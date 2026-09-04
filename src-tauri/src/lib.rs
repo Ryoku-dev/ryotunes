@@ -247,7 +247,7 @@ pub fn run() {
                 tracing::info!("loaded persisted login session");
             }
 
-            let session = Session { locale: Locale::default(), visitor_data, data_sync_id, cookie };
+            let session = Session { locale: Locale::from_env(), visitor_data, data_sync_id, cookie };
             let it = match InnerTube::new(session.clone(), proxy.as_deref()) {
                 Ok(it) => it,
                 Err(error) => {
