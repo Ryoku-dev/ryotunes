@@ -32,6 +32,7 @@
 		togglePin,
 		toggleSaved
 	} from '$lib/player.svelte';
+	import { t } from '$lib/i18n.svelte';
 
 	let {
 		item,
@@ -109,7 +110,7 @@
 <button
 	class="ryo-action-menu-trigger {triggerClass} {menuOpen ? 'opacity-100' : ''}"
 	onclick={openMenu}
-	aria-label="Item options"
+	aria-label={t('Item options')}
 	{@attach ctxHost(openMenu)}
 >
 	
@@ -126,7 +127,7 @@
 		class="fixed inset-0 z-40 cursor-default"
 		onclick={close}
 		oncontextmenu={close}
-		aria-label="Close menu"
+		aria-label={t('Close menu')}
 		{@attach toBody}
 	></button>
 	<div
@@ -141,7 +142,7 @@
 				onclick={(e) => run(e, () => togglePin(item.id))}
 			>
 				<HugeiconsIcon icon={pinned ? PinOffIcon : PinIcon} class="h-4 w-4" />
-				{pinned ? 'Unpin' : 'Pin to top'}
+				{t(pinned ? 'Unpin' : 'Pin to top')}
 			</button>
 		{/if}
 		{#if canQueue}
@@ -153,7 +154,7 @@
 					queue(true);
 				}}
 			>
-				<HugeiconsIcon icon={ArrowUpNarrowWideIcon} class="h-4 w-4" /> Play next
+				<HugeiconsIcon icon={ArrowUpNarrowWideIcon} class="h-4 w-4" /> {t('Play next')}
 			</button>
 			<button
 				class="flex w-full cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent/10 disabled:opacity-50"
@@ -163,7 +164,7 @@
 					queue(false);
 				}}
 			>
-				<HugeiconsIcon icon={ArrowDownWideNarrowIcon} class="h-4 w-4" /> Add to queue
+				<HugeiconsIcon icon={ArrowDownWideNarrowIcon} class="h-4 w-4" /> {t('Add to queue')}
 			</button>
 		{/if}
 		{#if onYouTube}
@@ -171,7 +172,7 @@
 				class="flex w-full cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent/10"
 				onclick={(e) => run(e, () => startRadio(item.kind as 'artist' | 'album' | 'playlist', item.id, item.title))}
 			>
-				<HugeiconsIcon icon={Radio02Icon} class="h-4 w-4" /> Start radio
+				<HugeiconsIcon icon={Radio02Icon} class="h-4 w-4" /> {t('Start radio')}
 			</button>
 		{/if}
 		<button
@@ -179,14 +180,14 @@
 			onclick={(e) => run(e, () => (isPick ? removePick(item.id) : addPick(item)))}
 		>
 			<HugeiconsIcon icon={DashboardSquare02Icon} class="h-4 w-4" />
-			{isPick ? 'Remove from shortcuts' : 'Add to shortcuts'}
+			{t(isPick ? 'Remove from shortcuts' : 'Add to shortcuts')}
 		</button>
 		{#if onYouTube}
 			<button
 				class="flex w-full cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent/10"
 				onclick={(e) => run(e, () => openShare(item))}
 			>
-				<HugeiconsIcon icon={Share08Icon} class="h-4 w-4" /> Share
+				<HugeiconsIcon icon={Share08Icon} class="h-4 w-4" /> {t('Share')}
 			</button>
 		{/if}
 		
@@ -196,10 +197,10 @@
 				onclick={(e) =>
 					run(e, () => {
 						toggleSaved(item);
-						toast.success('Removed from library');
+						toast.success(t('Removed from library'));
 					})}
 			>
-				<HugeiconsIcon icon={BookmarkMinus02Icon} class="h-4 w-4" /> Remove from library
+				<HugeiconsIcon icon={BookmarkMinus02Icon} class="h-4 w-4" /> {t('Remove from library')}
 			</button>
 		{/if}
 	</div>

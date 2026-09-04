@@ -11,10 +11,11 @@
 <script lang="ts">
 	import { HugeiconsIcon } from '@hugeicons/svelte';
 	import { SearchList01Icon, Cancel01Icon } from '@hugeicons/core-free-icons';
+	import { t } from '$lib/i18n.svelte';
 
 	let {
 		value = $bindable(''),
-		placeholder = 'Search this list',
+		placeholder = t('Search this list'),
 		compact = false
 	}: { value?: string; placeholder?: string; compact?: boolean } = $props();
 
@@ -48,7 +49,7 @@
 		class="ryo-track-filter-clear"
 		class:visible={!!value}
 		onclick={clear}
-		aria-label="Clear search"
+		aria-label={t('Clear search')}
 		tabindex={value ? 0 : -1}
 	>
 		<HugeiconsIcon icon={Cancel01Icon} strokeWidth={2.2} class="h-3.5 w-3.5" />

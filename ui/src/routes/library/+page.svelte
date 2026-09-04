@@ -44,6 +44,7 @@
 	} from '$lib/player.svelte';
 	import { mergeSaved, unsynced } from '$lib/personal';
 	import { reveal } from '$lib/reveal.svelte';
+	import { t } from '$lib/i18n.svelte';
 
 	let dialogOpen = $state(false);
 	let newTitle = $state('');
@@ -115,7 +116,7 @@
 		try {
 			const transfer = await api.importPlaylistFile();
 			if (!transfer) return;
-			if (!transfer.items.length) throw new Error('That playlist file has no tracks.');
+			if (!transfer.items.length) throw new Error(t('That playlist file has no tracks.'));
 			const playlistId = await api.createPlaylist(transfer.title.trim() || 'Imported playlist');
 			let added = 0;
 			for (const song of transfer.items) {
@@ -156,8 +157,8 @@
 		{#if rv.more(items.length)}<div {@attach rv.sentinel}></div>{/if}
 	{:else}
 		<div class="ryo-library-empty">
-			<div><span>// COLLECTION / EMPTY</span><b>蔵</b></div>
-			<strong>Nothing in this shelf yet.</strong>
+			<div><span>{t('// COLLECTION / EMPTY')}</span><b>蔵</b></div>
+			<strong>{t('Nothing in this shelf yet.')}</strong>
 			<p>{empty}</p>
 		</div>
 	{/if}
@@ -166,8 +167,8 @@
 <div class="ryo-route-page">
 	<RyokuPageHeader
 		eyebrow="MUSIC / COLLECTION"
-		title="Library"
-		blurb="Your saved music, local files and playlists — one collection, arranged like an instrument sheet."
+		title={t('Library')}
+		blurb={t('Your saved music, local files and playlists — one collection, arranged like an instrument sheet.')}
 		artMode="library"
 		code="LIBRARY · INDEX"
 		artTitle="収蔵"
@@ -177,12 +178,12 @@
 		readout={libraryReadout}
 	/>
 
-	<div class="ryo-library-index" aria-label="Library summary">
-		<div><span>01</span><small>PLAYLISTS</small><strong>{playlists.length}</strong></div>
-		<div><span>02</span><small>ALBUMS</small><strong>{albums.length}</strong></div>
-		<div><span>03</span><small>ARTISTS</small><strong>{artists.length}</strong></div>
-		<div><span>04</span><small>SAVED</small><strong>{savedTotal}</strong></div>
-		<p>{signedOut ? 'Local collection · sign in to merge your YouTube Music library.' : 'Account collection · local music remains available in its own lane.'}</p>
+	<div class="ryo-library-index" aria-label={t('Library summary')}>
+		<div><span>01</span><small>{t('PLAYLISTS')}</small><strong>{playlists.length}</strong></div>
+		<div><span>02</span><small>{t('ALBUMS')}</small><strong>{albums.length}</strong></div>
+		<div><span>03</span><small>{t('ARTISTS')}</small><strong>{artists.length}</strong></div>
+		<div><span>04</span><small>{t('SAVED')}</small><strong>{savedTotal}</strong></div>
+		<p>{signedOut ? t('Local collection · sign in to merge your YouTube Music library.') : t('Account collection · local music remains available in its own lane.')}</p>
 	</div>
 
 	<div class="ryo-page-toolbar ryo-library-toolbar">
@@ -218,18 +219,18 @@
 							</Tooltip.Trigger>
 							<Tooltip.Content side="bottom">
 								{syncing
-									? 'Adding them to YouTube Music…'
+									? t('Adding them to YouTube Music…')
 									: `Add the ${toSync.length} saved on this device to your YouTube Music library`}
 							</Tooltip.Content>
 						</Tooltip.Root>
 					</Tooltip.Provider>
 				{/if}
 				<Button variant="outline" size="sm" onclick={importPlaylist} disabled={importing}>
-					{importing ? 'Importing…' : 'Import playlist'}
+					{importing ? t('Importing…') : t('Import playlist')}
 				</Button>
 			{/if}
 			<Button variant="outline" size="sm" class="gap-2" onclick={() => (dialogOpen = true)}>
-				<HugeiconsIcon icon={Add01Icon} class="h-4 w-4" /> New playlist
+				<HugeiconsIcon icon={Add01Icon} class="h-4 w-4" /> {t('New playlist')}
 			</Button>
 		</div>
 	</div>
@@ -238,11 +239,11 @@
 	<Dialog.Root bind:open={dialogOpen}>
 		<Dialog.Content class="ryo-overlay-sheet sm:max-w-md">
 			<Dialog.Header>
-				<Dialog.Title>New playlist</Dialog.Title>
+				<Dialog.Title>{t('New playlist')}</Dialog.Title>
 				<Dialog.Description>
 					{signedOut
-						? 'This playlist will be stored on this device. Sign in later without losing it.'
-						: 'Give your YouTube Music playlist a name to get started.'}
+						? t('This playlist will be stored on this device. Sign in later without losing it.')
+						: t('Give your YouTube Music playlist a name to get started.')}
 				</Dialog.Description>
 			</Dialog.Header>
 			<form
@@ -252,13 +253,13 @@
 					createNew();
 				}}
 			>
-				<Input bind:value={newTitle} placeholder="Playlist name" autofocus />
+				<Input bind:value={newTitle} placeholder={t('Playlist name')} autofocus />
 				<Dialog.Footer>
 					<Button type="button" variant="outline" onclick={() => (dialogOpen = false)}>
-						Cancel
+						{t('Cancel')}
 					</Button>
 					<Button type="submit" disabled={busy || !newTitle.trim()}>
-						{busy ? 'Creating…' : 'Create'}
+						{busy ? t('Creating…') : t('Create')}
 					</Button>
 				</Dialog.Footer>
 			</form>
@@ -269,25 +270,25 @@
 	<Tabs.Root bind:value={tab}>
 		<Tabs.List class="mb-4">
 			<Tabs.Trigger value="all">
-				<HugeiconsIcon icon={SquareStackIcon} class="h-4 w-4" /> All
+				<HugeiconsIcon icon={SquareStackIcon} class="h-4 w-4" /> {t('All')}
 			</Tabs.Trigger>
 			<Tabs.Trigger value="playlists">
-				<HugeiconsIcon icon={Playlist02Icon} class="h-4 w-4" /> Playlists
+				<HugeiconsIcon icon={Playlist02Icon} class="h-4 w-4" /> {t('Playlists')}
 			</Tabs.Trigger>
 			<Tabs.Trigger value="albums">
-				<HugeiconsIcon icon={MusicNoteSquare02Icon} class="h-4 w-4" /> Albums
+				<HugeiconsIcon icon={MusicNoteSquare02Icon} class="h-4 w-4" /> {t('Albums')}
 			</Tabs.Trigger>
 			<Tabs.Trigger value="artists">
-				<HugeiconsIcon icon={UserSharingIcon} class="h-4 w-4" /> Artists
+				<HugeiconsIcon icon={UserSharingIcon} class="h-4 w-4" /> {t('Artists')}
 			</Tabs.Trigger>
 			<Tabs.Trigger value="songs">
-				<HugeiconsIcon icon={MusicNote01Icon} class="h-4 w-4" /> Songs
+				<HugeiconsIcon icon={MusicNote01Icon} class="h-4 w-4" /> {t('Songs')}
 			</Tabs.Trigger>
 			<Tabs.Trigger value="local">
-				<HugeiconsIcon icon={DriveIcon} class="h-4 w-4" /> Local
+				<HugeiconsIcon icon={DriveIcon} class="h-4 w-4" /> {t('Local')}
 			</Tabs.Trigger>
 			<Tabs.Trigger value="insights">
-				<HugeiconsIcon icon={DashboardSquare02Icon} class="h-4 w-4" /> Insights
+				<HugeiconsIcon icon={DashboardSquare02Icon} class="h-4 w-4" /> {t('Insights')}
 			</Tabs.Trigger>
 		</Tabs.List>
 		
@@ -295,10 +296,7 @@
 		<Tabs.Content value="songs">
 			{#if tab === 'songs'}
 				{#if signedOut}
-					<p class="text-sm text-muted-foreground">
-						Sign in to see the songs saved in your YouTube Music library. Music on this machine is
-						in the Local tab.
-					</p>
+					<p class="text-sm text-muted-foreground">{t('Sign in to see the songs saved in your YouTube Music library. Music on this machine is in the Local tab.')}</p>
 				{:else}
 					<LibrarySongs />
 				{/if}
@@ -309,9 +307,9 @@
 		{#if tab !== 'local' && tab !== 'songs' && tab !== 'insights'}
 			{#if loading}
 				<div class="ryo-library-loading" aria-live="polite">
-					<div><span>// COLLECTION / INDEXING</span><b>LOCAL + ACCOUNT</b></div>
-					<strong>Loading your collection.</strong>
-					<p>Resolving playlists, albums and artists without blocking local music.</p>
+					<div><span>{t('// COLLECTION / INDEXING')}</span><b>{t('LOCAL + ACCOUNT')}</b></div>
+					<strong>{t('Loading your collection.')}</strong>
+					<p>{t('Resolving playlists, albums and artists without blocking local music.')}</p>
 					<section aria-hidden="true">
 						{#each Array(8) as _, i (i)}
 							<i style="--w:{42 + ((i * 19) % 48)}%"></i>
@@ -326,8 +324,8 @@
 						{@render grid(
 							all,
 							signedOut
-								? 'Nothing saved yet. Open a playlist or album and hit Save to library, or sign in for the one on your account.'
-								: 'Your library is empty.',
+								? t('Nothing saved yet. Open a playlist or album and hit Save to library, or sign in for the one on your account.')
+								: t('Your library is empty.'),
 							rvAll
 						)}
 					{/if}
@@ -337,8 +335,8 @@
 						{@render grid(
 							playlists,
 							signedOut
-								? 'No playlists yet. Use New playlist above to create one on this device.'
-								: 'No playlists yet. Use New playlist above, or save one from YouTube Music.',
+								? t('No playlists yet. Use New playlist above to create one on this device.')
+								: t('No playlists yet. Use New playlist above, or save one from YouTube Music.'),
 							rvPlaylists
 						)}
 					{/if}
@@ -347,7 +345,7 @@
 					{#if tab === 'albums'}
 						{@render grid(
 							albums,
-							'No saved albums yet. Open an album and hit Save to library.',
+							t('No saved albums yet. Open an album and hit Save to library.'),
 							rvAlbums
 						)}
 					{/if}
@@ -357,8 +355,8 @@
 						{@render grid(
 							artists,
 							signedOut
-								? 'No artists yet. Save one from its page to keep it here.'
-								: 'No artists yet. They show up once you save their songs or albums.',
+								? t('No artists yet. Save one from its page to keep it here.')
+								: t('No artists yet. They show up once you save their songs or albums.'),
 							rvArtists
 						)}
 					{/if}

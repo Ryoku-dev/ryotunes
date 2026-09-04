@@ -6,6 +6,7 @@
 	import * as api from '$lib/api';
 	import type { AccountIdentity } from '$lib/api';
 	import { toast, ui } from '$lib/player.svelte';
+	import { t } from '$lib/i18n.svelte';
 	import { thumb } from '$lib/thumb';
 
 	let loading = $state(false);
@@ -47,7 +48,7 @@
 			ui.channelPickerRequired = false;
 			ui.channelPickerOpen = false;
 			ui.channelIdentities = [];
-			toast.success(wasRequired ? `Signed in as ${identity.name}` : `Switched to ${identity.name}`);
+			toast.success(wasRequired ? `${t('Signed in as')} ${identity.name}` : `${t('Switched to')} ${identity.name}`);
 		} catch (e) {
 			error = String(e);
 			toast.error(error);
@@ -83,23 +84,23 @@
 		interactOutsideBehavior={dismissable}
 	>
 		<div class="border-b px-5 py-4">
-			<Dialog.Title class="text-lg font-semibold">Choose a YouTube channel</Dialog.Title>
+			<Dialog.Title class="text-lg font-semibold">{t('Choose a YouTube channel')}</Dialog.Title>
 			<Dialog.Description class="mt-1 text-xs text-muted-foreground">
-				Library, likes and playlists will use this channel. You can switch again later.
+				{t('Library, likes and playlists will use this channel. You can switch again later.')}
 			</Dialog.Description>
 		</div>
 
 		<div class="max-h-[26rem] min-h-32 overflow-y-auto p-2">
 			{#if loading}
-				<p class="px-3 py-8 text-center text-sm text-muted-foreground">Loading channels…</p>
+				<p class="px-3 py-8 text-center text-sm text-muted-foreground">{t('Loading channels…')}</p>
 			{:else if error}
 				<div class="space-y-3 px-3 py-6 text-center">
 					<p class="text-sm text-destructive">{error}</p>
-					<Button variant="outline" size="sm" onclick={loadIdentities}>Try again</Button>
+					<Button variant="outline" size="sm" onclick={loadIdentities}>{t('Try again')}</Button>
 				</div>
 			{:else if ui.channelIdentities.length === 0}
 				<p class="px-3 py-8 text-center text-sm text-muted-foreground">
-					YouTube did not return any selectable channels.
+					{t('YouTube did not return any selectable channels.')}
 				</p>
 			{:else}
 				{#each ui.channelIdentities as identity (identity.selectionKey)}
@@ -131,7 +132,7 @@
 						{#if identity.selected}
 							<span class="flex shrink-0 items-center gap-1 text-xs text-primary">
 								<HugeiconsIcon icon={CheckmarkCircle02Icon} class="h-4 w-4" />
-								Selected
+								{t('Selected')}
 							</span>
 						{/if}
 					</button>
@@ -142,11 +143,11 @@
 		<div class="flex justify-end border-t px-5 py-3">
 			{#if ui.channelPickerRequired}
 				<Button variant="outline" size="sm" onclick={cancelSignIn} disabled={cancelling || switching !== null}>
-					{cancelling ? 'Cancelling…' : 'Cancel sign-in'}
+					{cancelling ? t('Cancelling…') : t('Cancel sign-in')}
 				</Button>
 			{:else}
 				<Button variant="outline" size="sm" onclick={() => (ui.channelPickerOpen = false)}>
-					Cancel
+					{t('Cancel')}
 				</Button>
 			{/if}
 		</div>

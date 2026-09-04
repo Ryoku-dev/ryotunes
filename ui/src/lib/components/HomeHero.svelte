@@ -6,9 +6,10 @@
 	import SearchSuggest from '$lib/components/SearchSuggest.svelte';
 	import RyokuMusicDeck from '$lib/components/RyokuMusicDeck.svelte';
 	import { auth } from '$lib/player.svelte';
+	import { t } from '$lib/i18n.svelte';
 
 	const hour = new Date().getHours();
-	const daypart = hour < 5 ? 'Good night' : hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening';
+	const daypart = hour < 5 ? t('Good night') : hour < 12 ? t('Good morning') : hour < 18 ? t('Good afternoon') : t('Good evening');
 	let searchQuery = $state('');
 	function accountFirstName(name?: string | null) {
 		const raw = name?.trim().split(/\s+/)[0] ?? '';
@@ -32,13 +33,13 @@
 		<div class="ryo-eyebrow ryo-home-eyebrow">
 			<span class="ryo-eyebrow-rule"></span>
 			<span class="ryo-jp-mark">力</span>
-			<span>HOME / LISTEN</span>
+			<span>{t('HOME / LISTEN')}</span>
 			<i></i>
 			<b>01</b>
 		</div>
 
 		<h1 class="ryo-page-title ryo-home-greeting">{daypart}{firstName ? `, ${firstName}` : ''}</h1>
-		<p class="ryo-page-caption ryo-home-caption">Pick up where you left off, or find the next thing worth hearing.</p>
+		<p class="ryo-page-caption ryo-home-caption">{t('Pick up where you left off, or find the next thing worth hearing.')}</p>
 
 		<form class="ryo-home-search ryo-home-searchbox" onsubmit={(e) => { e.preventDefault(); goSearch(); }}>
 			<HugeiconsIcon icon={Search01Icon} class="ryo-search-icon" />
@@ -50,10 +51,10 @@
 			/>
 		</form>
 
-		<div class="ryo-home-shortcuts" aria-label="Keyboard shortcuts">
-			<span><kbd>{MOD}K</kbd> command search</span>
+		<div class="ryo-home-shortcuts" aria-label={t('Keyboard shortcuts')}>
+			<span><kbd>{MOD}K</kbd> {t('command search')}</span>
 			<i></i>
-			<span><kbd>SPACE</kbd> play / pause</span>
+			<span><kbd>SPACE</kbd> {t('play / pause')}</span>
 		</div>
 	</div>
 

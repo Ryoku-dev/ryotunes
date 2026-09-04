@@ -9,6 +9,7 @@
 	import { goto } from '$app/navigation';
 	import { HugeiconsIcon } from '@hugeicons/svelte';
 	import { Search01Icon, MusicNote01Icon, UserIcon } from '@hugeicons/core-free-icons';
+	import { t } from '$lib/i18n.svelte';
 	import * as Command from '$lib/components/ui/command/index.js';
 	import { Skeleton } from '$lib/components/ui/skeleton';
 	import ExplicitIcon from './ExplicitIcon.svelte';
@@ -18,7 +19,7 @@
 	import { thumb } from '$lib/thumb';
 	import { warmStream } from '$lib/warm-stream';
 
-	const KIND = { song: 'Song', album: 'Album', artist: 'Artist', playlist: 'Playlist' };
+	const KIND = { song: t('Song'), album: t('Album'), artist: t('Artist'), playlist: t('Playlist') };
 
 	let query = $state('');
 	let items = $state<BrowseItem[]>([]);
@@ -81,11 +82,11 @@
 	shouldFilter={false}
 	vimBindings={false}
 	loop
-	title="Search"
-	description="Search songs, albums, artists and playlists"
+	title={t('Search')}
+	description={t('Search songs, albums, artists and playlists')}
 	class="ryo-command-palette sm:max-w-xl"
 >
-	<Command.Input bind:value={query} placeholder="Search songs, albums, artists, playlists…" />
+	<Command.Input bind:value={query} placeholder={t('Search songs, albums, artists, playlists…')} />
 	<Command.List class="ryo-command-list max-h-[22rem]">
 		{#if loading}
 			{#each Array(4) as _, i (i)}
@@ -99,10 +100,10 @@
 			{/each}
 		{:else if !items.length}
 			<div class="px-4 py-6 text-center text-sm text-muted-foreground">
-				{query.trim().length < 2 ? 'Type to search.' : 'Nothing quick for that.'}
+				{t(query.trim().length < 2 ? 'Type to search.' : 'Nothing quick for that.')}
 			</div>
 		{:else}
-			<Command.Group heading="Results">
+			<Command.Group heading={t('Results')}>
 				{#each items as item (item.id)}
 					<Command.Item value={item.id} onSelect={() => choose(item)} onmouseenter={() => item.kind === 'song' && warmStream(item.id, !!item.isUpload)} class="gap-3 px-2 py-1.5">
 						{#if item.thumbnail}
@@ -147,7 +148,7 @@
 			<Command.Group>
 				<Command.Item value="__all__" onSelect={allResults} class="gap-2 text-muted-foreground">
 					<HugeiconsIcon icon={Search01Icon} class="h-3.5 w-3.5" />
-					<span class="truncate">All results for “{query.trim()}”</span>
+					<span class="truncate">{t('All results for')} “{query.trim()}”</span>
 				</Command.Item>
 			</Command.Group>
 		{/if}

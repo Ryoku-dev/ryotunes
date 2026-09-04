@@ -36,6 +36,7 @@
 	import { recentItems, freshen } from '$lib/personal';
 	import { cloneSearchPager, createSearchPager, nextSearchPage, searchPagerDone, type SearchPagerState } from '$lib/search-pager';
 	import { ownNestedVerticalScroll } from '$lib/ryoku-scroll';
+	import { t } from '$lib/i18n.svelte';
 
 	type Cached = { res: SearchResults; songs: SongItem[]; songContinuation?: string };
 
@@ -333,8 +334,8 @@
 <div class="ryo-route-page flex h-full flex-col">
 	<RyokuPageHeader
 		eyebrow="MUSIC / DISCOVERY"
-		title="Search"
-		blurb="Tune into a track, artist, album or playlist — one discovery index, built for keyboard flow."
+		title={t('Search')}
+		blurb={t('Tune into a track, artist, album or playlist — one discovery index, built for keyboard flow.')}
 		artMode="search"
 		code="SEARCH · INDEX"
 		artTitle="検索"
@@ -353,17 +354,17 @@
 		>
 			<SearchSuggest
 				bind:value={query}
-				placeholder="Search songs, albums, artists, playlists…"
+				placeholder={t('Search songs, albums, artists, playlists…')}
 				onpick={() => (lastQuery = query)}
 				inputClass="ryo-search-input"
 				panelClass="left-0 w-[32rem]"
 			/>
 			{#if query}
-				<button type="button" class="ryo-search-clear" aria-label="Clear search" title="Clear search" onclick={() => { query = ''; res = null; songs = []; searched = ''; error = null; }}><HugeiconsIcon icon={Cancel01Icon} class="h-4 w-4" /></button>
+				<button type="button" class="ryo-search-clear" aria-label={t('Clear search')} title={t('Clear search')} onclick={() => { query = ''; res = null; songs = []; searched = ''; error = null; }}><HugeiconsIcon icon={Cancel01Icon} class="h-4 w-4" /></button>
 			{/if}
 			<Button type="submit" variant="outline" class="ryo-sheet-action gap-2" disabled={searching}>
 				<HugeiconsIcon icon={Search01Icon} class="h-4 w-4" />
-				{searching ? 'SEARCHING' : 'SEARCH'}
+				{t(searching ? 'SEARCHING' : 'SEARCH')}
 			</Button>
 		</form>
 		{#if error}<div class="mt-2"><ErrorState message={error} onRetry={runSearch} /></div>{/if}
@@ -373,9 +374,9 @@
 		{#if searching}
 			<section class="ryo-search-scanning" aria-live="polite">
 				<div class="ryo-search-scanning-copy">
-					<span>// DISCOVERY / QUERY</span>
+					<span>{t('// DISCOVERY / QUERY')}</span>
 					<strong>{query}</strong>
-					<p>Resolving songs, artists, albums and playlists in parallel.</p>
+					<p>{t('Resolving songs, artists, albums and playlists in parallel.')}</p>
 					<div><b>INDEX</b><em>YOUTUBE MUSIC</em><b>STATE</b><em>SEARCHING</em></div>
 				</div>
 				<div class="ryo-search-scanning-field" aria-hidden="true">
@@ -385,9 +386,9 @@
 				</div>
 			</section>
 		{:else if !res}
-			<section class="ryo-search-idle ryo-search-index" aria-label="Search start page">
+			<section class="ryo-search-idle ryo-search-index" aria-label={t('Search start page')}>
 				<div class="ryo-search-idle-column">
-					<div class="ryo-search-idle-head"><span>// RECENT SEARCHES</span>{#if searchHistory.length}<button type="button" onclick={clearHistory}>CLEAR</button>{/if}</div>
+					<div class="ryo-search-idle-head"><span>{t('// RECENT SEARCHES')}</span>{#if searchHistory.length}<button type="button" onclick={clearHistory}>{t('CLEAR')}</button>{/if}</div>
 					{#if searchHistory.length}
 						<div class="ryo-search-history">
 							{#each searchHistory as value, i (value)}
@@ -395,12 +396,12 @@
 							{/each}
 						</div>
 					{:else}
-						<div class="ryo-search-idle-empty"><strong>No search history yet.</strong><p>Use the field above or press <kbd>Ctrl K</kbd> from anywhere.</p></div>
+						<div class="ryo-search-idle-empty"><strong>{t('No search history yet.')}</strong><p>{t('Use the field above or press')} <kbd>Ctrl K</kbd> {t('from anywhere.')}</p></div>
 					{/if}
 				</div>
 
 				<div class="ryo-search-idle-column">
-					<div class="ryo-search-idle-head"><span>// RECENT LISTENING</span><b>{recentListening.length ? `${recentListening.length} ITEMS` : 'READY'}</b></div>
+					<div class="ryo-search-idle-head"><span>{t('// RECENT LISTENING')}</span><b>{recentListening.length ? `${recentListening.length} ITEMS` : 'READY'}</b></div>
 					{#if recentListening.length}
 						<div class="ryo-search-recent-listening">
 							{#each recentListening as item, i (item.id)}
@@ -411,21 +412,21 @@
 							{/each}
 						</div>
 					{:else}
-						<div class="ryo-search-index-plate"><span>検索</span><strong>DISCOVERY INDEX</strong><p>Search songs, artists, albums and playlists without leaving the keyboard.</p><div><b>/</b> PAGE SEARCH <i>·</i> <b>CTRL K</b> COMMAND</div></div>
+						<div class="ryo-search-index-plate"><span>検索</span><strong>DISCOVERY INDEX</strong><p>{t('Search songs, artists, albums and playlists without leaving the keyboard.')}</p><div><b>/</b> PAGE SEARCH <i>·</i> <b>CTRL K</b> COMMAND</div></div>
 					{/if}
 				</div>
 			</section>
 		{:else if !sections.length}
 			<div class="ryo-search-none">
-				<span>検索</span><div><small>// DISCOVERY / EMPTY</small><strong>No results for “{searched}”.</strong><p>Try a shorter title, the artist name, or a different spelling.</p><button type="button" onclick={() => { query = ''; res = null; songs = []; searched = ''; }}>CLEAR QUERY</button></div>
+				<span>検索</span><div><small>{t('// DISCOVERY / EMPTY')}</small><strong>No results for “{searched}”.</strong><p>{t('Try a shorter title, the artist name, or a different spelling.')}</p><button type="button" onclick={() => { query = ''; res = null; songs = []; searched = ''; }}>{t('CLEAR QUERY')}</button></div>
 			</div>
 		{:else}
 			<div class="content-in flex flex-col gap-8">
 				{#if quickItems.length && activeResult}
-					<section class="ryo-search-workspace" aria-label="Search results inspector">
+					<section class="ryo-search-workspace" aria-label={t('Search results inspector')}>
 						<div class="ryo-search-quick">
-							<div class="ryo-search-workspace-head"><span>// RESULTS</span><b>↑↓ / J K · ENTER</b></div>
-							<div class="ryo-search-quick-list" role="listbox" aria-label="Quick results" data-ryo-own-scroll bind:this={quickListEl} onscroll={quickScroll} {@attach ownNestedVerticalScroll}>
+							<div class="ryo-search-workspace-head"><span>{t('// RESULTS')}</span><b>↑↓ / J K · ENTER</b></div>
+							<div class="ryo-search-quick-list" role="listbox" aria-label={t('Quick results')} data-ryo-own-scroll bind:this={quickListEl} onscroll={quickScroll} {@attach ownNestedVerticalScroll}>
 								{#each quickItems as item, i (item.id)}
 									<div
 										role="option"
@@ -454,7 +455,7 @@
 									</div>
 								{/each}
 								<div class="ryo-search-quick-tail" aria-live="polite">
-									{#if quickLoading}<span>Loading more…</span>{:else if quickDone}<span>No more results</span>{:else}<button type="button" onclick={loadNextQuickPage}>Load more</button>{/if}
+									{#if quickLoading}<span>{t('Loading more…')}</span>{:else if quickDone}<span>{t('No more results')}</span>{:else}<button type="button" onclick={loadNextQuickPage}>{t('Load more')}</button>{/if}
 								</div>
 							</div>
 						</div>
@@ -462,23 +463,23 @@
 						<aside class="ryo-search-inspector">
 							<div class="ryo-search-inspector-art">
 								{#if activeResult.thumbnail}<img src={thumb(activeResult.thumbnail, 480)} alt="" decoding="async" />{:else}<span>音</span>{/if}
-								<div class="ryo-search-inspector-index">RESULT · {activeResult.kind.toUpperCase()}</div>
+								<div class="ryo-search-inspector-index">{t('RESULT ·')} {activeResult.kind.toUpperCase()}</div>
 							</div>
 							<div class="ryo-search-inspector-copy">
-								<div class="ryo-search-inspector-eyebrow">// SELECTED RESULT</div>
+								<div class="ryo-search-inspector-eyebrow">{t('// SELECTED RESULT')}</div>
 								<h2>{activeResult.title}</h2>
 								<p>{activeResult.subtitle ?? activeResult.kind}</p>
 								{#if activeResult.duration || activeResult.playCount}
-									<div class="ryo-search-inspector-meta">{#if activeResult.duration}<span>DURATION <b>{activeResult.duration}</b></span>{/if}{#if activeResult.playCount}<span>PLAYS <b>{activeResult.playCount}</b></span>{/if}</div>
+									<div class="ryo-search-inspector-meta">{#if activeResult.duration}<span>{t('DURATION')} <b>{activeResult.duration}</b></span>{/if}{#if activeResult.playCount}<span>{t('PLAYS')} <b>{activeResult.playCount}</b></span>{/if}</div>
 								{/if}
 								<div class="ryo-search-inspector-actions">
 									<button type="button" class="primary" onclick={() => naturalAction(activeResult)}>
-										{activeResult.kind === 'song' ? 'Play' : 'Open'} <HugeiconsIcon icon={PlayIcon} altIcon={ArrowRight01Icon} showAlt={activeResult.kind !== 'song'} class="h-3.5 w-3.5" />
+										{t(activeResult.kind === 'song' ? 'Play' : 'Open')} <HugeiconsIcon icon={PlayIcon} altIcon={ArrowRight01Icon} showAlt={activeResult.kind !== 'song'} class="h-3.5 w-3.5" />
 									</button>
 									{#if activeResult.kind === 'song'}
 										<TrackMenu song={asSong(activeResult)} onAdd={() => openAddToPlaylist(asSong(activeResult))} triggerClass="ryo-search-inspector-menu" />
 									{:else}
-										{#if activeResult.kind !== 'artist'}<button type="button" onclick={() => playSelection(activeResult)}><HugeiconsIcon icon={PlayIcon} class="h-3.5 w-3.5" /> Play</button>{/if}
+										{#if activeResult.kind !== 'artist'}<button type="button" onclick={() => playSelection(activeResult)}><HugeiconsIcon icon={PlayIcon} class="h-3.5 w-3.5" /> {t('Play')}</button>{/if}
 										<PlaylistMenu item={activeResult} triggerClass="ryo-search-inspector-menu" />
 									{/if}
 								</div>
@@ -490,13 +491,13 @@
 				{#each sections as sec (sec.key)}
 					<section>
 						<div class="mb-3 flex items-center justify-between">
-							<h2 class="ryo-search-section-title"><span>//</span>{sec.label}</h2>
+							<h2 class="ryo-search-section-title"><span>//</span>{t(sec.label)}</h2>
 							{#if sec.more}
 								<button
 									class="ryo-show-more cursor-pointer"
 									onclick={() => showMore(sec.key as 'songs' | 'albums' | 'artists' | 'playlists')}
 								>
-									Show more
+									{t('Show more')}
 								</button>
 							{/if}
 						</div>

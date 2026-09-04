@@ -18,6 +18,7 @@
 	import { getCached, putCached } from '$lib/pagecache';
 	import { thumb } from '$lib/thumb';
 	import { openAddToPlaylist, openPlayer, playback } from '$lib/player.svelte';
+	import { t } from '$lib/i18n.svelte';
 
 	// Cached like every other browse page, so switching tabs (or leaving the Library and coming
 	// back) paints the list instead of refetching it and losing every page you scrolled in.
@@ -58,8 +59,8 @@
 	// filter walks every page), and say so while that walk is still running.
 	const line = $derived(
 		filtering
-			? `${shownSongs.length.toLocaleString()} matching${token && !moreError ? ' so far' : ''}`
-			: 'Every song you’ve saved, in one list'
+			? `${shownSongs.length.toLocaleString()} ${t('matching')}${token && !moreError ? t(' so far') : ''}`
+			: t('Every song you’ve saved, in one list')
 	);
 	// Four covers for the mosaic. Distinct ones: a library that opens on six tracks off the same
 	// album would otherwise draw the same sleeve four times.
@@ -77,7 +78,7 @@
 
 	// The queue this tab builds. Not a `playFrom`: there is no page behind "the songs in your
 	// library", so it has no business landing in recents or the sidebar's last-played order.
-	const SOURCE = 'Your songs';
+	const SOURCE = t('Your songs');
 
 	onMount(() => {
 		const cached = getCached<Cached>(KEY);
@@ -218,13 +219,13 @@
 				</div>
 			{/if}
 			<div class="min-w-0 flex-1">
-				<h2 class="font-heading text-2xl font-bold tracking-tight">Songs</h2>
+				<h2 class="font-heading text-2xl font-bold tracking-tight">{t('Songs')}</h2>
 				<p class="mt-0.5 text-sm text-muted-foreground">
 					{line}
 				</p>
 				<div class="mt-3 flex flex-wrap items-center gap-2">
 					<Button class="gap-2 rounded-full" disabled={!songs.length} onclick={() => play(null, true)}>
-						<HugeiconsIcon icon={ShuffleIcon} class="h-4 w-4" /> Shuffle all
+						<HugeiconsIcon icon={ShuffleIcon} class="h-4 w-4" /> {t('Shuffle all')}
 					</Button>
 					<Button
 						variant="outline"
@@ -232,11 +233,11 @@
 						disabled={!songs.length}
 						onclick={() => play(null)}
 					>
-						<HugeiconsIcon icon={PlayIcon} class="h-4 w-4" /> Play all
+						<HugeiconsIcon icon={PlayIcon} class="h-4 w-4" /> {t('Play all')}
 					</Button>
 				</div>
 			</div>
-			<TrackFilter bind:value={query} placeholder="Search your songs" />
+			<TrackFilter bind:value={query} placeholder={t('Search your songs')} />
 		</div>
 	</div>
 
@@ -255,18 +256,18 @@
 		</div>
 	{:else if filtering}
 		<p class="text-sm text-muted-foreground">
-			No songs match “{query.trim()}”{token && !moreError ? ' yet, still loading' : ''}.
+			{t('No songs match')} “{query.trim()}”{token && !moreError ? t(' yet, still loading') : ''}.
 		</p>
 	{:else}
 		<p class="text-sm text-muted-foreground">
-			No songs in your library yet. Hit the ⋯ on a song and save it, or like it, and it lands here.
+			{t('No songs in your library yet. Hit the ⋯ on a song and save it, or like it, and it lands here.')}
 		</p>
 	{/if}
 
 	{#if moreError}
 		<div class="p-3 text-center">
 			<Button variant="outline" size="sm" onclick={() => ((moreError = false), loadMore())}>
-				{loadingMore ? 'Loading…' : 'Try again'}
+				{t(loadingMore ? 'Loading…' : 'Try again')}
 			</Button>
 		</div>
 	{:else if shown < shownSongs.length || token}

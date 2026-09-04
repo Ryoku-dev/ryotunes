@@ -27,6 +27,7 @@
 	import type { SongItem } from '$lib/api';
 	import { anchorMenu, ctxHost, fitMenu, NO_ANCHOR, toBody } from '$lib/menu';
 	import { addPick, enqueue, openShare, personal, ratingOf, removePick, startRadio, toggleRating } from '$lib/player.svelte';
+	import { t } from '$lib/i18n.svelte';
 	import TempoPitchDialog from './TempoPitchDialog.svelte';
 
 	let {
@@ -90,7 +91,7 @@
 <button
 	class="ryo-action-menu-trigger ryo-track-menu-trigger {triggerClass} {menuOpen ? 'opacity-100' : ''}"
 	onclick={openMenu}
-	aria-label="Track options"
+	aria-label={t('Track options')}
 	{@attach ctxHost(openMenu)}
 >
 	
@@ -107,7 +108,7 @@
 		class="fixed inset-0 z-40 cursor-default"
 		onclick={close}
 		oncontextmenu={close}
-		aria-label="Close menu"
+		aria-label={t('Close menu')}
 		{@attach toBody}
 	></button>
 	<div
@@ -121,13 +122,13 @@
 				class="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent/10"
 				onclick={(e) => run(e, () => enqueue([song], true))}
 			>
-				<HugeiconsIcon icon={ArrowUpNarrowWideIcon} class="h-4 w-4" /> Play next
+				<HugeiconsIcon icon={ArrowUpNarrowWideIcon} class="h-4 w-4" /> {t('Play next')}
 			</button>
 			<button
 				class="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent/10"
 				onclick={(e) => run(e, () => enqueue([song], false))}
 			>
-				<HugeiconsIcon icon={ArrowDownWideNarrowIcon} class="h-4 w-4" /> Add to queue
+				<HugeiconsIcon icon={ArrowDownWideNarrowIcon} class="h-4 w-4" /> {t('Add to queue')}
 			</button>
 		{/if}
 		
@@ -136,7 +137,7 @@
 				class="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent/10"
 				onclick={(e) => run(e, () => startRadio('song', song.video_id, song.title))}
 			>
-				<HugeiconsIcon icon={Radio02Icon} class="h-4 w-4" /> Start radio
+				<HugeiconsIcon icon={Radio02Icon} class="h-4 w-4" /> {t('Start radio')}
 			</button>
 		{/if}
 		
@@ -151,7 +152,7 @@
 					icon={ThumbsUpIcon}
 					class="h-4 w-4 {rated === 'like' ? 'fill-current text-primary' : ''}"
 				/>
-				{rated === 'like' ? 'Remove from Liked Songs' : 'Save to Liked Songs'}
+				{t(rated === 'like' ? 'Remove from Liked Songs' : 'Save to Liked Songs')}
 			</button>
 			<button
 				class="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent/10"
@@ -161,7 +162,7 @@
 					icon={ThumbsDownIcon}
 					class="h-4 w-4 {rated === 'dislike' ? 'fill-current text-foreground' : ''}"
 				/>
-				{rated === 'dislike' ? 'Remove dislike' : 'Dislike'}
+				{t(rated === 'dislike' ? 'Remove dislike' : 'Dislike')}
 			</button>
 		{/if}
 		{#if song.artist_id}
@@ -169,7 +170,7 @@
 				class="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent/10"
 				onclick={(e) => run(e, () => goto(`/artist/${encodeURIComponent(song.artist_id!)}`))}
 			>
-				<HugeiconsIcon icon={UserListIcon} class="h-4 w-4" /> Go to artist
+				<HugeiconsIcon icon={UserListIcon} class="h-4 w-4" /> {t('Go to artist')}
 			</button>
 		{/if}
 		
@@ -178,7 +179,7 @@
 				class="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent/10"
 				onclick={(e) => run(e, () => goto(`/album/${encodeURIComponent(song.album_id!)}`))}
 			>
-				<HugeiconsIcon icon={Vynil02Icon} class="h-4 w-4" /> Go to album
+				<HugeiconsIcon icon={Vynil02Icon} class="h-4 w-4" /> {t('Go to album')}
 			</button>
 		{/if}
 		{#if !isRadio}
@@ -198,7 +199,7 @@
 					)}
 			>
 				<HugeiconsIcon icon={DashboardSquare02Icon} class="h-4 w-4" />
-				{isPick ? 'Remove from shortcuts' : 'Add to shortcuts'}
+				{t(isPick ? 'Remove from shortcuts' : 'Add to shortcuts')}
 			</button>
 		{/if}
 		{#if !noYouTubeTrack}
@@ -215,7 +216,7 @@
 						})
 					)}
 			>
-				<HugeiconsIcon icon={Share08Icon} class="h-4 w-4" /> Share
+				<HugeiconsIcon icon={Share08Icon} class="h-4 w-4" /> {t('Share')}
 			</button>
 		{/if}
 		{#if linksOnly}
@@ -223,7 +224,7 @@
 				class="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent/10"
 				onclick={(e) => run(e, () => (advancedOpen = true))}
 			>
-				<HugeiconsIcon icon={PreferenceVerticalIcon} class="h-4 w-4" /> Advanced
+				<HugeiconsIcon icon={PreferenceVerticalIcon} class="h-4 w-4" /> {t('Advanced')}
 			</button>
 		{/if}
 		{#if onAdd && !noYouTubeTrack}
@@ -233,7 +234,7 @@
 					: 'flex'}"
 				onclick={(e) => run(e, onAdd)}
 			>
-				<HugeiconsIcon icon={PlayListAddIcon} class="h-4 w-4" /> Add to playlist
+				<HugeiconsIcon icon={PlayListAddIcon} class="h-4 w-4" /> {t('Add to playlist')}
 			</button>
 		{/if}
 		{#if onRemove}
@@ -241,7 +242,7 @@
 				class="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm text-destructive hover:bg-destructive/10"
 				onclick={(e) => run(e, onRemove)}
 			>
-				<HugeiconsIcon icon={PlayListRemoveIcon} class="h-4 w-4" /> {removeLabel}
+				<HugeiconsIcon icon={PlayListRemoveIcon} class="h-4 w-4" /> {t(removeLabel)}
 			</button>
 		{/if}
 	</div>

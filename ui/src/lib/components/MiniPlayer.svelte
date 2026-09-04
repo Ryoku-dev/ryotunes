@@ -33,6 +33,7 @@
 	import LyricsView from './LyricsView.svelte';
 	import QueueList from './QueueList.svelte';
 	import Marquee from './Marquee.svelte';
+	import { t } from '$lib/i18n.svelte';
 
 	type MiniView = 'now' | 'lyrics' | 'queue';
 	let view = $state<MiniView>('now');
@@ -89,31 +90,31 @@
 	style={accent ? `--mini-accent:${accent}` : undefined}
 >
 	<div class="ryo-mini-v2-glow" aria-hidden="true"></div>
-	<section class="ryo-mini-v2-art" aria-label="Current artwork">
+	<section class="ryo-mini-v2-art" aria-label={t('Current artwork')}>
 		<ArtworkImage source={now?.thumbnail} size={480} previewSize={120} className="ryo-mini-v2-art-image" />
 		<span class="ryo-mini-v2-live">// LIVE</span>
 		<div class="ryo-mini-v2-art-copy">
-			<strong>{now?.title ?? 'Nothing playing'}</strong>
-			<span>{now?.artists ?? 'Ryotunes is ready'}</span>
+			<strong>{now?.title ?? t('Nothing playing')}</strong>
+			<span>{now?.artists ?? t('Ryotunes is ready')}</span>
 		</div>
 	</section>
 
 	<section class="ryo-mini-v2-main">
 		<header class="ryo-mini-v2-head">
 			<div class="ryo-mini-v2-brand"><span class="ryo-mini-v2-rule"></span><b>力 RYOTUNES</b></div>
-			<nav class="ryo-mini-v2-tabs" aria-label="Mini player view">
-				<button class:active={view === 'now'} aria-pressed={view === 'now'} aria-label="Now playing" title="Now playing" onclick={() => (view = 'now')}><HugeiconsIcon icon={MusicNote01Icon} class="h-4 w-4" /></button>
-				<button class:active={view === 'lyrics'} aria-pressed={view === 'lyrics'} aria-label="Lyrics" title="Lyrics" onclick={() => (view = 'lyrics')}><HugeiconsIcon icon={Mic01Icon} class="h-4 w-4" /></button>
-				<button class:active={view === 'queue'} aria-pressed={view === 'queue'} aria-label="Queue" title="Queue" onclick={() => (view = 'queue')}><HugeiconsIcon icon={Queue01Icon} class="h-4 w-4" /></button>
+			<nav class="ryo-mini-v2-tabs" aria-label={t('Mini player view')}>
+				<button class:active={view === 'now'} aria-pressed={view === 'now'} aria-label={t('Now playing')} title={t('Now playing')} onclick={() => (view = 'now')}><HugeiconsIcon icon={MusicNote01Icon} class="h-4 w-4" /></button>
+				<button class:active={view === 'lyrics'} aria-pressed={view === 'lyrics'} aria-label={t('Lyrics')} title={t('Lyrics')} onclick={() => (view = 'lyrics')}><HugeiconsIcon icon={Mic01Icon} class="h-4 w-4" /></button>
+				<button class:active={view === 'queue'} aria-pressed={view === 'queue'} aria-label={t('Queue')} title={t('Queue')} onclick={() => (view = 'queue')}><HugeiconsIcon icon={Queue01Icon} class="h-4 w-4" /></button>
 			</nav>
 			<div class="ryo-mini-v2-head-actions">
 				{#if likeable}
-					<button class:active={playback.rating === 'like'} onclick={toggleLike} aria-label={playback.rating === 'like' ? 'Remove from liked songs' : 'Like track'}>
+					<button class:active={playback.rating === 'like'} onclick={toggleLike} aria-label={t(playback.rating === 'like' ? 'Remove from liked songs' : 'Like track')}>
 						<span class:animate-heart-pop={justLiked} onanimationend={() => (justLiked = false)}><HugeiconsIcon icon={FavouriteIcon} class="h-4 w-4" /></span>
 					</button>
 				{/if}
 				<!-- This is deliberately an explicit “open full app” action. The window manager close\n				     path remains separate in Rust and never calls it. -->
-				<button onclick={() => api.closeMini().catch(() => {})} title="Open full Ryotunes" aria-label="Open full Ryotunes"><HugeiconsIcon icon={MaximizeScreenIcon} class="h-4 w-4" /></button>
+				<button onclick={() => api.closeMini().catch(() => {})} title={t('Open full Ryotunes')} aria-label={t('Open full Ryotunes')}><HugeiconsIcon icon={MaximizeScreenIcon} class="h-4 w-4" /></button>
 			</div>
 		</header>
 
@@ -121,8 +122,8 @@
 			{#if view === 'now'}
 				<div class="ryo-mini-v2-now">
 					<div class="ryo-mini-v2-track">
-						<Marquee text={now?.title ?? 'Nothing playing'} class="ryo-mini-v2-title" />
-						<Marquee text={now?.artists ?? 'Ryotunes is ready'} class="ryo-mini-v2-artist" />
+						<Marquee text={now?.title ?? t('Nothing playing')} class="ryo-mini-v2-title" />
+						<Marquee text={now?.artists ?? t('Ryotunes is ready')} class="ryo-mini-v2-artist" />
 					</div>
 					<div class="ryo-mini-v2-seek">
 						<span>{fmt(shownPosition)}</span>
@@ -135,22 +136,22 @@
 							value={shownPosition}
 							oninput={onSeekInput}
 							onchange={onSeekCommit}
-							aria-label="Seek"
+							aria-label={t('Seek')}
 						/>
 						<span>{fmt(playback.duration)}</span>
 					</div>
-					<div class="ryo-mini-v2-next" title={next ? `Up next: ${next.title}` : 'Queue is empty'}>
+					<div class="ryo-mini-v2-next" title={next ? `${t('Up next')}: ${next.title}` : t('Queue is empty')}>
 						<HugeiconsIcon icon={Queue01Icon} class="h-3.5 w-3.5" />
-						<span>{next ? `NEXT · ${next.title}` : 'QUEUE · END'}</span>
+						<span>{next ? `${t('Next')} · ${next.title}` : `${t('Queue')} · ${t('End')}`}</span>
 					</div>
 				</div>
 			{:else if view === 'lyrics'}
-				<div class="ryo-mini-v2-panel ryo-mini-v2-lyrics" aria-label="Lyrics">
+				<div class="ryo-mini-v2-panel ryo-mini-v2-lyrics" aria-label={t('Lyrics')}>
 					<div class="ryo-mini-v2-panel-label"><span>// LYRICS</span><b>AUTO FOLLOW</b></div>
 					<LyricsView compact />
 				</div>
 			{:else}
-				<div class="ryo-mini-v2-panel ryo-mini-v2-queue" aria-label="Queue">
+				<div class="ryo-mini-v2-panel ryo-mini-v2-queue" aria-label={t('Queue')}>
 					<div class="ryo-mini-v2-panel-label"><span>// QUEUE</span><b>{Math.max(0, playback.queue.items.length - playback.queue.currentIndex - 1)} NEXT</b></div>
 					<QueueList compact showMenus={false} />
 				</div>
@@ -159,19 +160,19 @@
 
 		<footer class="ryo-mini-v2-controls">
 			<div class="ryo-mini-v2-transport">
-				<button class:active={shuffleOn} onclick={() => api.toggleShuffle()} aria-label="Shuffle"><HugeiconsIcon icon={ShuffleIcon} class="h-4 w-4" /></button>
-				<button onclick={() => api.prevTrack()} aria-label="Previous"><HugeiconsIcon icon={PreviousIcon} class="h-4 w-4" /></button>
-				<button class="primary" onclick={() => api.togglePause()} aria-label={playback.paused ? 'Play' : 'Pause'}>
+				<button class:active={shuffleOn} onclick={() => api.toggleShuffle()} aria-label={t('Shuffle')}><HugeiconsIcon icon={ShuffleIcon} class="h-4 w-4" /></button>
+				<button onclick={() => api.prevTrack()} aria-label={t('Previous')}><HugeiconsIcon icon={PreviousIcon} class="h-4 w-4" /></button>
+				<button class="primary" onclick={() => api.togglePause()} aria-label={t(playback.paused ? 'Play' : 'Pause')}>
 					<HugeiconsIcon icon={PauseIcon} altIcon={PlayIcon} showAlt={playback.paused} class="h-4 w-4" />
 				</button>
-				<button onclick={() => api.nextTrack()} aria-label="Next"><HugeiconsIcon icon={NextIcon} class="h-4 w-4" /></button>
-				<button class:active={repeat !== 'off'} onclick={cycleRepeat} aria-label={`Repeat: ${repeat}`}>
+				<button onclick={() => api.nextTrack()} aria-label={t('Next')}><HugeiconsIcon icon={NextIcon} class="h-4 w-4" /></button>
+				<button class:active={repeat !== 'off'} onclick={cycleRepeat} aria-label={`${t('Repeat')}: ${repeat}`}>
 					<HugeiconsIcon icon={RepeatIcon} altIcon={RepeatOne01Icon} showAlt={repeat === 'one'} class="h-4 w-4" />
 				</button>
 			</div>
 
-			<div class="ryo-mini-v2-volume" role="group" aria-label="Volume">
-				<button onclick={toggleMute} aria-label={playback.volume === 0 ? 'Unmute' : 'Mute'}>
+			<div class="ryo-mini-v2-volume" role="group" aria-label={t('Volume')}>
+				<button onclick={toggleMute} aria-label={t(playback.volume === 0 ? 'Unmute' : 'Mute')}>
 					<HugeiconsIcon icon={VolumeHighIcon} altIcon={VolumeMute02Icon} showAlt={playback.volume === 0} class="h-4 w-4" />
 				</button>
 				<input
@@ -183,7 +184,7 @@
 					oninput={(e) => dragVolume(Number(e.currentTarget.value))}
 					onchange={(e) => commitVolume(Number(e.currentTarget.value))}
 					onwheel={wheelVolume}
-					aria-label="Volume"
+					aria-label={t('Volume')}
 				/>
 			</div>
 		</footer>

@@ -12,6 +12,7 @@
 	import { Switch } from '$lib/components/ui/switch';
 	import { thumb } from '$lib/thumb';
 	import { ui, toast } from '$lib/player.svelte';
+	import { t } from '$lib/i18n.svelte';
 
 	// Playlist browseIds carry a `VL` prefix that the watch/playlist URLs don't take.
 	function shareUrl(item: BrowseItem): string {
@@ -94,7 +95,7 @@
 				copied = true;
 				setTimeout(() => (copied = false), 1500);
 			},
-			() => toast.error('Could not copy the link. Select it and press Ctrl+C.')
+			() => toast.error(t('Could not copy the link. Select it and press Ctrl+C.'))
 		);
 	}
 </script>
@@ -112,11 +113,11 @@
 	>
 		<div class="ryo-overlay-sheet ryo-share-sheet w-full max-w-md p-4">
 			<div class="mb-3 flex items-start justify-between gap-3">
-				<h2 class="font-heading text-base font-semibold">Share</h2>
+				<h2 class="font-heading text-base font-semibold">{t('Share')}</h2>
 				<button
 					class="flex h-8 w-8 shrink-0 cursor-pointer items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
 					onclick={close}
-					aria-label="Close"
+					aria-label={t('Close')}
 				>
 					<HugeiconsIcon icon={Cancel01Icon} class="h-4 w-4" />
 				</button>
@@ -152,35 +153,35 @@
 				<button
 					class="flex h-8 shrink-0 cursor-pointer items-center gap-1.5 rounded-md px-2.5 text-sm transition-colors hover:bg-accent/10"
 					onclick={copy}
-					aria-label="Copy link"
+					aria-label={t('Copy link')}
 				>
 					
 					<HugeiconsIcon icon={Copy01Icon} altIcon={Tick02Icon} showAlt={copied} class="h-4 w-4" />
-					{copied ? 'Copied' : 'Copy'}
+					{t(copied ? 'Copied' : 'Copy')}
 				</button>
 			</div>
 
 			{#if privacy === 'PRIVATE'}
 				<div class="mt-3 flex items-start gap-2 text-xs text-amber-600 dark:text-amber-500">
 					<HugeiconsIcon icon={Alert02Icon} class="mt-px h-4 w-4 shrink-0" />
-					<p>This playlist is private. Anyone you send the link to will get an error.</p>
+					<p>{t('This playlist is private. Anyone you send the link to will get an error.')}</p>
 				</div>
 			{/if}
 
 			{#if wasPrivate && canToggle}
 				<div class="mt-3 flex items-center justify-between gap-4 rounded-lg border px-3 py-2.5">
 					<div class="min-w-0">
-						<div class="text-sm font-medium">Public</div>
+						<div class="text-sm font-medium">{t('Public')}</div>
 						<p class="text-xs text-muted-foreground">
-							{privacy === 'PUBLIC'
+							{t(privacy === 'PUBLIC'
 								? 'Anyone with the link can open it.'
-								: 'Turn on to make the link work for everyone.'}
+								: 'Turn on to make the link work for everyone.')}
 						</p>
 					</div>
 					<Switch
 						checked={privacy === 'PUBLIC'}
 						onCheckedChange={setPublic}
-						aria-label="Public playlist"
+						aria-label={t('Public playlist')}
 					/>
 				</div>
 			{/if}

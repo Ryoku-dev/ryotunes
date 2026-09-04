@@ -18,6 +18,7 @@
 	import TrackMenu from './TrackMenu.svelte';
 	import { createSearchPager, nextSearchPage, searchPagerDone, type SearchPagerState } from '$lib/search-pager';
 	import { ownNestedVerticalScroll } from '$lib/ryoku-scroll';
+	import { t } from '$lib/i18n.svelte';
 
 	let {
 		value = $bindable(''),
@@ -44,7 +45,7 @@
 	let loadedFor = ''; // query `items` belongs to, so a stale response can't land
 	let debounce: ReturnType<typeof setTimeout> | undefined;
 
-	const KIND = { song: 'Song', album: 'Album', artist: 'Artist', playlist: 'Playlist' };
+	const KIND = { song: t('Song'), album: t('Album'), artist: t('Artist'), playlist: t('Playlist') };
 
 	async function load(q: string) {
 		loadedFor = q;
@@ -166,7 +167,7 @@
 	<Input
 		data-ryo-escape-owner
 		bind:value
-		{placeholder}
+		placeholder={t(placeholder)}
 		class="ryo-unified-search-input pr-16 {inputClass}"
 		autocomplete="off"
 		role="combobox"
@@ -190,7 +191,7 @@
 		<div
 			id="search-suggest"
 			role="listbox"
-			aria-label="Search preview"
+			aria-label={t('Search preview')}
 			data-ryo-own-scroll
 			class="ryo-search-suggest absolute top-full z-[80] mt-2 overflow-y-auto border {panelClass}"
 			onscroll={panelScroll}
@@ -198,14 +199,14 @@
 		>
 			{#if loading && !items.length}
 				<div class="ryo-typeahead-resolver" aria-live="polite">
-					<div class="ryo-typeahead-resolver-head"><span>// SEARCH / RESOLVE</span><b>FETCHING</b></div>
-					<div class="ryo-typeahead-resolver-meta"><span>QUERY</span><strong>{value.trim()}</strong><span>SOURCE</span><strong>YOUTUBE MUSIC</strong></div>
+					<div class="ryo-typeahead-resolver-head"><span>{t('// SEARCH / RESOLVE')}</span><b>{t('FETCHING')}</b></div>
+					<div class="ryo-typeahead-resolver-meta"><span>{t('QUERY')}</span><strong>{value.trim()}</strong><span>{t('SOURCE')}</span><strong>YOUTUBE MUSIC</strong></div>
 					<div class="ryo-typeahead-resolver-lines" aria-hidden="true">
 						{#each [84, 67, 92, 58] as width, i (i)}<i style={`--w:${width}%`}><b>{String(i + 1).padStart(2, '0')}</b></i>{/each}
 					</div>
 				</div>
 			{:else if !items.length}
-				<div class="px-4 py-3 text-sm text-muted-foreground">Nothing quick for that.</div>
+				<div class="px-4 py-3 text-sm text-muted-foreground">{t('Nothing quick for that.')}</div>
 			{:else}
 				{#each items as item, i (item.id)}
 					{@const hero = i === 0}
@@ -237,7 +238,7 @@
 									<span class="truncate">{KIND[item.kind]}{item.subtitle ? ` • ${item.subtitle}` : ''}</span>
 								</div>
 							</div>
-							{#if hero}<span class="shrink-0 rounded-full bg-primary/10 px-2 py-0.5 text-[0.625rem] font-semibold uppercase tracking-wide text-primary">Top result</span>{/if}
+							{#if hero}<span class="shrink-0 rounded-full bg-primary/10 px-2 py-0.5 text-[0.625rem] font-semibold uppercase tracking-wide text-primary">{t('Top result')}</span>{/if}
 						</button>
 						{#if item.kind === 'song'}
 							<TrackMenu
@@ -250,9 +251,9 @@
 				{/each}
 			{/if}
 			{#if loadingMore}
-				<div class="ryo-search-more-state" role="status">// LOADING MORE RESULTS</div>
+				<div class="ryo-search-more-state" role="status">{t('// LOADING MORE RESULTS')}</div>
 			{:else if items.length && searchPagerDone(pager)}
-				<div class="ryo-search-more-state" data-end>// END OF QUICK RESULTS</div>
+				<div class="ryo-search-more-state" data-end>{t('// END OF QUICK RESULTS')}</div>
 			{/if}
 			
 			<button
@@ -263,7 +264,7 @@
 				onclick={submitAll}
 			>
 				<HugeiconsIcon icon={Search01Icon} class="h-3.5 w-3.5" />
-				All results for “{value.trim()}”
+				{t('All results for')} “{value.trim()}”
 			</button>
 		</div>
 	{/if}
