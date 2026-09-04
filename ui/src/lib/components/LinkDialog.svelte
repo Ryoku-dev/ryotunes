@@ -9,6 +9,7 @@
 	import { hrefFor } from '$lib/browse';
 	import { parseYtLink } from '$lib/ytlink';
 	import { startRadio, toast, ui } from '$lib/player.svelte';
+	import { t } from '$lib/i18n.svelte';
 
 	let url = $state('');
 	const target = $derived(parseYtLink(url));
@@ -30,7 +31,7 @@
 			const value = await navigator.clipboard.readText();
 			if (value) url = value.trim();
 		} catch {
-			toast.error('Clipboard access was not available');
+			toast.error(t('Clipboard access was not available'));
 		}
 	}
 
@@ -38,7 +39,7 @@
 		e.preventDefault();
 		const resolved = parseYtLink(url);
 		if (!resolved) {
-			toast.error('That is not a YouTube Music link');
+			toast.error(t('That is not a YouTube Music link'));
 			return;
 		}
 		ui.linkOpen = false;
@@ -52,15 +53,15 @@
 	<Dialog.Content class="ryo-overlay-sheet ryo-link-sheet overflow-hidden p-0 sm:max-w-[560px]">
 		<header class="ryo-overlay-head">
 			<div class="ryo-overlay-eyebrow"><span>—</span><b>力</b><strong>LINK / RESOLVE</strong><i></i><em>LINK-01</em></div>
-			<Dialog.Title>Open a music link</Dialog.Title>
-			<Dialog.Description>Resolve a YouTube Music song, album, artist or playlist without leaving the instrument.</Dialog.Description>
+			<Dialog.Title>{t('Open a music link')}</Dialog.Title>
+			<Dialog.Description>{t('Resolve a YouTube Music song, album, artist or playlist without leaving the instrument.')}</Dialog.Description>
 		</header>
 
 		<form class="ryo-link-body" onsubmit={submit}>
 			<label class="ryo-overlay-field">
 				<span>ADDRESS</span>
-				<small>Paste a music.youtube.com or youtu.be address.</small>
-				<div><HugeiconsIcon icon={Link01Icon} class="h-4 w-4" /><Input bind:value={url} placeholder="https://music.youtube.com/…" autofocus spellcheck={false} /><button type="button" onclick={paste} title="Paste from clipboard"><HugeiconsIcon icon={Copy01Icon} class="h-4 w-4" /><span>PASTE</span></button></div>
+				<small>{t('Paste a music.youtube.com or youtu.be address.')}</small>
+				<div><HugeiconsIcon icon={Link01Icon} class="h-4 w-4" /><Input bind:value={url} placeholder="https://music.youtube.com/…" autofocus spellcheck={false} /><button type="button" onclick={paste} title={t('Paste from clipboard')}><HugeiconsIcon icon={Copy01Icon} class="h-4 w-4" /><span>{t('PASTE')}</span></button></div>
 			</label>
 
 			<div class="ryo-link-readout" aria-live="polite">
@@ -72,8 +73,8 @@
 			<div class="ryo-overlay-note"><span>ACCEPTS</span><strong>SONG · ALBUM · ARTIST · PLAYLIST</strong></div>
 
 			<footer class="ryo-overlay-actions">
-				<Button type="button" variant="outline" onclick={() => (ui.linkOpen = false)}>CANCEL</Button>
-				<Button type="submit" disabled={!target}>OPEN <HugeiconsIcon icon={ArrowRight01Icon} class="h-3.5 w-3.5" /></Button>
+				<Button type="button" variant="outline" onclick={() => (ui.linkOpen = false)}>{t('CANCEL')}</Button>
+				<Button type="submit" disabled={!target}>{t('OPEN')} <HugeiconsIcon icon={ArrowRight01Icon} class="h-3.5 w-3.5" /></Button>
 			</footer>
 		</form>
 	</Dialog.Content>

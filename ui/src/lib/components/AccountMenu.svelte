@@ -8,6 +8,7 @@
 	import * as api from '$lib/api';
 	import { auth, openChannelPicker } from '$lib/player.svelte';
 	import { thumb } from '$lib/thumb';
+	import { t } from '$lib/i18n.svelte';
 	import { anchorMenu, fitMenu, NO_ANCHOR, toBody } from '$lib/menu';
 
 	let menuOpen = $state(false);
@@ -39,7 +40,7 @@
 
 <button
 	onclick={openMenu}
-	title={auth.account?.signedIn ? (auth.account.name ?? 'Account') : 'Sign in'}
+	title={auth.account?.signedIn ? (auth.account.name ?? t('Account')) : t('Sign in')}
 	aria-expanded={menuOpen}
 	class="ryo-account-trigger flex h-full cursor-pointer items-center gap-2 px-2.5 text-xs transition-colors hover:bg-muted aria-expanded:bg-muted"
 >
@@ -55,7 +56,7 @@
 		<HugeiconsIcon icon={UserCircleIcon} class="h-5 w-5 shrink-0 text-muted-foreground" />
 	{/if}
 	<span class="hidden max-w-28 truncate font-medium lg:block">
-		{auth.account?.signedIn ? (auth.account.name ?? 'Account') : 'Sign in'}
+		{auth.account?.signedIn ? (auth.account.name ?? t('Account')) : t('Sign in')}
 	</span>
 	<HugeiconsIcon
 		icon={ArrowDown01Icon}
@@ -69,7 +70,7 @@
 	<button
 		class="fixed inset-0 z-40 cursor-default"
 		onclick={() => (menuOpen = false)}
-		aria-label="Close menu"
+		aria-label={t('Close menu')}
 		{@attach toBody}
 	></button>
 	<div
@@ -80,7 +81,7 @@
 	>
 		{#if auth.account?.signedIn}
 			<div class="mb-3">
-				<div class="truncate text-sm font-medium">{auth.account.name ?? 'Account'}</div>
+				<div class="truncate text-sm font-medium">{auth.account.name ?? t('Account')}</div>
 				{#if auth.account.handle || auth.account.email}
 					<div class="truncate text-xs text-muted-foreground">
 						{auth.account.handle ?? auth.account.email}
@@ -90,18 +91,18 @@
 			
 			<Button variant="outline" size="sm" class="mb-2 w-full gap-2" onclick={switchChannel}>
 				<HugeiconsIcon icon={UserCircleIcon} class="h-4 w-4" />
-				Switch channel
+				{t('Switch channel')}
 			</Button>
 			<Button variant="outline" size="sm" class="w-full gap-2" onclick={doSignOut}>
 				<HugeiconsIcon icon={Logout01Icon} class="h-4 w-4" />
-				Sign out
+				{t('Sign out')}
 			</Button>
 		{:else}
-			<p class="text-sm font-medium">Sign in</p>
+			<p class="text-sm font-medium">{t('Sign in')}</p>
 			<p class="mt-1 text-xs text-muted-foreground">
-				Sign in with your Google account to reach your YouTube Music library and playlists.
+				{t('Sign in with your Google account to reach your YouTube Music library and playlists.')}
 			</p>
-			<Button class="mt-3 w-full" onclick={signInGoogle}>Sign in with Google</Button>
+			<Button class="mt-3 w-full" onclick={signInGoogle}>{t('Sign in with Google')}</Button>
 		{/if}
 	</div>
 {/if}

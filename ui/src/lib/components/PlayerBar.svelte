@@ -41,6 +41,7 @@
 	import ArtistLine from './ArtistLine.svelte';
 	import Marquee from './Marquee.svelte';
 	import TrackMenu from './TrackMenu.svelte';
+	import { t } from '$lib/i18n.svelte';
 
 	let {
 		onToggleQueue,
@@ -164,16 +165,16 @@
 		<div class="min-w-0">
 			<div class="flex items-center gap-1.5">
 				<Marquee
-					text={playback.now?.title ?? 'Nothing playing'}
+					text={playback.now?.title ?? t('Nothing playing')}
 					class="text-sm font-medium"
 				/>
 				{#if playback.pendingVideoId}
-					<span class="ryo-player-resolving" title="Resolving stream"><HugeiconsIcon icon={Loading03Icon} class="h-3 w-3 animate-spin" /> RESOLVING</span>
+					<span class="ryo-player-resolving" title={t('Resolving stream')}><HugeiconsIcon icon={Loading03Icon} class="h-3 w-3 animate-spin" /> {t('RESOLVING')}</span>
 				{/if}
 				{#if autoplayTrack}
 					<span
 						class="shrink-0 text-muted-foreground"
-						title="Playing similar music (Autoplay)"
+						title={t('Playing similar music (Autoplay)')}
 						in:fade={{ duration: 170 }}
 					>
 						<HugeiconsIcon icon={InfinityIcon} class="h-3.5 w-3.5" />
@@ -196,7 +197,7 @@
 						size="icon-sm"
 						class="hidden lg:inline-flex"
 						onclick={toggleLike}
-						aria-label="Like"
+						aria-label={t('Like')}
 					>
 						<span
 							class="inline-flex"
@@ -224,7 +225,7 @@
 								duration: now.duration
 							});
 						}}
-						aria-label="Add to playlist"
+						aria-label={t('Add to playlist')}
 					>
 						<HugeiconsIcon icon={Add01Icon} class="h-4 w-4 text-muted-foreground" />
 					</Button>
@@ -248,7 +249,7 @@
 				variant="ghost"
 				size="icon-sm"
 				onclick={() => api.toggleShuffle()}
-				aria-label="Shuffle"
+				aria-label={t('Shuffle')}
 				aria-pressed={shuffleOn}
 			>
 				<HugeiconsIcon
@@ -256,7 +257,7 @@
 					class="h-4 w-4 {shuffleOn ? 'text-primary' : 'text-muted-foreground'}"
 				/>
 			</Button>
-			<Button variant="ghost" size="icon-sm" onclick={() => api.prevTrack()} aria-label="Previous">
+			<Button variant="ghost" size="icon-sm" onclick={() => api.prevTrack()} aria-label={t('Previous')}>
 				<HugeiconsIcon icon={PreviousIcon} class="h-5 w-5" />
 			</Button>
 			<Button
@@ -264,7 +265,7 @@
 				size="icon"
 				class="ryo-transport-primary rounded-md"
 				onclick={() => api.togglePause()}
-				aria-label="Play/pause"
+				aria-label={t('Play/pause')}
 			>
 				
 			<HugeiconsIcon
@@ -274,14 +275,14 @@
 				class="h-5 w-5"
 			/>
 			</Button>
-			<Button variant="ghost" size="icon-sm" onclick={() => api.nextTrack()} aria-label="Next">
+			<Button variant="ghost" size="icon-sm" onclick={() => api.nextTrack()} aria-label={t('Next')}>
 				<HugeiconsIcon icon={NextIcon} class="h-5 w-5" />
 			</Button>
 			<Button
 				variant="ghost"
 				size="icon-sm"
 				onclick={cycleRepeat}
-				aria-label="Repeat: {repeat}"
+				aria-label={`${t('Repeat')}: ${repeat}`}
 				aria-pressed={repeat !== 'off'}
 			>
 				
@@ -308,7 +309,7 @@
 					value={shownPosition}
 					oninput={onSeekInput}
 					onchange={onSeekCommit}
-					aria-label="Seek"
+					aria-label={t('Seek')}
 				/>
 			</div>
 			<span class="tabular-nums">{fmt(playback.duration)}</span>
@@ -324,7 +325,7 @@
 				size="icon-sm"
 				class="text-muted-foreground"
 				onclick={toggleMute}
-				aria-label={playback.volume === 0 ? 'Unmute' : 'Mute'}
+				aria-label={t(playback.volume === 0 ? 'Unmute' : 'Mute')}
 			>
 				
 				<HugeiconsIcon
@@ -344,19 +345,19 @@
 				oninput={onVolume}
 				onchange={onVolumeCommit}
 				onwheel={wheelVolume}
-				aria-label="Volume"
+				aria-label={t('Volume')}
 			/>
 		</div>
 		
 		<div class="flex items-center gap-0.5">
-			<Button variant="ghost" size="icon-sm" onclick={openMiniPlayer} aria-label="Mini player">
+			<Button variant="ghost" size="icon-sm" onclick={openMiniPlayer} aria-label={t('Mini player')}>
 				<HugeiconsIcon icon={MinimizeScreenIcon} class="h-5 w-5" />
 			</Button>
 			<Button
 				variant={lyricsOpen ? 'secondary' : 'ghost'}
 				size="icon-sm"
 				onclick={onToggleLyrics}
-				aria-label={isRadioNow ? 'Lyrics unavailable for live radio' : 'Toggle lyrics'}
+				aria-label={t(isRadioNow ? 'Lyrics unavailable for live radio' : 'Toggle lyrics')}
 				disabled={isRadioNow}
 			>
 				<HugeiconsIcon icon={Mic01Icon} class="h-5 w-5" />
@@ -365,7 +366,7 @@
 				variant={queueOpen ? 'secondary' : 'ghost'}
 				size="icon-sm"
 				onclick={onToggleQueue}
-				aria-label="Toggle queue"
+				aria-label={t('Toggle queue')}
 			>
 				<HugeiconsIcon icon={Queue01Icon} class="h-5 w-5" />
 			</Button>
@@ -374,7 +375,7 @@
 				variant="ghost"
 				size="icon-sm"
 				onclick={() => (np.open = !np.open)}
-				aria-label={np.open ? 'Minimise player' : 'Open player'}
+				aria-label={t(np.open ? 'Minimise player' : 'Open player')}
 				aria-expanded={np.open}
 			>
 				

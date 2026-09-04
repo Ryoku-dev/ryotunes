@@ -32,13 +32,14 @@
 	} from '$lib/player.svelte';
 	import { mergeSaved, orderLibrary } from '$lib/personal';
 	import { normalizeSearchText } from '$lib/localsearch';
+	import { t } from '$lib/i18n.svelte';
 
 	const discoverNav = [
-		{ href: '/', label: 'Home', icon: Home01Icon, kana: '聴' },
-		{ href: '/search', label: 'Search', icon: Search01Icon, kana: '探' },
-		{ href: '/radio', label: 'Radio', icon: Radio02Icon, kana: '波' }
+		{ href: '/', label: t('Home'), icon: Home01Icon, kana: '聴' },
+		{ href: '/search', label: t('Search'), icon: Search01Icon, kana: '探' },
+		{ href: '/radio', label: t('Radio'), icon: Radio02Icon, kana: '波' }
 	];
-	const collectionNav = { href: '/library', label: 'Library', icon: LibraryIcon, kana: '蔵' };
+	const collectionNav = { href: '/library', label: t('Library'), icon: LibraryIcon, kana: '蔵' };
 	const isActive = (href: string) =>
 		href === '/' ? page.url.pathname === '/' : page.url.pathname.startsWith(href);
 
@@ -83,7 +84,7 @@
 		creating = true;
 		try {
 			await createLibraryPlaylist(title);
-			toast.success(`Created "${title}"`);
+			toast.success(`${t('Created')} "${title}"`);
 			newTitle = '';
 			dialogOpen = false;
 		} catch (e) {
@@ -117,14 +118,14 @@
 						<div class="ryo-rail-brand-name">RYOTUNES</div>
 						<div class="ryo-rail-brand-sub">RYOKU // MUSIC</div>
 					</div>
-					<Button variant="ghost" size="icon-sm" onclick={toggleSidebar} aria-label="Collapse sidebar" class="ryo-rail-collapse">
+					<Button variant="ghost" size="icon-sm" onclick={toggleSidebar} aria-label={t('Collapse sidebar')} class="ryo-rail-collapse">
 						<HugeiconsIcon icon={SquareArrowLeft01Icon} class="h-4 w-4" />
 					</Button>
 				</div>
 				<span class="ryo-rail-triple">///</span>
 			</div>
 		{:else}
-			<Button variant="ghost" size="icon-sm" class="hidden lg:inline-flex" onclick={toggleSidebar} aria-label="Expand sidebar">
+			<Button variant="ghost" size="icon-sm" class="hidden lg:inline-flex" onclick={toggleSidebar} aria-label={t('Expand sidebar')}>
 				<HugeiconsIcon icon={SquareArrowRight01Icon} class="h-4 w-4" />
 			</Button>
 		{/if}
@@ -165,11 +166,11 @@
 		</div>
 		<button
 			onclick={() => (ui.settingsOpen = true)}
-			title="Settings"
+			title={t('Settings')}
 			class="group flex items-center justify-center gap-3 rounded-md px-3 py-2 text-sm font-medium {ui.settingsOpen ? `bg-primary text-primary-foreground` : `text-sidebar-foreground/70 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground`} {wide(`lg:justify-start`)}"
 		>
 			<HugeiconsIcon icon={Settings01Icon} class="h-5 w-5 shrink-0" />
-			<span class="hidden flex-1 text-left font-medium {wide('lg:inline')}">{ui.settingsOpen ? '// Settings' : 'Settings'}</span>
+			<span class="hidden flex-1 text-left font-medium {wide('lg:inline')}">{ui.settingsOpen ? '// ' : ''}{t('Settings')}</span>
 			<span class="hidden ryo-nav-kana {wide('lg:inline')}">設</span>
 		</button>
 	</nav>
@@ -184,11 +185,11 @@
 				class="mb-2 w-full gap-2"
 				onclick={() => (dialogOpen = true)}
 			>
-				<HugeiconsIcon icon={Add01Icon} class="h-4 w-4" /> New playlist
+				<HugeiconsIcon icon={Add01Icon} class="h-4 w-4" /> {t('New playlist')}
 			</Button>
 			{#if playlists.length > 8}
 				<div class="ryo-rail-playlist-filter">
-					<Input bind:value={playlistFilter} aria-label="Filter playlists" placeholder="Filter playlists…" />
+					<Input bind:value={playlistFilter} aria-label={t('Filter playlists')} placeholder={t('Filter playlists…')} />
 				</div>
 			{/if}
 			<div class="ryo-rail-playlist-scroll min-h-0 flex-1 overflow-y-auto" data-ryo-own-scroll>
@@ -234,9 +235,9 @@
 					{/if}
 				{:else}
 					{#if library.loading}
-						<p class="px-3 py-1.5 text-xs text-muted-foreground">Loading…</p>
+						<p class="px-3 py-1.5 text-xs text-muted-foreground">{t('Loading…')}</p>
 					{:else if playlistFilter.trim()}
-						<p class="px-3 py-3 text-xs text-muted-foreground">No playlists match “{playlistFilter.trim()}”.</p>
+						<p class="px-3 py-3 text-xs text-muted-foreground">{t('No playlists match')} “{playlistFilter.trim()}”.</p>
 					{/if}
 				{/each}
 			</div>
@@ -245,11 +246,11 @@
 		<Dialog.Root bind:open={dialogOpen}>
 			<Dialog.Content class="ryo-overlay-sheet sm:max-w-md">
 				<Dialog.Header>
-					<Dialog.Title>New playlist</Dialog.Title>
+					<Dialog.Title>{t('New playlist')}</Dialog.Title>
 					<Dialog.Description>
-						{auth.account?.signedIn
+						{t(auth.account?.signedIn
 							? 'Give your YouTube Music playlist a name to get started.'
-							: 'This playlist will be stored on this device. Sign in later without losing it.'}
+							: 'This playlist will be stored on this device. Sign in later without losing it.')}
 					</Dialog.Description>
 				</Dialog.Header>
 				<form
@@ -259,11 +260,11 @@
 						createNew();
 					}}
 				>
-					<Input bind:value={newTitle} placeholder="Playlist name" autofocus />
+					<Input bind:value={newTitle} placeholder={t('Playlist name')} autofocus />
 					<Dialog.Footer>
-						<Button type="button" variant="outline" onclick={() => (dialogOpen = false)}>Cancel</Button>
+						<Button type="button" variant="outline" onclick={() => (dialogOpen = false)}>{t('Cancel')}</Button>
 						<Button type="submit" disabled={creating || !newTitle.trim()}>
-							{creating ? 'Creating…' : 'Create'}
+							{t(creating ? 'Creating…' : 'Create')}
 						</Button>
 					</Dialog.Footer>
 				</form>

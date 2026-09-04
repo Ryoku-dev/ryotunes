@@ -13,6 +13,7 @@
 		notePlaylistAdd,
 		noteSavedIn
 	} from '$lib/player.svelte';
+	import { t } from '$lib/i18n.svelte';
 
 	let playlists = $state<BrowseItem[]>([]);
 	let loading = $state(false);
@@ -117,11 +118,11 @@
 			class="ryo-overlay-sheet w-full max-w-sm p-4"
 		>
 			<div class="mb-3 flex items-center justify-between">
-				<h2 class="font-heading text-base font-semibold">Add to playlist</h2>
+				<h2 class="font-heading text-base font-semibold">{t('Add to playlist')}</h2>
 				<button
 					class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
 					onclick={close}
-					aria-label="Close"
+					aria-label={t('Close')}
 				>
 					<HugeiconsIcon icon={Cancel01Icon} class="h-4 w-4" />
 				</button>
@@ -139,14 +140,14 @@
 							class="min-w-0 flex-1 rounded-md border border-border bg-background px-3 py-2 text-sm outline-none focus:border-foreground/40"
 							bind:value={newTitle}
 							maxlength="150"
-							placeholder="Playlist name"
+							placeholder={t('Playlist name')}
 						/>
 						<button
 							type="submit"
 							class="rounded-md bg-foreground px-3 py-2 text-sm font-medium text-background disabled:opacity-50"
 							disabled={creating || !newTitle.trim()}
 						>
-							{creating ? 'Creating…' : 'Create + add'}
+							{t(creating ? 'Creating…' : 'Create + add')}
 						</button>
 					</form>
 				{:else}
@@ -154,12 +155,12 @@
 						class="w-full rounded-md border border-border px-3 py-2 text-left text-sm font-medium hover:bg-accent/10"
 						onclick={() => (showCreate = true)}
 					>
-						+ New playlist
+						{t('+ New playlist')}
 					</button>
 				{/if}
 			</div>
 			{#if loading}
-				<p class="p-2 text-sm text-muted-foreground">Loading…</p>
+				<p class="p-2 text-sm text-muted-foreground">{t('Loading…')}</p>
 			{:else if playlists.length}
 				<div class="max-h-80 overflow-y-auto">
 					{#each playlists as pl (pl.id)}
@@ -183,7 +184,7 @@
 				</div>
 			{:else}
 				<p class="p-2 text-sm text-muted-foreground">
-					No playlists yet. Create one above and these songs will be added immediately.
+					{t('No playlists yet. Create one above and these songs will be added immediately.')}
 				</p>
 			{/if}
 		</div>

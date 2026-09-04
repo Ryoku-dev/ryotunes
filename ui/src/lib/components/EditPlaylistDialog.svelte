@@ -13,6 +13,7 @@
 	import * as api from '$lib/api';
 	import { thumb } from '$lib/thumb';
 	import { toast } from '$lib/player.svelte';
+	import { t } from '$lib/i18n.svelte';
 
 	/** What the page shows while YouTube catches up, and what it puts back if the write fails. */
 	type Edit = { title?: string; description?: string; privacy?: string; cover?: string };
@@ -109,7 +110,7 @@
 		open = false;
 		try {
 			await api.editPlaylistDetails(id, changes);
-			toast.success('Playlist updated');
+			toast.success(t('Playlist updated'));
 		} catch (e) {
 			onchange(before);
 			toast.error(String(e));
@@ -122,11 +123,11 @@
 <Dialog.Root bind:open>
 	<Dialog.Content class="ryo-overlay-sheet sm:max-w-xl">
 		<Dialog.Header>
-			<Dialog.Title>Edit playlist</Dialog.Title>
+			<Dialog.Title>{t('Edit playlist')}</Dialog.Title>
 			<Dialog.Description>
-				{local
+				{t(local
 					? 'Change the name or artwork stored for this playlist on this device.'
-					: 'Change how this playlist looks and who can see it.'}
+					: 'Change how this playlist looks and who can see it.')}
 			</Dialog.Description>
 		</Dialog.Header>
 		<form
@@ -142,7 +143,7 @@
 						type="button"
 						class="group relative h-32 w-32 cursor-pointer overflow-hidden rounded-xl border bg-muted"
 						onclick={pickCover}
-						aria-label="Change cover art"
+						aria-label={t('Change cover art')}
 						disabled={coverBusy}
 					>
 						{#if preview}
@@ -155,7 +156,7 @@
 								: 'opacity-100'}"
 						>
 							<HugeiconsIcon icon={ImageAdd02Icon} class="h-6 w-6" />
-							Choose image
+							{t('Choose image')}
 						</span>
 					</button>
 					{#if cover}
@@ -168,24 +169,23 @@
 							disabled={removing}
 						>
 							<HugeiconsIcon icon={Delete02Icon} class="h-3.5 w-3.5" />
-							{removing ? 'Removing…' : 'Remove'}
+							{t(removing ? 'Removing…' : 'Remove')}
 						</Button>
 					{/if}
 				</div>
 				<div class="flex min-w-0 flex-1 flex-col gap-3">
-					<Input bind:value={draftName} placeholder="Playlist name" aria-label="Playlist name" />
+					<Input bind:value={draftName} placeholder={t('Playlist name')} aria-label={t('Playlist name')} />
 					{#if !local}
 						<textarea
 							bind:value={draftDescription}
-							placeholder="Description"
-							aria-label="Playlist description"
+							placeholder={t('Description')}
+							aria-label={t('Playlist description')}
 							rows="4"
 							class="w-full flex-1 resize-none rounded-2xl border border-input bg-input/30 px-3 py-2 text-sm outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
 						></textarea>
 					{:else}
 						<p class="rounded-2xl border px-3 py-2 text-xs leading-relaxed text-muted-foreground">
-							Device playlists stay available without a Google account. Their songs, name and artwork
-							are kept locally and are never uploaded automatically.
+							{t('Device playlists stay available without a Google account. Their songs, name and artwork are kept locally and are never uploaded automatically.')}
 						</p>
 					{/if}
 				</div>
@@ -193,25 +193,25 @@
 			{#if !local}
 				<div class="flex items-center justify-between gap-4 rounded-2xl border px-3 py-2.5">
 					<div class="min-w-0">
-						<div class="text-sm font-medium">Public</div>
+						<div class="text-sm font-medium">{t('Public')}</div>
 						<p class="text-xs text-muted-foreground">
-							{isPublic
+							{t(isPublic
 								? 'Anyone can find this playlist on YouTube Music.'
-								: 'Only you can see this playlist.'}
+								: 'Only you can see this playlist.')}
 						</p>
 					</div>
-					<Switch bind:checked={isPublic} aria-label="Public playlist" />
+					<Switch bind:checked={isPublic} aria-label={t('Public playlist')} />
 				</div>
 			{/if}
 			<p class="text-xs text-muted-foreground">
-				{local
+				{t(local
 					? 'Artwork is copied into Ryotunes storage on this device. Square JPEG or PNG works best.'
-					: 'Artwork applies here at once and uploads to YouTube Music in the background. Square JPEG or PNG works best.'}
+					: 'Artwork applies here at once and uploads to YouTube Music in the background. Square JPEG or PNG works best.')}
 			</p>
 			<Dialog.Footer>
-				<Button type="button" variant="outline" onclick={() => (open = false)}>Cancel</Button>
+				<Button type="button" variant="outline" onclick={() => (open = false)}>{t('Cancel')}</Button>
 				<Button type="submit" disabled={saving || !draftName.trim()}>
-					{saving ? 'Saving…' : 'Save'}
+					{t(saving ? 'Saving…' : 'Save')}
 				</Button>
 			</Dialog.Footer>
 		</form>

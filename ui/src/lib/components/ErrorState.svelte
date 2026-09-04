@@ -2,6 +2,7 @@
 	import { HugeiconsIcon } from '@hugeicons/svelte';
 	import { RefreshIcon } from '@hugeicons/core-free-icons';
 	import { Button } from '$lib/components/ui/button';
+	import { t } from '$lib/i18n.svelte';
 
 	let { message, onRetry }: { message: string; onRetry: () => void } = $props();
 </script>
@@ -10,6 +11,6 @@
 	<p class="text-sm text-destructive">{message}</p>
 	
 	<Button variant="outline" size="sm" class="gap-2" onclick={() => onRetry()}>
-		<HugeiconsIcon icon={RefreshIcon} class="h-4 w-4" /> Try again
+		<HugeiconsIcon icon={RefreshIcon} class="h-4 w-4" /> {t('Try again')}
 	</Button>
 </div>

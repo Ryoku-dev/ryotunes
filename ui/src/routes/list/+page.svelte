@@ -7,6 +7,7 @@
 	import type { BrowseItem } from '$lib/api';
 	import { getCached, putCached } from '$lib/pagecache';
 	import { reveal } from '$lib/reveal.svelte';
+	import { t } from '$lib/i18n.svelte';
 
 	let items = $state<BrowseItem[]>([]);
 	let loading = $state(true);
@@ -17,7 +18,7 @@
 
 	const id = $derived(page.url.searchParams.get('id') ?? '');
 	const params = $derived(page.url.searchParams.get('params') ?? undefined);
-	const title = $derived(page.url.searchParams.get('title') ?? 'More');
+	const title = $derived(page.url.searchParams.get('title') ?? t('More'));
 
 	async function load(browseId: string, p?: string) {
 		const key = `list:${browseId}:${p ?? ''}`;
@@ -70,6 +71,6 @@
 		
 		{#if rv.more(items.length)}<div {@attach rv.sentinel}></div>{/if}
 	{:else}
-		<p class="text-sm text-muted-foreground">Nothing here.</p>
+		<p class="text-sm text-muted-foreground">{t('Nothing here.')}</p>
 	{/if}
 </div>

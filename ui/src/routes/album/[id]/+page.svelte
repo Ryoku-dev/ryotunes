@@ -43,6 +43,7 @@
     import { getCached, putCached } from "$lib/pagecache";
     import { thumb } from "$lib/thumb";
     import { anchorMenu, fitMenu, NO_ANCHOR, toBody } from "$lib/menu";
+    import { t } from "$lib/i18n.svelte";
 
     let album = $state<AlbumPage | null>(null);
     let artistHero = $state<string | null>(null);
@@ -137,7 +138,7 @@
         // tile keeps its circle (see browse.ts `hrefFor`).
         kind: id.startsWith(api.LOCAL_ARTIST_PREFIX) ? "artist" : "album",
         id,
-        title: album?.title ?? "Album",
+        title: album?.title ?? t("Album"),
         subtitle: album?.artist,
         thumbnail: album?.thumbnail,
         // Recently played keeps this object as the card it draws, so without the flag an album
@@ -180,20 +181,20 @@
         const next = !inLibrary;
         if (!auth.account?.signedIn || !a.playlistId) {
             toggleSaved(asItem());
-            toast.success(next ? "Saved to library" : "Removed from library");
+            toast.success(t(next ? "Saved to library" : "Removed from library"));
             return;
         }
         // Signed in: YouTube owns it from here, so drop any local row left from before signing in.
         if (savedHere) toggleSaved(asItem());
         if (a.inLibrary === next) {
-            toast.success(next ? "Saved to library" : "Removed from library");
+            toast.success(t(next ? "Saved to library" : "Removed from library"));
             return; // YouTube already agrees; only the local row had to go
         }
         a.inLibrary = next;
         savingLibrary = true;
         try {
             await api.setAlbumSaved(a.playlistId, next);
-            toast.success(next ? "Saved to library" : "Removed from library");
+            toast.success(t(next ? "Saved to library" : "Removed from library"));
         } catch (e) {
             a.inLibrary = !next;
             toast.error(String(e));
@@ -266,7 +267,7 @@
         ></div>
 
         <div class="absolute right-6 top-6 z-10">
-            <TrackFilter bind:value={query} placeholder="Search this album" />
+            <TrackFilter bind:value={query} placeholder={t('Search this album')} />
         </div>
 
         <div class="relative flex flex-col gap-5 p-6 pt-10">
@@ -290,12 +291,12 @@
                     <div
                         class="text-xs font-semibold uppercase tracking-wide text-muted-foreground"
                     >
-                        {album.subtitle ?? "Album"}
+                        {album.subtitle ?? t("Album")}
                     </div>
                     <h1
                         class="mt-1 font-heading text-4xl font-bold tracking-tight drop-shadow"
                     >
-                        {album.title ?? "Album"}
+                        {album.title ?? t("Album")}
                     </h1>
                     <div
                         class="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-muted-foreground"
@@ -341,7 +342,7 @@
                         class="mt-1 cursor-pointer text-xs font-semibold uppercase text-muted-foreground hover:text-foreground"
                         onclick={() => (expanded = !expanded)}
                     >
-                        {expanded ? "Less" : "More"}
+                        {t(expanded ? "Less" : "More")}
                     </button>
                 </div>
             {/if}
@@ -353,14 +354,14 @@
                     onclick={() => playAll(null)}
                     disabled={!album.items.length}
                 >
-                    <HugeiconsIcon icon={PlayIcon} class="h-4 w-4" /> Play
+                    <HugeiconsIcon icon={PlayIcon} class="h-4 w-4" /> {t("Play")}
                 </button>
                 <button
                     class="flex cursor-pointer items-center gap-2 rounded-full border px-5 py-2.5 text-sm font-semibold transition hover:bg-accent/10 disabled:opacity-50"
                     onclick={shuffle}
                     disabled={!album.items.length}
                 >
-                    <HugeiconsIcon icon={ShuffleIcon} class="h-4 w-4" /> Shuffle
+                    <HugeiconsIcon icon={ShuffleIcon} class="h-4 w-4" /> {t("Shuffle")}
                 </button>
                 
                 {#if !isLocal}
@@ -378,13 +379,13 @@
                             showAlt={inLibrary}
                             class="h-4 w-4"
                         />
-                        {inLibrary ? "In library" : "Save to library"}
+                        {t(inLibrary ? "In library" : "Save to library")}
                     </button>
                 {/if}
                 <button
                     class="flex h-10 w-10 cursor-pointer items-center justify-center rounded-full border text-muted-foreground transition hover:bg-accent/10 hover:text-foreground"
                     onclick={openMenu}
-                    aria-label="More options"
+                    aria-label={t('More options')}
                 >
                     <HugeiconsIcon icon={MoreVerticalIcon} class="h-5 w-5" />
                 </button>
@@ -398,7 +399,7 @@
                             e.preventDefault();
                             menuOpen = false;
                         }}
-                        aria-label="Close menu"
+                        aria-label={t('Close menu')}
                         {@attach toBody}
                     ></button>
                     <div
@@ -414,7 +415,7 @@
                             <HugeiconsIcon
                                 icon={ArrowUpNarrowWideIcon}
                                 class="h-4 w-4"
-                            /> Play next
+                            /> {t("Play next")}
                         </button>
                         <button
                             class="flex w-full cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent/10"
@@ -423,7 +424,7 @@
                             <HugeiconsIcon
                                 icon={ArrowDownWideNarrowIcon}
                                 class="h-4 w-4"
-                            /> Add to queue
+                            /> {t("Add to queue")}
                         </button>
                         
                         {#if !isLocal && album.playlistId}
@@ -434,7 +435,7 @@
                                 <HugeiconsIcon
                                     icon={Radio02Icon}
                                     class="h-4 w-4"
-                                /> Start radio
+                                /> {t("Start radio")}
                             </button>
                         {/if}
                         {#if !isLocal}
@@ -445,7 +446,7 @@
                                 <HugeiconsIcon
                                     icon={PlayListAddIcon}
                                     class="h-4 w-4"
-                                /> Save to playlist
+                                /> {t("Save to playlist")}
                             </button>
                         {/if}
                         <button
@@ -458,7 +459,7 @@
                             <HugeiconsIcon
                                 icon={DashboardSquare02Icon}
                                 class="h-4 w-4"
-                            /> Add to shortcuts
+                            /> {t("Add to shortcuts")}
                         </button>
                         {#if !isLocal}
                             <button
@@ -471,7 +472,7 @@
                                 <HugeiconsIcon
                                     icon={Share08Icon}
                                     class="h-4 w-4"
-                                /> Share
+                                /> {t("Share")}
                             </button>
                         {/if}
                     </div>
@@ -496,7 +497,7 @@
             <p class="p-4 text-sm text-muted-foreground">
                 {query.trim()
                     ? `No tracks match “${query.trim()}”.`
-                    : "This album is empty."}
+                    : t("This album is empty.")}
             </p>
         {/each}
     </div>

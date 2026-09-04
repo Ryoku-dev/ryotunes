@@ -8,6 +8,7 @@
 	import * as api from '$lib/api';
 	import type { RadioStation } from '$lib/api';
 	import { toast } from '$lib/player.svelte';
+	import { t } from '$lib/i18n.svelte';
 
 	const PAGE = 36;
 	let input = $state('');
@@ -90,7 +91,7 @@
 			station.codec,
 			station.bitrate && station.bitrate > 0 ? `${station.bitrate} kbps` : ''
 		].filter(Boolean);
-		return parts.join(' · ') || 'Live stream';
+		return parts.join(' · ') || t('Live stream');
 	}
 
 	function stationTags(station: RadioStation) {
@@ -114,8 +115,8 @@
 <div class="ryo-route-page">
 	<RyokuPageHeader
 		eyebrow="MUSIC / AIRWAVES"
-		title="Radio"
-		blurb="Live stations from around the world, played through Ryotunes' native audio engine."
+		title={t('Radio')}
+		blurb={t("Live stations from around the world, played through Ryotunes' native audio engine.")}
 		code="RADIO · DIRECTORY"
 		artTitle="電波"
 		artSub="LIVE RADIO"
@@ -126,12 +127,9 @@
 
 	<section class="radio-console">
 		<div class="radio-console-copy">
-			<span>// RADIO BROWSER / LIVE DIRECTORY</span>
-			<strong>{query ? `Results for “${query}”` : 'Popular stations'}</strong>
-			<p>
-				Station discovery is demand-driven: Ryotunes only contacts the directory when this page is
-				opened, searched or extended.
-			</p>
+			<span>{t('// RADIO BROWSER / LIVE DIRECTORY')}</span>
+			<strong>{query ? `Results for “${query}”` : t('Popular stations')}</strong>
+			<p>{t('Station discovery is demand-driven: Ryotunes only contacts the directory when this page is opened, searched or extended.')}</p>
 		</div>
 		<form
 			class="radio-search"
@@ -144,36 +142,36 @@
 				<HugeiconsIcon icon={Search01Icon} class="h-4 w-4" />
 				<Input
 					bind:value={input}
-					placeholder="Search stations by name…"
-					aria-label="Search internet radio stations"
+					placeholder={t('Search stations by name…')}
+					aria-label={t('Search internet radio stations')}
 				/>
 			</div>
-			<Button type="submit" disabled={loading}>Search</Button>
+			<Button type="submit" disabled={loading}>{t('Search')}</Button>
 			{#if query}
-				<Button type="button" variant="outline" onclick={clearSearch} disabled={loading}>Top stations</Button>
+				<Button type="button" variant="outline" onclick={clearSearch} disabled={loading}>{t('Top stations')}</Button>
 			{/if}
 		</form>
 	</section>
 
 	{#if loading}
 		<div class="radio-loading" aria-live="polite">
-			<span>// TUNING</span>
-			<strong>Finding live stations.</strong>
-			<p>Trying available Radio Browser mirrors without blocking the player.</p>
+			<span>{t('// TUNING')}</span>
+			<strong>{t('Finding live stations.')}</strong>
+			<p>{t('Trying available Radio Browser mirrors without blocking the player.')}</p>
 		</div>
 	{:else if error && !stations.length}
 		<div class="radio-error" role="alert">
-			<span>// SIGNAL LOST</span>
-			<strong>Radio directory unavailable.</strong>
+			<span>{t('// SIGNAL LOST')}</span>
+			<strong>{t('Radio directory unavailable.')}</strong>
 			<p>{error}</p>
-			<Button variant="outline" onclick={() => load(true)}>Try again</Button>
+			<Button variant="outline" onclick={() => load(true)}>{t('Try again')}</Button>
 		</div>
 	{:else if !stations.length}
 		<div class="radio-empty">
-			<span>// NO MATCH</span>
-			<strong>No stations found.</strong>
-			<p>Try a shorter station name or return to the popular directory.</p>
-			{#if query}<Button variant="outline" onclick={clearSearch}>Top stations</Button>{/if}
+			<span>{t('// NO MATCH')}</span>
+			<strong>{t('No stations found.')}</strong>
+			<p>{t('Try a shorter station name or return to the popular directory.')}</p>
+			{#if query}<Button variant="outline" onclick={clearSearch}>{t('Top stations')}</Button>{/if}
 		</div>
 	{:else}
 		<div class="radio-grid">
@@ -190,13 +188,13 @@
 							/>
 						{/if}
 						<HugeiconsIcon icon={MusicNote01Icon} class="radio-art-fallback" />
-						<span>LIVE</span>
+						<span>{t('LIVE')}</span>
 					</div>
 					<div class="radio-copy">
 						<h2 title={station.name}>{station.name}</h2>
 						<p>{detail(station)}</p>
 						{#if stationTags(station).length}
-							<div class="radio-tags" aria-label="Station tags">
+							<div class="radio-tags" aria-label={t('Station tags')}>
 								{#each stationTags(station) as tag}
 									<span>{tag}</span>
 								{/each}
@@ -212,10 +210,10 @@
 							aria-label={`Play ${station.name}`}
 						>
 							<HugeiconsIcon icon={PlayIcon} class="h-4 w-4" />
-							{playing === station.stationUuid ? 'Tuning…' : 'Play'}
+							{t(playing === station.stationUuid ? 'Tuning…' : 'Play')}
 						</Button>
 						{#if station.homepage}
-							<Button variant="ghost" size="sm" onclick={() => openHomepage(station)}>Site</Button>
+							<Button variant="ghost" size="sm" onclick={() => openHomepage(station)}>{t('Site')}</Button>
 						{/if}
 					</div>
 				</article>
@@ -228,20 +226,20 @@
 			{/if}
 			{#if hasMore}
 				<Button variant="outline" disabled={loadingMore} onclick={() => load(false)}>
-					{loadingMore ? 'Finding more…' : 'Load more stations'}
+					{t(loadingMore ? 'Finding more…' : 'Load more stations')}
 				</Button>
 			{:else}
-				<span>// END OF THIS SIGNAL SET</span>
+				<span>{t('// END OF THIS SIGNAL SET')}</span>
 			{/if}
 		</div>
 	{/if}
 
 	<footer class="radio-attribution">
-		<span>DIRECTORY</span>
+		<span>{t('DIRECTORY')}</span>
 		<strong>Radio Browser</strong>
-		<p>Station metadata and live stream endpoints are provided by the community-run Radio Browser network.</p>
+		<p>{t('Station metadata and live stream endpoints are provided by the community-run Radio Browser network.')}</p>
 		<Button variant="ghost" size="sm" onclick={() => api.openExternal('https://www.radio-browser.info/')}>
-			About the directory
+			{t('About the directory')}
 		</Button>
 	</footer>
 </div>

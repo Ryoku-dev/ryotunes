@@ -16,6 +16,7 @@
 	import * as api from '$lib/api';
 	import { np, playback, ui } from '$lib/player.svelte';
 	import { appearance } from '$lib/theme.svelte';
+	import { t } from '$lib/i18n.svelte';
 	import ArtworkImage from './ArtworkImage.svelte';
 	import QueueList from './QueueList.svelte';
 	import LyricsView from './LyricsView.svelte';
@@ -72,13 +73,13 @@
 >
     <div class="npstable-shell {tabbed ? 'npstable-tabbed' : 'npstable-solo'} {big ? 'npstable-focus' : ''}">
         {#if !big}
-            <section class="npstable-preview" aria-label="Now playing media">
+            <section class="npstable-preview" aria-label={t('Now playing media')}>
                 <div class="npstable-preview-head" aria-hidden="true">
                     <span>// LIVE PREVIEW</span>
                     <span>PLAYBACK · LOCAL</span>
                 </div>
                 <div class="npstable-media npstable-artwork">
-                    <button type="button" onclick={toggle} aria-label="Play/pause" class="npstable-media-button">
+                    <button type="button" onclick={toggle} aria-label={t('Play/pause')} class="npstable-media-button">
                         {#if flash}
                             <div
                                 in:scale={{ start: 0.7, duration: 150, easing: cubicOut }}
@@ -114,20 +115,20 @@
             >
                 <Tabs.Root value={np.tab} onValueChange={(v) => (np.tab = v as typeof np.tab)} class="npstable-tabs">
                     <div class="npstable-tabs-head {big ? 'npstable-focus-head' : ''}">
-                        {#if big}<span class="npstable-focus-label">// LYRICS / FOCUS</span>{/if}
+                        {#if big}<span class="npstable-focus-label">{t('// LYRICS / FOCUS')}</span>{/if}
                         <Tabs.List class={big ? 'hidden' : 'npstable-tabs-list'}>
                             <Tabs.Trigger value="queue" class="ryo-lane-tab gap-2.5">
-                                <HugeiconsIcon icon={Queue01Icon} class="h-4 w-4" /> Queue
+                                <HugeiconsIcon icon={Queue01Icon} class="h-4 w-4" /> {t('Queue')}
                             </Tabs.Trigger>
                             <Tabs.Trigger value="lyrics" class="ryo-lane-tab gap-2.5">
-                                <HugeiconsIcon icon={Mic01Icon} class="h-4 w-4" /> Lyrics
+                                <HugeiconsIcon icon={Mic01Icon} class="h-4 w-4" /> {t('Lyrics')}
                             </Tabs.Trigger>
                         </Tabs.List>
                         {#if np.tab === 'lyrics'}
                             <button
                                 onclick={() => (np.lyricsFocus = !np.lyricsFocus)}
                                 class="npstable-focus-toggle"
-                                aria-label={big ? 'Shrink lyrics' : 'Enlarge lyrics'}
+                                aria-label={t(big ? 'Shrink lyrics' : 'Enlarge lyrics')}
                             >
                                 <HugeiconsIcon icon={Maximize01Icon} altIcon={Minimize01Icon} showAlt={big} class="h-4 w-4" />
                             </button>

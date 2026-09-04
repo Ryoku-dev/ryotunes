@@ -42,6 +42,7 @@
 	import { initPrecisionScrollFallback } from '$lib/ryoku-scroll';
 	import * as api from '$lib/api';
 	import { loadRouteScroll, rememberRoute, saveRouteScroll } from '$lib/session';
+	import { t } from '$lib/i18n.svelte';
 
 	let { children } = $props();
 	// Two ways the now-playing view and these panels can divide the same two buttons, picked in
@@ -191,7 +192,7 @@
 		<div class="ryo-workspace relative flex min-h-0 flex-1 overflow-hidden" class:ryo-sidebar-collapsed={ui.sidebarCollapsed}>
 			<Sidebar />
 			<RyokuAtmosphere active={windowFocused && !np.open && !!playback.now && !playback.paused} />
-			{#if ui.offline}<div class="ryo-offline-strip" role="status">OFFLINE · cached and local music remain available</div>{/if}
+			{#if ui.offline}<div class="ryo-offline-strip" role="status">{t('OFFLINE · cached and local music remain available')}</div>{/if}
 			
 			<main bind:this={mainEl} class="ryo-main relative z-[1] min-w-0 flex-1 overflow-y-auto" data-ryo-own-scroll class:ryo-main-suppressed={np.open && !!playback.now} {@attach dragScroll}>
 				

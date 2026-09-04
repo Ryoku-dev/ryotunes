@@ -14,28 +14,29 @@
 	import { setInterfaceScale } from '$lib/zoom';
 	import { KEYBIND_GROUPS } from '$lib/shortcuts';
 	import { normalizeSearchText } from '$lib/localsearch';
+	import { t } from '$lib/i18n.svelte';
 
 	type TabId = 'general' | 'playback' | 'data' | 'keybinds' | 'about';
 	const TABS: { id: TabId; label: string }[] = [
-		{ id: 'general', label: 'General' },
-		{ id: 'playback', label: 'Playback' },
-		{ id: 'data', label: 'Data & storage' },
-		{ id: 'keybinds', label: 'Keybinds' },
-		{ id: 'about', label: 'About' }
+		{ id: 'general', label: t('General') },
+		{ id: 'playback', label: t('Playback') },
+		{ id: 'data', label: t('Data & storage') },
+		{ id: 'keybinds', label: t('Keybinds') },
+		{ id: 'about', label: t('About') }
 	];
 
 	const TAB_META: Record<TabId, { jp: string; group: string; blurb: string; code: string }> = {
-		general: { jp: '全般', group: 'APPLICATION', blurb: 'Session behaviour, desktop integration and the things that should stay out of your way.', code: 'APP-01' },
-		playback: { jp: '再生', group: 'PLAYBACK', blurb: 'How the listening engine resolves, queues and carries a session forward.', code: 'PLAY-02' },
-		data: { jp: '保存', group: 'DATA', blurb: 'Network routing and local storage used to keep the instrument responsive.', code: 'DATA-03' },
-		keybinds: { jp: '鍵', group: 'KEYBINDS', blurb: 'Every Ryotunes shortcut, grouped by intent and read from the same registry the app executes.', code: 'KEY-04' },
-		about: { jp: '力', group: 'ABOUT', blurb: 'Build identity and the small set of components that make Ryotunes a Ryoku music instrument.', code: 'INFO-05' }
+		general: { jp: '全般', group: 'APPLICATION', blurb: t('Session behaviour, desktop integration and the things that should stay out of your way.'), code: 'APP-01' },
+		playback: { jp: '再生', group: 'PLAYBACK', blurb: t('How the listening engine resolves, queues and carries a session forward.'), code: 'PLAY-02' },
+		data: { jp: '保存', group: 'DATA', blurb: t('Network routing and local storage used to keep the instrument responsive.'), code: 'DATA-03' },
+		keybinds: { jp: '鍵', group: 'KEYBINDS', blurb: t('Every Ryotunes shortcut, grouped by intent and read from the same registry the app executes.'), code: 'KEY-04' },
+		about: { jp: '力', group: 'ABOUT', blurb: t('Build identity and the small set of components that make Ryotunes a Ryoku music instrument.'), code: 'INFO-05' }
 	};
 
 	let tab = $state<TabId>('general');
 	const metaFor = (id: TabId) => TAB_META[id];
 	const activeMeta = $derived(metaFor(tab));
-	const activeLabel = $derived(TABS.find((t) => t.id === tab)?.label ?? 'General');
+	const activeLabel = $derived(TABS.find((t) => t.id === tab)?.label ?? t('General'));
 	const PRODUCT_VERSION = 'v2.4';
 	let buildVersion = $state('2.4.1');
 	getVersion().then((v) => (buildVersion = v)).catch(() => {});
@@ -55,17 +56,17 @@
 	const settingsCaption = $derived.by(() => {
 		if (tab === 'general') {
 			return auth.account?.signedIn
-				? `Session ready${auth.account.name ? ` — ${auth.account.name}` : ''}. Desktop services stay local.`
-				: 'Local desktop session. Sign in only when your YouTube library needs it.';
-		}
-		if (tab === 'playback') {
-			return playback.now
-				? `${playback.now.title} — ${playback.now.artists || 'Now playing'}`
-				: 'Playback engine ready. No stream is active.';
-		}
-		if (tab === 'data') return 'Tape, cache and transport — the local path that keeps playback immediate.';
-		if (tab === 'keybinds') return 'Keyboard flow is part of the instrument: searchable, grouped and always in sync with the live bindings.';
-		return `Ryotunes ${PRODUCT_VERSION} — a Ryoku-native music instrument built around Rust, mpv and WebKitGTK.`;
+					? `${t('Session ready')}${auth.account.name ? ` — ${auth.account.name}` : ''}. ${t('Desktop services stay local.')}`
+					: t('Local desktop session. Sign in only when your YouTube library needs it.');
+			}
+			if (tab === 'playback') {
+				return playback.now
+					? `${playback.now.title} — ${playback.now.artists || t('Now playing')}`
+					: t('Playback engine ready. No stream is active.');
+			}
+			if (tab === 'data') return t('Tape, cache and transport — the local path that keeps playback immediate.');
+			if (tab === 'keybinds') return t('Keyboard flow is part of the instrument: searchable, grouped and always in sync with the live bindings.');
+			return `${t('Ryotunes')} ${PRODUCT_VERSION} — ${t('a Ryoku-native music instrument built around Rust, mpv and WebKitGTK.')}`;
 	});
 	const settingsReadout = $derived.by(() => {
 		if (tab === 'general') {
@@ -165,9 +166,9 @@
 	);
 
 	const QUALITIES = [
-		{ id: 'LOW', label: 'Low' },
-		{ id: 'AUTO', label: 'Auto' },
-		{ id: 'HIGH', label: 'High' }
+		{ id: 'LOW', label: t('Low') },
+		{ id: 'AUTO', label: t('Auto') },
+		{ id: 'HIGH', label: t('High') }
 	];
 
 	async function setQuality(q: string) {
@@ -175,7 +176,7 @@
 		await api.setSetting('quality', q);
 		// Cached URLs are keyed by video only, so clear them to apply the new quality everywhere.
 		await api.clearCaches();
-		toast.success('Audio quality updated');
+		toast.success(t('Audio quality updated'));
 	}
 
 	async function setHistory(on: boolean) {
@@ -209,7 +210,7 @@
 		const value = discordNameInput.trim() || 'Ryotunes';
 		const length = [...value].length;
 		if (length < 2 || length > 128) {
-			toast.error('Discord presence title must be between 2 and 128 characters');
+			toast.error(t('Discord presence title must be between 2 and 128 characters'));
 			return;
 		}
 		savingDiscordName = true;
@@ -217,7 +218,7 @@
 			await api.setSetting('discord_presence_name', value);
 			settings.discord_presence_name = value;
 			discordNameInput = value;
-			toast.success(`Discord now shows “Listening to ${value}”`);
+			toast.success(`${t('Discord now shows')} “${t('Listening to')} ${value}”`);
 		} catch (e) {
 			toast.error(String(e));
 		} finally {
@@ -278,7 +279,7 @@
 			await api.setSetting('proxy', value);
 			settings.proxy = value;
 			proxyInput = value;
-			toast.success('Proxy saved — restart to apply');
+			toast.success(t('Proxy saved — restart to apply'));
 		} catch (e) {
 			toast.error(String(e));
 		}
@@ -288,7 +289,7 @@
 		clearing = true;
 		try {
 			await api.clearCaches();
-			toast.success('Caches cleared');
+			toast.success(t('Caches cleared'));
 		} finally {
 			clearing = false;
 		}
@@ -304,7 +305,7 @@
 				<Dialog.Title>RYOTUNES</Dialog.Title>
 				<span>// SETTINGS_</span>
 			</div>
-			<Dialog.Description class="sr-only">Ryotunes application settings</Dialog.Description>
+			<Dialog.Description class="sr-only">{t("Ryotunes application settings")}</Dialog.Description>
 			<div class="ryo-settings-register-right">
 				<span>{activeMeta.code}</span><i>///</i>
 			</div>
@@ -361,47 +362,46 @@
 						<div class="ryo-settings-tabview">
 							<div class="ryo-settings-card">
 				{#if !loaded}
-					<p class="text-sm text-muted-foreground">Loading…</p>
+					<p class="text-sm text-muted-foreground">{t('Loading…')}</p>
 				{:else if tab === 'general'}
 					<div class="border-b py-3">
-						<div class="font-medium">Appearance</div>
-						<p class="mt-0.5 mb-3 text-sm text-muted-foreground">Follow the desktop automatically, or keep Ryotunes in its comfortable light or dark palette.</p>
-						<div class="flex flex-wrap gap-2" role="radiogroup" aria-label="Appearance">
-							{#each [['system','Follow system'], ['light','Light'], ['dark','Dark']] as option}
+						<div class="font-medium">{t('Appearance')}</div>
+						<p class="mt-0.5 mb-3 text-sm text-muted-foreground">{t("Follow the desktop automatically, or keep Ryotunes in its comfortable light or dark palette.")}</p>
+						<div class="flex flex-wrap gap-2" role="radiogroup" aria-label={t('Appearance')}>
+							{#each [['system', t('Follow system')], ['light', t('Light')], ['dark', t('Dark')]] as option}
 								<Button variant={appearance.themeMode === option[0] ? 'default' : 'outline'} size="sm" role="radio" aria-checked={appearance.themeMode === option[0]} onclick={() => setTheme(option[0] as ThemeMode)}>{option[1]}</Button>
 							{/each}
 						</div>
-						<p class="mt-2 text-xs text-muted-foreground">Currently {resolvedTheme()}. Ryoku accent and reduced-motion preferences still apply.</p>
-					</div>
+						<p class="mt-2 text-xs text-muted-foreground">{t('Currently')} {resolvedTheme()}. {t("Ryoku accent and reduced-motion preferences still apply.")}</p>
+						</div>
 					<div class="flex items-start justify-between gap-4 border-b py-3">
 						<div class="min-w-0">
-							<div class="font-medium">Watch history</div>
+							<div class="font-medium">{t('Watch history')}</div>
 							<p class="mt-0.5 text-sm text-muted-foreground">
-								{auth.account?.signedIn ? 'Register completed plays in your YouTube Music history.' : 'Sign in to register completed plays in your YouTube Music history.'}
+								{t(auth.account?.signedIn ? 'Register completed plays in your YouTube Music history.' : 'Sign in to register completed plays in your YouTube Music history.')}
 							</p>
 						</div>
 						<Switch checked={historyOn} onCheckedChange={setHistory} />
 					</div>
 					<div class="flex items-start justify-between gap-4 border-b py-3">
 						<div class="min-w-0">
-							<div class="font-medium">Discord rich presence</div>
-							<p class="mt-0.5 text-sm text-muted-foreground">Show what you're listening to on your Discord profile through the local Discord desktop client.</p>
-							<p class="mt-1 text-xs font-medium" data-discord-status={discordState.status}>Status: {discordState.status === 'connected' ? 'Connected' : discordState.status === 'connecting' ? 'Connecting…' : discordState.status === 'unavailable' ? 'Discord not running / unavailable' : 'Disabled'}</p>
+							<div class="font-medium">{t('Discord rich presence')}</div>
+							<p class="mt-0.5 text-sm text-muted-foreground">{t("Show what you're listening to on your Discord profile through the local Discord desktop client.")}</p>
+							<p class="mt-1 text-xs font-medium" data-discord-status={discordState.status}>{t('Status:')} {t(discordState.status === 'connected' ? 'Connected' : discordState.status === 'connecting' ? 'Connecting…' : discordState.status === 'unavailable' ? 'Discord not running / unavailable' : 'Disabled')}</p>
 						</div>
 						<Switch checked={discordOn} onCheckedChange={setDiscord} />
 					</div>
 					<div class="border-b py-3">
-						<div class="font-medium">Discord presence title</div>
+						<div class="font-medium">{t('Discord presence title')}</div>
 						<p class="mt-0.5 text-sm text-muted-foreground">
-							Customize the text Discord renders as “Listening to …”. Track, artist and Ryotunes'
-							application identity stay unchanged.
+							{t("Customize the text Discord renders as “Listening to …”. Track, artist and Ryotunes' application identity stay unchanged.")}
 						</p>
 						<div class="mt-3 flex max-w-xl items-center gap-2">
 							<Input
 								bind:value={discordNameInput}
 								maxlength={128}
 								placeholder="Ryotunes"
-								aria-label="Discord presence title"
+								aria-label={t('Discord presence title')}
 							/>
 							<Button
 								variant="outline"
@@ -409,7 +409,7 @@
 								disabled={savingDiscordName || !discordNameInput.trim()}
 								onclick={saveDiscordName}
 							>
-								{savingDiscordName ? 'Saving…' : 'Save'}
+								{t(savingDiscordName ? 'Saving…' : 'Save')}
 							</Button>
 							<Button
 								variant="ghost"
@@ -417,45 +417,44 @@
 								disabled={savingDiscordName || discordNameInput === 'Ryotunes'}
 								onclick={resetDiscordName}
 							>
-								Reset
+								{t('Reset')}
 							</Button>
 						</div>
 						<p class="mt-2 text-xs text-muted-foreground">
-							Preview: Listening to {discordNameInput.trim() || 'Ryotunes'}
+							{t('Preview:')} {t('Listening to')} {discordNameInput.trim() || 'Ryotunes'}
 						</p>
 					</div>
 					<div class="flex items-start justify-between gap-4 border-b py-3">
 						<div class="min-w-0">
-							<div class="font-medium">Close to tray</div>
+							<div class="font-medium">{t('Close to tray')}</div>
 							<p class="mt-0.5 text-sm text-muted-foreground">
-								Closing the window keeps music playing in the background. Restore or quit from the
-								tray icon.
+								{t("Closing the window keeps music playing in the background. Restore or quit from the tray icon.")}
 							</p>
 						</div>
 						<Switch checked={trayOn} onCheckedChange={setTray} />
 					</div>
 					<div class="flex items-start justify-between gap-4 border-b py-3">
 						<div class="min-w-0">
-							<div class="font-medium">Low resource mode</div>
+							<div class="font-medium">{t('Low resource mode')}</div>
 							<p class="mt-0.5 text-sm text-muted-foreground">
-								Keep playback quality unchanged while disabling speculative stream warming, reducing automatic Home/network work, slowing nonessential UI updates and suppressing decorative motion.
+								{t("Keep playback quality unchanged while disabling speculative stream warming, reducing automatic Home/network work, slowing nonessential UI updates and suppressing decorative motion.")}
 							</p>
 						</div>
 						<Switch checked={appearance.lowResourceMode} onCheckedChange={setLowResource} />
 					</div>
 					<div class="flex items-start justify-between gap-4 border-b py-3">
 						<div class="min-w-0">
-							<div class="font-medium">Start on login</div>
+							<div class="font-medium">{t('Start on login')}</div>
 							<p class="mt-0.5 text-sm text-muted-foreground">
-								Launch Ryotunes automatically when you log in.
+								{t('Launch Ryotunes automatically when you log in.')}
 							</p>
 						</div>
 						<Switch checked={autostartOn} onCheckedChange={setAutostart} />
 					</div>
 					<div class="py-3">
-						<div class="font-medium">Interface scale</div>
+						<div class="font-medium">{t('Interface scale')}</div>
 						<p class="mt-0.5 mb-3 text-sm text-muted-foreground">
-							Adjust the WebKit interface without changing your desktop scaling. Ctrl+0 restores 110%.
+							{t("Adjust the WebKit interface without changing your desktop scaling. Ctrl+0 restores 110%.")}
 						</p>
 						<div class="flex flex-wrap gap-2">
 							{#each UI_SCALES as n (n)}
@@ -466,17 +465,17 @@
 				{:else if tab === 'playback'}
 					<div class="ryo-settings-subhead"><span>// PLAYER BEHAVIOUR</span><b>LOCAL</b></div>
 					<div class="flex items-start justify-between gap-4 border-b py-3">
-						<div class="min-w-0"><div class="font-medium">Open the player when playback starts</div><p class="mt-0.5 text-sm text-muted-foreground">Bring the full listening view forward when you choose a track, album or playlist.</p></div>
+						<div class="min-w-0"><div class="font-medium">{t('Open the player when playback starts')}</div><p class="mt-0.5 text-sm text-muted-foreground">{t("Bring the full listening view forward when you choose a track, album or playlist.")}</p></div>
 						<Switch checked={appearance.openPlayerOnPlay} onCheckedChange={(on) => setAppearance({ openPlayerOnPlay: on })} />
 					</div>
 					<div class="flex items-start justify-between gap-4 border-b py-3">
-						<div class="min-w-0"><div class="font-medium">Queue and lyrics inside the player</div><p class="mt-0.5 text-sm text-muted-foreground">Keep Queue and Lyrics as tabs in Now Playing. Turn off to use the floating side panels instead.</p></div>
+						<div class="min-w-0"><div class="font-medium">{t('Queue and lyrics inside the player')}</div><p class="mt-0.5 text-sm text-muted-foreground">{t("Keep Queue and Lyrics as tabs in Now Playing. Turn off to use the floating side panels instead.")}</p></div>
 						<Switch checked={appearance.tabbedPlayer} onCheckedChange={(on) => setAppearance({ tabbedPlayer: on })} />
 					</div>
 					<div class="border-b py-3">
-						<div class="font-medium">Audio quality</div>
+						<div class="font-medium">{t('Audio quality')}</div>
 						<p class="mt-0.5 mb-3 text-sm text-muted-foreground">
-							Preferred stream quality when resolving a track.
+							{t("Preferred stream quality when resolving a track.")}
 						</p>
 						<div class="flex gap-2">
 							{#each QUALITIES as q (q.id)}
@@ -492,40 +491,35 @@
 					</div>
 					<div class="flex items-start justify-between gap-4 border-b py-3">
 						<div class="min-w-0">
-							<div class="font-medium">Autoplay</div>
+							<div class="font-medium">{t('Autoplay')}</div>
 							<p class="mt-0.5 text-sm text-muted-foreground">
-								Keep the music going with similar songs when your queue ends.
+								{t("Keep the music going with similar songs when your queue ends.")}
 							</p>
 						</div>
 						<Switch checked={autoplayOn} onCheckedChange={setAutoplay} />
 					</div>
 					<div class="flex items-start justify-between gap-4 border-b py-3">
 						<div class="min-w-0">
-							<div class="font-medium">Prevent duplicate tracks in queue</div>
+							<div class="font-medium">{t('Prevent duplicate tracks in queue')}</div>
 							<p class="mt-0.5 text-sm text-muted-foreground">
-								Adding a track that's already in the queue moves it from its old position instead of
-								adding a second copy.
+								{t("Adding a track that's already in the queue moves it from its old position instead of adding a second copy.")}
 							</p>
 						</div>
 						<Switch checked={preventDuplicatesOn} onCheckedChange={setPreventDuplicates} />
 					</div>
 					<div class="flex items-start justify-between gap-4 border-b py-3">
 						<div class="min-w-0">
-							<div class="font-medium">Word-by-word lyrics</div>
+							<div class="font-medium">{t('Word-by-word lyrics')}</div>
 							<p class="mt-0.5 text-sm text-muted-foreground">
-								Asks lyrics-api.boidu.dev first, the only source here with per-word timings, so
-								lyrics can highlight as they're sung. It's checked for every track, so turning
-								this off keeps your listening off that service. Other sources still provide
-								line-by-line lyrics.
+								{t("Asks lyrics-api.boidu.dev first, the only source here with per-word timings, so lyrics can highlight as they're sung. It's checked for every track, so turning this off keeps your listening off that service. Other sources still provide line-by-line lyrics.")}
 							</p>
 						</div>
 						<Switch checked={boiduOn} onCheckedChange={setBoidu} />
 					</div>
 					<div class="py-3">
-						<div class="font-medium">Stream clients</div>
+						<div class="font-medium">{t('Stream clients')}</div>
 						<p class="mt-0.5 mb-2 text-sm text-muted-foreground">
-							Advanced — turn a client off to skip it when resolving streams. Overridden by a
-							RYOTUNES_DISABLED_CLIENTS environment value when one is configured.
+							{t("Advanced — turn a client off to skip it when resolving streams. Overridden by a RYOTUNES_DISABLED_CLIENTS environment value when one is configured.")}
 						</p>
 						<div class="flex flex-col gap-2">
 							{#each clients as name (name)}
@@ -541,10 +535,9 @@
 					</div>
 				{:else if tab === 'data'}
 					<div class="border-b py-3">
-						<div class="font-medium">Proxy</div>
+						<div class="font-medium">{t('Proxy')}</div>
 						<p class="mt-0.5 mb-3 text-sm text-muted-foreground">
-							HTTP or HTTPS proxy for all YouTube traffic. Authenticated proxy URLs are not
-							stored. Takes effect on restart.
+							{t("HTTP or HTTPS proxy for all YouTube traffic. Authenticated proxy URLs are not stored. Takes effect on restart.")}
 						</p>
 						<form
 							class="flex gap-2"
@@ -553,22 +546,22 @@
 								saveProxy();
 							}}
 						>
-							<Input bind:value={proxyInput} placeholder="http://host:port (blank = none)" />
-							<Button type="submit" variant="outline">Save</Button>
+							<Input bind:value={proxyInput} placeholder={t("http://host:port (blank = none)")} />
+							<Button type="submit" variant="outline">{t('Save')}</Button>
 						</form>
 					</div>
 					<div class="py-3">
-						<div class="font-medium">Cache</div>
+						<div class="font-medium">{t('Cache')}</div>
 						<p class="mt-0.5 mb-3 text-sm text-muted-foreground">
-							Clear cached stream URLs and downloaded audio bytes.
+							{t("Clear cached stream URLs and downloaded audio bytes.")}
 						</p>
 						<Button variant="destructive" size="sm" onclick={doClearCaches} disabled={clearing}>
-							{clearing ? 'Clearing…' : 'Clear caches'}
+							{t(clearing ? 'Clearing…' : 'Clear caches')}
 						</Button>
 					</div>
 				{:else if tab === 'keybinds'}
 					<div class="ryo-settings-subhead"><span>// KEYBOARD MAP</span><b>{KEYBIND_GROUPS.reduce((n, g) => n + g.rows.length, 0)} BINDINGS</b></div>
-					<label class="ryo-keybind-search"><span>⌕</span><input bind:value={keybindFilter} placeholder="Filter shortcuts…" autocomplete="off" spellcheck="false" /></label>
+					<label class="ryo-keybind-search"><span>⌕</span><input bind:value={keybindFilter} placeholder={t('Filter shortcuts…')} autocomplete="off" spellcheck="false" /></label>
 					<div class="ryo-keybind-groups">
 						{#each visibleKeybindGroups as group (group.title)}
 							<section class="ryo-keybind-group">
@@ -578,14 +571,13 @@
 								{/each}
 							</section>
 						{/each}
-						{#if !visibleKeybindGroups.length}<p class="py-4 text-sm text-muted-foreground">No shortcut matches that filter.</p>{/if}
+						{#if !visibleKeybindGroups.length}<p class="py-4 text-sm text-muted-foreground">{t('No shortcut matches that filter.')}</p>{/if}
 					</div>
 				{:else if tab === 'about'}
 					<div class="border-b py-3">
 						<div class="font-heading text-lg font-bold">Ryotunes</div>
 						<p class="mt-1 text-sm text-muted-foreground">
-							A focused Ryoku desktop music instrument: your YouTube Music library, local media
-							controls, queue, lyrics and playback engine in one paper-and-ink surface.
+							{t("A focused Ryoku desktop music instrument: your YouTube Music library, local media controls, queue, lyrics and playback engine in one paper-and-ink surface.")}
 						</p>
 						<div class="ryo-about-build"><span>RELEASE</span><strong>{PRODUCT_VERSION}</strong><span>BUILD</span><strong>{buildVersion}</strong><span>ENGINE</span><strong>RUST + MPV</strong><span>UI</span><strong>TAURI / WEBKITGTK</strong></div>
 					</div>

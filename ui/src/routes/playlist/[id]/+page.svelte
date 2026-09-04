@@ -65,6 +65,7 @@
 		patchLibraryPlaylist,
 		lastPlaylistAdd
 	} from '$lib/player.svelte';
+	import { t } from '$lib/i18n.svelte';
 
 	// `$state.raw`, not `$state`: a deep proxy makes every read of a row go through a trap and
 	// create a signal, and this list runs to five figures. Measured at 5,000 rows, one filter pass
@@ -186,7 +187,7 @@
 	let resorting = $state(false);
 
 	const sortLabel = $derived(
-		sort === 'default' ? 'Sort' : (SORTS.find((s) => s.key === sort)?.label ?? 'Sort')
+		sort === 'default' ? t('Sort') : (SORTS.find((s) => s.key === sort)?.label ?? t('Sort'))
 	);
 	// The local listening history, fetched once and only if "Most played" is ever picked — it is a
 	// SQLite read the other five sorts have no use for.
@@ -567,7 +568,7 @@
 	const asItem = (): BrowseItem => ({
 		kind: 'playlist',
 		id,
-		title: pl?.title ?? 'Playlist',
+		title: pl?.title ?? t('Playlist'),
 		subtitle,
 		// On Repeat stays artwork-free wherever it's rendered (shortcuts, recents) so it always
 		// draws its icon rather than one of its songs' covers.
@@ -621,13 +622,13 @@
 		// Export the whole list, not just the first continuation page. The existing guarded loader
 		// already caps paging and leaves playback untouched.
 		if (pl.continuation && !(await loadAll())) {
-			toast.error('Could not load the full playlist for export');
+			toast.error(t('Could not load the full playlist for export'));
 			return;
 		}
 		const title = pl?.title?.trim() || 'Ryotunes Playlist';
 		if (!pl) return;
 		try {
-			if (await api.exportPlaylistFile(title, pl.items)) toast.success('Playlist exported');
+			if (await api.exportPlaylistFile(title, pl.items)) toast.success(t('Playlist exported'));
 		} catch (e) { toast.error(String(e)); }
 	}
 
@@ -696,12 +697,12 @@
 		try {
 			if (isLiked) {
 				await api.rate(track.video_id, 'indifferent');
-				toast.success('Removed from Liked Music');
+				toast.success(t('Removed from Liked Music'));
 			} else {
 				await api.removeFromPlaylist(id, track.video_id, track.set_video_id!);
 				bumpLibraryTrackCount(id, -1);
 				noteUnsavedFrom(id, track.video_id);
-				toast.success('Removed from playlist');
+				toast.success(t('Removed from playlist'));
 			}
 			cacheCurrent();
 		} catch (e) {
@@ -715,7 +716,7 @@
 		try {
 			await api.deletePlaylist(id);
 			invalidateCached(`playlist:${id}`);
-			toast.success('Playlist deleted');
+			toast.success(t('Playlist deleted'));
 			goto('/library');
 		} catch (e) {
 			toast.error(String(e));
@@ -773,11 +774,11 @@
 				{/if}
 				<div class="relative min-w-0 flex-1">
 					<div class="flex items-center gap-2 text-xs font-medium uppercase text-muted-foreground">
-						<span>Playlist</span>
+						<span>{t('Playlist')}</span>
 						{#if pl.collaborative}<span class="rounded border border-border px-1.5 py-0.5 text-[10px] tracking-wide">Collab</span>{/if}
 					</div>
 					<h1 class="mt-1 font-heading text-4xl font-bold tracking-tight drop-shadow-lg">
-						{pl.title ?? 'Playlist'}
+						{pl.title ?? t('Playlist')}
 					</h1>
 					{#if subtitle}<p class="mt-2 text-sm text-muted-foreground">{subtitle}</p>{/if}
 					{#if pl.description}
@@ -791,7 +792,7 @@
 									class="mt-1 cursor-pointer text-xs font-semibold uppercase text-muted-foreground hover:text-foreground"
 									onclick={() => (expanded = !expanded)}
 								>
-									{expanded ? 'Less' : 'More'}
+									{t(expanded ? 'Less' : 'More')}
 								</button>
 							{/if}
 						</div>
@@ -804,21 +805,21 @@
 								disabled={!pl.items.length || preparing || resorting}
 							>
 								<HugeiconsIcon icon={PlayIcon} class="h-4 w-4" />
-								{preparing || resorting ? 'Sorting…' : 'Play'}
+								{t(preparing || resorting ? 'Sorting…' : 'Play')}
 							</Button>
 							{#if confirmingDelete}
 								<div class="flex items-center gap-2 rounded-lg border border-destructive/40 px-2 py-1">
-									<span class="text-xs text-muted-foreground">Delete this playlist?</span>
-									<Button variant="destructive" size="sm" onclick={deleteThisPlaylist}>Delete</Button>
+									<span class="text-xs text-muted-foreground">{t('Delete this playlist?')}</span>
+									<Button variant="destructive" size="sm" onclick={deleteThisPlaylist}>{t('Delete')}</Button>
 									<Button variant="ghost" size="sm" onclick={() => (confirmingDelete = false)}>
-										Cancel
+										{t('Cancel')}
 									</Button>
 								</div>
 							{:else}
 								<Button
 									variant="ghost"
 									size="icon"
-									aria-label="Playlist options"
+									aria-label={t('Playlist options')}
 									onclick={openMenu}
 								>
 									<HugeiconsIcon icon={MoreVerticalIcon} class="h-5 w-5 text-muted-foreground" />
@@ -841,7 +842,7 @@
 								variant="ghost"
 								size="icon"
 								class={desc ? '' : 'text-muted-foreground'}
-								aria-label="Sort direction: {desc ? 'descending' : 'ascending'}"
+								aria-label={`${t('Sort direction')}: ${t(desc ? 'descending' : 'ascending')}`}
 								onclick={toggleDesc}
 								disabled={!pl.items.length}
 							>
@@ -851,7 +852,7 @@
 					</div>
 				</div>
 				<div class="absolute right-6 top-6">
-					<TrackFilter bind:value={query} placeholder="Search this playlist" />
+					<TrackFilter bind:value={query} placeholder={t('Search this playlist')} />
 				</div>
 			</div>
 			<div
@@ -886,13 +887,13 @@
 							: ''}.
 					</p>
 				{:else}
-					<p class="p-4 text-sm text-muted-foreground">This playlist is empty.</p>
+					<p class="p-4 text-sm text-muted-foreground">{t('This playlist is empty.')}</p>
 				{/if}
 				{#if pl.continuation}
 					{#if moreError}
 						<div class="p-3 text-center">
 							<Button variant="outline" size="sm" onclick={loadMore} disabled={loadingMore}>
-								{loadingMore ? 'Loading…' : 'Try again'}
+								{t(loadingMore ? 'Loading…' : 'Try again')}
 							</Button>
 						</div>
 					{:else}
@@ -916,7 +917,7 @@
 	<button
 		class="fixed inset-0 z-40 cursor-default"
 		onclick={() => (sortOpen = false)}
-		aria-label="Close menu"
+		aria-label={t('Close menu')}
 	></button>
 	<div
 		class="fixed z-50 min-w-44 animate-in rounded-lg border bg-popover p-1 text-popover-foreground shadow-xl duration-150 fade-in-0 zoom-in-95"
@@ -948,7 +949,7 @@
 			e.preventDefault();
 			menuOpen = false;
 		}}
-		aria-label="Close menu"
+		aria-label={t('Close menu')}
 	></button>
 	<div
 		class="fixed z-50 min-w-52 animate-in rounded-lg border bg-popover p-1 text-popover-foreground shadow-xl duration-150 fade-in-0 zoom-in-95"
@@ -960,28 +961,28 @@
 			onclick={() => run(shufflePlay)}
 			disabled={!pl?.items.length}
 		>
-			<HugeiconsIcon icon={ShuffleIcon} class="h-4 w-4" /> Shuffle play
+			<HugeiconsIcon icon={ShuffleIcon} class="h-4 w-4" /> {t('Shuffle play')}
 		</button>
 		<button
 			class="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent/10"
 			onclick={() => run(() => queue(true))}
 			disabled={!pl?.items.length}
 		>
-			<HugeiconsIcon icon={ArrowUpNarrowWideIcon} class="h-4 w-4" /> Play next
+			<HugeiconsIcon icon={ArrowUpNarrowWideIcon} class="h-4 w-4" /> {t('Play next')}
 		</button>
 		<button
 			class="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent/10"
 			onclick={() => run(() => queue(false))}
 			disabled={!pl?.items.length}
 		>
-			<HugeiconsIcon icon={ArrowDownWideNarrowIcon} class="h-4 w-4" /> Add to queue
+			<HugeiconsIcon icon={ArrowDownWideNarrowIcon} class="h-4 w-4" /> {t('Add to queue')}
 		</button>
 		<button
 			class="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent/10"
 			onclick={() => run(() => void exportPlaylist())}
 			disabled={!pl?.items.length}
 		>
-			<HugeiconsIcon icon={Share08Icon} class="h-4 w-4" /> Export playlist file
+			<HugeiconsIcon icon={Share08Icon} class="h-4 w-4" /> {t('Export playlist file')}
 		</button>
 		
 		{#if !isSmart && !isDevicePlaylist}
@@ -989,21 +990,21 @@
 				class="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent/10"
 				onclick={() => run(() => startRadio('playlist', id, pl?.title))}
 			>
-				<HugeiconsIcon icon={Radio02Icon} class="h-4 w-4" /> Start radio
+				<HugeiconsIcon icon={Radio02Icon} class="h-4 w-4" /> {t('Start radio')}
 			</button>
 		{/if}
 		<button
 			class="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent/10"
 			onclick={() => run(() => addPick(asItem()))}
 		>
-			<HugeiconsIcon icon={DashboardSquare02Icon} class="h-4 w-4" /> Add to shortcuts
+			<HugeiconsIcon icon={DashboardSquare02Icon} class="h-4 w-4" /> {t('Add to shortcuts')}
 		</button>
 		{#if !isSmart && !isDevicePlaylist}
 			<button
 				class="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent/10"
 				onclick={() => run(() => openShare(asItem()))}
 			>
-				<HugeiconsIcon icon={Share08Icon} class="h-4 w-4" /> Share
+				<HugeiconsIcon icon={Share08Icon} class="h-4 w-4" /> {t('Share')}
 			</button>
 		{/if}
 		{#if savable}
@@ -1023,7 +1024,7 @@
 					showAlt={savedHere}
 					class="h-4 w-4"
 				/>
-				{savedHere ? 'Remove from library' : 'Save to library'}
+				{t(savedHere ? 'Remove from library' : 'Save to library')}
 			</button>
 		{/if}
 		{#if editable}
@@ -1031,13 +1032,13 @@
 				class="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent/10"
 				onclick={() => run(() => (editing = true))}
 			>
-				<HugeiconsIcon icon={PencilEdit02Icon} class="h-4 w-4" /> Edit playlist
+				<HugeiconsIcon icon={PencilEdit02Icon} class="h-4 w-4" /> {t('Edit playlist')}
 			</button>
 			<button
 				class="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm text-destructive hover:bg-destructive/10"
 				onclick={() => run(() => (confirmingDelete = true))}
 			>
-				<HugeiconsIcon icon={Delete02Icon} class="h-4 w-4" /> Delete playlist
+				<HugeiconsIcon icon={Delete02Icon} class="h-4 w-4" /> {t('Delete playlist')}
 			</button>
 		{/if}
 	</div>

@@ -34,6 +34,7 @@
 	import { getCached, putCached } from '$lib/pagecache';
 	import { appearance } from '$lib/theme.svelte';
 	import { buildHomeRegistry, HOME_LOCAL_SECTIONS, homeSectionKey, homeSectionTitle, unsupportedHomeSection } from '$lib/home-sections';
+	import { t } from '$lib/i18n.svelte';
 
 	const FORGOTTEN_KEY = 'home:forgotten';
 
@@ -209,7 +210,7 @@
 		} catch (e) {
 			// Stop auto-loading and offer a retry — auto-retrying a visible sentinel would spin.
 			moreError = true;
-			toast.error('Could not load more');
+			toast.error(t('Could not load more'));
 		} finally {
 			loadingMore = false;
 		}
@@ -296,7 +297,7 @@
 		<div class="ryo-toolbar sticky top-0 z-20 border-b bg-background px-6 pt-2.5">
 			<div class="ryo-chip-rail flex gap-2 overflow-x-auto pb-2">
 				
-				<button onclick={() => load(null)} class={chipClass(!selected)}>All</button>
+				<button onclick={() => load(null)} class={chipClass(!selected)}>{t('All')}</button>
 				{#each chips as chip (chip.params)}
 					<button
 						onclick={() => load(selected === chip.params ? null : chip.params)}
@@ -366,21 +367,21 @@
 				<div class="flex flex-col items-center gap-3 py-20 text-center">
 					<HugeiconsIcon icon={MusicNote01Icon} class="h-8 w-8 text-muted-foreground/40" />
 					<p class="max-w-sm text-sm text-muted-foreground">
-						{auth.account?.signedIn
+						{t(auth.account?.signedIn
 							? 'Your home feed came back empty this time.'
-							: 'Sign in and home fills up with mixes and playlists built from what you listen to.'}
+							: 'Sign in and home fills up with mixes and playlists built from what you listen to.')}
 					</p>
 					{#if auth.account?.signedIn}
-						<Button variant="outline" size="sm" onclick={() => load(selected)}>Try again</Button>
+						<Button variant="outline" size="sm" onclick={() => load(selected)}>{t('Try again')}</Button>
 					{:else}
-						<Button size="sm" onclick={() => api.loginWebview()}>Sign in with Google</Button>
+						<Button size="sm" onclick={() => api.loginWebview()}>{t('Sign in with Google')}</Button>
 					{/if}
 				</div>
 			{:else if home.continuation}
 				{#if moreError || appearance.lowResourceMode}
 					<div class="p-3 text-center">
 						<Button variant="outline" size="sm" onclick={loadMore} disabled={loadingMore}>
-							{loadingMore ? 'Loading…' : moreError ? 'Try again' : 'Load more'}
+							{t(loadingMore ? 'Loading…' : moreError ? 'Try again' : 'Load more')}
 						</Button>
 					</div>
 				{:else}

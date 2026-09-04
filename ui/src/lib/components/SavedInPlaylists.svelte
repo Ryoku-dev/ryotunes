@@ -10,6 +10,7 @@
 	import type { BrowseItem } from '$lib/api';
 	import { hrefFor } from '$lib/browse';
 	import { anchorMenu, fitMenu, NO_ANCHOR, toBody } from '$lib/menu';
+	import { t } from '$lib/i18n.svelte';
 	import { thumb } from '$lib/thumb';
 
 	let { playlists }: { playlists: BrowseItem[] } = $props();
@@ -39,8 +40,8 @@
 
 	const label = $derived(
 		playlists.length === 1
-			? `Saved in ${playlists[0].title}`
-			: `Saved in ${playlists.length} playlists`
+			? `${t('Saved in')} ${playlists[0].title}`
+			: `${t('Saved in')} ${playlists.length} ${t('playlists')}`
 	);
 </script>
 
@@ -69,7 +70,7 @@
 		{@attach toBody}
 	>
 		<p class="px-2 pb-1 pt-1.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-			Saved in
+			{t('Saved in')}
 		</p>
 		{#each shown as pl (pl.id)}
 			<a
@@ -86,7 +87,7 @@
 			</a>
 		{/each}
 		{#if extra > 0}
-			<p class="px-2 pb-1 pt-0.5 text-xs text-muted-foreground">and {extra} more</p>
+			<p class="px-2 pb-1 pt-0.5 text-xs text-muted-foreground">{t('and')} {extra} {t('more')}</p>
 		{/if}
 	</div>
 {/if}

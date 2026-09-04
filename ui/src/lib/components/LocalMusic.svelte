@@ -20,6 +20,7 @@
 	import TrackFilter from './TrackFilter.svelte';
 	import TrackRow from './TrackRow.svelte';
 	import * as api from '$lib/api';
+	import { t } from '$lib/i18n.svelte';
 	import { indexCards, indexSongs, match } from '$lib/localsearch';
 	import {
 		addLocalFolder,
@@ -94,7 +95,7 @@
 
 	async function forget(path: string) {
 		await removeLocalFolder(path);
-		toast.success('Folder removed from your local library');
+		toast.success(t('Folder removed from your local library'));
 	}
 </script>
 
@@ -104,10 +105,10 @@
 		<div class="mb-3 flex items-center justify-between gap-3">
 			<div class="min-w-0">
 				<div class="flex items-center gap-2 font-medium">
-					<HugeiconsIcon icon={DriveIcon} class="h-4 w-4" /> Folders
+					<HugeiconsIcon icon={DriveIcon} class="h-4 w-4" /> {t('Folders')}
 				</div>
 				<p class="mt-0.5 text-xs text-muted-foreground">
-					Music in these folders plays without an internet connection.
+					{t('Music in these folders plays without an internet connection.')}
 				</p>
 			</div>
 			<div class="flex shrink-0 gap-2">
@@ -119,10 +120,10 @@
 					onclick={() => scanLocal()}
 				>
 					<HugeiconsIcon icon={RefreshIcon} class="h-4 w-4" />
-					{local.loading ? 'Scanning…' : 'Rescan'}
+					{local.loading ? t('Scanning…') : t('Rescan')}
 				</Button>
 				<Button variant="outline" size="sm" class="gap-2" onclick={pickFolder}>
-					<HugeiconsIcon icon={Add01Icon} class="h-4 w-4" /> Add folder
+					<HugeiconsIcon icon={Add01Icon} class="h-4 w-4" /> {t('Add folder')}
 				</Button>
 			</div>
 		</div>
@@ -135,7 +136,7 @@
 						</span>
 						<button
 							class="flex h-7 w-7 shrink-0 cursor-pointer items-center justify-center rounded-full text-muted-foreground transition hover:bg-destructive/10 hover:text-destructive"
-							aria-label="Remove folder"
+							aria-label={t('Remove folder')}
 							onclick={() => forget(folder)}
 						>
 							<HugeiconsIcon icon={Delete02Icon} class="h-4 w-4" />
@@ -145,7 +146,7 @@
 			</ul>
 		{:else}
 			<p class="text-sm text-muted-foreground">
-				No folders yet. Add the one your music sits in and it shows up here.
+				{t('No folders yet. Add the one your music sits in and it shows up here.')}
 			</p>
 		{/if}
 	</div>
@@ -163,14 +164,14 @@
 			
 			<div class="mb-4 flex flex-wrap items-center justify-between gap-3">
 				<Tabs.List>
-					<Tabs.Trigger value="albums">Albums ({albums.length})</Tabs.Trigger>
-					<Tabs.Trigger value="artists">Artists ({artists.length})</Tabs.Trigger>
-					<Tabs.Trigger value="songs">Songs ({songs.length})</Tabs.Trigger>
+					<Tabs.Trigger value="albums">{t('Albums')} ({albums.length})</Tabs.Trigger>
+					<Tabs.Trigger value="artists">{t('Artists')} ({artists.length})</Tabs.Trigger>
+					<Tabs.Trigger value="songs">{t('Songs')} ({songs.length})</Tabs.Trigger>
 				</Tabs.List>
-				<TrackFilter bind:value={query} placeholder="Search your music" />
+				<TrackFilter bind:value={query} placeholder={t('Search your music')} />
 			</div>
 			{#if q && !songs.length && !albums.length && !artists.length}
-				<p class="text-sm text-muted-foreground">Nothing on this device matches “{q}”.</p>
+				<p class="text-sm text-muted-foreground">{t('Nothing on this device matches')} “{q}”.</p>
 			{/if}
 			
 			<Tabs.Content value="albums">
@@ -200,7 +201,7 @@
 							disabled={!songs.length}
 							onclick={() => playAll(false)}
 						>
-							<HugeiconsIcon icon={PlayIcon} class="h-4 w-4" /> Play all
+							<HugeiconsIcon icon={PlayIcon} class="h-4 w-4" /> {t('Play all')}
 						</Button>
 						<Button
 							size="sm"
@@ -209,7 +210,7 @@
 							disabled={!songs.length}
 							onclick={() => playAll(true)}
 						>
-							<HugeiconsIcon icon={ShuffleIcon} class="h-4 w-4" /> Shuffle
+							<HugeiconsIcon icon={ShuffleIcon} class="h-4 w-4" /> {t('Shuffle')}
 						</Button>
 					</div>
 					<div class="content-in">
@@ -233,8 +234,7 @@
 		</Tabs.Root>
 	{:else if local.folders.length}
 		<p class="text-sm text-muted-foreground">
-			Nothing playable found in those folders yet. Looking for mp3, flac, m4a, aac, ogg, opus,
-			wav, wma, aiff, ape, wv and mka files.
+			{t('Nothing playable found in those folders yet.')} {t('Looking for mp3, flac, m4a, aac, ogg, opus, wav, wma, aiff, ape, wv and mka files.')}
 		</p>
 	{/if}
 </div>
