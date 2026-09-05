@@ -98,7 +98,7 @@ Item {
         Item {
             Layout.fillWidth: true
             Layout.margins: Style.sp(2)
-            implicitHeight: Style.sp(10)
+            implicitHeight: Style.ctlH
             Rectangle {
                 anchors.fill: parent
                 radius: Style.radius
@@ -219,13 +219,13 @@ Item {
             Text {
                 Layout.fillWidth: true
                 Layout.leftMargin: Style.sp(3)
-                Layout.topMargin: Style.sp(1)
-                Layout.bottomMargin: Style.sp(0.5)
-                text: "Now playing"
-                color: Tokens.inkDim
-                font.family: Style.fontUi
-                font.pixelSize: Style.fs.sm
-                font.weight: Font.DemiBold
+                Layout.topMargin: Style.sp(2)
+                Layout.bottomMargin: Style.sp(1)
+                text: "NOW PLAYING"
+                color: Tokens.inkMuted
+                font.family: Style.fontMono
+                font.pixelSize: Style.fs.micro
+                font.letterSpacing: Style.trackMicro
             }
             TrackRow {
                 Layout.fillWidth: true
@@ -236,62 +236,34 @@ Item {
                 onPlay: root.playBackend(root.currentIndex)
             }
 
-            RowLayout {
+            ColumnLayout {
                 Layout.fillWidth: true
                 Layout.leftMargin: Style.sp(3)
                 Layout.rightMargin: Style.sp(2)
-                Layout.topMargin: Style.sp(2)
-                Layout.bottomMargin: Style.sp(0.5)
-                spacing: Style.sp(2)
+                Layout.topMargin: Style.sp(3)
+                Layout.bottomMargin: Style.sp(1)
+                spacing: Style.sp(1.5)
                 Text {
                     Layout.fillWidth: true
-                    text: "Up next"
-                    color: Tokens.inkDim
-                    font.family: Style.fontUi
-                    font.pixelSize: Style.fs.sm
-                    font.weight: Font.DemiBold
+                    text: "UP NEXT"
+                    color: Tokens.inkMuted
+                    font.family: Style.fontMono
+                    font.pixelSize: Style.fs.micro
+                    font.letterSpacing: Style.trackMicro
                 }
-                Rectangle {
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: Style.sp(2)
                     visible: !!root.nowItem
-                    implicitWidth: stopLabel.implicitWidth + Style.sp(3)
-                    implicitHeight: Style.sp(7)
-                    radius: Style.radius
-                    color: Playback.stopAfterCurrent ? Tokens.tint10 : (stopHover.hovered ? Tokens.tint5 : "transparent")
-                    Text {
-                        id: stopLabel
-                        anchors.centerIn: parent
+                    Btn {
+                        Layout.fillWidth: true
                         text: Playback.stopAfterCurrent ? "Stopping after this" : "Stop after current"
-                        color: Playback.stopAfterCurrent ? Tokens.ink : Tokens.inkMuted
-                        font.family: Style.fontUi
-                        font.pixelSize: Style.fs.xs
-                        font.weight: Font.Medium
-                    }
-                    HoverHandler { id: stopHover }
-                    MouseArea {
-                        anchors.fill: parent
-                        cursorShape: Qt.PointingHandCursor
+                        icon: Playback.stopAfterCurrent ? "check-circle" : ""
                         onClicked: root.toggleStop()
                     }
-                }
-                Rectangle {
-                    visible: root.hasQueued
-                    implicitWidth: clearLabel.implicitWidth + Style.sp(3)
-                    implicitHeight: Style.sp(7)
-                    radius: Style.radius
-                    color: clearHover.hovered ? Tokens.tint5 : "transparent"
-                    Text {
-                        id: clearLabel
-                        anchors.centerIn: parent
-                        text: "Clear queue"
-                        color: Tokens.inkMuted
-                        font.family: Style.fontUi
-                        font.pixelSize: Style.fs.xs
-                        font.weight: Font.Medium
-                    }
-                    HoverHandler { id: clearHover }
-                    MouseArea {
-                        anchors.fill: parent
-                        cursorShape: Qt.PointingHandCursor
+                    Btn {
+                        visible: root.hasQueued
+                        text: "Clear"
                         onClicked: root.clearQueue()
                     }
                 }

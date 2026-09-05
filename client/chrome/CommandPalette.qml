@@ -10,6 +10,8 @@ import "../lib/browse.js" as Browse
 // The Ctrl+K command palette, ported from CommandPalette.svelte. A modal typeahead over the same
 // search_all → previewMix rows the field shows; Up/Down move, Enter takes the row (or, at the tail,
 // "All results" routes to the full search page), Escape closes. Opened by the App's global shortcut.
+// The modal card sits over a scrim; the page behind is frozen and blurred by App while any modal is
+// open (spec 9's snapshot blur is a `layer.live:false` pass on the content, owned by App).
 Item {
     id: root
 
@@ -81,9 +83,11 @@ Item {
         debounce.restart();
     }
 
+    // Scrim over the (App-blurred) page; a click outside the card dismisses.
+    Rectangle { anchors.fill: parent; color: "#000000"; opacity: 0.45 }
     MouseArea { anchors.fill: parent; onClicked: root.open = false }
-    Rectangle { anchors.fill: parent; color: "#000000"; opacity: 0.5 }
 
+    // The modal card.
     Rectangle {
         anchors.top: parent.top
         anchors.horizontalCenter: parent.horizontalCenter
@@ -171,7 +175,7 @@ Item {
                     required property var modelData
                     required property int index
                     width: palList.width
-                    implicitHeight: Style.sp(13)
+                    implicitHeight: Style.sp(11)
                     color: (root.active === pRow.index) ? Tokens.tint10 : pHover.hovered ? Tokens.tint5 : "transparent"
                     RowLayout {
                         anchors.fill: parent
@@ -190,7 +194,7 @@ Item {
                             Text { Layout.fillWidth: true; text: pRow.modelData.title; color: Tokens.ink; font.family: Style.fontUi; font.pixelSize: Style.fs.md; font.weight: Font.Medium; elide: Text.ElideRight }
                             Text { Layout.fillWidth: true; text: pRow.modelData.subtitle ? pRow.modelData.subtitle : pRow.modelData.kind; color: Tokens.inkMuted; font.family: Style.fontUi; font.pixelSize: Style.fs.sm; elide: Text.ElideRight }
                         }
-                        Text { text: pRow.modelData.kind.toUpperCase(); color: Tokens.inkFaint; font.family: Style.fontMono; font.pixelSize: Style.fs.xs }
+                        Text { text: pRow.modelData.kind.toUpperCase(); color: Tokens.inkFaint; font.family: Style.fontMono; font.pixelSize: Style.fs.micro; font.letterSpacing: Style.trackMicro }
                     }
                     HoverHandler { id: pHover }
                     MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; hoverEnabled: true; onEntered: root.active = pRow.index; onClicked: root.choose(pRow.index) }

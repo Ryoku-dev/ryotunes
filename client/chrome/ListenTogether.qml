@@ -89,8 +89,10 @@ Item {
     // Hidden holder that owns the system-clipboard copy of the invite string.
     TextEdit { id: clip; visible: false; width: 0; height: 0 }
 
-    // dismiss layer
-    Rectangle { anchors.fill: parent; color: "#000000"; opacity: 0.5 }
+    // Scrim over the (App-blurred) page; a click outside the sheet dismisses. The page behind is
+    // frozen and blurred by App while a modal is open (spec 9's snapshot blur is a layer.live:false
+    // pass on the content, owned by App).
+    Rectangle { anchors.fill: parent; color: "#000000"; opacity: 0.45 }
     MouseArea { anchors.fill: parent; onClicked: root.open = false }
 
     Rectangle {

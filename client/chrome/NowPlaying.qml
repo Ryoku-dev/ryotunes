@@ -3,17 +3,18 @@ import QtQuick
 import QtQuick.Layouts
 import QtQuick.Effects
 import Ryoku.Ui.Singletons
+import Ryoku.Ui as RU
 import "../"
 import "../components"
 
-// The Now Playing surface, ported from ui/src/lib/components/NowPlaying.svelte (tabbed mode). It is
-// artwork-first: the playing cover fills the left column over a single blurred wash of a 64 px source
-// (the one MultiEffect this surface spends, gated on Style.blurEnabled), and the right column carries
-// the Queue / Lyrics tabs. It holds no state of its own beyond the flash on the artwork; the open
-// state and active tab are App's three flags (nowPlayingOpen / queueOpen / lyricsOpen), which it
-// reads through bound properties and writes back through tabRequested / closeRequested so the player
-// bar toggles and this surface stay in lockstep. Both panels stay instantiated across a tab switch
-// (their timers gate on visible) so the lyrics keep their scroll and the queue its position.
+// The Now Playing stage (spec section 3): the playing surface at full size, artwork-first. It
+// replaces the content area and the right panel when open. The cover fills the left column over a
+// 0.6 Backdrop wash, lit by a static accent glow that re-renders only on track change; the lyrics
+// stage fills the right column; a Spectrum ribbon runs along the foot while a track plays. It holds
+// no state beyond the play/pause flash on the artwork — App owns the open state and the active tab
+// through nowPlayingOpen / queueOpen / lyricsOpen, and this surface asks for changes through
+// tabRequested / closeRequested so the player-bar toggles stay in lockstep. The Queue lives in
+// App's right panel; the stage is the immersive lyrics view.
 Item {
     id: root
 
@@ -25,10 +26,21 @@ Item {
     signal closeRequested()
 
     readonly property bool open: root.nowPlayingOpen || root.queueOpen || root.lyricsOpen
-    readonly property string tab: root.lyricsOpen ? "lyrics" : "queue"
-    readonly property bool previewVisible: root.width > Style.sp(200)
 
     visible: root.open && !!Playback.now
+
+    // The current queue item, for the album meta the now-playing snapshot does not carry.
+    readonly property var nowItem: {
+        var q = Playback.queue;
+        if (!q || !q.items || !q.items.length)
+            return null;
+        var i = q.currentIndex >= 0 ? q.currentIndex : 0;
+        return q.items.length > i ? q.items[i] : null;
+    }
+
+    // The spectrum ribbon claims the analyser only while the stage is on screen.
+    onVisibleChanged: Spectrum.claim("stage", root.visible)
+    Component.onCompleted: Spectrum.claim("stage", root.visible)
 
     // --- artwork play/pause flash -----------------------------------------------------------
     property string flash: ""
@@ -46,196 +58,176 @@ Item {
         MouseArea { anchors.fill: parent }
     }
 
-    // The wash: a 64 px cover stretched to fill and blurred once. Static between track changes.
-    Image {
-        id: washSource
+    // The playing cover as the room's light, stronger here than on a page (spec 1).
+    Backdrop {
         anchors.fill: parent
-        source: (Playback.now && Playback.now.thumbnail) ? Style.thumb(Playback.now.thumbnail, 64) : ""
-        sourceSize: Qt.size(64, 64)
-        fillMode: Image.PreserveAspectCrop
-        asynchronous: true
-        cache: true
-        visible: false
-    }
-    MultiEffect {
-        anchors.fill: parent
-        source: washSource
-        visible: Style.blurEnabled && washSource.status === Image.Ready
-        blurEnabled: true
-        blur: 1.0
-        blurMax: 64
-        opacity: 0.28
+        strength: 0.6
     }
 
-    RowLayout {
+    ColumnLayout {
         anchors.fill: parent
-        anchors.margins: Style.sp(4)
+        anchors.margins: Style.sp(6)
         spacing: Style.sp(4)
 
-        // ── artwork preview (left) ──────────────────────────────────────────────────────
-        Item {
-            id: previewCell
-            visible: root.previewVisible
+        RowLayout {
             Layout.fillWidth: true
             Layout.fillHeight: true
-            Layout.preferredWidth: 5
+            spacing: Style.sp(8)
 
-            Text {
-                id: previewHead
-                anchors.top: parent.top
-                anchors.left: parent.left
-                text: "// LIVE PREVIEW"
-                color: Tokens.inkFaint
-                font.family: Style.fontMono
-                font.pixelSize: Style.fs.xs
-                font.letterSpacing: 1.3
-            }
-            Text {
-                anchors.top: parent.top
-                anchors.right: parent.right
-                text: "PLAYBACK · LOCAL"
-                color: Tokens.inkFaint
-                font.family: Style.fontMono
-                font.pixelSize: Style.fs.xs
-                font.letterSpacing: 1.3
-            }
-
-            Item {
-                id: artHolder
-                anchors.top: previewHead.bottom
-                anchors.topMargin: Style.sp(2)
-                anchors.left: parent.left
-                anchors.right: parent.right
-                anchors.bottom: parent.bottom
-
-                Artwork {
-                    id: bigArt
-                    anchors.centerIn: parent
-                    px: Math.max(Style.sp(30), Math.min(artHolder.width, artHolder.height))
-                    url: (Playback.now && Playback.now.thumbnail) ? Playback.now.thumbnail : ""
-                    placeholderIcon: "music"
-
-                    MouseArea {
-                        anchors.fill: parent
-                        cursorShape: Qt.PointingHandCursor
-                        onClicked: root.toggle()
-                    }
-
-                    // Flash the action taken, over the cover, so the click visibly did something.
-                    Rectangle {
-                        anchors.centerIn: parent
-                        visible: root.flash !== ""
-                        width: Style.sp(14)
-                        height: width
-                        radius: width / 2
-                        color: Qt.rgba(0, 0, 0, 0.55)
-                        Icon {
-                            anchors.centerIn: parent
-                            name: root.flash === "play" ? "play" : "pause"
-                            size: Style.fs.xl
-                            color: "#ffffff"
-                        }
-                    }
-                }
-            }
-        }
-
-        // ── detail column (right) ───────────────────────────────────────────────────────
-        Rectangle {
-            id: detailCell
-            Layout.fillWidth: true
-            Layout.fillHeight: true
-            Layout.preferredWidth: 7
-            radius: Style.radiusCard
-            color: Tokens.paper
-            border.width: 1
-            border.color: Tokens.line
-
+            // ── artwork + track (left) ──────────────────────────────────────────────────
             ColumnLayout {
-                anchors.fill: parent
-                anchors.margins: Style.sp(2)
-                spacing: Style.sp(2)
+                Layout.fillHeight: true
+                Layout.fillWidth: false
+                Layout.preferredWidth: Math.min(Style.sp(120), root.width * 0.42)
+                spacing: Style.sp(4)
 
-                // Tab strip + close ------------------------------------------------------
-                RowLayout {
+                Item {
+                    id: artHolder
                     Layout.fillWidth: true
-                    spacing: Style.sp(2)
+                    Layout.fillHeight: true
+                    readonly property int artPx: Math.max(Style.sp(40),
+                        Math.min(Style.sp(120), Math.min(artHolder.width, artHolder.height)))
 
-                    Rectangle {
-                        Layout.fillWidth: true
-                        implicitHeight: Style.sp(9)
-                        radius: Style.radius
-                        color: Tokens.paperLift
-                        border.width: 1
-                        border.color: Tokens.line
-                        RowLayout {
+                    // A small static source of the cover, tinted to the accent and blurred once into
+                    // a glow behind the art. It re-renders only when the source or the accent change
+                    // — i.e. on track change — so the wash costs nothing per frame.
+                    Image {
+                        id: glowSource
+                        anchors.centerIn: parent
+                        width: 64
+                        height: 64
+                        source: (Playback.now && Playback.now.thumbnail) ? Style.thumb(Playback.now.thumbnail, 64) : ""
+                        sourceSize: Qt.size(64, 64)
+                        fillMode: Image.PreserveAspectCrop
+                        asynchronous: true
+                        cache: true
+                        visible: false
+                    }
+                    MultiEffect {
+                        anchors.centerIn: parent
+                        width: artHolder.artPx * 1.12
+                        height: artHolder.artPx * 1.12
+                        source: glowSource
+                        visible: Style.blurEnabled && glowSource.status === Image.Ready
+                        blurEnabled: true
+                        blur: 1.0
+                        blurMax: 64
+                        colorization: 1.0
+                        colorizationColor: Style.accent
+                        brightness: 0.1
+                        opacity: 0.5
+                    }
+
+                    Artwork {
+                        id: bigArt
+                        anchors.centerIn: parent
+                        px: artHolder.artPx
+                        cornerRadius: Style.radiusCard
+                        url: (Playback.now && Playback.now.thumbnail) ? Playback.now.thumbnail : ""
+                        placeholderIcon: "music"
+
+                        MouseArea {
                             anchors.fill: parent
-                            anchors.margins: Style.sp(0.75)
-                            spacing: Style.sp(0.75)
-                            Repeater {
-                                model: [
-                                    { key: "queue", label: "Queue", icon: "queue" },
-                                    { key: "lyrics", label: "Lyrics", icon: "mic" }
-                                ]
-                                delegate: Rectangle {
-                                    id: tabBtn
-                                    required property var modelData
-                                    readonly property bool selected: root.tab === tabBtn.modelData.key
-                                    Layout.fillWidth: true
-                                    Layout.fillHeight: true
-                                    radius: Style.radius - 1
-                                    color: tabBtn.selected ? Tokens.bone
-                                        : (tabHover.hovered ? Tokens.tint5 : "transparent")
-                                    RowLayout {
-                                        anchors.centerIn: parent
-                                        spacing: Style.sp(1.5)
-                                        Icon {
-                                            name: tabBtn.modelData.icon
-                                            size: Style.fs.sm
-                                            color: tabBtn.selected ? Tokens.inkOnBone : Tokens.inkMuted
-                                        }
-                                        Text {
-                                            text: tabBtn.modelData.label
-                                            color: tabBtn.selected ? Tokens.inkOnBone : Tokens.inkMuted
-                                            font.family: Style.fontUi
-                                            font.pixelSize: Style.fs.sm
-                                            font.weight: Font.Medium
-                                        }
-                                    }
-                                    HoverHandler { id: tabHover }
-                                    MouseArea {
-                                        anchors.fill: parent
-                                        cursorShape: Qt.PointingHandCursor
-                                        onClicked: root.tabRequested(tabBtn.modelData.key)
-                                    }
-                                }
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: root.toggle()
+                        }
+
+                        // Flash the action taken, over the cover, so the click visibly did something.
+                        Rectangle {
+                            anchors.centerIn: parent
+                            visible: root.flash !== ""
+                            width: Style.sp(14)
+                            height: width
+                            radius: width / 2
+                            color: Qt.rgba(0, 0, 0, 0.55)
+                            Icon {
+                                anchors.centerIn: parent
+                                name: root.flash === "play" ? "play" : "pause"
+                                size: Style.fs.xl
+                                color: "#ffffff"
                             }
                         }
                     }
-
-                    IconButton {
-                        icon: "arrow-down"
-                        iconSize: Style.fs.lg
-                        diameter: Style.sp(9)
-                        onClicked: root.closeRequested()
-                    }
                 }
 
-                // Panels (both kept alive across tab switches) ---------------------------
-                Item {
+                // title xl Fraunces · artist sm · meta micro
+                ColumnLayout {
                     Layout.fillWidth: true
-                    Layout.fillHeight: true
-
-                    QueuePanel {
-                        anchors.fill: parent
-                        visible: root.tab === "queue"
+                    spacing: Style.sp(0.5)
+                    Text {
+                        Layout.fillWidth: true
+                        text: (Playback.now && Playback.now.title) ? Playback.now.title : ""
+                        color: Tokens.ink
+                        font.family: Style.fontDisplay
+                        font.pixelSize: Style.fs.xl
+                        maximumLineCount: 2
+                        wrapMode: Text.WordWrap
+                        elide: Text.ElideRight
                     }
-                    LyricsPanel {
-                        anchors.fill: parent
-                        visible: root.tab === "lyrics"
+                    Text {
+                        Layout.fillWidth: true
+                        text: (Playback.now && Playback.now.artists) ? Playback.now.artists : ""
+                        color: Tokens.inkMuted
+                        font.family: Style.fontUi
+                        font.pixelSize: Style.fs.sm
+                        elide: Text.ElideRight
+                    }
+                    Text {
+                        Layout.fillWidth: true
+                        visible: text !== ""
+                        text: {
+                            var parts = [];
+                            if (root.nowItem && root.nowItem.album)
+                                parts.push(String(root.nowItem.album));
+                            if (Playback.duration > 0)
+                                parts.push(Style.fmtTime(Playback.duration));
+                            return parts.join("  ·  ").toUpperCase();
+                        }
+                        color: Tokens.inkFaint
+                        font.family: Style.fontMono
+                        font.pixelSize: Style.fs.micro
+                        font.letterSpacing: Style.trackMicro
+                        elide: Text.ElideRight
                     }
                 }
             }
+
+            // ── lyrics stage (right) ────────────────────────────────────────────────────
+            LyricsPanel {
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+            }
         }
+
+        // ── spectrum ribbon (foot) ──────────────────────────────────────────────────────
+        Item {
+            Layout.fillWidth: true
+            Layout.preferredHeight: Style.sp(20)
+            RU.SpectrumField {
+                anchors.fill: parent
+                levels: Spectrum.levels
+                energy: Spectrum.energy
+                style: "wave"
+                ramp: [Style.accent, Tokens.ink]
+                boxX: 0
+                boxY: 0
+                boxW: 1
+                boxH: 1
+                grow: "center"
+                opacity: Spectrum.analysing ? 1 : 0.35
+                Behavior on opacity { NumberAnimation { duration: Style.motion.swap } }
+            }
+        }
+    }
+
+    // Close: collapse the stage back to the player bar.
+    IconButton {
+        anchors.top: parent.top
+        anchors.right: parent.right
+        anchors.margins: Style.sp(4)
+        icon: "chevron-down"
+        iconSize: Style.fs.lg
+        diameter: Style.sp(9)
+        onClicked: root.closeRequested()
     }
 }

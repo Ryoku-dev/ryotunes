@@ -167,7 +167,7 @@ Item {
         id: scrollAnim
         target: view
         property: "contentY"
-        duration: Style.motion.slow
+        duration: Style.motion.swap
         easing.type: Easing.OutCubic
     }
     function follow(i, animate) {
@@ -254,33 +254,59 @@ Item {
                 readonly property bool isActive: root.synced && lineWrap.index === root.activeIndex
                 readonly property bool isPast: root.synced && lineWrap.index < root.activeIndex
                 readonly property bool wordMode: lineWrap.isActive && !!(lineWrap.modelData.words && lineWrap.modelData.words.length)
-                readonly property color lineColor: lineWrap.isActive ? Tokens.ink
-                    : lineWrap.isPast ? Qt.rgba(Tokens.inkMuted.r, Tokens.inkMuted.g, Tokens.inkMuted.b, 0.42)
-                    : Qt.rgba(Tokens.inkMuted.r, Tokens.inkMuted.g, Tokens.inkMuted.b, 0.72)
-                readonly property int lineFs: root.compact ? Style.fs.md
-                    : lineWrap.isActive ? Style.fs.xl : Style.fs.lg
+                readonly property int lineFs: root.compact
+                    ? (lineWrap.isActive ? Style.fs.lg : Style.fs.md)
+                    : (lineWrap.isActive ? Style.fs.xl : Style.fs.lg)
+                // Sung lines settle to 0.4, upcoming to 0.6, the active line full; the viewport haze
+                // then fades every line by its distance from the reading centre.
+                readonly property real baseOpacity: !root.synced ? 0.85
+                    : lineWrap.isActive ? 1 : lineWrap.isPast ? 0.4 : 0.6
+                // The active word is the last one whose start has passed: earlier words are sung ink,
+                // it lights in the accent, later words wait muted.
+                readonly property int activeWord: {
+                    if (!lineWrap.wordMode)
+                        return -1;
+                    var ws = lineWrap.modelData.words, p = root.posMs, idx = -1;
+                    for (var i = 0; i < ws.length; i++) {
+                        if (ws[i].start_ms <= p)
+                            idx = i;
+                        else
+                            break;
+                    }
+                    return idx;
+                }
+                // A centred reading column, capped at 560 on the wide stage, snug in the mini.
+                readonly property real colW: root.compact
+                    ? Math.max(1, lineWrap.width - Style.sp(4))
+                    : Math.min(lineWrap.width - Style.sp(8), Style.sp(140))
 
                 ColumnLayout {
                     id: lineCol
-                    x: root.compact ? Style.sp(2) : Style.sp(6)
-                    width: parent.width - x * 2
+                    x: (lineWrap.width - lineCol.width) / 2
+                    width: lineWrap.colW
                     anchors.verticalCenter: parent.verticalCenter
                     spacing: Style.sp(0.5)
+                    // Reading-centre haze: full at the middle line, falling to nothing at the edges.
+                    opacity: {
+                        var mid = lineWrap.y + lineWrap.height / 2 - view.contentY;
+                        var d = view.height > 0 ? Math.min(1, Math.abs(mid - view.height / 2) / view.height) : 0;
+                        return lineWrap.baseOpacity * (1 - Math.pow(d, 0.45));
+                    }
 
-                    // Plain (no word timing, or non-active) line.
+                    // Plain line (no word timing, or a non-active line): ink, dimmed by the opacity.
                     Text {
                         Layout.fillWidth: true
                         visible: !lineWrap.wordMode
                         text: lineWrap.modelData.text ? lineWrap.modelData.text : "♪"
-                        color: lineWrap.lineColor
-                        font.family: Style.fontUi
+                        color: Tokens.ink
+                        font.family: Style.fontDisplay
                         font.pixelSize: lineWrap.lineFs
-                        font.weight: Font.DemiBold
+                        font.weight: Font.Medium
                         wrapMode: Text.WordWrap
-                        lineHeight: 1.15
+                        lineHeight: 1.2
                     }
 
-                    // Active line with word timing: karaoke fill driven by root.posMs.
+                    // Active line with word timing: the karaoke fill driven by root.posMs.
                     Flow {
                         Layout.fillWidth: true
                         visible: lineWrap.wordMode
@@ -289,13 +315,16 @@ Item {
                             model: lineWrap.wordMode ? lineWrap.modelData.words : []
                             delegate: Text {
                                 id: word
+                                required property int index
                                 required property var modelData
                                 text: word.modelData.text ? String(word.modelData.text).replace(/\s+$/, "") : ""
-                                color: (root.posMs >= word.modelData.start_ms) ? Tokens.ink
+                                color: word.index === lineWrap.activeWord ? Style.accent
+                                    : word.index < lineWrap.activeWord ? Tokens.ink
                                     : Qt.rgba(Tokens.inkMuted.r, Tokens.inkMuted.g, Tokens.inkMuted.b, 0.72)
-                                font.family: Style.fontUi
+                                font.family: Style.fontDisplay
                                 font.pixelSize: lineWrap.lineFs
-                                font.weight: Font.DemiBold
+                                font.weight: Font.Medium
+                                Behavior on color { ColorAnimation { duration: Style.motion.snap } }
                             }
                         }
                     }
