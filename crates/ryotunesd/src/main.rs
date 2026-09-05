@@ -46,6 +46,19 @@ fn main() -> anyhow::Result<()> {
         app::spawn_pumps(state.clone(), events, media_rx, lt_rx, sink.clone(), lifecycle.clone());
         tray::spawn(state.clone(), quit_tx.clone(), sink.clone());
 
+        // Restore a cached Spotify session in the background so browsing and playback are ready
+        // without blocking startup. Logged, never fatal: no cached credentials is the common case.
+        {
+            let state = state.clone();
+            tokio::spawn(async move {
+                match state.spotify.restore().await {
+                    Ok(true) => tracing::info!("spotify: restored a cached session"),
+                    Ok(false) => tracing::debug!("spotify: no cached session to restore"),
+                    Err(e) => tracing::warn!("spotify: restore failed: {:#}", e),
+                }
+            });
+        }
+
         let server = server::Server::bind(&path, sink.clone(), lifecycle)?;
         let methods = Arc::new(methods::Methods { state: state.clone(), quit: quit_tx });
         tokio::select! {

@@ -6,6 +6,7 @@
 //! no webview assets). Plus the control methods `hello`, `subscribe`, `quit` and `sign_in`.
 
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use innertube::{BrowseItem, PlaylistPage, PlaylistSort, Rating, SongItem, YouTubeClient};
 use ryotunes_core::db::LocalPlaylist;
@@ -16,6 +17,8 @@ use ryotunes_core::state::{
     SMART_PLAYLIST_LIMIT, UI_SETTINGS,
 };
 use ryotunes_core::{local, radio};
+use ryotunes_core::spotify::{spotify_track_id, Provider};
+use ryotunes_core::spotify_bridge;
 use ryotunes_protocol::{ErrorBody, PROTOCOL_VERSION};
 use serde::de::DeserializeOwned;
 use serde_json::{json, Value};
@@ -44,6 +47,32 @@ fn null() -> Result<Value, ErrorBody> {
     Ok(Value::Null)
 }
 
+// --- Spotify routing --------------------------------------------------------------------------
+
+/// Guards the sign-in flow so two OAuth attempts never run at once (it is fire-and-forget).
+static SPOTIFY_SIGNING_IN: AtomicBool = AtomicBool::new(false);
+/// One `client.liked` page (mirrors the crate's private `LIKED_PAGE`); the liked-songs view pages
+/// until a batch comes back short.
+const SPOTIFY_LIKED_PAGE: usize = 100;
+
+/// Resets [`SPOTIFY_SIGNING_IN`] whenever the spawned flow ends — success, failure or panic.
+struct SignInGuard;
+impl Drop for SignInGuard {
+    fn drop(&mut self) {
+        SPOTIFY_SIGNING_IN.store(false, Ordering::SeqCst);
+    }
+}
+
+/// A Spotify crate error as the daemon's error body.
+fn spotify_err(e: impl ToString) -> ErrorBody {
+    ErrorBody { code: "spotify".into(), message: e.to_string() }
+}
+
+/// The error a by-prefix Spotify command returns when no session is signed in.
+fn spotify_signed_out() -> ErrorBody {
+    ErrorBody { code: "spotify_signed_out".into(), message: "Sign in to Spotify".into() }
+}
+
 #[async_trait::async_trait]
 impl Dispatch for Methods {
     async fn call(
@@ -60,12 +89,16 @@ impl Dispatch for Methods {
             }
             "subscribe" => {
                 conn.subscribe();
+                let provider = st.spotify.selected().as_str();
+                let spotify = spotify_status_json(st).await;
                 ok(json!({
                     "playback": st.playback_snapshot().await,
                     "queue": st.queue_snapshot().await,
                     "settings": st.settings_snapshot(),
                     "auth": st.account_snapshot(),
                     "audioFx": st.audio_fx(),
+                    "provider": provider,
+                    "spotify": spotify,
                 }))
             }
             "quit" => {
@@ -85,24 +118,38 @@ impl Dispatch for Methods {
             // --- search ----------------------------------------------------------------------
             "search" => ok(st.search(&arg::<String>(&params, "query")?).await.map_err(err)?),
             "search_page" => {
-                ok(st.search_page(&arg::<String>(&params, "query")?).await.map_err(err)?)
+                if st.spotify.browsing_spotify().await {
+                    spotify_search_page(st, &arg::<String>(&params, "query")?).await
+                } else {
+                    ok(st.search_page(&arg::<String>(&params, "query")?).await.map_err(err)?)
+                }
             }
             "search_page_more" => {
-                ok(st.search_page_more(&arg::<String>(&params, "token")?).await.map_err(err)?)
+                if st.spotify.browsing_spotify().await {
+                    ok(json!({ "items": [], "continuation": null }))
+                } else {
+                    ok(st.search_page_more(&arg::<String>(&params, "token")?).await.map_err(err)?)
+                }
             }
             "search_all" => {
-                ok(st.search_all(&arg::<String>(&params, "query")?).await.map_err(err)?)
+                if st.spotify.browsing_spotify().await {
+                    spotify_search_all(st, &arg::<String>(&params, "query")?).await
+                } else {
+                    ok(st.search_all(&arg::<String>(&params, "query")?).await.map_err(err)?)
+                }
             }
             "search_all_more" => {
                 ok(st.search_all_more(&arg::<String>(&params, "token")?).await.map_err(err)?)
             }
-            "search_cards" => ok(st
-                .search_cards(
-                    &arg::<String>(&params, "query")?,
-                    &arg::<String>(&params, "category")?,
-                )
-                .await
-                .map_err(err)?),
+            "search_cards" => {
+                let query = arg::<String>(&params, "query")?;
+                let category = arg::<String>(&params, "category")?;
+                if st.spotify.browsing_spotify().await {
+                    spotify_search_cards(st, &query, &category).await
+                } else {
+                    ok(st.search_cards(&query, &category).await.map_err(err)?)
+                }
+            }
             "search_cards_page" => ok(st
                 .search_cards_page(
                     &arg::<String>(&params, "query")?,
@@ -248,17 +295,99 @@ impl Dispatch for Methods {
                 null()
             }
 
-            // --- browse / library ------------------------------------------------------------
-            "get_home" => ok(st
-                .home(arg::<Option<String>>(&params, "params")?.as_deref())
-                .await
-                .map_err(err)?),
-            "get_home_more" => {
-                ok(st.home_more(&arg::<String>(&params, "token")?).await.map_err(err)?)
+            // --- provider + Spotify auth -----------------------------------------------------
+            "set_provider" => {
+                let provider = arg::<String>(&params, "provider")?;
+                let selected = Provider::parse(&provider)
+                    .ok_or_else(|| err(format!("unknown provider: {provider}")))?;
+                st.db.set_setting("provider", selected.as_str());
+                st.spotify.select(selected);
+                st.emit("provider-changed", json!({ "provider": selected.as_str() }));
+                ok(json!({ "provider": selected.as_str() }))
             }
-            "get_library" => get_library(st).await,
-            "get_library_albums" => ok(st.library_albums().await.map_err(err)?),
-            "get_library_artists" => ok(st.library_artists().await.map_err(err)?),
+            "get_provider" => ok(json!({ "provider": st.spotify.selected().as_str() })),
+            "spotify_status" => ok(spotify_status_json(st).await),
+            "spotify_sign_in" => {
+                if SPOTIFY_SIGNING_IN
+                    .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+                    .is_err()
+                {
+                    // A flow is already running; the call is idempotent.
+                    return ok(json!({ "started": true }));
+                }
+                let task = st.clone();
+                tokio::spawn(async move {
+                    let _guard = SignInGuard;
+                    let emitter = task.clone();
+                    let result = task
+                        .spotify
+                        .sign_in(move |url| {
+                            emitter.emit("spotify-auth", json!({ "state": "url", "url": url }));
+                        })
+                        .await;
+                    match result {
+                        Ok(()) => {
+                            let name = spotify_name(&task).await;
+                            task.emit("spotify-auth", json!({ "state": "signed_in", "name": name }));
+                        }
+                        Err(e) => {
+                            task.emit(
+                                "spotify-auth",
+                                json!({
+                                    "state": "error",
+                                    "message": format!("Spotify sign-in failed: {e:#}"),
+                                }),
+                            );
+                        }
+                    }
+                });
+                ok(json!({ "started": true }))
+            }
+            "spotify_sign_out" => {
+                st.spotify.sign_out().await;
+                st.emit("spotify-auth", json!({ "state": "signed_out" }));
+                ok(json!({ "signedIn": false }))
+            }
+
+            // --- browse / library ------------------------------------------------------------
+            "get_home" => {
+                if st.spotify.browsing_spotify().await {
+                    spotify_home(st).await
+                } else {
+                    ok(st
+                        .home(arg::<Option<String>>(&params, "params")?.as_deref())
+                        .await
+                        .map_err(err)?)
+                }
+            }
+            "get_home_more" => {
+                if st.spotify.browsing_spotify().await {
+                    ok(json!({ "sections": [], "continuation": null }))
+                } else {
+                    ok(st.home_more(&arg::<String>(&params, "token")?).await.map_err(err)?)
+                }
+            }
+            "get_library" => {
+                if st.spotify.browsing_spotify().await {
+                    spotify_library(st).await
+                } else {
+                    get_library(st).await
+                }
+            }
+            "get_library_albums" => {
+                if st.spotify.browsing_spotify().await {
+                    spotify_library_albums(st).await
+                } else {
+                    ok(st.library_albums().await.map_err(err)?)
+                }
+            }
+            "get_library_artists" => {
+                if st.spotify.browsing_spotify().await {
+                    spotify_library_artists(st).await
+                } else {
+                    ok(st.library_artists().await.map_err(err)?)
+                }
+            }
             "get_playlist" => get_playlist(st, &params).await,
             "get_playlist_more" => {
                 ok(st.playlist_more(&arg::<String>(&params, "token")?).await.map_err(err)?)
@@ -271,8 +400,22 @@ impl Dispatch for Methods {
                 .into_iter()
                 .collect::<std::collections::HashMap<String, i64>>()),
             "listening_stats" => listening_stats(st, &params),
-            "get_album" => ok(st.album(&arg::<String>(&params, "id")?).await.map_err(err)?),
-            "get_artist" => ok(st.artist(&arg::<String>(&params, "id")?).await.map_err(err)?),
+            "get_album" => {
+                let id = arg::<String>(&params, "id")?;
+                if let Some(aid) = id.strip_prefix("spotify:album:") {
+                    spotify_album(st, aid).await
+                } else {
+                    ok(st.album(&id).await.map_err(err)?)
+                }
+            }
+            "get_artist" => {
+                let id = arg::<String>(&params, "id")?;
+                if let Some(aid) = id.strip_prefix("spotify:artist:") {
+                    spotify_artist(st, aid).await
+                } else {
+                    ok(st.artist(&id).await.map_err(err)?)
+                }
+            }
             "get_browse_grid" => ok(st
                 .browse_grid(
                     &arg::<String>(&params, "id")?,
@@ -340,6 +483,14 @@ impl Dispatch for Methods {
             "rate" => {
                 let video_id = arg::<String>(&params, "videoId")?;
                 let rating = arg::<Rating>(&params, "rating")?;
+                if let Some(tid) = spotify_track_id(&video_id) {
+                    let client = st.spotify.client().await.ok_or_else(spotify_signed_out)?;
+                    client
+                        .set_track_saved(tid, matches!(rating, Rating::Like))
+                        .await
+                        .map_err(spotify_err)?;
+                    return null();
+                }
                 if radio::is_radio_id(&video_id) || local::is_local_song(&video_id) {
                     return Err(err("This track does not have a YouTube Music rating."));
                 }
@@ -351,6 +502,11 @@ impl Dispatch for Methods {
             "set_album_saved" => {
                 let playlist_id = arg::<String>(&params, "playlistId")?;
                 let saved = arg::<bool>(&params, "saved")?;
+                if let Some(aid) = playlist_id.strip_prefix("spotify:album:") {
+                    let client = st.spotify.client().await.ok_or_else(spotify_signed_out)?;
+                    client.set_album_saved(aid, saved).await.map_err(spotify_err)?;
+                    return null();
+                }
                 let client = require_login(st).map_err(err)?;
                 st.it.like_playlist(client, &playlist_id, saved).await.map_err(err)?;
                 null()
@@ -358,6 +514,17 @@ impl Dispatch for Methods {
             "add_to_playlist" => {
                 let playlist_id = arg::<String>(&params, "playlistId")?;
                 let video_id = arg::<String>(&params, "videoId")?;
+                if let Some(pid) = playlist_id.strip_prefix("spotify:playlist:") {
+                    let client = st.spotify.client().await.ok_or_else(spotify_signed_out)?;
+                    let tid = spotify_track_id(&video_id)
+                        .ok_or_else(|| spotify_err("Not a Spotify track."))?;
+                    if pid == "liked" {
+                        client.set_track_saved(tid, true).await.map_err(spotify_err)?;
+                    } else {
+                        client.add_track_to_playlist(pid, tid).await.map_err(spotify_err)?;
+                    }
+                    return null();
+                }
                 if radio::is_radio_id(&video_id) {
                     return Err(err("Live radio stations cannot be added to song playlists."));
                 }
@@ -386,6 +553,20 @@ impl Dispatch for Methods {
             "remove_from_playlist" => {
                 let playlist_id = arg::<String>(&params, "playlistId")?;
                 let video_id = arg::<String>(&params, "videoId")?;
+                if let Some(pid) = playlist_id.strip_prefix("spotify:playlist:") {
+                    let client = st.spotify.client().await.ok_or_else(spotify_signed_out)?;
+                    let tid = spotify_track_id(&video_id)
+                        .ok_or_else(|| spotify_err("Not a Spotify track."))?;
+                    if pid == "liked" {
+                        client.set_track_saved(tid, false).await.map_err(spotify_err)?;
+                    } else {
+                        client
+                            .remove_track_from_playlist(pid, tid)
+                            .await
+                            .map_err(spotify_err)?;
+                    }
+                    return null();
+                }
                 let set_video_id = arg::<String>(&params, "setVideoId")?;
                 if is_local_playlist_id(&playlist_id) {
                     st.db
@@ -408,6 +589,11 @@ impl Dispatch for Methods {
                     return Err(err("Playlist name cannot be empty."));
                 }
                 let title: String = title.chars().take(150).collect();
+                if st.spotify.browsing_spotify().await {
+                    let client = st.spotify.client().await.ok_or_else(spotify_signed_out)?;
+                    let id = client.create_playlist(&title).await.map_err(spotify_err)?;
+                    return ok(format!("spotify:playlist:{id}"));
+                }
                 if st.it.is_logged_in() {
                     let client = require_login(st).map_err(err)?;
                     return ok(st.it.create_playlist(client, &title).await.map_err(err)?);
@@ -424,7 +610,14 @@ impl Dispatch for Methods {
                     .map_err(|e| err(format!("device playlist: {e}")))?;
                 ok(id)
             }
-            "edit_playlist_details" => edit_playlist_details(st, &params).await,
+            "edit_playlist_details" => {
+                let playlist_id = arg::<String>(&params, "playlistId")?;
+                if let Some(pid) = playlist_id.strip_prefix("spotify:playlist:") {
+                    spotify_edit_playlist(st, &params, pid).await
+                } else {
+                    edit_playlist_details(st, &params).await
+                }
+            }
             "set_playlist_cover" => set_playlist_cover(st, &params).await,
             "set_playlist_sort" => {
                 let playlist_id = arg::<String>(&params, "playlistId")?;
@@ -435,6 +628,14 @@ impl Dispatch for Methods {
             }
             "delete_playlist" => {
                 let playlist_id = arg::<String>(&params, "playlistId")?;
+                if let Some(pid) = playlist_id.strip_prefix("spotify:playlist:") {
+                    if pid == "liked" {
+                        return Err(spotify_err("The liked songs playlist cannot be removed."));
+                    }
+                    let client = st.spotify.client().await.ok_or_else(spotify_signed_out)?;
+                    client.delete_playlist(pid).await.map_err(spotify_err)?;
+                    return null();
+                }
                 if is_local_playlist_id(&playlist_id) {
                     st.db
                         .delete_local_playlist(&playlist_id)
@@ -509,6 +710,13 @@ impl Dispatch for Methods {
             // --- lyrics + misc ---------------------------------------------------------------
             "get_lyrics" => {
                 let video_id = arg::<String>(&params, "videoId")?;
+                if let Some(tid) = spotify_track_id(&video_id) {
+                    let Some(client) = st.spotify.client().await else {
+                        return null();
+                    };
+                    let lyrics = client.lyrics(tid).await.map_err(spotify_err)?;
+                    return ok(lyrics.as_ref().map(spotify_bridge::lyrics_to_lyrics));
+                }
                 if radio::is_radio_id(&video_id) {
                     return null();
                 }
@@ -552,6 +760,135 @@ impl Dispatch for Methods {
             _ => Err(ErrorBody { code: "unknown_method".into(), message: method.into() }),
         }
     }
+}
+
+// --- Spotify command bodies -------------------------------------------------------------------
+
+/// The `{signedIn, stored, name, premium}` block for `spotify_status` and the subscribe snapshot.
+/// A signed-in session implies Premium (the crate gates both sign-in and restore on it).
+async fn spotify_status_json(st: &Arc<AppState>) -> Value {
+    let signed_in = st.spotify.status().await;
+    let name = if signed_in { spotify_name(st).await } else { None };
+    let premium = signed_in.then_some(true);
+    json!({
+        "signedIn": signed_in,
+        "stored": st.spotify.stored(),
+        "name": name,
+        "premium": premium,
+    })
+}
+
+/// The signed-in profile's display name, fetched fresh. `None` when signed out or unreachable.
+async fn spotify_name(st: &Arc<AppState>) -> Option<String> {
+    let client = st.spotify.client().await?;
+    client.profile().await.ok().map(|profile| profile.display_name)
+}
+
+async fn spotify_home(st: &Arc<AppState>) -> Result<Value, ErrorBody> {
+    let client = st.spotify.client().await.ok_or_else(spotify_signed_out)?;
+    let feed = client.home().await.map_err(spotify_err)?;
+    ok(spotify_bridge::home_page(&feed))
+}
+
+async fn spotify_search_all(st: &Arc<AppState>, query: &str) -> Result<Value, ErrorBody> {
+    let client = st.spotify.client().await.ok_or_else(spotify_signed_out)?;
+    let results = client.search(query).await.map_err(spotify_err)?;
+    ok(spotify_bridge::search_all(&results))
+}
+
+async fn spotify_search_page(st: &Arc<AppState>, query: &str) -> Result<Value, ErrorBody> {
+    let client = st.spotify.client().await.ok_or_else(spotify_signed_out)?;
+    let results = client.search(query).await.map_err(spotify_err)?;
+    ok(json!({ "items": spotify_bridge::search_songs(&results), "continuation": null }))
+}
+
+async fn spotify_search_cards(
+    st: &Arc<AppState>,
+    query: &str,
+    category: &str,
+) -> Result<Value, ErrorBody> {
+    let client = st.spotify.client().await.ok_or_else(spotify_signed_out)?;
+    let results = client.search(query).await.map_err(spotify_err)?;
+    ok(spotify_bridge::search_cards(&results, category))
+}
+
+async fn spotify_library(st: &Arc<AppState>) -> Result<Value, ErrorBody> {
+    let client = st.spotify.client().await.ok_or_else(spotify_signed_out)?;
+    let playlists = client.playlists(200).await.map_err(spotify_err)?;
+    let mut items = vec![spotify_bridge::liked_card()];
+    items.extend(playlists.iter().map(spotify_bridge::playlist_to_card));
+    ok(items)
+}
+
+async fn spotify_library_albums(st: &Arc<AppState>) -> Result<Value, ErrorBody> {
+    let client = st.spotify.client().await.ok_or_else(spotify_signed_out)?;
+    let albums = client.saved_albums(200).await.map_err(spotify_err)?;
+    ok(albums.iter().map(spotify_bridge::album_to_card).collect::<Vec<_>>())
+}
+
+async fn spotify_library_artists(st: &Arc<AppState>) -> Result<Value, ErrorBody> {
+    let client = st.spotify.client().await.ok_or_else(spotify_signed_out)?;
+    let artists = client.saved_artists(200).await.map_err(spotify_err)?;
+    ok(artists.iter().map(spotify_bridge::saved_artist_to_card).collect::<Vec<_>>())
+}
+
+/// `spotify:playlist:liked` pages every saved track; any other id is a real Spotify playlist.
+async fn spotify_playlist(st: &Arc<AppState>, pid: &str) -> Result<Value, ErrorBody> {
+    let client = st.spotify.client().await.ok_or_else(spotify_signed_out)?;
+    if pid == "liked" {
+        let mut tracks = Vec::new();
+        let mut page = 0u32;
+        loop {
+            let batch = client.liked(page).await.map_err(spotify_err)?;
+            let full = batch.len() >= SPOTIFY_LIKED_PAGE;
+            tracks.extend(batch);
+            if !full {
+                break;
+            }
+            page += 1;
+        }
+        ok(spotify_bridge::liked_page(&tracks))
+    } else {
+        let detail = client.playlist(pid).await.map_err(spotify_err)?;
+        ok(spotify_bridge::playlist_page(&detail))
+    }
+}
+
+async fn spotify_album(st: &Arc<AppState>, id: &str) -> Result<Value, ErrorBody> {
+    let client = st.spotify.client().await.ok_or_else(spotify_signed_out)?;
+    let detail = client.album(id).await.map_err(spotify_err)?;
+    ok(spotify_bridge::album_page(&detail))
+}
+
+async fn spotify_artist(st: &Arc<AppState>, id: &str) -> Result<Value, ErrorBody> {
+    let client = st.spotify.client().await.ok_or_else(spotify_signed_out)?;
+    let artist = client.artist(id).await.map_err(spotify_err)?;
+    ok(spotify_bridge::artist_page(id, &artist))
+}
+
+/// Rename / set-public for a Spotify playlist. Description is dropped (the crate has no setter);
+/// the liked-songs view is not editable.
+async fn spotify_edit_playlist(
+    st: &Arc<AppState>,
+    params: &Value,
+    pid: &str,
+) -> Result<Value, ErrorBody> {
+    if pid == "liked" {
+        return Err(spotify_err("The liked songs playlist cannot be edited."));
+    }
+    let client = st.spotify.client().await.ok_or_else(spotify_signed_out)?;
+    if let Some(name) = arg::<Option<String>>(params, "name")? {
+        let name = name.trim();
+        if name.is_empty() {
+            return Err(err("Playlist name cannot be empty."));
+        }
+        let name: String = name.chars().take(150).collect();
+        client.rename_playlist(pid, &name).await.map_err(spotify_err)?;
+    }
+    if let Some(public) = arg::<Option<bool>>(params, "public")? {
+        client.set_playlist_public(pid, public).await.map_err(spotify_err)?;
+    }
+    null()
 }
 
 // --- ported command bodies that are too large for a match arm ---------------------------------
@@ -638,6 +975,9 @@ async fn get_library(st: &Arc<AppState>) -> Result<Value, ErrorBody> {
 
 async fn get_playlist(st: &Arc<AppState>, params: &Value) -> Result<Value, ErrorBody> {
     let id = arg::<String>(params, "id")?;
+    if let Some(pid) = id.strip_prefix("spotify:playlist:") {
+        return spotify_playlist(st, pid).await;
+    }
     let sort = arg::<Option<PlaylistSort>>(params, "sort")?;
     let desc = arg::<Option<bool>>(params, "desc")?;
     if is_local_playlist_id(&id) {
