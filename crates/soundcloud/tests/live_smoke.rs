@@ -47,7 +47,10 @@ async fn live_smoke() {
 
     // 5. The artist.
     let user = sc.user(track.user.id).await.expect("user");
-    eprintln!("user: {} — {} followers, {} tracks", user.username, user.followers, user.track_count);
+    eprintln!(
+        "user: {} — {} followers, {} tracks",
+        user.username, user.followers, user.track_count
+    );
     assert_eq!(user.id, track.user.id);
 
     // 6. The artist's albums.

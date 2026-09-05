@@ -189,10 +189,7 @@ async fn listen(address: &str) -> Result<String> {
     let mut stream = BufReader::new(stream);
 
     let mut request_line = String::new();
-    stream
-        .read_line(&mut request_line)
-        .await
-        .context("cannot read the OAuth redirect request")?;
+    stream.read_line(&mut request_line).await.context("cannot read the OAuth redirect request")?;
 
     let target = request_line
         .split_whitespace()

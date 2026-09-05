@@ -122,9 +122,7 @@ impl SoundCloud {
         if status.is_success() {
             return Ok(resp.bytes().await?.to_vec());
         }
-        if status == reqwest::StatusCode::UNAUTHORIZED
-            || status == reqwest::StatusCode::FORBIDDEN
-        {
+        if status == reqwest::StatusCode::UNAUTHORIZED || status == reqwest::StatusCode::FORBIDDEN {
             let id = self.refresh_client_id().await?;
             let resp = self.send(url, extra, &id).await?;
             let status = resp.status();
@@ -142,13 +140,7 @@ impl SoundCloud {
         extra: &[(&str, String)],
         client_id: &str,
     ) -> Result<reqwest::Response> {
-        Ok(self
-            .http
-            .get(url)
-            .query(extra)
-            .query(&[("client_id", client_id)])
-            .send()
-            .await?)
+        Ok(self.http.get(url).query(extra).query(&[("client_id", client_id)]).send().await?)
     }
 
     /// GET + deserialize JSON, with the client_id retry.
@@ -234,8 +226,7 @@ impl SoundCloud {
     pub async fn tracks(&self, ids: &[u64]) -> Result<Vec<Track>> {
         let mut by_id: HashMap<u64, Track> = HashMap::with_capacity(ids.len());
         for chunk in ids.chunks(HYDRATE_BATCH) {
-            let joined =
-                chunk.iter().map(u64::to_string).collect::<Vec<_>>().join(",");
+            let joined = chunk.iter().map(u64::to_string).collect::<Vec<_>>().join(",");
             let url = format!("{API}/tracks");
             let batch: Vec<WireTrack> = self.get_json(&url, &[("ids", joined)]).await?;
             for w in batch {
@@ -288,9 +279,8 @@ impl SoundCloud {
     /// A user's tracks, paged (`/users/{id}/tracks`).
     pub async fn user_tracks(&self, id: u64, offset: u32) -> Result<Page<Track>> {
         let url = format!("{API}/users/{id}/tracks");
-        let w: WireCollection<WireTrack> = self
-            .get_json(&url, &[("limit", LIMIT.into()), ("offset", offset.to_string())])
-            .await?;
+        let w: WireCollection<WireTrack> =
+            self.get_json(&url, &[("limit", LIMIT.into()), ("offset", offset.to_string())]).await?;
         Ok(page(w, offset, map_track))
     }
 
@@ -320,9 +310,7 @@ impl SoundCloud {
         for item in w.collection {
             let track = match item.get("track") {
                 Some(t) => Some(t.clone()),
-                None if item.get("kind").and_then(|k| k.as_str()) == Some("track") => {
-                    Some(item)
-                }
+                None if item.get("kind").and_then(|k| k.as_str()) == Some("track") => Some(item),
                 None => None,
             };
             if let Some(t) = track {
@@ -365,8 +353,7 @@ impl SoundCloud {
     /// Related / autoplay tracks (`/tracks/{id}/related`).
     pub async fn related(&self, id: u64) -> Result<Vec<Track>> {
         let url = format!("{API}/tracks/{id}/related");
-        let w: WireCollection<WireTrack> =
-            self.get_json(&url, &[("limit", LIMIT.into())]).await?;
+        let w: WireCollection<WireTrack> = self.get_json(&url, &[("limit", LIMIT.into())]).await?;
         Ok(w.collection.into_iter().map(map_track).collect())
     }
 

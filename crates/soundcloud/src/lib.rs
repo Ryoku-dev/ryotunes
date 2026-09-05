@@ -21,9 +21,8 @@ use std::sync::LazyLock;
 use regex::Regex;
 
 /// Asset-bundle `<script src>` matcher; the `client_id` lives in one of these bundles.
-static SCRIPT_SRC_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r#"src="(https://a-v2\.sndcdn\.com/assets/[^"]+\.js)""#).unwrap()
-});
+static SCRIPT_SRC_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r#"src="(https://a-v2\.sndcdn\.com/assets/[^"]+\.js)""#).unwrap());
 /// The `client_id` literal inside a bundle (`client_id:"…"` or `client_id="…"`, exactly 32 chars).
 static CLIENT_ID_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r#"client_id\s*[:=]\s*"([A-Za-z0-9]{32})""#).unwrap());
@@ -49,12 +48,9 @@ pub fn downsample_waveform(samples: &[u32], height: u32, buckets: usize) -> Vec<
     let n = samples.len();
     // Fall back to the observed peak when the payload omits/zeroes `height`, so scaling never
     // divides by zero and still spans the full 0..=100 range.
-    let denom = u64::from(if height == 0 {
-        samples.iter().copied().max().unwrap_or(1)
-    } else {
-        height
-    })
-    .max(1);
+    let denom =
+        u64::from(if height == 0 { samples.iter().copied().max().unwrap_or(1) } else { height })
+            .max(1);
     let mut out = Vec::with_capacity(buckets);
     for i in 0..buckets {
         let start = i * n / buckets;
