@@ -105,336 +105,286 @@ Item {
             .slice(0, 3);
     }
 
-    Rectangle { anchors.fill: parent; color: Tokens.paper }
-
-    ColumnLayout {
+    // App draws the Backdrop + paper wash behind the page; no full-bleed paper base here, and the
+    // page fills the padded rect App gives it with no outer margins of its own.
+    GridView {
+        id: grid
         anchors.fill: parent
-        spacing: 0
+        clip: true
+        reuseItems: true
+        cacheBuffer: Math.max(0, Math.round(height * 1.5))
+        boundsBehavior: Flickable.StopAtBounds
+        topMargin: Style.sp(4)
+        bottomMargin: Style.sp(20)
+        // The full grid clears while a fresh query resolves, mirroring the Svelte loading branch;
+        // paging keeps the current cards and only appends beneath them.
+        model: page.loading ? [] : page.stations
 
-        // --- header + search console --------------------------------------------------------
-        ColumnLayout {
-            Layout.fillWidth: true
-            Layout.leftMargin: Style.sp(8)
-            Layout.rightMargin: Style.sp(8)
-            Layout.topMargin: Style.sp(6)
-            spacing: Style.sp(1)
+        // The same column maths CardGrid uses: fill the width in ~192 px columns.
+        cellWidth: Math.floor((width - 1) / Math.max(1, Math.floor(width / Style.sp(48))))
+        cellHeight: Style.sp(74)
 
-            Text {
-                text: "// MUSIC / AIRWAVES"
-                color: Tokens.inkFaint
-                font.family: Style.fontMono
-                font.pixelSize: Style.fs.xs
-                font.letterSpacing: 1
-            }
-            RowLayout {
-                Layout.fillWidth: true
+        // --- hero + search console + state -------------------------------------------------
+        header: Item {
+            width: grid.width
+            implicitHeight: heroCol.implicitHeight + Style.sp(4)
+
+            ColumnLayout {
+                id: heroCol
+                width: parent.width
                 spacing: Style.sp(4)
-                Text {
-                    text: "Radio"
-                    color: Tokens.ink
-                    font.family: Tokens.display
-                    font.pixelSize: Style.fs.xl
-                }
-                Text {
-                    text: "波 · " + (page.query ? "SEARCH" : "TOP") + " · " + page.stations.length + " STATIONS"
-                    color: Tokens.inkFaint
-                    font.family: Style.fontMono
-                    font.pixelSize: Style.fs.xs
-                    font.letterSpacing: 1
-                    Layout.alignment: Qt.AlignBottom
-                    Layout.bottomMargin: Style.sp(1)
-                }
-                Item { Layout.fillWidth: true }
-            }
-            Text {
-                Layout.fillWidth: true
-                Layout.maximumWidth: Style.sp(160)
-                text: "Live stations from around the world, played through Ryotunes' native audio engine. The directory is only contacted when you open, search or extend this page."
-                color: Tokens.inkMuted
-                font.family: Style.fontUi
-                font.pixelSize: Style.fs.sm
-                wrapMode: Text.WordWrap
-            }
 
-            // search form
-            RowLayout {
-                Layout.fillWidth: true
-                Layout.topMargin: Style.sp(2)
-                spacing: Style.sp(2)
-                Rectangle {
-                    Layout.preferredWidth: Style.sp(90)
-                    Layout.maximumWidth: Style.sp(120)
-                    implicitHeight: Style.sp(10)
-                    radius: Style.radius
-                    color: Tokens.paperLift
-                    border.width: 1
-                    border.color: searchField.activeFocus ? Tokens.lineStrong : Tokens.line
-                    RowLayout {
-                        anchors.fill: parent
-                        anchors.leftMargin: Style.sp(2)
-                        anchors.rightMargin: Style.sp(2)
-                        spacing: Style.sp(2)
-                        Icon { name: "search"; size: Style.fs.sm; color: Tokens.inkMuted }
-                        TextInput {
-                            id: searchField
-                            Layout.fillWidth: true
-                            verticalAlignment: TextInput.AlignVCenter
-                            clip: true
-                            color: Tokens.ink
-                            font.family: Style.fontUi
-                            font.pixelSize: Style.fs.md
-                            text: page.input
-                            onTextChanged: page.input = text
-                            onAccepted: page.search()
-                            Text {
-                                anchors.verticalCenter: parent.verticalCenter
-                                visible: searchField.text.length === 0
-                                text: "Search stations by name…"
-                                color: Tokens.inkFaint
-                                font: searchField.font
+                PageHero {
+                    Layout.fillWidth: true
+                    eyebrow: "RADIO"
+                    title: "Airwaves"
+                    meta: (page.query ? "Results for “" + page.query + "”" : "Top stations")
+                        + " · " + page.stations.length + " stations"
+                    placeholderIcon: "radio"
+                    likeable: false
+                    showMore: false
+                    primaryLabel: "Top stations"
+                    onPrimary: page.clearSearch()
+                }
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: Style.sp(2)
+                    Rectangle {
+                        Layout.preferredWidth: Style.sp(90)
+                        Layout.maximumWidth: Style.sp(120)
+                        Layout.preferredHeight: Style.sp(10)
+                        radius: Style.radius
+                        color: Tokens.paperLift
+                        border.width: 1
+                        border.color: searchField.activeFocus ? Tokens.lineStrong : Tokens.line
+                        RowLayout {
+                            anchors.fill: parent
+                            anchors.leftMargin: Style.sp(3)
+                            anchors.rightMargin: Style.sp(3)
+                            spacing: Style.sp(2)
+                            Icon { name: "search"; size: Style.fs.md; color: Tokens.inkMuted }
+                            TextInput {
+                                id: searchField
+                                Layout.fillWidth: true
+                                verticalAlignment: TextInput.AlignVCenter
+                                clip: true
+                                color: Tokens.ink
+                                font.family: Style.fontUi
+                                font.pixelSize: Style.fs.md
+                                text: page.input
+                                onTextChanged: page.input = text
+                                onAccepted: page.search()
+                                Text {
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    visible: searchField.text.length === 0
+                                    text: "Search stations by name…"
+                                    color: Tokens.inkFaint
+                                    font: searchField.font
+                                }
                             }
                         }
                     }
+                    Pill { label: "Search"; icon: "search"; primary: true; enabled: !page.loading; onClicked: page.search() }
+                    Item { Layout.fillWidth: true }
                 }
-                Pill { label: "Search"; icon: "search"; primary: true; enabled: !page.loading; onClicked: page.search() }
-                Pill { visible: page.query !== ""; label: "Top stations"; enabled: !page.loading; onClicked: page.clearSearch() }
-                Item { Layout.fillWidth: true }
+
+                Hairline { Layout.fillWidth: true }
+
+                // Loading / error / empty state, matching the Svelte branches. Flows under the
+                // console so the hero and search stay put while a query resolves.
+                ColumnLayout {
+                    Layout.fillWidth: true
+                    Layout.topMargin: Style.sp(4)
+                    spacing: Style.sp(2)
+                    visible: page.loading || page.stations.length === 0
+
+                    Text {
+                        text: page.loading ? "TUNING"
+                            : (page.errorMsg ? "SIGNAL LOST" : "NO MATCH")
+                        color: Tokens.inkFaint
+                        font.family: Style.fontMono
+                        font.pixelSize: Style.fs.micro
+                        font.letterSpacing: Style.trackMicro
+                    }
+                    Text {
+                        text: page.loading ? "Finding live stations."
+                            : (page.errorMsg ? "Radio directory unavailable." : "No stations found.")
+                        color: Tokens.inkDim
+                        font.family: Style.fontUi
+                        font.pixelSize: Style.fs.md
+                        font.weight: Font.DemiBold
+                    }
+                    Text {
+                        Layout.fillWidth: true
+                        Layout.maximumWidth: Style.sp(140)
+                        text: page.loading ? "Trying available Radio Browser mirrors without blocking the player."
+                            : (page.errorMsg ? page.errorMsg : "Try a shorter station name or return to the popular directory.")
+                        color: Tokens.inkMuted
+                        font.family: Style.fontUi
+                        font.pixelSize: Style.fs.sm
+                        wrapMode: Text.WordWrap
+                    }
+                    Pill {
+                        visible: !page.loading && (page.errorMsg !== "" || page.query !== "")
+                        label: page.errorMsg ? "Try again" : "Top stations"
+                        onClicked: page.errorMsg ? page.load(true) : page.clearSearch()
+                    }
+                }
             }
         }
 
-        Hairline { Layout.fillWidth: true; Layout.topMargin: Style.sp(4); Layout.leftMargin: Style.sp(8); Layout.rightMargin: Style.sp(8) }
-
-        // --- content ------------------------------------------------------------------------
-        Item {
-            Layout.fillWidth: true
-            Layout.fillHeight: true
-
-            // loading / error / empty states replace the grid, matching the Svelte branches.
+        // --- pager --------------------------------------------------------------------------
+        footer: Item {
+            width: grid.width
+            implicitHeight: (!page.loading && page.stations.length > 0) ? Style.sp(20) : 0
+            visible: !page.loading && page.stations.length > 0
             ColumnLayout {
                 anchors.centerIn: parent
-                width: Style.sp(120)
-                spacing: Style.sp(2)
-                visible: page.loading || (!page.stations.length)
-
-                Text {
-                    Layout.alignment: Qt.AlignHCenter
-                    text: page.loading ? "// TUNING"
-                        : (page.errorMsg ? "// SIGNAL LOST" : "// NO MATCH")
-                    color: Tokens.inkFaint
-                    font.family: Style.fontMono
-                    font.pixelSize: Style.fs.xs
-                    font.letterSpacing: 1.5
-                }
-                Text {
-                    Layout.alignment: Qt.AlignHCenter
-                    text: page.loading ? "Finding live stations."
-                        : (page.errorMsg ? "Radio directory unavailable." : "No stations found.")
-                    color: Tokens.inkDim
-                    font.family: Style.fontUi
-                    font.pixelSize: Style.fs.lg
-                    font.weight: Font.DemiBold
-                }
-                Text {
-                    Layout.alignment: Qt.AlignHCenter
-                    Layout.maximumWidth: Style.sp(120)
-                    horizontalAlignment: Text.AlignHCenter
-                    text: page.loading ? "Trying available Radio Browser mirrors without blocking the player."
-                        : (page.errorMsg ? page.errorMsg : "Try a shorter station name or return to the popular directory.")
-                    color: Tokens.inkMuted
-                    font.family: Style.fontUi
-                    font.pixelSize: Style.fs.sm
-                    wrapMode: Text.WordWrap
-                }
+                spacing: Style.sp(1)
                 Pill {
                     Layout.alignment: Qt.AlignHCenter
-                    visible: !page.loading && (page.errorMsg !== "" || page.query !== "")
-                    label: page.errorMsg ? "Try again" : "Top stations"
-                    onClicked: page.errorMsg ? page.load(true) : page.clearSearch()
+                    visible: page.hasMore
+                    label: page.loadingMore ? "Finding more…" : "Load more stations"
+                    enabled: !page.loadingMore
+                    onClicked: page.load(false)
+                }
+                Text {
+                    Layout.alignment: Qt.AlignHCenter
+                    visible: !page.hasMore
+                    text: "END OF THIS SIGNAL SET"
+                    color: Tokens.inkFaint
+                    font.family: Style.fontMono
+                    font.pixelSize: Style.fs.micro
+                    font.letterSpacing: Style.trackMicro
                 }
             }
+        }
 
-            GridView {
-                id: grid
+        // --- station card: art 96, name md, tags micro (tracked) ---------------------------
+        delegate: Item {
+            id: cell
+            required property var modelData
+            width: grid.cellWidth
+            height: grid.cellHeight
+
+            Rectangle {
                 anchors.fill: parent
-                anchors.leftMargin: Style.sp(6)
-                anchors.rightMargin: Style.sp(6)
-                anchors.topMargin: Style.sp(4)
-                visible: !page.loading && page.stations.length > 0
-                clip: true
-                reuseItems: true
-                cacheBuffer: Math.max(0, Math.round(height * 1.5))
-                boundsBehavior: Flickable.StopAtBounds
-                model: page.stations
+                anchors.margins: Style.sp(1.5)
+                radius: Style.radiusCard
+                color: Tokens.paperLift
+                border.width: 1
+                border.color: cardHover.hovered ? Tokens.lineStrong : Tokens.line
 
-                readonly property int cols: Math.max(2, Math.floor(width / Style.sp(72)))
-                cellWidth: Math.floor(width / cols)
-                cellHeight: Style.sp(42)
+                ColumnLayout {
+                    anchors.fill: parent
+                    anchors.margins: Style.sp(3)
+                    spacing: Style.sp(2)
 
-                footer: Item {
-                    width: grid.width
-                    implicitHeight: Style.sp(20)
-                    ColumnLayout {
-                        anchors.centerIn: parent
-                        spacing: Style.sp(1)
-                        Pill {
-                            Layout.alignment: Qt.AlignHCenter
-                            visible: page.hasMore
-                            label: page.loadingMore ? "Finding more…" : "Load more stations"
-                            enabled: !page.loadingMore
-                            onClicked: page.load(false)
+                    // favicon over the neutral plate, with a LIVE badge and a radio fallback.
+                    Item {
+                        id: artBox
+                        Layout.preferredWidth: Style.sp(24)
+                        Layout.preferredHeight: Style.sp(24)
+                        Layout.alignment: Qt.AlignLeft
+
+                        Artwork {
+                            anchors.fill: parent
+                            url: cell.modelData.favicon || ""
+                            px: Style.sp(24)
+                            placeholderIcon: "radio"
                         }
-                        Text {
-                            Layout.alignment: Qt.AlignHCenter
-                            visible: !page.hasMore
-                            text: "// END OF THIS SIGNAL SET"
-                            color: Tokens.inkFaint
-                            font.family: Style.fontMono
-                            font.pixelSize: Style.fs.xs
-                            font.letterSpacing: 1.5
+                        Rectangle {
+                            anchors.left: parent.left
+                            anchors.bottom: parent.bottom
+                            anchors.margins: Style.sp(1)
+                            implicitWidth: liveTag.implicitWidth + Style.sp(2)
+                            implicitHeight: liveTag.implicitHeight + Style.sp(1)
+                            radius: Style.sp(1)
+                            color: Qt.rgba(Tokens.paper.r, Tokens.paper.g, Tokens.paper.b, 0.82)
+                            Text {
+                                id: liveTag
+                                anchors.centerIn: parent
+                                text: "LIVE"
+                                color: Tokens.sun
+                                font.family: Style.fontMono
+                                font.pixelSize: Style.fs.micro
+                                font.letterSpacing: Style.trackMicro
+                            }
                         }
                     }
-                }
 
-                delegate: Item {
-                    id: cell
-                    required property var modelData
-                    width: grid.cellWidth
-                    height: grid.cellHeight
+                    Text {
+                        Layout.fillWidth: true
+                        text: cell.modelData.name
+                        color: Tokens.ink
+                        font.family: Style.fontUi
+                        font.pixelSize: Style.fs.md
+                        font.weight: Font.DemiBold
+                        elide: Text.ElideRight
+                        maximumLineCount: 2
+                        wrapMode: Text.WordWrap
+                    }
+                    Text {
+                        Layout.fillWidth: true
+                        text: page.detail(cell.modelData)
+                        color: Tokens.inkMuted
+                        font.family: Style.fontMono
+                        font.pixelSize: Style.fs.micro
+                        elide: Text.ElideRight
+                    }
 
-                    Rectangle {
-                        anchors.fill: parent
-                        anchors.margins: Style.sp(1.5)
-                        radius: Style.radiusCard
-                        color: Tokens.paperLift
-                        border.width: 1
-                        border.color: cardHover.hovered ? Tokens.lineStrong : Tokens.line
-
-                        RowLayout {
-                            anchors.fill: parent
-                            anchors.margins: Style.sp(3)
-                            spacing: Style.sp(3)
-
-                            // artwork: favicon over a neutral plate, LIVE badge, music fallback
-                            Rectangle {
-                                Layout.preferredWidth: Style.sp(16)
-                                Layout.preferredHeight: Style.sp(16)
-                                Layout.alignment: Qt.AlignTop
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: Style.sp(1)
+                        visible: page.stationTags(cell.modelData).length > 0
+                        Repeater {
+                            model: page.stationTags(cell.modelData)
+                            delegate: Rectangle {
+                                id: tagChip
+                                required property var modelData
+                                implicitWidth: tagText.implicitWidth + Style.sp(3)
+                                implicitHeight: Style.sp(5)
                                 radius: Style.radius
-                                color: Tokens.paperLift
+                                color: "transparent"
                                 border.width: 1
                                 border.color: Tokens.lineSoft
-                                clip: true
-                                Icon {
+                                Text {
+                                    id: tagText
                                     anchors.centerIn: parent
-                                    visible: favicon.status !== Image.Ready
-                                    name: "radio"
-                                    size: Style.fs.lg
+                                    text: tagChip.modelData.toUpperCase()
                                     color: Tokens.inkFaint
-                                }
-                                Image {
-                                    id: favicon
-                                    anchors.fill: parent
-                                    anchors.margins: 1
-                                    source: cell.modelData.favicon || ""
-                                    sourceSize: Qt.size(Style.sp(32), Style.sp(32))
-                                    fillMode: Image.PreserveAspectFit
-                                    asynchronous: true
-                                    cache: true
-                                    visible: status === Image.Ready
-                                }
-                                Rectangle {
-                                    anchors.left: parent.left
-                                    anchors.bottom: parent.bottom
-                                    width: liveTag.implicitWidth + Style.sp(2)
-                                    height: liveTag.implicitHeight + Style.sp(1)
-                                    color: Qt.rgba(Tokens.paper.r, Tokens.paper.g, Tokens.paper.b, 0.78)
-                                    Text {
-                                        id: liveTag
-                                        anchors.centerIn: parent
-                                        text: "LIVE"
-                                        color: Tokens.sun
-                                        font.family: Style.fontMono
-                                        font.pixelSize: Style.fs.xs
-                                        font.letterSpacing: 1
-                                    }
-                                }
-                            }
-
-                            ColumnLayout {
-                                Layout.fillWidth: true
-                                Layout.fillHeight: true
-                                spacing: Style.sp(1)
-
-                                Text {
-                                    Layout.fillWidth: true
-                                    text: cell.modelData.name
-                                    color: Tokens.ink
-                                    font.family: Style.fontUi
-                                    font.pixelSize: Style.fs.md
-                                    font.weight: Font.DemiBold
-                                    elide: Text.ElideRight
-                                    maximumLineCount: 2
-                                    wrapMode: Text.WordWrap
-                                }
-                                Text {
-                                    Layout.fillWidth: true
-                                    text: page.detail(cell.modelData)
-                                    color: Tokens.inkMuted
                                     font.family: Style.fontMono
-                                    font.pixelSize: Style.fs.xs
-                                    elide: Text.ElideRight
-                                }
-                                RowLayout {
-                                    Layout.fillWidth: true
-                                    Layout.topMargin: Style.sp(0.5)
-                                    spacing: Style.sp(1)
-                                    visible: page.stationTags(cell.modelData).length > 0
-                                    Repeater {
-                                        model: page.stationTags(cell.modelData)
-                                        delegate: Rectangle {
-                                            id: tagChip
-                                            required property var modelData
-                                            implicitWidth: tagText.implicitWidth + Style.sp(3)
-                                            implicitHeight: Style.sp(5)
-                                            radius: Style.radius
-                                            color: "transparent"
-                                            border.width: 1
-                                            border.color: Tokens.lineSoft
-                                            Text {
-                                                id: tagText
-                                                anchors.centerIn: parent
-                                                text: tagChip.modelData
-                                                color: Tokens.inkFaint
-                                                font.family: Style.fontUi
-                                                font.pixelSize: Style.fs.xs
-                                            }
-                                        }
-                                    }
-                                }
-                                Item { Layout.fillHeight: true }
-                                RowLayout {
-                                    Layout.fillWidth: true
-                                    spacing: Style.sp(2)
-                                    Pill {
-                                        label: (page.playing === cell.modelData.stationUuid) ? "Tuning…" : "Play"
-                                        icon: "play"
-                                        primary: true
-                                        enabled: !page.playing
-                                        onClicked: page.playStation(cell.modelData)
-                                    }
-                                    Pill {
-                                        visible: !!cell.modelData.homepage
-                                        label: "Site"
-                                        icon: "link"
-                                        onClicked: page.openHomepage(cell.modelData)
-                                    }
-                                    Item { Layout.fillWidth: true }
+                                    font.pixelSize: Style.fs.micro
+                                    font.letterSpacing: Style.trackMicro
                                 }
                             }
                         }
-                        HoverHandler { id: cardHover }
+                        Item { Layout.fillWidth: true }
+                    }
+
+                    Item { Layout.fillHeight: true }
+
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: Style.sp(2)
+                        Pill {
+                            label: (page.playing === cell.modelData.stationUuid) ? "Tuning…" : "Play"
+                            icon: "play"
+                            primary: true
+                            enabled: !page.playing
+                            onClicked: page.playStation(cell.modelData)
+                        }
+                        Pill {
+                            visible: !!cell.modelData.homepage
+                            label: "Site"
+                            icon: "link"
+                            onClicked: page.openHomepage(cell.modelData)
+                        }
+                        Item { Layout.fillWidth: true }
                     }
                 }
+                HoverHandler { id: cardHover }
             }
         }
     }
