@@ -95,6 +95,13 @@ impl StreamHandle {
         self.fifo.path()
     }
 
+    /// A cheap, cloneable transport handle (seek/play + FIFO path). The daemon keeps this to
+    /// drive scrubbing while a separate task owns the [`StreamHandle`] to poll
+    /// [`StreamHandle::next_event`] — the two halves can't share `&mut self`.
+    pub fn controls(&self) -> StreamControls {
+        StreamControls { player: self.player.clone(), fifo: self.fifo.clone() }
+    }
+
     /// Seek within the current track.
     pub fn seek(&self, position: Duration) {
         self.player.seek(position.as_millis() as u32);
@@ -121,6 +128,34 @@ impl StreamHandle {
                 return Some(event);
             }
         }
+    }
+}
+
+/// The transport half of a live stream, split off from [`StreamHandle`] so the daemon can seek
+/// and reload from one place while the handle itself is owned by the task polling its events.
+/// Cheap to clone: two `Arc`s. Dropping it does not tear the player down (see [`StreamHandle`]).
+#[derive(Clone)]
+pub struct StreamControls {
+    player: Arc<Player>,
+    fifo: Arc<Fifo>,
+}
+
+impl StreamControls {
+    /// The FIFO mpv should `loadfile` with the rawaudio demuxer options (see the module docs).
+    pub fn fifo_path(&self) -> &Path {
+        self.fifo.path()
+    }
+
+    /// Seek within the current track. The daemon reloads mpv on the FIFO afterwards so it reads
+    /// the post-seek PCM (mpv cannot seek a pipe itself).
+    pub fn seek(&self, position: Duration) {
+        self.player.seek(position.as_millis() as u32);
+    }
+
+    /// Resume librespot decoding. Never used for an ordinary pause (that pauses mpv and lets FIFO
+    /// backpressure stall librespot); only after a seek reload.
+    pub fn play(&self) {
+        self.player.play();
     }
 }
 

@@ -5,7 +5,12 @@ use std::collections::HashSet;
 use std::hash::{Hash, Hasher};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
+use std::future::Future;
+use std::pin::Pin;
 use std::sync::Arc;
+use std::time::Duration;
+
+use ryotunes_spotify::{StreamControls, StreamEvent, StreamHandle};
 
 use innertube::{
     AccountIdentity, AccountInfo, AudioQuality, Clients, InnerTube, SongItem, MAIN_CLIENT,
@@ -138,6 +143,24 @@ pub struct AppState {
     /// the `audio-fx` event and the subscribe snapshot. Applied to the player as one `af` chain;
     /// kept here so a newly opened window can be told the current values.
     audio_fx: parking_lot::RwLock<AudioFx>,
+    /// The one live Spotify stream, if a `spotify:track:` id is playing: its transport controls
+    /// (seek/play) plus the task watching librespot's events. A fresh `resolve` of a Spotify id
+    /// replaces it (dropping the previous handle and aborting its watcher); a non-Spotify track or
+    /// an explicit stop drops it. `None` whenever YouTube/local/radio audio is playing.
+    spotify_stream: parking_lot::Mutex<Option<SpotifyStream>>,
+    /// Per-track position offset (secs, f64 bits) for the playing Spotify track: mpv restarts its
+    /// `time-pos` at 0 every time the FIFO is (re)loaded, so a seek stores the target here and
+    /// position ticks report `base + mpv time-pos`. Reset to 0 on every track start; always 0
+    /// while a non-Spotify track plays, so adding it is a no-op there.
+    spotify_seek_base: AtomicU64,
+}
+
+/// One live Spotify stream held on [`AppState`]: the cheap transport handle the daemon seeks
+/// with, plus the task watching librespot's event stream for the cases mpv can't see (a track
+/// that never becomes available). Aborting the watcher and dropping the controls tears it down.
+struct SpotifyStream {
+    controls: StreamControls,
+    watcher: tokio::task::JoinHandle<()>,
 }
 
 /// Repeat mode for the queue. Serialized lowercase for the UI + `queue_json`.
@@ -408,6 +431,8 @@ impl AppState {
             stop_after_current: AtomicBool::new(false),
             low_resource_mode: AtomicBool::new(low_resource_mode),
             audio_fx: parking_lot::RwLock::new(AudioFx::default()),
+            spotify_stream: parking_lot::Mutex::new(None),
+            spotify_seek_base: AtomicU64::new(0),
         }
     }
 
@@ -805,7 +830,11 @@ impl AppState {
         Ok(())
     }
 
-    async fn resolve(&self, video_id: &str, is_upload: bool) -> Result<PlaybackData, ResolveError> {
+    async fn resolve(
+        self: &std::sync::Arc<Self>,
+        video_id: &str,
+        is_upload: bool,
+    ) -> Result<PlaybackData, ResolveError> {
         // A local file is its own "stream": no network, no cache, no extraction (local.rs).
         // The renderer sees local ids for legitimate library rows, but it is not authoritative:
         // require the path to have come from our native scan before handing it to mpv.
@@ -833,6 +862,52 @@ impl AppState {
                 .and_then(crate::radio::normalize_station)
                 .ok_or_else(|| ResolveError::AllClientsFailed(video_id.to_owned()))?;
             return Ok(crate::radio::playback_data(&station));
+        }
+        // A Spotify track streams as raw PCM through a per-session FIFO, not a cacheable URL, so it
+        // resolves ahead of the latency cache / HEAD / orchestrator path and never touches any of
+        // them. Opening the stream starts librespot decoding into the FIFO immediately; mpv is
+        // pointed at that FIFO with the rawaudio demuxer options.
+        if let Some(tid) = crate::spotify::spotify_track_id(video_id) {
+            let Some(client) = self.spotify.client().await else {
+                return Err(ResolveError::SignInRequired(
+                    "Sign in to Spotify to play this".to_owned(),
+                ));
+            };
+            let handle = client
+                .stream(tid)
+                .map_err(|e| ResolveError::AllClientsFailed(format!("{video_id}: {e}")))?;
+            let controls = handle.controls();
+            let fifo = controls.fifo_path().to_string_lossy().into_owned();
+            // Watch librespot's events off the mpv pump. An Unavailable track never fills the FIFO,
+            // so mpv would just block forever — the watcher surfaces it as an error + skip.
+            let watcher = {
+                let me = std::sync::Arc::clone(self);
+                let vid = video_id.to_owned();
+                tokio::spawn(async move { me.watch_spotify_stream(vid, handle).await })
+            };
+            let previous =
+                self.spotify_stream.lock().replace(SpotifyStream { controls, watcher });
+            if let Some(prev) = previous {
+                prev.watcher.abort();
+            }
+            return Ok(PlaybackData {
+                video_id: video_id.to_owned(),
+                stream_url: fifo,
+                itag: 0,
+                mpv_options: spotify_mpv_options(),
+                headers: Default::default(),
+                expires_in_seconds: 0,
+                loudness_db: None,
+                playback_ping: None,
+                // The queue item already carries title/artists/thumbnail/duration; skip the extra
+                // `client.track` round-trip so playback starts without waiting on it.
+                title: None,
+                artists: None,
+                duration: None,
+                thumbnail: None,
+                is_video: Some(false),
+                stream_client: "spotify".to_owned(),
+            });
         }
         // Latency cache first (UI state) — honor expiry, never a source of truth.
         // 60s safety margin: a URL that expires mid-load/mid-buffer fails as Raw(-13).
@@ -890,7 +965,11 @@ impl AppState {
     /// Speculatively resolve one stream into the normal latency cache without touching playback.
     /// The UI calls this only after settled search intent / a short hover, so a subsequent Play can
     /// skip the /player + PoToken + HEAD waterfall and go straight to mpv. Failures are silent.
-    pub async fn prefetch_stream(&self, video_id: String, is_upload: bool) {
+    pub async fn prefetch_stream(self: &std::sync::Arc<Self>, video_id: String, is_upload: bool) {
+        // A Spotify id would open a real librespot stream into the shared FIFO — never on spec.
+        if crate::spotify::is_spotify_id(&video_id) {
+            return;
+        }
         let _ = self.resolve(&video_id, is_upload).await;
     }
 
@@ -1466,6 +1545,10 @@ impl AppState {
             q.history_pinged = false;
             q.duration = 0.0;
         }
+        // A gapless advance is only ever YouTube→YouTube (a Spotify boundary is never primed), so
+        // the base is already 0 — reset anyway to keep the "0 unless a Spotify track was seeked"
+        // invariant local and obvious.
+        self.set_spotify_base(0.0);
         if let Some(item) = self.current_item().await {
             self.emit_now_playing(&item, "gapless");
             self.refresh_rating(&item.video_id, gen);
@@ -1654,6 +1737,20 @@ impl AppState {
                 }
             }
         }
+        // A fresh load always starts at position 0 (a user seek moves the base later). Clear it
+        // unconditionally: it is only ever non-zero after a Spotify seek, and this covers the
+        // Spotify→anything and anything→Spotify transitions in one place.
+        self.set_spotify_base(0.0);
+        if crate::spotify::is_spotify_id(&item.video_id) {
+            // mpv can't measure a FIFO's length, so seed the duration from the queue item and push
+            // it exactly like `on_duration` would (mpv's own `duration` events are ignored while a
+            // Spotify track plays).
+            self.seed_spotify_duration(&item).await;
+        } else {
+            // Any non-Spotify track means the previous Spotify stream (if any) is finished: drop
+            // its handle and stop its watcher. `resolve` already replaced it for a Spotify track.
+            self.drop_spotify_stream();
+        }
         self.emit_now_playing(&item, &data.stream_client);
         // Search/autoplay/restored rows often carry no live likeStatus. Refresh the playing track
         // asynchronously without delaying audio start.
@@ -1689,6 +1786,16 @@ impl AppState {
                 let Some(next) = next_index(q.items.len(), q.current, q.repeat) else { return };
                 if q.lookahead_loaded == Some(next) {
                     return; // already primed
+                }
+                // A Spotify track streams through one per-client FIFO: resolving a Spotify *next*
+                // would start a second librespot decode into it (corrupting the current track), and
+                // a FIFO can't be gaplessly appended to a URL either. When either side of the
+                // boundary is Spotify, don't prime — `on_track_ended` loads across it explicitly.
+                let boundary_spotify = [q.current, next].iter().any(|&i| {
+                    q.items.get(i).is_some_and(|it| crate::spotify::is_spotify_id(&it.video_id))
+                });
+                if boundary_spotify {
+                    return;
                 }
                 next
             };
@@ -1812,7 +1919,13 @@ impl AppState {
             let q = self.queue.lock().await;
             (q.duration, q.items.get(q.current).cloned())
         };
-        let position = self.player.position().unwrap_or_else(|| self.current_position());
+        // mpv's raw `time-pos` is relative to the last FIFO (re)load for a Spotify track; add the
+        // seek base (0 for everything else) so a window opening mid-playback sees the true position.
+        let position = self
+            .player
+            .position()
+            .map(|p| position_with_base(p, self.spotify_base()))
+            .unwrap_or_else(|| self.current_position());
         self.note_position_sample(position);
         serde_json::json!({
             "now": item.as_ref().map(|i| Self::now_playing_json(i, "current")),
@@ -1948,6 +2061,8 @@ impl AppState {
     pub async fn shutdown_for_quit(&self) {
         self.flush_position();
         let _ = self.player.stop();
+        // Tear down any live Spotify stream + its watcher; nothing resumes librespot after Quit.
+        self.drop_spotify_stream();
         self.is_playing.store(false, Ordering::Release);
 
         // The user-facing media island is the first thing Quit must remove. MediaHandle::shutdown
@@ -2104,6 +2219,11 @@ impl AppState {
     /// watch-history ping, latched to happen exactly once per play. The ping is additionally
     /// gated on the `enable_history` setting + being logged in. Best-effort (errors logged).
     pub async fn on_position(&self, pos: f64) {
+        // mpv restarts `time-pos` at 0 whenever a Spotify FIFO is (re)loaded; the base carries the
+        // true track position across a seek. It is 0 for every non-Spotify track, so this is a
+        // no-op there — everything downstream (scrubber, resume, history threshold) sees the real
+        // position.
+        let pos = position_with_base(pos, self.spotify_base());
         self.record_position(pos);
         let crossed = {
             let mut q = self.queue.lock().await;
@@ -2132,7 +2252,9 @@ impl AppState {
         // Local files don't count: On Repeat is the only thing built from this table, and it's a
         // YouTube Music playlist — a row pointing at a path on this disk doesn't belong in it.
         if let Some(item) = played.filter(|i| {
-            !crate::local::is_local_song(&i.video_id) && !crate::radio::is_radio_id(&i.video_id)
+            !crate::local::is_local_song(&i.video_id)
+                && !crate::radio::is_radio_id(&i.video_id)
+                && !crate::spotify::is_spotify_id(&i.video_id)
         }) {
             if let Ok(json) = serde_json::to_string(&item) {
                 self.db.record_play(&item.video_id, &json, now_secs(), ON_REPEAT_WINDOW_SECS);
@@ -2163,16 +2285,119 @@ impl AppState {
 
     /// Latest mpv-reported track duration (secs), feeding the history-ping threshold + OS scrubber.
     pub async fn on_duration(&self, secs: f64) {
-        if secs.is_finite() && secs > 0.0 {
-            self.queue.lock().await.duration = secs;
-            if let Some(m) = &self.media {
-                m.set_duration(secs);
-            }
-            if let Some(d) = &self.discord {
-                d.set_duration(secs);
-            }
-            self.lastfm.set_duration(secs);
+        if !(secs.is_finite() && secs > 0.0) {
+            return;
         }
+        {
+            let mut q = self.queue.lock().await;
+            // A Spotify track's length is seeded from its queue item (`seed_spotify_duration`);
+            // mpv reports 0/inf for a FIFO and would clobber it. Ignore mpv here for Spotify.
+            let spotify = q
+                .items
+                .get(q.current)
+                .is_some_and(|i| crate::spotify::is_spotify_id(&i.video_id));
+            if spotify {
+                return;
+            }
+            q.duration = secs;
+        }
+        if let Some(m) = &self.media {
+            m.set_duration(secs);
+        }
+        if let Some(d) = &self.discord {
+            d.set_duration(secs);
+        }
+        self.lastfm.set_duration(secs);
+    }
+
+    /// The playing Spotify track's position base (secs). 0 while anything else plays.
+    fn spotify_base(&self) -> f64 {
+        f64::from_bits(self.spotify_seek_base.load(Ordering::Relaxed))
+    }
+
+    fn set_spotify_base(&self, secs: f64) {
+        self.spotify_seek_base.store(secs.to_bits(), Ordering::Relaxed);
+    }
+
+    /// Seed a Spotify track's duration from its queue item (`m:ss`) and push it to the OS controls,
+    /// Discord and Last.fm exactly as [`Self::on_duration`] would — mpv can't measure the FIFO.
+    async fn seed_spotify_duration(&self, item: &SongItem) {
+        let secs = parse_duration_ms(item.duration.as_deref()) as f64 / 1000.0;
+        if secs <= 0.0 {
+            return;
+        }
+        self.queue.lock().await.duration = secs;
+        if let Some(m) = &self.media {
+            m.set_duration(secs);
+        }
+        if let Some(d) = &self.discord {
+            d.set_duration(secs);
+        }
+        self.lastfm.set_duration(secs);
+    }
+
+    /// Drop the live Spotify stream, if any: releasing the transport controls and aborting the
+    /// event watcher. A no-op when nothing is streaming. Also clears the seek base.
+    fn drop_spotify_stream(&self) {
+        if let Some(prev) = self.spotify_stream.lock().take() {
+            prev.watcher.abort();
+        }
+        self.set_spotify_base(0.0);
+    }
+
+    /// Watch one Spotify stream's librespot events on its own task. mpv drives ordinary playback
+    /// (position/pause, and end-of-track via the FIFO closing → mpv EOF → `on_track_ended`), so
+    /// this only catches what mpv can't see: a track that never becomes available (the FIFO simply
+    /// never fills). Owns the [`StreamHandle`]; aborted by [`Self::drop_spotify_stream`] / a
+    /// replacing `resolve`.
+    async fn watch_spotify_stream(
+        self: std::sync::Arc<Self>,
+        video_id: String,
+        mut handle: StreamHandle,
+    ) {
+        while let Some(event) = handle.next_event().await {
+            if event == StreamEvent::Unavailable {
+                self.skip_unavailable_spotify(&video_id).await;
+                return;
+            }
+        }
+    }
+
+    /// A Spotify track reported Unavailable: toast the error and skip past it, mirroring a failed
+    /// YouTube stream. Guarded so a stale watcher (the user already moved on) does nothing.
+    ///
+    /// Returns a boxed future on purpose: `resolve` spawns the watcher that reaches back into
+    /// `on_track_ended` → `start_current` → `resolve`. An explicit `dyn Future + Send` return type
+    /// gives that mutual recursion a concrete type and stops the `Send`-inference cycle.
+    fn skip_unavailable_spotify<'a>(
+        self: &'a Arc<Self>,
+        video_id: &'a str,
+    ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
+        Box::pin(async move {
+            let has_next = {
+                let q = self.queue.lock().await;
+                if q.items.get(q.current).map(|i| i.video_id != video_id).unwrap_or(true) {
+                    return; // superseded — a newer track is current
+                }
+                // Strictly-forward only: never wrap here, or a repeat-all queue whose only playable
+                // path is this unavailable track would retry it forever.
+                q.current + 1 < q.items.len()
+            };
+            self.emit_error(video_id, "This track isn't available on Spotify.");
+            if has_next {
+                // `on_track_ended` loads the next track, whose `player.load` replaces mpv's
+                // never-filling FIFO.
+                self.on_track_ended().await;
+            } else {
+                // Nothing to advance into: release mpv from the dead FIFO and settle like an
+                // exhausted queue.
+                let _ = self.player.stop();
+                self.drop_spotify_stream();
+                self.emit("playback-state", "paused");
+                self.media_set_playing(false);
+                self.persist_queue().await;
+            }
+        })
     }
 
     /// Watch-history ping enabled? Default on; only an explicit `"false"` disables it.
@@ -2210,7 +2435,8 @@ impl AppState {
             // videoId, and a queue of local music is exactly the case that has to work offline.
             if q.radio_seed.is_none()
                 && (crate::local::is_local_song(&last.video_id)
-                    || crate::radio::is_radio_id(&last.video_id))
+                    || crate::radio::is_radio_id(&last.video_id)
+                    || crate::spotify::is_spotify_id(&last.video_id))
             {
                 return 0;
             }
@@ -2462,7 +2688,7 @@ impl AppState {
 
     /// Guest: apply a full room-state snapshot (join / reconnect / re-sync). If the current track is
     /// already loaded, just correct the position + play state (no reload blip); otherwise load it.
-    async fn lt_apply_state(&self, state: listen_protocol::RoomState) {
+    async fn lt_apply_state(self: &std::sync::Arc<Self>, state: listen_protocol::RoomState) {
         let Some(track) = state.current_track else { return };
         let already_loaded = {
             let q = self.queue.lock().await;
@@ -2494,7 +2720,7 @@ impl AppState {
 
     /// Guest: load a host-chosen track, seek to its live position, set play/pause, mirror the queue.
     async fn lt_apply_change_track(
-        &self,
+        self: &std::sync::Arc<Self>,
         track: Track,
         position_ms: i64,
         playing: bool,
@@ -2641,7 +2867,32 @@ impl AppState {
         if self.lt.is_guest().await {
             return Ok(()); // guests can't scrub — the host controls the timeline
         }
-        self.player.seek(position).map_err(|e| e.to_string())?;
+        let position = position.max(0.0);
+        // A Spotify track: mpv can't seek a FIFO, so tell librespot to seek, record the base, and
+        // reload mpv on the same FIFO so it reads the post-seek PCM from 0 (base + mpv time-pos =
+        // the true position). Anything else is a plain mpv seek.
+        let spotify_title = {
+            let q = self.queue.lock().await;
+            q.items
+                .get(q.current)
+                .filter(|i| crate::spotify::is_spotify_id(&i.video_id))
+                .map(|i| media_title(&i.title, &i.artists))
+        };
+        if let Some(title) = spotify_title {
+            let controls = self.spotify_stream.lock().as_ref().map(|s| s.controls.clone());
+            let Some(controls) = controls else {
+                return Ok(()); // no live stream to seek (shouldn't happen while one plays)
+            };
+            controls.seek(Duration::from_secs_f64(position));
+            self.set_spotify_base(position);
+            self.player
+                .load(controls.fifo_path().to_string_lossy().as_ref(), &Default::default(), None, &title, &spotify_mpv_options())
+                .map_err(|e| e.to_string())?;
+            let _ = self.player.play();
+            controls.play();
+        } else {
+            self.player.seek(position).map_err(|e| e.to_string())?;
+        }
         if self.lt.is_host().await {
             self.lt
                 .broadcast_playback(Playback::at(PlaybackKind::Seek, (position * 1000.0) as i64))
@@ -3515,6 +3766,26 @@ fn media_title(title: &str, artists: &str) -> String {
     }
 }
 
+/// The per-file mpv options for a Spotify track. librespot writes raw S16LE / 44100 Hz / stereo
+/// PCM into a FIFO that mpv can't probe, so the rawaudio demuxer must be told the exact format.
+/// Must stay byte-for-byte in step with the format librespot's `pipe` backend emits.
+fn spotify_mpv_options() -> Vec<String> {
+    vec![
+        "demuxer=rawaudio".to_owned(),
+        "demuxer-rawaudio-format=s16le".to_owned(),
+        "demuxer-rawaudio-rate=44100".to_owned(),
+        "demuxer-rawaudio-channels=2".to_owned(),
+    ]
+}
+
+/// True track position from mpv's per-load `time-pos` and the Spotify seek base. mpv restarts its
+/// clock at 0 on every FIFO (re)load, so a seek stores the target as the base and playback reports
+/// `base + time-pos`. The base is 0 for every non-Spotify track and for an un-seeked Spotify one,
+/// making this transparent there.
+fn position_with_base(mpv_time_pos: f64, seek_base: f64) -> f64 {
+    mpv_time_pos + seek_base
+}
+
 /// Loudness target, matching YouTube Music's own player rather than the video site's -14.
 const TARGET_LUFS: f64 = -7.0;
 
@@ -3731,8 +4002,9 @@ mod tests {
     use super::{
         append_page, backfill_metadata, drop_duplicates, enqueue_at, format_duration,
         guest_insert_index, is_mix, loudness_gain, merge_radio, next_index, parse_duration_ms,
-        persist_fingerprint, queue_fingerprint, radio_seed_for, read_personal, shuffle_new_queue,
-        shuffle_upcoming, splice_radio_into, unshuffled, upcoming_queued, validate_personal_blob,
+        persist_fingerprint, position_with_base, queue_fingerprint, radio_seed_for, read_personal,
+        shuffle_new_queue, shuffle_upcoming, splice_radio_into, spotify_mpv_options, unshuffled,
+        upcoming_queued, validate_personal_blob,
         QueueState, RepeatMode, PERSONAL_JSON_KEY,
     };
     use crate::db::Db;
@@ -4410,5 +4682,46 @@ mod tests {
         assert_eq!(loudness_gain(Some(40.0)), Some(-24.0));
         // No metadata → no filter.
         assert_eq!(loudness_gain(None), None);
+    }
+
+    // The FIFO carries raw PCM mpv can't probe; these exact options are the whole contract with
+    // librespot's `pipe` backend (S16LE / 44100 / stereo). A typo would fail playback silently.
+    #[test]
+    fn spotify_mpv_options_are_the_rawaudio_demuxer_settings() {
+        assert_eq!(
+            spotify_mpv_options(),
+            vec![
+                "demuxer=rawaudio",
+                "demuxer-rawaudio-format=s16le",
+                "demuxer-rawaudio-rate=44100",
+                "demuxer-rawaudio-channels=2",
+            ]
+        );
+    }
+
+    // mpv's `time-pos` restarts at 0 every time the Spotify FIFO is (re)loaded, so a reported
+    // position is `mpv time-pos + seek base`. Base 0 (every non-Spotify track, and a Spotify track
+    // that was never seeked) is transparent; a seek to 60s makes mpv's post-reload 0/0.5 read back
+    // as 60/60.5 — the true track position, not a jump back to the start.
+    #[test]
+    fn spotify_seek_base_reconstructs_true_position() {
+        assert_eq!(position_with_base(12.5, 0.0), 12.5);
+        assert_eq!(position_with_base(0.0, 60.0), 60.0);
+        assert_eq!(position_with_base(0.5, 60.0), 60.5);
+    }
+
+    // Real Spotify playback needs a Premium session and the librespot pipe backend, which can't run
+    // in CI (no credentials, no audio device). This documents the manual acceptance path; run it
+    // by hand on the rig against a signed-in Premium account. See `crates/spotify/README.md`.
+    #[test]
+    #[ignore = "needs a real Spotify Premium session + audio device; run manually on the rig"]
+    fn spotify_premium_playback_manual() {
+        // 1. Sign in to a Premium account (daemon `spotify_sign_in`), select the Spotify provider.
+        // 2. Play a `spotify:track:` item: `resolve` opens a librespot stream, mpv reads the FIFO
+        //    with `spotify_mpv_options()`, audio plays; duration is seeded from the queue item.
+        // 3. Seek: librespot seeks, mpv reloads the FIFO, the position reads `base + time-pos`.
+        // 4. Pause/resume: mpv only — FIFO backpressure stalls librespot, the pipe stays open.
+        // 5. Let it end: librespot closes the FIFO, mpv EOFs, `on_track_ended` advances the queue.
+        // 6. Play while signed out: `resolve` returns `SignInRequired` and the UI toasts it.
     }
 }

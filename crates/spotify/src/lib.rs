@@ -33,7 +33,7 @@ pub use auth::{SignInFailure, SignInProblem};
 pub use client::{Client, SearchResults};
 pub use models::*;
 pub use provider::{SpotifyConfig, SpotifyProvider};
-pub use stream::{StreamEvent, StreamHandle};
+pub use stream::{StreamControls, StreamEvent, StreamHandle};
 
 /// The media kinds [`Client::share_url`] can address.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

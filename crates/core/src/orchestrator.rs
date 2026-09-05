@@ -63,6 +63,10 @@ pub enum ResolveError {
     AllClientsFailed(String),
     #[error("this upload could not be played. Try signing in to YouTube Music again ({0})")]
     UploadUnavailable(String),
+    /// A provider stream needs the user signed in first. The message is user-facing (the daemon
+    /// surfaces it straight to a toast), unlike [`Self::AllClientsFailed`] which wraps a video id.
+    #[error("{0}")]
+    SignInRequired(String),
     /// A local-library file that no longer exists on disk.
     #[error("this file is no longer on your disk: {0}")]
     LocalMissing(String),
