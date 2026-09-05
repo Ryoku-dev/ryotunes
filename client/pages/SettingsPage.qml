@@ -13,6 +13,11 @@ import "../components"
 // re-renders. File choices use zenity (the same picker the library Local tab already adopted; the
 // daemon dropped its Tauri dialogs for an explicit path). Nothing here polls: discord status is
 // fetched on open and after a toggle, never on an interval, honouring the no-idle-timer rule.
+//
+// Visual layer: a left section rail (unchanged navigation + lazy-load data flow) beside a scrolling
+// body of two-column setting rows (label md + description sm | control) grouped under SectionHeadings,
+// per spec section 5. The page fills the padded rect App gives it — no outer margins, no opaque paper
+// base (App draws the Backdrop + paper@0.88 behind it); local card fills only.
 Item {
     id: page
 
@@ -243,17 +248,67 @@ Item {
         }
     }
 
-    Rectangle { anchors.fill: parent; color: Tokens.paper }
+    // A two-column on/off setting row: label + description in a fillWidth column, the shared Toggle
+    // pinned to the right. Unidirectional like the component — renders `value`, emits `flipped`, the
+    // host writes the daemon setting and the binding feeds the new value back.
+    component ToggleRow: RowLayout {
+        id: toggleRow
+        property string title: ""
+        property string desc: ""
+        property string note: ""
+        property bool value: false
+        signal flipped(bool on)
+
+        Layout.fillWidth: true
+        spacing: Style.sp(4)
+
+        ColumnLayout {
+            Layout.fillWidth: true
+            spacing: 1
+            Text {
+                Layout.fillWidth: true
+                text: toggleRow.title
+                color: Tokens.ink
+                font.family: Style.fontUi
+                font.pixelSize: Style.fs.md
+                font.weight: Font.Medium
+                wrapMode: Text.WordWrap
+            }
+            Text {
+                Layout.fillWidth: true
+                visible: toggleRow.desc !== ""
+                text: toggleRow.desc
+                color: Tokens.inkMuted
+                font.family: Style.fontUi
+                font.pixelSize: Style.fs.sm
+                wrapMode: Text.WordWrap
+            }
+            Text {
+                visible: toggleRow.note !== ""
+                text: toggleRow.note
+                color: Tokens.inkFaint
+                font.family: Style.fontMono
+                font.pixelSize: Style.fs.xs
+            }
+        }
+        Toggle {
+            Layout.alignment: Qt.AlignVCenter
+            checked: toggleRow.value
+            onToggled: (v) => toggleRow.flipped(v)
+        }
+    }
 
     RowLayout {
         anchors.fill: parent
         spacing: 0
 
         // --- section rail -------------------------------------------------------------------
+        // Frosted over the App backdrop: transparent so the paper@0.88 + bloom read through; only the
+        // right hairline and the active bone plate carry weight.
         Rectangle {
             Layout.preferredWidth: Style.sp(46)
             Layout.fillHeight: true
-            color: Tokens.paper
+            color: "transparent"
             Hairline { anchors.right: parent.right; width: 1; height: parent.height }
 
             ColumnLayout {
@@ -364,98 +419,140 @@ Item {
                 ColumnLayout {
                     id: generalCol
                     visible: page.section === "general"
-                    anchors { left: parent.left; right: parent.right; top: parent.top; leftMargin: Style.sp(8); rightMargin: Style.sp(8); topMargin: Style.sp(6) }
-                    spacing: Style.sp(1)
+                    anchors { left: parent.left; right: parent.right; top: parent.top; leftMargin: Style.sp(6); rightMargin: Style.sp(6); topMargin: Style.sp(4) }
+                    spacing: Style.sp(3)
 
-                    Text { text: "General"; color: Tokens.ink; font.family: Tokens.display; font.pixelSize: Style.fs.xl }
-                    Text {
-                        Layout.fillWidth: true
-                        text: "Session behaviour, desktop integration and the theme."
-                        color: Tokens.inkMuted; font.family: Style.fontUi; font.pixelSize: Style.fs.sm; wrapMode: Text.WordWrap
-                    }
-                    Item { Layout.preferredHeight: Style.sp(2) }
+                    // Appearance ------------------------------------------------------------
+                    SectionHeading { Layout.fillWidth: true; title: "Appearance"; mark: "表示" }
 
-                    // Appearance / theme
-                    ColumnLayout {
+                    // Theme → Prefs.themeMode (+ save); Style mirrors Prefs, so the chrome re-themes.
+                    RowLayout {
                         Layout.fillWidth: true
-                        spacing: Style.sp(1)
-                        Text { text: "Appearance"; color: Tokens.ink; font.family: Style.fontUi; font.pixelSize: Style.fs.md; font.weight: Font.DemiBold }
-                        Text {
+                        spacing: Style.sp(4)
+                        ColumnLayout {
                             Layout.fillWidth: true
-                            text: "Follow the desktop automatically, or pin Ryotunes to its light or dark palette."
-                            color: Tokens.inkMuted; font.family: Style.fontUi; font.pixelSize: Style.fs.sm; wrapMode: Text.WordWrap
+                            spacing: 1
+                            Text { Layout.fillWidth: true; text: "Theme"; color: Tokens.ink; font.family: Style.fontUi; font.pixelSize: Style.fs.md; font.weight: Font.Medium; wrapMode: Text.WordWrap }
+                            Text {
+                                Layout.fillWidth: true
+                                text: "Follow the desktop automatically, or pin Ryotunes to its light or dark palette."
+                                color: Tokens.inkMuted; font.family: Style.fontUi; font.pixelSize: Style.fs.sm; wrapMode: Text.WordWrap
+                            }
                         }
                         RowLayout {
-                            Layout.topMargin: Style.sp(1)
+                            Layout.alignment: Qt.AlignVCenter
                             spacing: Style.sp(2)
                             Repeater {
-                                model: [ { m: "system", l: "Follow system" }, { m: "light", l: "Light" }, { m: "dark", l: "Dark" } ]
+                                model: [ { m: "system", l: "System" }, { m: "light", l: "Light" }, { m: "dark", l: "Dark" } ]
                                 delegate: Chip {
                                     required property var modelData
                                     text: modelData.l
-                                    active: Style.themeMode === modelData.m
-                                    onClicked: Style.themeMode = modelData.m
+                                    active: Prefs.themeMode === modelData.m
+                                    onClicked: { Prefs.themeMode = modelData.m; Prefs.save(); }
                                 }
                             }
                         }
-                        Text {
-                            text: "Currently " + (Tokens.light ? "light" : "dark") + ". Ryoku accent and reduced-motion preferences still apply."
-                            color: Tokens.inkFaint; font.family: Style.fontMono; font.pixelSize: Style.fs.xs
-                        }
                     }
-                    Hairline { Layout.fillWidth: true; Layout.topMargin: Style.sp(3); Layout.bottomMargin: Style.sp(3) }
 
-                    // Watch history
+                    // Decor → Prefs.decor (+ save); Style.decorRich reads Prefs.decor.
                     RowLayout {
                         Layout.fillWidth: true
                         spacing: Style.sp(4)
                         ColumnLayout {
                             Layout.fillWidth: true
                             spacing: 1
-                            Text { text: "Watch history"; color: Tokens.ink; font.family: Style.fontUi; font.pixelSize: Style.fs.md; font.weight: Font.Medium }
+                            Text { Layout.fillWidth: true; text: "Decor"; color: Tokens.ink; font.family: Style.fontUi; font.pixelSize: Style.fs.md; font.weight: Font.Medium; wrapMode: Text.WordWrap }
                             Text {
                                 Layout.fillWidth: true
-                                text: (Playback.auth && Playback.auth.signedIn) ? "Register completed plays in your YouTube Music history." : "Sign in to register completed plays in your YouTube Music history."
+                                text: "Rich layers grain, register crosses and kana seals over the paper; calm keeps it plain."
                                 color: Tokens.inkMuted; font.family: Style.fontUi; font.pixelSize: Style.fs.sm; wrapMode: Text.WordWrap
                             }
                         }
-                        Toggle {
-                            checked: page.settings.enable_history !== "false"
-                            onToggled: (v) => page.setSetting("enable_history", v ? "true" : "false")
-                        }
-                    }
-                    Hairline { Layout.fillWidth: true; Layout.topMargin: Style.sp(3); Layout.bottomMargin: Style.sp(3) }
-
-                    // Discord rich presence
-                    RowLayout {
-                        Layout.fillWidth: true
-                        spacing: Style.sp(4)
-                        ColumnLayout {
-                            Layout.fillWidth: true
-                            spacing: 1
-                            Text { text: "Discord rich presence"; color: Tokens.ink; font.family: Style.fontUi; font.pixelSize: Style.fs.md; font.weight: Font.Medium }
-                            Text {
-                                Layout.fillWidth: true
-                                text: "Show what you're listening to on your Discord profile through the local Discord client."
-                                color: Tokens.inkMuted; font.family: Style.fontUi; font.pixelSize: Style.fs.sm; wrapMode: Text.WordWrap
-                            }
-                            Text {
-                                text: "Status: " + page.discordLabel(page.discordStatus)
-                                color: Tokens.inkFaint; font.family: Style.fontMono; font.pixelSize: Style.fs.xs
+                        RowLayout {
+                            Layout.alignment: Qt.AlignVCenter
+                            spacing: Style.sp(2)
+                            Repeater {
+                                model: [ { m: "rich", l: "Rich" }, { m: "calm", l: "Calm" } ]
+                                delegate: Chip {
+                                    required property var modelData
+                                    text: modelData.l
+                                    active: Prefs.decor === modelData.m
+                                    onClicked: { Prefs.decor = modelData.m; Prefs.save(); }
+                                }
                             }
                         }
-                        Toggle {
-                            checked: page.settings.discord_rpc === "true"
-                            onToggled: (v) => page.setDiscord(v)
-                        }
                     }
-                    Hairline { Layout.fillWidth: true; Layout.topMargin: Style.sp(3); Layout.bottomMargin: Style.sp(3) }
 
-                    // Discord presence title
+                    // Session ---------------------------------------------------------------
+                    SectionHeading { Layout.fillWidth: true; Layout.topMargin: Style.sp(3); title: "Session"; mark: "全般" }
+
+                    ToggleRow {
+                        title: "Watch history"
+                        desc: (Playback.auth && Playback.auth.signedIn) ? "Register completed plays in your YouTube Music history." : "Sign in to register completed plays in your YouTube Music history."
+                        value: page.settings.enable_history !== "false"
+                        onFlipped: (on) => page.setSetting("enable_history", on ? "true" : "false")
+                    }
+                    ToggleRow {
+                        title: "Close to tray"
+                        desc: "Closing the window keeps music playing in the background."
+                        value: page.settings.close_to_tray !== "false"
+                        onFlipped: (on) => page.setSetting("close_to_tray", on ? "true" : "false")
+                    }
+                    ToggleRow {
+                        title: "Low resource mode"
+                        desc: "Disable speculative stream warming and reduce automatic Home/network work and decorative motion."
+                        value: page.settings.low_resource_mode === "true"
+                        onFlipped: (on) => page.setSetting("low_resource_mode", on ? "true" : "false")
+                    }
+                    ToggleRow {
+                        title: "Start on login"
+                        desc: "Launch Ryotunes automatically when you log in."
+                        value: page.settings.autostart === "true"
+                        onFlipped: (on) => page.setAutostart(on)
+                    }
+
+                    // Interface scale — a wide chip set, stacked under the label.
                     ColumnLayout {
                         Layout.fillWidth: true
                         spacing: Style.sp(1)
-                        Text { text: "Discord presence title"; color: Tokens.ink; font.family: Style.fontUi; font.pixelSize: Style.fs.md; font.weight: Font.DemiBold }
+                        Text { text: "Interface scale"; color: Tokens.ink; font.family: Style.fontUi; font.pixelSize: Style.fs.md; font.weight: Font.Medium }
+                        Text {
+                            Layout.fillWidth: true
+                            text: "Preferred renderer scale, persisted for every Ryotunes client on this account."
+                            color: Tokens.inkMuted; font.family: Style.fontUi; font.pixelSize: Style.fs.sm; wrapMode: Text.WordWrap
+                        }
+                        Flow {
+                            Layout.fillWidth: true
+                            Layout.topMargin: Style.sp(1)
+                            spacing: Style.sp(2)
+                            Repeater {
+                                model: page.uiScales
+                                delegate: Chip {
+                                    required property var modelData
+                                    text: modelData + "%"
+                                    active: Number(page.settings.ui_scale || "110") === modelData
+                                    onClicked: page.setSetting("ui_scale", String(modelData))
+                                }
+                            }
+                        }
+                    }
+
+                    // Discord ---------------------------------------------------------------
+                    SectionHeading { Layout.fillWidth: true; Layout.topMargin: Style.sp(3); title: "Discord"; mark: "接続" }
+
+                    ToggleRow {
+                        title: "Discord rich presence"
+                        desc: "Show what you're listening to on your Discord profile through the local Discord client."
+                        note: "Status: " + page.discordLabel(page.discordStatus)
+                        value: page.settings.discord_rpc === "true"
+                        onFlipped: (on) => page.setDiscord(on)
+                    }
+
+                    // Discord presence title — a text field, stacked.
+                    ColumnLayout {
+                        Layout.fillWidth: true
+                        spacing: Style.sp(1)
+                        Text { text: "Discord presence title"; color: Tokens.ink; font.family: Style.fontUi; font.pixelSize: Style.fs.md; font.weight: Font.Medium }
                         Text {
                             Layout.fillWidth: true
                             text: "The text Discord renders as “Listening to …”."
@@ -503,125 +600,58 @@ Item {
                             color: Tokens.inkFaint; font.family: Style.fontUi; font.pixelSize: Style.fs.xs
                         }
                     }
-                    Hairline { Layout.fillWidth: true; Layout.topMargin: Style.sp(3); Layout.bottomMargin: Style.sp(3) }
-
-                    // Close to tray
-                    RowLayout {
-                        Layout.fillWidth: true
-                        spacing: Style.sp(4)
-                        ColumnLayout {
-                            Layout.fillWidth: true
-                            spacing: 1
-                            Text { text: "Close to tray"; color: Tokens.ink; font.family: Style.fontUi; font.pixelSize: Style.fs.md; font.weight: Font.Medium }
-                            Text {
-                                Layout.fillWidth: true
-                                text: "Closing the window keeps music playing in the background."
-                                color: Tokens.inkMuted; font.family: Style.fontUi; font.pixelSize: Style.fs.sm; wrapMode: Text.WordWrap
-                            }
-                        }
-                        Toggle {
-                            checked: page.settings.close_to_tray !== "false"
-                            onToggled: (v) => page.setSetting("close_to_tray", v ? "true" : "false")
-                        }
-                    }
-                    Hairline { Layout.fillWidth: true; Layout.topMargin: Style.sp(3); Layout.bottomMargin: Style.sp(3) }
-
-                    // Low resource mode
-                    RowLayout {
-                        Layout.fillWidth: true
-                        spacing: Style.sp(4)
-                        ColumnLayout {
-                            Layout.fillWidth: true
-                            spacing: 1
-                            Text { text: "Low resource mode"; color: Tokens.ink; font.family: Style.fontUi; font.pixelSize: Style.fs.md; font.weight: Font.Medium }
-                            Text {
-                                Layout.fillWidth: true
-                                text: "Disable speculative stream warming and reduce automatic Home/network work and decorative motion."
-                                color: Tokens.inkMuted; font.family: Style.fontUi; font.pixelSize: Style.fs.sm; wrapMode: Text.WordWrap
-                            }
-                        }
-                        Toggle {
-                            checked: page.settings.low_resource_mode === "true"
-                            onToggled: (v) => page.setSetting("low_resource_mode", v ? "true" : "false")
-                        }
-                    }
-                    Hairline { Layout.fillWidth: true; Layout.topMargin: Style.sp(3); Layout.bottomMargin: Style.sp(3) }
-
-                    // Start on login
-                    RowLayout {
-                        Layout.fillWidth: true
-                        spacing: Style.sp(4)
-                        ColumnLayout {
-                            Layout.fillWidth: true
-                            spacing: 1
-                            Text { text: "Start on login"; color: Tokens.ink; font.family: Style.fontUi; font.pixelSize: Style.fs.md; font.weight: Font.Medium }
-                            Text {
-                                Layout.fillWidth: true
-                                text: "Launch Ryotunes automatically when you log in."
-                                color: Tokens.inkMuted; font.family: Style.fontUi; font.pixelSize: Style.fs.sm; wrapMode: Text.WordWrap
-                            }
-                        }
-                        Toggle {
-                            checked: page.settings.autostart === "true"
-                            onToggled: (v) => page.setAutostart(v)
-                        }
-                    }
-                    Hairline { Layout.fillWidth: true; Layout.topMargin: Style.sp(3); Layout.bottomMargin: Style.sp(3) }
-
-                    // Interface scale
-                    ColumnLayout {
-                        Layout.fillWidth: true
-                        spacing: Style.sp(1)
-                        Text { text: "Interface scale"; color: Tokens.ink; font.family: Style.fontUi; font.pixelSize: Style.fs.md; font.weight: Font.DemiBold }
-                        Text {
-                            Layout.fillWidth: true
-                            text: "Preferred renderer scale, persisted for every Ryotunes client on this account."
-                            color: Tokens.inkMuted; font.family: Style.fontUi; font.pixelSize: Style.fs.sm; wrapMode: Text.WordWrap
-                        }
-                        Flow {
-                            Layout.fillWidth: true
-                            Layout.topMargin: Style.sp(1)
-                            spacing: Style.sp(2)
-                            Repeater {
-                                model: page.uiScales
-                                delegate: Chip {
-                                    required property var modelData
-                                    text: modelData + "%"
-                                    active: Number(page.settings.ui_scale || "110") === modelData
-                                    onClicked: page.setSetting("ui_scale", String(modelData))
-                                }
-                            }
-                        }
-                    }
                 }
 
                 // ─────────────────────────── PLAYBACK ───────────────────────────
                 ColumnLayout {
                     id: playbackCol
                     visible: page.section === "playback"
-                    anchors { left: parent.left; right: parent.right; top: parent.top; leftMargin: Style.sp(8); rightMargin: Style.sp(8); topMargin: Style.sp(6) }
-                    spacing: Style.sp(1)
+                    anchors { left: parent.left; right: parent.right; top: parent.top; leftMargin: Style.sp(6); rightMargin: Style.sp(6); topMargin: Style.sp(4) }
+                    spacing: Style.sp(3)
 
-                    Text { text: "Playback"; color: Tokens.ink; font.family: Tokens.display; font.pixelSize: Style.fs.xl }
-                    Text {
+                    // Sound — the Ryotunes-only effect chain; opens the Sound dialog.
+                    SectionHeading { Layout.fillWidth: true; title: "Sound"; mark: "音響" }
+
+                    RowLayout {
                         Layout.fillWidth: true
-                        text: "How the listening engine resolves, queues and carries a session forward."
-                        color: Tokens.inkMuted; font.family: Style.fontUi; font.pixelSize: Style.fs.sm; wrapMode: Text.WordWrap
+                        spacing: Style.sp(4)
+                        ColumnLayout {
+                            Layout.fillWidth: true
+                            spacing: 1
+                            Text { Layout.fillWidth: true; text: "Sound"; color: Tokens.ink; font.family: Style.fontUi; font.pixelSize: Style.fs.md; font.weight: Font.Medium; wrapMode: Text.WordWrap }
+                            Text {
+                                Layout.fillWidth: true
+                                text: "Shape playback with tempo, pitch, reverb, bass and stereo width — and one-tap presets like Slowed + Reverb."
+                                color: Tokens.inkMuted; font.family: Style.fontUi; font.pixelSize: Style.fs.sm; wrapMode: Text.WordWrap
+                            }
+                        }
+                        Btn {
+                            Layout.alignment: Qt.AlignVCenter
+                            text: "Open"
+                            icon: "sound"
+                            onClicked: Playback.soundRequested()
+                        }
                     }
-                    Item { Layout.preferredHeight: Style.sp(2) }
+
+                    // Engine ----------------------------------------------------------------
+                    SectionHeading { Layout.fillWidth: true; Layout.topMargin: Style.sp(3); title: "Engine"; mark: "再生" }
 
                     // Audio quality
-                    ColumnLayout {
+                    RowLayout {
                         Layout.fillWidth: true
-                        spacing: Style.sp(1)
-                        Text { text: "Audio quality"; color: Tokens.ink; font.family: Style.fontUi; font.pixelSize: Style.fs.md; font.weight: Font.DemiBold }
-                        Text {
+                        spacing: Style.sp(4)
+                        ColumnLayout {
                             Layout.fillWidth: true
-                            text: "Preferred stream quality when resolving a track. Changing it clears cached URLs."
-                            color: Tokens.inkMuted; font.family: Style.fontUi; font.pixelSize: Style.fs.sm; wrapMode: Text.WordWrap
+                            spacing: 1
+                            Text { Layout.fillWidth: true; text: "Audio quality"; color: Tokens.ink; font.family: Style.fontUi; font.pixelSize: Style.fs.md; font.weight: Font.Medium; wrapMode: Text.WordWrap }
+                            Text {
+                                Layout.fillWidth: true
+                                text: "Preferred stream quality when resolving a track. Changing it clears cached URLs."
+                                color: Tokens.inkMuted; font.family: Style.fontUi; font.pixelSize: Style.fs.sm; wrapMode: Text.WordWrap
+                            }
                         }
                         RowLayout {
-                            Layout.topMargin: Style.sp(1)
+                            Layout.alignment: Qt.AlignVCenter
                             spacing: Style.sp(2)
                             Repeater {
                                 model: page.qualities
@@ -634,100 +664,51 @@ Item {
                             }
                         }
                     }
-                    Hairline { Layout.fillWidth: true; Layout.topMargin: Style.sp(3); Layout.bottomMargin: Style.sp(3) }
 
-                    // Autoplay
-                    RowLayout {
+                    ToggleRow {
+                        title: "Autoplay"
+                        desc: "Keep the music going with similar songs when your queue ends."
+                        value: page.settings.autoplay !== "false"
+                        onFlipped: (on) => page.setSetting("autoplay", on ? "true" : "false")
+                    }
+                    ToggleRow {
+                        title: "Prevent duplicate tracks in queue"
+                        desc: "Adding a track already queued moves it instead of adding a second copy."
+                        value: page.settings.prevent_duplicates === "true"
+                        onFlipped: (on) => page.setSetting("prevent_duplicates", on ? "true" : "false")
+                    }
+                    ToggleRow {
+                        title: "Word-by-word lyrics"
+                        desc: "Ask lyrics-api.boidu.dev first for per-word timings. Turning this off keeps your listening off that service; line-by-line lyrics still work."
+                        value: page.settings.lyrics_boidu !== "false"
+                        onFlipped: (on) => page.setSetting("lyrics_boidu", on ? "true" : "false")
+                    }
+
+                    // Stream clients --------------------------------------------------------
+                    SectionHeading { Layout.fillWidth: true; Layout.topMargin: Style.sp(3); title: "Stream clients"; mark: "詳細" }
+                    Text {
                         Layout.fillWidth: true
-                        spacing: Style.sp(4)
-                        ColumnLayout {
+                        text: "Advanced — turn a client off to skip it when resolving streams."
+                        color: Tokens.inkMuted; font.family: Style.fontUi; font.pixelSize: Style.fs.sm; wrapMode: Text.WordWrap
+                    }
+                    Repeater {
+                        model: page.clients
+                        delegate: RowLayout {
+                            id: clientRow
+                            required property var modelData
                             Layout.fillWidth: true
-                            spacing: 1
-                            Text { text: "Autoplay"; color: Tokens.ink; font.family: Style.fontUi; font.pixelSize: Style.fs.md; font.weight: Font.Medium }
+                            spacing: Style.sp(4)
                             Text {
                                 Layout.fillWidth: true
-                                text: "Keep the music going with similar songs when your queue ends."
-                                color: Tokens.inkMuted; font.family: Style.fontUi; font.pixelSize: Style.fs.sm; wrapMode: Text.WordWrap
+                                text: clientRow.modelData
+                                color: Tokens.inkDim
+                                font.family: Style.fontMono
+                                font.pixelSize: Style.fs.sm
                             }
-                        }
-                        Toggle {
-                            checked: page.settings.autoplay !== "false"
-                            onToggled: (v) => page.setSetting("autoplay", v ? "true" : "false")
-                        }
-                    }
-                    Hairline { Layout.fillWidth: true; Layout.topMargin: Style.sp(3); Layout.bottomMargin: Style.sp(3) }
-
-                    // Prevent duplicates
-                    RowLayout {
-                        Layout.fillWidth: true
-                        spacing: Style.sp(4)
-                        ColumnLayout {
-                            Layout.fillWidth: true
-                            spacing: 1
-                            Text { text: "Prevent duplicate tracks in queue"; color: Tokens.ink; font.family: Style.fontUi; font.pixelSize: Style.fs.md; font.weight: Font.Medium }
-                            Text {
-                                Layout.fillWidth: true
-                                text: "Adding a track already queued moves it instead of adding a second copy."
-                                color: Tokens.inkMuted; font.family: Style.fontUi; font.pixelSize: Style.fs.sm; wrapMode: Text.WordWrap
-                            }
-                        }
-                        Toggle {
-                            checked: page.settings.prevent_duplicates === "true"
-                            onToggled: (v) => page.setSetting("prevent_duplicates", v ? "true" : "false")
-                        }
-                    }
-                    Hairline { Layout.fillWidth: true; Layout.topMargin: Style.sp(3); Layout.bottomMargin: Style.sp(3) }
-
-                    // Word-by-word lyrics
-                    RowLayout {
-                        Layout.fillWidth: true
-                        spacing: Style.sp(4)
-                        ColumnLayout {
-                            Layout.fillWidth: true
-                            spacing: 1
-                            Text { text: "Word-by-word lyrics"; color: Tokens.ink; font.family: Style.fontUi; font.pixelSize: Style.fs.md; font.weight: Font.Medium }
-                            Text {
-                                Layout.fillWidth: true
-                                text: "Ask lyrics-api.boidu.dev first for per-word timings. Turning this off keeps your listening off that service; line-by-line lyrics still work."
-                                color: Tokens.inkMuted; font.family: Style.fontUi; font.pixelSize: Style.fs.sm; wrapMode: Text.WordWrap
-                            }
-                        }
-                        Toggle {
-                            checked: page.settings.lyrics_boidu !== "false"
-                            onToggled: (v) => page.setSetting("lyrics_boidu", v ? "true" : "false")
-                        }
-                    }
-                    Hairline { Layout.fillWidth: true; Layout.topMargin: Style.sp(3); Layout.bottomMargin: Style.sp(3) }
-
-                    // Stream clients
-                    ColumnLayout {
-                        Layout.fillWidth: true
-                        spacing: Style.sp(1)
-                        Text { text: "Stream clients"; color: Tokens.ink; font.family: Style.fontUi; font.pixelSize: Style.fs.md; font.weight: Font.DemiBold }
-                        Text {
-                            Layout.fillWidth: true
-                            text: "Advanced — turn a client off to skip it when resolving streams."
-                            color: Tokens.inkMuted; font.family: Style.fontUi; font.pixelSize: Style.fs.sm; wrapMode: Text.WordWrap
-                        }
-                        Repeater {
-                            model: page.clients
-                            delegate: RowLayout {
-                                id: clientRow
-                                required property var modelData
-                                Layout.fillWidth: true
-                                Layout.topMargin: Style.sp(1)
-                                spacing: Style.sp(4)
-                                Text {
-                                    Layout.fillWidth: true
-                                    text: clientRow.modelData
-                                    color: Tokens.inkDim
-                                    font.family: Style.fontMono
-                                    font.pixelSize: Style.fs.sm
-                                }
-                                Toggle {
-                                    checked: !page.clientDisabled(clientRow.modelData)
-                                    onToggled: () => page.toggleClient(clientRow.modelData)
-                                }
+                            Toggle {
+                                Layout.alignment: Qt.AlignVCenter
+                                checked: !page.clientDisabled(clientRow.modelData)
+                                onToggled: () => page.toggleClient(clientRow.modelData)
                             }
                         }
                     }
@@ -737,22 +718,17 @@ Item {
                 ColumnLayout {
                     id: dataCol
                     visible: page.section === "data"
-                    anchors { left: parent.left; right: parent.right; top: parent.top; leftMargin: Style.sp(8); rightMargin: Style.sp(8); topMargin: Style.sp(6) }
-                    spacing: Style.sp(1)
+                    anchors { left: parent.left; right: parent.right; top: parent.top; leftMargin: Style.sp(6); rightMargin: Style.sp(6); topMargin: Style.sp(4) }
+                    spacing: Style.sp(3)
 
-                    Text { text: "Data & storage"; color: Tokens.ink; font.family: Tokens.display; font.pixelSize: Style.fs.xl }
-                    Text {
-                        Layout.fillWidth: true
-                        text: "Network routing and local storage used to keep the instrument responsive."
-                        color: Tokens.inkMuted; font.family: Style.fontUi; font.pixelSize: Style.fs.sm; wrapMode: Text.WordWrap
-                    }
-                    Item { Layout.preferredHeight: Style.sp(2) }
+                    // Network ---------------------------------------------------------------
+                    SectionHeading { Layout.fillWidth: true; title: "Network"; mark: "経路" }
 
-                    // Proxy
+                    // Proxy — a text field, stacked.
                     ColumnLayout {
                         Layout.fillWidth: true
                         spacing: Style.sp(1)
-                        Text { text: "Proxy"; color: Tokens.ink; font.family: Style.fontUi; font.pixelSize: Style.fs.md; font.weight: Font.DemiBold }
+                        Text { text: "Proxy"; color: Tokens.ink; font.family: Style.fontUi; font.pixelSize: Style.fs.md; font.weight: Font.Medium }
                         Text {
                             Layout.fillWidth: true
                             text: "HTTP or HTTPS proxy for all YouTube traffic. Takes effect on restart."
@@ -795,19 +771,30 @@ Item {
                             Pill { label: "Save"; onClicked: page.saveProxy() }
                         }
                     }
-                    Hairline { Layout.fillWidth: true; Layout.topMargin: Style.sp(3); Layout.bottomMargin: Style.sp(3) }
 
-                    // Cache
-                    ColumnLayout {
+                    // Storage ---------------------------------------------------------------
+                    SectionHeading { Layout.fillWidth: true; Layout.topMargin: Style.sp(3); title: "Storage"; mark: "保存" }
+
+                    RowLayout {
                         Layout.fillWidth: true
-                        spacing: Style.sp(1)
-                        Text { text: "Cache"; color: Tokens.ink; font.family: Style.fontUi; font.pixelSize: Style.fs.md; font.weight: Font.DemiBold }
-                        Text {
+                        spacing: Style.sp(4)
+                        ColumnLayout {
                             Layout.fillWidth: true
-                            text: "Clear cached stream URLs and downloaded audio bytes."
-                            color: Tokens.inkMuted; font.family: Style.fontUi; font.pixelSize: Style.fs.sm; wrapMode: Text.WordWrap
+                            spacing: 1
+                            Text { Layout.fillWidth: true; text: "Cache"; color: Tokens.ink; font.family: Style.fontUi; font.pixelSize: Style.fs.md; font.weight: Font.Medium; wrapMode: Text.WordWrap }
+                            Text {
+                                Layout.fillWidth: true
+                                text: "Clear cached stream URLs and downloaded audio bytes."
+                                color: Tokens.inkMuted; font.family: Style.fontUi; font.pixelSize: Style.fs.sm; wrapMode: Text.WordWrap
+                            }
                         }
-                        Pill { Layout.topMargin: Style.sp(1); label: page.clearing ? "Clearing…" : "Clear caches"; icon: "close"; enabled: !page.clearing; onClicked: page.clearCaches() }
+                        Pill {
+                            Layout.alignment: Qt.AlignVCenter
+                            label: page.clearing ? "Clearing…" : "Clear caches"
+                            icon: "close"
+                            enabled: !page.clearing
+                            onClicked: page.clearCaches()
+                        }
                     }
                 }
 
@@ -815,16 +802,10 @@ Item {
                 ColumnLayout {
                     id: accountCol
                     visible: page.section === "account"
-                    anchors { left: parent.left; right: parent.right; top: parent.top; leftMargin: Style.sp(8); rightMargin: Style.sp(8); topMargin: Style.sp(6) }
-                    spacing: Style.sp(1)
+                    anchors { left: parent.left; right: parent.right; top: parent.top; leftMargin: Style.sp(6); rightMargin: Style.sp(6); topMargin: Style.sp(4) }
+                    spacing: Style.sp(3)
 
-                    Text { text: "Account"; color: Tokens.ink; font.family: Tokens.display; font.pixelSize: Style.fs.xl }
-                    Text {
-                        Layout.fillWidth: true
-                        text: "Sign in only when your YouTube library needs it. Desktop services stay local."
-                        color: Tokens.inkMuted; font.family: Style.fontUi; font.pixelSize: Style.fs.sm; wrapMode: Text.WordWrap
-                    }
-                    Item { Layout.preferredHeight: Style.sp(2) }
+                    SectionHeading { Layout.fillWidth: true; title: "Account"; mark: "鍵" }
 
                     // current identity
                     RowLayout {
@@ -864,14 +845,13 @@ Item {
                             }
                         }
                     }
-                    Hairline { Layout.fillWidth: true; Layout.topMargin: Style.sp(3); Layout.bottomMargin: Style.sp(3) }
 
                     // switch account
+                    SectionHeading { Layout.fillWidth: true; Layout.topMargin: Style.sp(3); title: "Channels"; mark: "選択"; visible: page.identities.length > 0 }
                     ColumnLayout {
                         Layout.fillWidth: true
                         visible: page.identities.length > 0
                         spacing: Style.sp(1)
-                        Text { text: "Switch channel"; color: Tokens.ink; font.family: Style.fontUi; font.pixelSize: Style.fs.md; font.weight: Font.DemiBold }
                         Text {
                             Layout.fillWidth: true
                             text: "Pick which YouTube channel or brand account this session acts as."
@@ -924,16 +904,15 @@ Item {
                 ColumnLayout {
                     id: localCol
                     visible: page.section === "local"
-                    anchors { left: parent.left; right: parent.right; top: parent.top; leftMargin: Style.sp(8); rightMargin: Style.sp(8); topMargin: Style.sp(6) }
-                    spacing: Style.sp(1)
+                    anchors { left: parent.left; right: parent.right; top: parent.top; leftMargin: Style.sp(6); rightMargin: Style.sp(6); topMargin: Style.sp(4) }
+                    spacing: Style.sp(3)
 
-                    Text { text: "Local music"; color: Tokens.ink; font.family: Tokens.display; font.pixelSize: Style.fs.xl }
+                    SectionHeading { Layout.fillWidth: true; title: "Watched folders"; mark: "音源" }
                     Text {
                         Layout.fillWidth: true
                         text: "Folders Ryotunes watches for files on disk. The daemon rescans them on demand."
                         color: Tokens.inkMuted; font.family: Style.fontUi; font.pixelSize: Style.fs.sm; wrapMode: Text.WordWrap
                     }
-                    Item { Layout.preferredHeight: Style.sp(2) }
 
                     RowLayout {
                         Layout.topMargin: Style.sp(1)
@@ -945,7 +924,7 @@ Item {
 
                     Text {
                         visible: !page.folders.length
-                        Layout.topMargin: Style.sp(2)
+                        Layout.topMargin: Style.sp(1)
                         text: "No folders yet. Add the one your music sits in."
                         color: Tokens.inkMuted; font.family: Style.fontUi; font.pixelSize: Style.fs.sm
                     }
@@ -995,22 +974,14 @@ Item {
                 ColumnLayout {
                     id: playlistsCol
                     visible: page.section === "playlists"
-                    anchors { left: parent.left; right: parent.right; top: parent.top; leftMargin: Style.sp(8); rightMargin: Style.sp(8); topMargin: Style.sp(6) }
-                    spacing: Style.sp(1)
+                    anchors { left: parent.left; right: parent.right; top: parent.top; leftMargin: Style.sp(6); rightMargin: Style.sp(6); topMargin: Style.sp(4) }
+                    spacing: Style.sp(3)
 
-                    Text { text: "Playlists"; color: Tokens.ink; font.family: Tokens.display; font.pixelSize: Style.fs.xl }
-                    Text {
-                        Layout.fillWidth: true
-                        text: "Move playlists between machines as portable .json files (YouTube Music tracks only)."
-                        color: Tokens.inkMuted; font.family: Style.fontUi; font.pixelSize: Style.fs.sm; wrapMode: Text.WordWrap
-                    }
-                    Item { Layout.preferredHeight: Style.sp(2) }
-
-                    // Import
+                    // Import ----------------------------------------------------------------
+                    SectionHeading { Layout.fillWidth: true; title: "Import a playlist"; mark: "転送" }
                     ColumnLayout {
                         Layout.fillWidth: true
                         spacing: Style.sp(1)
-                        Text { text: "Import a playlist"; color: Tokens.ink; font.family: Style.fontUi; font.pixelSize: Style.fs.md; font.weight: Font.DemiBold }
                         Text {
                             Layout.fillWidth: true
                             text: "Choose a Ryotunes playlist file; its tracks land in a new library playlist. Sign in first."
@@ -1024,13 +995,12 @@ Item {
                             onClicked: importPicker.running = true
                         }
                     }
-                    Hairline { Layout.fillWidth: true; Layout.topMargin: Style.sp(3); Layout.bottomMargin: Style.sp(3) }
 
-                    // Export
+                    // Export ----------------------------------------------------------------
+                    SectionHeading { Layout.fillWidth: true; Layout.topMargin: Style.sp(3); title: "Export the current queue"; mark: "出力" }
                     ColumnLayout {
                         Layout.fillWidth: true
                         spacing: Style.sp(1)
-                        Text { text: "Export the current queue"; color: Tokens.ink; font.family: Style.fontUi; font.pixelSize: Style.fs.md; font.weight: Font.DemiBold }
                         Text {
                             Layout.fillWidth: true
                             text: "Write the tracks now in your queue to a portable .json file."
@@ -1050,10 +1020,10 @@ Item {
                 ColumnLayout {
                     id: aboutCol
                     visible: page.section === "about"
-                    anchors { left: parent.left; right: parent.right; top: parent.top; leftMargin: Style.sp(8); rightMargin: Style.sp(8); topMargin: Style.sp(6) }
+                    anchors { left: parent.left; right: parent.right; top: parent.top; leftMargin: Style.sp(6); rightMargin: Style.sp(6); topMargin: Style.sp(4) }
                     spacing: Style.sp(2)
 
-                    Text { text: "About"; color: Tokens.ink; font.family: Tokens.display; font.pixelSize: Style.fs.xl }
+                    SectionHeading { Layout.fillWidth: true; title: "About"; mark: "力" }
                     Text {
                         Layout.fillWidth: true
                         text: "A focused Ryoku desktop music instrument: your YouTube Music library, local media, queue, lyrics and playback engine in one paper-and-ink surface."
