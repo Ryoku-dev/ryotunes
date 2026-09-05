@@ -42,6 +42,7 @@ ShellRoot {
         else if (cmd === "mini") appRoot.miniOpen = arg === "on";
         else if (cmd === "np") { if (arg === "off") appRoot.npClose(); else appRoot.npOpenTab(arg); }
         else if (cmd === "panel") appRoot.panelOpen = arg === "on";
+        else if (cmd === "sidebar") appRoot.sidebarOpen = arg === "on";
         else if (cmd === "decor") { Prefs.decor = arg; Prefs.save(); }
         else if (cmd === "theme") { Prefs.themeMode = arg; Prefs.save(); }
         else if (cmd === "provider") Playback.setProvider(arg);

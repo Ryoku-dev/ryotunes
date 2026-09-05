@@ -136,6 +136,7 @@ Item {
             Sidebar {
                 Layout.fillHeight: true
                 open: app.sidebarOpen
+                onCollapseRequested: app.sidebarOpen = false
             }
 
             // The content area: the single cover Backdrop, a paper glass over it so the bloom reads
