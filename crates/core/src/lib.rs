@@ -15,4 +15,5 @@ pub mod orchestrator;
 pub mod potoken;
 pub mod radio;
 pub mod session;
+pub mod spotify;
 pub mod state;

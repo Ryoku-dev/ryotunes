@@ -6,6 +6,7 @@ members = [
     "crates/listen-protocol",
     "crates/sync-server",
     "crates/core",
+    "crates/spotify",
     "crates/protocol",
     "crates/ryotunesd",
     "crates/ryotunes-cli",
@@ -39,3 +40,14 @@ ryotunes-protocol = { path = "crates/protocol" }
 lto = "thin"
 codegen-units = 1
 strip = "symbols"
+
+# Spotify streaming (crates/spotify) needs librespot 0.8 with nolight132's librespot-audio fix; the
+# whole set is pinned to the fork rev Sonora uses so the librespot crates stay mutually consistent.
+# No other workspace crate depends on librespot, so this only affects crates/spotify.
+[patch.crates-io]
+librespot-audio = { git = "https://github.com/nolight132/librespot", rev = "e7eb953d5848fd97bacd00e6c0e33500765eaa63" }
+librespot-core = { git = "https://github.com/nolight132/librespot", rev = "e7eb953d5848fd97bacd00e6c0e33500765eaa63" }
+librespot-metadata = { git = "https://github.com/nolight132/librespot", rev = "e7eb953d5848fd97bacd00e6c0e33500765eaa63" }
+librespot-oauth = { git = "https://github.com/nolight132/librespot", rev = "e7eb953d5848fd97bacd00e6c0e33500765eaa63" }
+librespot-playback = { git = "https://github.com/nolight132/librespot", rev = "e7eb953d5848fd97bacd00e6c0e33500765eaa63" }
+librespot-protocol = { git = "https://github.com/nolight132/librespot", rev = "e7eb953d5848fd97bacd00e6c0e33500765eaa63" }
