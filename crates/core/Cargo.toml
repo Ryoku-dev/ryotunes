@@ -20,6 +20,7 @@ listen-protocol = { workspace = true }
 innertube = { path = "../innertube" }
 player = { path = "../player" }
 ryotunes-spotify = { path = "../spotify" }
+ryotunes-soundcloud = { path = "../soundcloud" }
 rusqlite = { version = "0.32", features = ["bundled"] }
 base64 = "0.22"
 regex = "1"

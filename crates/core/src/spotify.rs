@@ -20,6 +20,7 @@ use tokio::sync::RwLock;
 pub enum Provider {
     Youtube,
     Spotify,
+    Soundcloud,
 }
 
 impl Provider {
@@ -27,12 +28,14 @@ impl Provider {
         match self {
             Provider::Youtube => "youtube",
             Provider::Spotify => "spotify",
+            Provider::Soundcloud => "soundcloud",
         }
     }
     pub fn parse(s: &str) -> Option<Self> {
         match s {
             "youtube" => Some(Provider::Youtube),
             "spotify" => Some(Provider::Spotify),
+            "soundcloud" => Some(Provider::Soundcloud),
             _ => None,
         }
     }
@@ -48,6 +51,31 @@ pub fn is_spotify_id(id: &str) -> bool {
 /// The bare base62 id of a Spotify track id, or None for anything else.
 pub fn spotify_track_id(id: &str) -> Option<&str> {
     id.strip_prefix(SPOTIFY_TRACK_PREFIX).filter(|s| !s.is_empty())
+}
+
+pub const SC_TRACK_PREFIX: &str = "sc:track:";
+pub const SC_USER_PREFIX: &str = "sc:user:";
+pub const SC_PLAYLIST_PREFIX: &str = "sc:playlist:";
+
+/// True for any id the daemon minted for a SoundCloud item (`sc:<kind>:<num>`). SoundCloud tracks
+/// stream over plain HTTPS (an HLS m3u8), not the Spotify FIFO — see `AppState::resolve`.
+pub fn is_sc_id(id: &str) -> bool {
+    id.starts_with("sc:")
+}
+
+/// The numeric id of a SoundCloud track id (`sc:track:<num>`), or None for anything else.
+pub fn sc_track_id(id: &str) -> Option<u64> {
+    id.strip_prefix(SC_TRACK_PREFIX)?.parse().ok()
+}
+
+/// The numeric id of a SoundCloud user id (`sc:user:<num>`).
+pub fn sc_user_id(id: &str) -> Option<u64> {
+    id.strip_prefix(SC_USER_PREFIX)?.parse().ok()
+}
+
+/// The numeric id of a SoundCloud playlist/album id (`sc:playlist:<num>`).
+pub fn sc_playlist_id(id: &str) -> Option<u64> {
+    id.strip_prefix(SC_PLAYLIST_PREFIX)?.parse().ok()
 }
 
 /// Owns the Spotify sign-in, the current client and the catalogue selector. Construct once with the
@@ -80,6 +108,12 @@ impl SpotifyState {
     /// is the sign-in state the client shows, not a catalogue.
     pub async fn browsing_spotify(&self) -> bool {
         self.selected() == Provider::Spotify && self.status().await
+    }
+
+    /// Whether browsing should go to SoundCloud. SoundCloud is guest-only (no account), so this
+    /// is just the selection — there is no sign-in gate like [`Self::browsing_spotify`].
+    pub fn browsing_soundcloud(&self) -> bool {
+        self.selected() == Provider::Soundcloud
     }
 
     /// Whether a credential file exists to restore from (no network).

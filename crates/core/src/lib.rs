@@ -16,5 +16,6 @@ pub mod potoken;
 pub mod radio;
 pub mod session;
 pub mod spotify;
+pub mod soundcloud_bridge;
 pub mod spotify_bridge;
 pub mod state;

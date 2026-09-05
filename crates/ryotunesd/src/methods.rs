@@ -10,8 +10,10 @@ use std::sync::Arc;
 
 use innertube::{BrowseItem, PlaylistPage, PlaylistSort, Rating, SongItem, YouTubeClient};
 use ryotunes_core::db::LocalPlaylist;
-use ryotunes_core::spotify::{spotify_track_id, Provider};
+use ryotunes_core::spotify::{sc_playlist_id, sc_track_id, sc_user_id, spotify_track_id, Provider};
 use ryotunes_core::spotify_bridge;
+use ryotunes_core::soundcloud_bridge;
+use ryotunes_soundcloud::ChartKind;
 use ryotunes_core::state::{
     is_local_playlist_id, is_smart_playlist_id, song_to_track, AppState, RepeatMode,
     LOCAL_PLAYLIST_PREFIX, ON_REPEAT_ID, ON_REPEAT_LIMIT, ON_REPEAT_WINDOW_SECS,
@@ -78,6 +80,11 @@ fn spotify_signed_out() -> ErrorBody {
     ErrorBody { code: "spotify_signed_out".into(), message: "Sign in to Spotify".into() }
 }
 
+/// A SoundCloud crate error as the daemon's error body.
+fn soundcloud_err(e: impl ToString) -> ErrorBody {
+    ErrorBody { code: "soundcloud".into(), message: e.to_string() }
+}
+
 #[async_trait::async_trait]
 impl Dispatch for Methods {
     async fn call(
@@ -123,24 +130,30 @@ impl Dispatch for Methods {
             // --- search ----------------------------------------------------------------------
             "search" => ok(st.search(&arg::<String>(&params, "query")?).await.map_err(err)?),
             "search_page" => {
-                if st.spotify.browsing_spotify().await {
-                    spotify_search_page(st, &arg::<String>(&params, "query")?).await
+                let query = arg::<String>(&params, "query")?;
+                if st.spotify.browsing_soundcloud() {
+                    soundcloud_search_page(st, &query).await
+                } else if st.spotify.browsing_spotify().await {
+                    spotify_search_page(st, &query).await
                 } else {
-                    ok(st.search_page(&arg::<String>(&params, "query")?).await.map_err(err)?)
+                    ok(st.search_page(&query).await.map_err(err)?)
                 }
             }
             "search_page_more" => {
-                if st.spotify.browsing_spotify().await {
+                if st.spotify.browsing_soundcloud() || st.spotify.browsing_spotify().await {
                     ok(json!({ "items": [], "continuation": null }))
                 } else {
                     ok(st.search_page_more(&arg::<String>(&params, "token")?).await.map_err(err)?)
                 }
             }
             "search_all" => {
-                if st.spotify.browsing_spotify().await {
-                    spotify_search_all(st, &arg::<String>(&params, "query")?).await
+                let query = arg::<String>(&params, "query")?;
+                if st.spotify.browsing_soundcloud() {
+                    soundcloud_search_all(st, &query).await
+                } else if st.spotify.browsing_spotify().await {
+                    spotify_search_all(st, &query).await
                 } else {
-                    ok(st.search_all(&arg::<String>(&params, "query")?).await.map_err(err)?)
+                    ok(st.search_all(&query).await.map_err(err)?)
                 }
             }
             "search_all_more" => {
@@ -149,7 +162,9 @@ impl Dispatch for Methods {
             "search_cards" => {
                 let query = arg::<String>(&params, "query")?;
                 let category = arg::<String>(&params, "category")?;
-                if st.spotify.browsing_spotify().await {
+                if st.spotify.browsing_soundcloud() {
+                    soundcloud_search_cards(st, &query, &category).await
+                } else if st.spotify.browsing_spotify().await {
                     spotify_search_cards(st, &query, &category).await
                 } else {
                     ok(st.search_cards(&query, &category).await.map_err(err)?)
@@ -365,7 +380,9 @@ impl Dispatch for Methods {
 
             // --- browse / library ------------------------------------------------------------
             "get_home" => {
-                if st.spotify.browsing_spotify().await {
+                if st.spotify.browsing_soundcloud() {
+                    soundcloud_home(st).await
+                } else if st.spotify.browsing_spotify().await {
                     spotify_home(st).await
                 } else {
                     ok(st
@@ -375,28 +392,34 @@ impl Dispatch for Methods {
                 }
             }
             "get_home_more" => {
-                if st.spotify.browsing_spotify().await {
+                if st.spotify.browsing_soundcloud() || st.spotify.browsing_spotify().await {
                     ok(json!({ "sections": [], "continuation": null }))
                 } else {
                     ok(st.home_more(&arg::<String>(&params, "token")?).await.map_err(err)?)
                 }
             }
             "get_library" => {
-                if st.spotify.browsing_spotify().await {
+                if st.spotify.browsing_soundcloud() {
+                    ok(Vec::<BrowseItem>::new())
+                } else if st.spotify.browsing_spotify().await {
                     spotify_library(st).await
                 } else {
                     get_library(st).await
                 }
             }
             "get_library_albums" => {
-                if st.spotify.browsing_spotify().await {
+                if st.spotify.browsing_soundcloud() {
+                    ok(Vec::<BrowseItem>::new())
+                } else if st.spotify.browsing_spotify().await {
                     spotify_library_albums(st).await
                 } else {
                     ok(st.library_albums().await.map_err(err)?)
                 }
             }
             "get_library_artists" => {
-                if st.spotify.browsing_spotify().await {
+                if st.spotify.browsing_soundcloud() {
+                    ok(Vec::<BrowseItem>::new())
+                } else if st.spotify.browsing_spotify().await {
                     spotify_library_artists(st).await
                 } else {
                     ok(st.library_artists().await.map_err(err)?)
@@ -418,6 +441,8 @@ impl Dispatch for Methods {
                 let id = arg::<String>(&params, "id")?;
                 if let Some(aid) = id.strip_prefix("spotify:album:") {
                     spotify_album(st, aid).await
+                } else if let Some(pid) = sc_playlist_id(&id) {
+                    soundcloud_album(st, pid).await
                 } else {
                     ok(st.album(&id).await.map_err(err)?)
                 }
@@ -426,9 +451,21 @@ impl Dispatch for Methods {
                 let id = arg::<String>(&params, "id")?;
                 if let Some(aid) = id.strip_prefix("spotify:artist:") {
                     spotify_artist(st, aid).await
+                } else if let Some(uid) = sc_user_id(&id) {
+                    soundcloud_artist(st, uid).await
                 } else {
                     ok(st.artist(&id).await.map_err(err)?)
                 }
+            }
+            "get_waveform" => {
+                let tid = sc_track_id(&arg::<String>(&params, "id")?)
+                    .ok_or_else(|| err("get_waveform expects a SoundCloud track id"))?;
+                soundcloud_waveform(st, tid).await
+            }
+            "get_sc_user" => {
+                let uid = sc_user_id(&arg::<String>(&params, "id")?)
+                    .ok_or_else(|| err("get_sc_user expects a SoundCloud user id"))?;
+                soundcloud_artist(st, uid).await
             }
             "get_browse_grid" => ok(st
                 .browse_grid(
@@ -902,6 +939,102 @@ async fn spotify_edit_playlist(
     null()
 }
 
+// --- SoundCloud command bodies ----------------------------------------------------------------
+
+/// The genre chart shelves the SoundCloud home shows, as `(title, "soundcloud:genres:<key>")`.
+const SC_GENRE_SHELVES: [(&str, &str); 6] = [
+    ("House", "soundcloud:genres:house"),
+    ("Hip-hop & Rap", "soundcloud:genres:hiphoprap"),
+    ("Electronic", "soundcloud:genres:electronic"),
+    ("Pop", "soundcloud:genres:pop"),
+    ("R&B & Soul", "soundcloud:genres:rbsoul"),
+    ("Dance & EDM", "soundcloud:genres:danceedm"),
+];
+
+/// SoundCloud home: the "Top 50 · All music" and "Trending" charts plus six genre charts, fetched
+/// concurrently. A shelf that fails to load is dropped (empty), never an error — home stays useful.
+async fn soundcloud_home(st: &Arc<AppState>) -> Result<Value, ErrorBody> {
+    const ALL: &str = "soundcloud:genres:all-music";
+    let sc = &st.soundcloud;
+    let (top, trending, g0, g1, g2, g3, g4, g5) = tokio::join!(
+        sc.charts(ChartKind::Top, ALL),
+        sc.charts(ChartKind::Trending, ALL),
+        sc.charts(ChartKind::Top, SC_GENRE_SHELVES[0].1),
+        sc.charts(ChartKind::Top, SC_GENRE_SHELVES[1].1),
+        sc.charts(ChartKind::Top, SC_GENRE_SHELVES[2].1),
+        sc.charts(ChartKind::Top, SC_GENRE_SHELVES[3].1),
+        sc.charts(ChartKind::Top, SC_GENRE_SHELVES[4].1),
+        sc.charts(ChartKind::Top, SC_GENRE_SHELVES[5].1),
+    );
+    let genres = [g0, g1, g2, g3, g4, g5];
+    let mut shelves = vec![
+        ("Top 50 · All music".to_owned(), top.unwrap_or_default()),
+        ("Trending".to_owned(), trending.unwrap_or_default()),
+    ];
+    for ((title, _), tracks) in SC_GENRE_SHELVES.iter().zip(genres) {
+        shelves.push(((*title).to_owned(), tracks.unwrap_or_default()));
+    }
+    ok(soundcloud_bridge::home_page(shelves))
+}
+
+async fn soundcloud_search_all(st: &Arc<AppState>, query: &str) -> Result<Value, ErrorBody> {
+    let results = st.soundcloud.search(query).await.map_err(soundcloud_err)?;
+    ok(soundcloud_bridge::search_all(&results))
+}
+
+async fn soundcloud_search_page(st: &Arc<AppState>, query: &str) -> Result<Value, ErrorBody> {
+    let results = st.soundcloud.search(query).await.map_err(soundcloud_err)?;
+    ok(json!({ "items": soundcloud_bridge::search_songs(&results), "continuation": null }))
+}
+
+async fn soundcloud_search_cards(
+    st: &Arc<AppState>,
+    query: &str,
+    category: &str,
+) -> Result<Value, ErrorBody> {
+    let results = st.soundcloud.search(query).await.map_err(soundcloud_err)?;
+    ok(soundcloud_bridge::search_cards(&results, category))
+}
+
+async fn soundcloud_album(st: &Arc<AppState>, id: u64) -> Result<Value, ErrorBody> {
+    let detail = st.soundcloud.playlist(id).await.map_err(soundcloud_err)?;
+    ok(soundcloud_bridge::album_page(&detail))
+}
+
+async fn soundcloud_playlist(st: &Arc<AppState>, id: u64) -> Result<Value, ErrorBody> {
+    let detail = st.soundcloud.playlist(id).await.map_err(soundcloud_err)?;
+    ok(soundcloud_bridge::playlist_page(&detail))
+}
+
+/// The Orange/SoundCloud artist page: the user profile plus their tracks, albums, playlists and
+/// likes, fetched concurrently. A missing sub-list degrades to empty rather than failing the page.
+async fn soundcloud_artist(st: &Arc<AppState>, id: u64) -> Result<Value, ErrorBody> {
+    let sc = &st.soundcloud;
+    let user = sc.user(id).await.map_err(soundcloud_err)?;
+    let (tracks, albums, playlists, likes) = tokio::join!(
+        sc.user_tracks(id, 0),
+        sc.user_albums(id),
+        sc.user_playlists(id),
+        sc.user_likes(id),
+    );
+    let tracks = tracks.map(|page| page.items).unwrap_or_default();
+    let page = soundcloud_bridge::artist_page(
+        &user,
+        &tracks,
+        &albums.unwrap_or_default(),
+        &playlists.unwrap_or_default(),
+        &likes.unwrap_or_default(),
+    );
+    ok(page)
+}
+
+/// The waveform for a SoundCloud track: 240 peak samples (0..=100) for the seek bar.
+async fn soundcloud_waveform(st: &Arc<AppState>, id: u64) -> Result<Value, ErrorBody> {
+    let track = st.soundcloud.track(id).await.map_err(soundcloud_err)?;
+    let samples = st.soundcloud.waveform(&track).await.map_err(soundcloud_err)?;
+    ok(json!({ "samples": samples }))
+}
+
 // --- ported command bodies that are too large for a match arm ---------------------------------
 
 fn set_setting(st: &Arc<AppState>, params: &Value) -> Result<Value, ErrorBody> {
@@ -988,6 +1121,9 @@ async fn get_playlist(st: &Arc<AppState>, params: &Value) -> Result<Value, Error
     let id = arg::<String>(params, "id")?;
     if let Some(pid) = id.strip_prefix("spotify:playlist:") {
         return spotify_playlist(st, pid).await;
+    }
+    if let Some(pid) = sc_playlist_id(&id) {
+        return soundcloud_playlist(st, pid).await;
     }
     let sort = arg::<Option<PlaylistSort>>(params, "sort")?;
     let desc = arg::<Option<bool>>(params, "desc")?;

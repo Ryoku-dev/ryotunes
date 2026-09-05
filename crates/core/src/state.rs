@@ -153,6 +153,13 @@ pub struct AppState {
     /// position ticks report `base + mpv time-pos`. Reset to 0 on every track start; always 0
     /// while a non-Spotify track plays, so adding it is a no-op there.
     spotify_seek_base: AtomicU64,
+    /// The SoundCloud provider (guest api-v2 client), cache dir `<data>/soundcloud`. SoundCloud
+    /// tracks stream over plain HTTPS, so unlike `spotify_stream` there is no live handle to hold.
+    pub soundcloud: Arc<ryotunes_soundcloud::SoundCloud>,
+    /// Play/like/genre for SoundCloud tracks seen by `resolve`, keyed by `sc:track:` id, so the
+    /// now-playing snapshot can render the meta line without another round-trip. Bounded in
+    /// `remember_sc_meta`.
+    sc_meta: parking_lot::Mutex<std::collections::HashMap<String, ScTrackMeta>>,
 }
 
 /// One live Spotify stream held on [`AppState`]: the cheap transport handle the daemon seeks
@@ -161,6 +168,16 @@ pub struct AppState {
 struct SpotifyStream {
     controls: StreamControls,
     watcher: tokio::task::JoinHandle<()>,
+}
+
+/// Play/like/genre for one SoundCloud track, remembered by [`AppState::resolve`] so the
+/// now-playing snapshot can render the "plays · likes · genre" meta line. Counts are pre-formatted
+/// display strings ("1.2M"); absent fields stay `None`.
+#[derive(Clone, Default)]
+struct ScTrackMeta {
+    plays: Option<String>,
+    likes: Option<String>,
+    genre: Option<String>,
 }
 
 /// Repeat mode for the queue. Serialized lowercase for the UI + `queue_json`.
@@ -404,6 +421,8 @@ impl AppState {
             .unwrap_or(crate::spotify::Provider::Youtube);
         let spotify =
             Arc::new(crate::spotify::SpotifyState::new(paths.data_dir.join("spotify"), selected));
+        let soundcloud =
+            Arc::new(ryotunes_soundcloud::SoundCloud::new(paths.data_dir.join("soundcloud")));
         AppState {
             it,
             clients,
@@ -418,6 +437,8 @@ impl AppState {
             discord,
             lastfm,
             spotify,
+            soundcloud,
+            sc_meta: parking_lot::Mutex::new(std::collections::HashMap::new()),
             queue: Mutex::new(QueueState::default()),
             is_playing: AtomicBool::new(false),
             generation: AtomicU64::new(0),
@@ -935,6 +956,53 @@ impl AppState {
                 // to the queue row's flag, which is exactly the thing that can't be trusted.
                 is_video: c.is_video,
                 stream_client: "cache".to_owned(),
+            });
+        }
+        // A SoundCloud track streams over plain HTTPS: an HLS m3u8 mpv reads directly, no FIFO and
+        // no YouTube-specific headers. Its signed URL expires in ~1h, so cap the latency cache at
+        // 30 min and re-resolve after. Resolving fetches the track (transcodings + counts) then
+        // picks an HLS transcoding; a cache hit above already returned without any of this.
+        if let Some(id) = crate::spotify::sc_track_id(video_id) {
+            let track = self
+                .soundcloud
+                .track(id)
+                .await
+                .map_err(|e| ResolveError::AllClientsFailed(format!("{video_id}: {e}")))?;
+            let url = self
+                .soundcloud
+                .stream_url(&track)
+                .await
+                .map_err(|e| ResolveError::AllClientsFailed(format!("{video_id}: {e}")))?;
+            self.remember_sc_meta(video_id, &track);
+            const SC_CACHE_SECS: i64 = 30 * 60;
+            self.db.put_stream(
+                video_id,
+                &crate::db::CachedStream {
+                    url: url.clone(),
+                    itag: 0,
+                    expires_at: now + SC_CACHE_SECS,
+                    loudness_db: None,
+                    is_video: Some(false),
+                    ping_url: None,
+                    ping_client: None,
+                },
+                now,
+            );
+            return Ok(PlaybackData {
+                video_id: video_id.to_owned(),
+                stream_url: url,
+                itag: 0,
+                mpv_options: Vec::new(),
+                headers: Default::default(),
+                expires_in_seconds: SC_CACHE_SECS,
+                loudness_db: None,
+                playback_ping: None,
+                title: None,
+                artists: None,
+                duration: None,
+                thumbnail: None,
+                is_video: Some(false),
+                stream_client: "soundcloud".to_owned(),
             });
         }
         let data = self
@@ -1895,8 +1963,8 @@ impl AppState {
     /// Everything the `now-playing` event carries. Shared with [`Self::playback_snapshot`] so a
     /// window that asks for the current track can't be told a different shape than one that
     /// listened for it.
-    fn now_playing_json(item: &SongItem, stream_client: &str) -> serde_json::Value {
-        serde_json::json!({
+    fn now_playing_json(&self, item: &SongItem, stream_client: &str) -> serde_json::Value {
+        let mut now = serde_json::json!({
             "videoId": item.video_id,
             "title": item.title,
             "artists": item.artists,
@@ -1907,7 +1975,42 @@ impl AppState {
             "duration": item.duration,
             "streamClient": stream_client,
             "rating": item.rating,
-        })
+        });
+        // SoundCloud tracks carry a "plays · likes · genre" meta line the player bar and Now
+        // Playing card render; splice in whatever `resolve` remembered for this id.
+        if crate::spotify::is_sc_id(&item.video_id) {
+            if let Some(meta) = self.sc_meta.lock().get(&item.video_id).cloned() {
+                let obj = now.as_object_mut().expect("json object");
+                if let Some(plays) = meta.plays {
+                    obj.insert("plays".to_owned(), serde_json::Value::String(plays));
+                }
+                if let Some(likes) = meta.likes {
+                    obj.insert("likes".to_owned(), serde_json::Value::String(likes));
+                }
+                if let Some(genre) = meta.genre {
+                    obj.insert("genre".to_owned(), serde_json::Value::String(genre));
+                }
+            }
+        }
+        now
+    }
+
+    /// Remember a SoundCloud track's play/like/genre counts (pre-formatted) so the now-playing
+    /// snapshot can render its meta line. Bounded: cleared past a few hundred entries so a long
+    /// session can't grow it without limit.
+    fn remember_sc_meta(&self, video_id: &str, track: &ryotunes_soundcloud::Track) {
+        let mut map = self.sc_meta.lock();
+        if map.len() > 512 {
+            map.clear();
+        }
+        map.insert(
+            video_id.to_owned(),
+            ScTrackMeta {
+                plays: track.plays.map(crate::soundcloud_bridge::abbreviate),
+                likes: track.likes.map(crate::soundcloud_bridge::abbreviate),
+                genre: track.genre.clone(),
+            },
+        );
     }
 
     /// What a window that opened mid-playback missed. Events are fire-and-forget, so the mini
@@ -1927,7 +2030,7 @@ impl AppState {
             .unwrap_or_else(|| self.current_position());
         self.note_position_sample(position);
         serde_json::json!({
-            "now": item.as_ref().map(|i| Self::now_playing_json(i, "current")),
+            "now": item.as_ref().map(|i| self.now_playing_json(i, "current")),
             "paused": !self.is_playing.load(Ordering::Relaxed),
             "position": position,
             "duration": duration,
@@ -1981,7 +2084,7 @@ impl AppState {
     }
 
     fn emit_now_playing(&self, item: &SongItem, stream_client: &str) {
-        self.emit("now-playing", Self::now_playing_json(item, stream_client));
+        self.emit("now-playing", self.now_playing_json(item, stream_client));
         self.emit("playback-state", "playing");
         // Push the same metadata to the OS media widget (fail-soft policy) and Discord.
         if let Some(m) = &self.media {
@@ -2254,6 +2357,7 @@ impl AppState {
             !crate::local::is_local_song(&i.video_id)
                 && !crate::radio::is_radio_id(&i.video_id)
                 && !crate::spotify::is_spotify_id(&i.video_id)
+                && !crate::spotify::is_sc_id(&i.video_id)
         }) {
             if let Ok(json) = serde_json::to_string(&item) {
                 self.db.record_play(&item.video_id, &json, now_secs(), ON_REPEAT_WINDOW_SECS);
@@ -2419,7 +2523,11 @@ impl AppState {
         if !self.autoplay_enabled() || self.lt.is_guest().await {
             return 0;
         }
-        let (last_video, seed, existing) = {
+        enum AutoplaySource {
+            Radio { last_video: String, seed: String },
+            Soundcloud { id: u64 },
+        }
+        let (source, existing) = {
             let q = self.queue.lock().await;
             if q.repeat != RepeatMode::Off {
                 return 0; // the queue never exhausts under repeat
@@ -2428,29 +2536,46 @@ impl AppState {
                 return 0; // tail not near yet
             }
             let Some(last) = q.items.last() else { return 0 };
-            // Nothing to continue from when the queue ends on a local file: its path is not a
-            // videoId, and a queue of local music is exactly the case that has to work offline.
-            if q.radio_seed.is_none()
-                && (crate::local::is_local_song(&last.video_id)
-                    || crate::radio::is_radio_id(&last.video_id)
-                    || crate::spotify::is_spotify_id(&last.video_id))
-            {
-                return 0;
-            }
-            let seed = q.radio_seed.clone().unwrap_or_else(|| format!("RDAMVM{}", last.video_id));
             let existing: HashSet<String> = q.items.iter().map(|i| i.video_id.clone()).collect();
-            (last.video_id.clone(), seed, existing)
-        };
-        let Some(client) = self.clients.get(innertube::METADATA_CLIENT) else { return 0 };
-        // Snapshot → network → re-lock, same discipline as `prime_lookahead`; the generation
-        // check between them is what makes it safe. A track added *during* the fetch could
-        // theoretically duplicate — accepted (YTM's own radio repeats occasionally too).
-        let fresh = match self.it.next(client, Some(&last_video), Some(&seed)).await {
-            Ok(next) => next.items,
-            Err(e) => {
-                tracing::warn!(error = %e, "autoplay radio fetch failed");
-                return 0;
+            // A SoundCloud tail continues via the track's own related feed, not YouTube radio.
+            if let Some(id) = crate::spotify::sc_track_id(&last.video_id) {
+                (AutoplaySource::Soundcloud { id }, existing)
+            } else {
+                // Nothing to continue from when the queue ends on a local file, a live-radio
+                // stream, or a Spotify track: none is a YouTube videoId a radio can seed from.
+                if q.radio_seed.is_none()
+                    && (crate::local::is_local_song(&last.video_id)
+                        || crate::radio::is_radio_id(&last.video_id)
+                        || crate::spotify::is_spotify_id(&last.video_id))
+                {
+                    return 0;
+                }
+                let seed =
+                    q.radio_seed.clone().unwrap_or_else(|| format!("RDAMVM{}", last.video_id));
+                (AutoplaySource::Radio { last_video: last.video_id.clone(), seed }, existing)
             }
+        };
+        // Snapshot → network → re-lock, same discipline as `prime_lookahead`; the generation
+        // check below is what makes it safe. A track added *during* the fetch could theoretically
+        // duplicate — accepted (a radio repeats occasionally too).
+        let fresh: Vec<SongItem> = match &source {
+            AutoplaySource::Radio { last_video, seed } => {
+                let Some(client) = self.clients.get(innertube::METADATA_CLIENT) else { return 0 };
+                match self.it.next(client, Some(last_video), Some(seed)).await {
+                    Ok(next) => next.items,
+                    Err(e) => {
+                        tracing::warn!(error = %e, "autoplay radio fetch failed");
+                        return 0;
+                    }
+                }
+            }
+            AutoplaySource::Soundcloud { id } => match self.soundcloud.related(*id).await {
+                Ok(tracks) => tracks.iter().map(crate::soundcloud_bridge::track_to_song).collect(),
+                Err(e) => {
+                    tracing::warn!(error = %e, "autoplay soundcloud related fetch failed");
+                    return 0;
+                }
+            },
         };
         if self.generation.load(Ordering::SeqCst) != gen {
             return 0; // user moved on while we fetched
@@ -2460,7 +2585,7 @@ impl AppState {
             merge_radio(&mut q.items, fresh, existing, AUTOPLAY_BATCH)
         };
         if added > 0 {
-            tracing::info!(added, seed = %seed, "autoplay extended the queue");
+            tracing::info!(added, "autoplay extended the queue");
             self.emit_queue().await;
             self.persist_queue().await;
             self.lt_broadcast_queue().await;
