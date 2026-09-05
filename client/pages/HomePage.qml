@@ -1,10 +1,13 @@
 pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Layouts
+import QtQuick.Shapes
 import Ryoku.Ui.Singletons
 import "../"
 import "../components"
 import "../chrome"
+import "../lib/browse.js" as Browse
+import "../lib/ids.js" as Ids
 
 // Home (spec section 5), ported from ui/src/routes/+page.svelte and reset onto the visual system.
 // One vertical reused ListView of the feed's shelves; the header carries the greeting hero (with
@@ -178,7 +181,7 @@ Item {
         cacheBuffer: Math.max(0, Math.round(height * 1.5))
         boundsBehavior: Flickable.StopAtBounds
         model: page.blocks
-        spacing: Style.sp(9)
+        spacing: Style.sp(10)
 
         // The header (hero + chips + pinned + personal shelves) is taller than the viewport and
         // grows as the recents / familiar / feed shelves resolve. While the user has not scrolled,
@@ -207,36 +210,47 @@ Item {
             // (the feed shelves) so the panel is never painted under them.
             z: 2
             width: list.width
-            implicitHeight: headerCol.implicitHeight + Style.sp(9)
+            implicitHeight: headerCol.implicitHeight
 
             ColumnLayout {
                 id: headerCol
                 width: parent.width
-                spacing: Style.sp(6)
+                spacing: Style.sp(10)
 
-                // hero: greeting, search and key hints on the left; the listening deck on the right
-                // when the page is wide enough (>= 1240 px, i.e. the panel closed or a wider window).
-                GridLayout {
-                    z: 2
+                // hero: the greeting, search and key hints on the left (inset 48 px); the Now
+                // Playing card on the right when the page is wide enough that it never crowds the
+                // greeting column (>= 1180 px) and something is playing.
+                RowLayout {
                     id: hero
+                    z: 2
                     Layout.fillWidth: true
-                    readonly property bool wide: width >= Style.sp(310)
-                    columns: wide ? 2 : 1
-                    columnSpacing: Style.sp(10)
-                    rowSpacing: Style.sp(5)
+                    readonly property bool wide: width >= Style.sp(295)
+                    spacing: 0
 
                     ColumnLayout {
                         Layout.fillWidth: true
-                        Layout.alignment: Qt.AlignVCenter
+                        Layout.maximumWidth: Style.sp(120)
+                        Layout.minimumWidth: Style.sp(70)
+                        Layout.leftMargin: Style.sp(4)
+                        Layout.alignment: Qt.AlignTop
                         spacing: Style.sp(2)
 
+                        // — 力 HOME / LISTEN ··· 01
                         RowLayout {
+                            Layout.fillWidth: true
                             spacing: Style.sp(2)
                             Rectangle { Layout.preferredWidth: Style.sp(4); Layout.preferredHeight: 1; Layout.alignment: Qt.AlignVCenter; color: Tokens.ink }
-                            Text { text: "聴"; color: Tokens.ink; font.family: Tokens.jp; font.pixelSize: Style.fs.sm }
-                            Rectangle { Layout.preferredWidth: Style.sp(13); Layout.preferredHeight: 1; Layout.alignment: Qt.AlignVCenter; color: Tokens.lineSoft }
+                            Text { text: "力"; color: Tokens.ink; font.family: Tokens.jp; font.pixelSize: Style.fs.sm }
                             Text {
-                                text: "RYOKU // MUSIC"
+                                text: "HOME / LISTEN"
+                                color: Tokens.inkFaint
+                                font.family: Style.fontMono
+                                font.pixelSize: Style.fs.micro
+                                font.letterSpacing: Style.trackMicro
+                            }
+                            Rectangle { Layout.fillWidth: true; Layout.preferredHeight: 1; Layout.alignment: Qt.AlignVCenter; color: Tokens.lineSoft }
+                            Text {
+                                text: "01"
                                 color: Tokens.inkFaint
                                 font.family: Style.fontMono
                                 font.pixelSize: Style.fs.micro
@@ -259,73 +273,255 @@ Item {
                             font.pixelSize: Style.fs.sm
                             wrapMode: Text.WordWrap
                         }
-                        SearchSuggest {
-                            id: heroSearch
-                            Component.onCompleted: page.heroSearch = heroSearch
-                            Layout.preferredWidth: Style.sp(80)
-                            Layout.maximumWidth: Style.sp(80)
+
+                        // the search field, with a Ctrl+K kbd chip inset at its right edge
+                        Item {
+                            Layout.fillWidth: true
                             Layout.topMargin: Style.sp(2)
-                            placeholder: "Search tracks, albums, artists…"
-                            onSubmitted: if (value.trim() !== "") Router.push("search", { q: value.trim() })
-                            onPicked: if (value.trim() !== "") Router.push("search", { q: value.trim() })
+                            implicitHeight: heroSearch.implicitHeight
                             z: 40
+                            SearchSuggest {
+                                id: heroSearch
+                                Component.onCompleted: page.heroSearch = heroSearch
+                                width: parent.width
+                                placeholder: "Search tracks, albums, artists…"
+                                onSubmitted: if (value.trim() !== "") Router.push("search", { q: value.trim() })
+                                onPicked: if (value.trim() !== "") Router.push("search", { q: value.trim() })
+                                z: 40
+                            }
+                            Rectangle {
+                                id: kbd
+                                z: 50
+                                visible: heroSearch.value === ""
+                                anchors.right: parent.right
+                                anchors.rightMargin: Style.sp(2)
+                                anchors.top: parent.top
+                                anchors.topMargin: (Style.sp(11) - height) / 2
+                                implicitHeight: Style.sp(6)
+                                implicitWidth: kbdText.implicitWidth + Style.sp(3)
+                                radius: Style.radius
+                                color: Tokens.tint5
+                                border.width: 1
+                                border.color: Tokens.line
+                                Text {
+                                    id: kbdText
+                                    anchors.centerIn: parent
+                                    text: "Ctrl+K"
+                                    color: Tokens.inkMuted
+                                    font.family: Style.fontMono
+                                    font.pixelSize: Style.fs.micro
+                                    font.letterSpacing: Style.trackMicro
+                                }
+                            }
                         }
+
+                        // key hints
                         RowLayout {
                             Layout.topMargin: Style.sp(1)
                             spacing: Style.sp(2)
-                            Text { text: "CTRL K"; color: Tokens.inkMuted; font.family: Style.fontMono; font.pixelSize: Style.fs.micro; font.letterSpacing: Style.trackMicro }
+                            Text { text: "Ctrl+K"; color: Tokens.inkMuted; font.family: Style.fontMono; font.pixelSize: Style.fs.micro; font.letterSpacing: Style.trackMicro }
                             Text { text: "command search"; color: Tokens.inkFaint; font.family: Style.fontUi; font.pixelSize: Style.fs.xs }
                             Rectangle { Layout.preferredWidth: Style.sp(4); Layout.preferredHeight: 1; Layout.alignment: Qt.AlignVCenter; color: Tokens.lineSoft }
-                            Text { text: "SPACE"; color: Tokens.inkMuted; font.family: Style.fontMono; font.pixelSize: Style.fs.micro; font.letterSpacing: Style.trackMicro }
+                            Text { text: "Space"; color: Tokens.inkMuted; font.family: Style.fontMono; font.pixelSize: Style.fs.micro; font.letterSpacing: Style.trackMicro }
                             Text { text: "play / pause"; color: Tokens.inkFaint; font.family: Style.fontUi; font.pixelSize: Style.fs.xs }
                         }
                     }
 
-                    MusicDeck {
-                        visible: hero.wide
-                        Layout.preferredWidth: Style.sp(140)
-                        Layout.preferredHeight: Style.sp(40)
-                        Layout.alignment: Qt.AlignVCenter | Qt.AlignRight
-                        onOpenNowPlaying: (tab) => Playback.nowPlayingRequested(tab)
+                    Item { Layout.fillWidth: true; Layout.minimumWidth: hero.wide ? Style.sp(10) : 0 }
+
+                    NowPlayingCard {
+                        visible: hero.wide && !!Playback.now
+                        Layout.preferredWidth: Style.sp(138)
+                        Layout.maximumWidth: Style.sp(140)
+                        Layout.alignment: Qt.AlignTop
+                        onOpenQueue: Playback.nowPlayingRequested("queue")
                     }
                 }
 
-                // chip rail
-                Flickable {
+                // chip rail — a horizontal Flickable whose right edge fades into the paper (never a
+                // hard cut on the last chip) via a gradient overlay rather than an OpacityMask.
+                Item {
                     Layout.fillWidth: true
                     implicitHeight: chipRow.implicitHeight
-                    contentWidth: chipRow.implicitWidth
-                    contentHeight: chipRow.implicitHeight
-                    flickableDirection: Flickable.HorizontalFlick
-                    boundsBehavior: Flickable.StopAtBounds
-                    clip: true
                     visible: page.chips.length > 0
-                    Row {
-                        id: chipRow
-                        spacing: Style.sp(2)
-                        Chip {
-                            text: "All"
-                            active: page.selected === ""
-                            onClicked: page.load("")
-                        }
-                        Repeater {
-                            model: page.chips
-                            delegate: Chip {
-                                required property var modelData
-                                text: modelData.title
-                                active: page.selected === modelData.params
-                                onClicked: page.load(page.selected === modelData.params ? "" : modelData.params)
+                    Flickable {
+                        id: chipsFlick
+                        anchors.fill: parent
+                        contentWidth: chipRow.implicitWidth
+                        contentHeight: chipRow.implicitHeight
+                        flickableDirection: Flickable.HorizontalFlick
+                        boundsBehavior: Flickable.StopAtBounds
+                        clip: true
+                        Row {
+                            id: chipRow
+                            spacing: Style.sp(2)
+                            Chip {
+                                text: "All"
+                                active: page.selected === ""
+                                onClicked: page.load("")
+                            }
+                            Repeater {
+                                model: page.chips
+                                delegate: Chip {
+                                    required property var modelData
+                                    text: modelData.title
+                                    active: page.selected === modelData.params
+                                    onClicked: page.load(page.selected === modelData.params ? "" : modelData.params)
+                                }
                             }
                         }
                     }
+                    Rectangle {
+                        visible: chipsFlick.contentWidth > chipsFlick.width
+                        anchors.right: parent.right
+                        anchors.top: parent.top
+                        anchors.bottom: parent.bottom
+                        width: Style.sp(12)
+                        gradient: Gradient {
+                            orientation: Gradient.Horizontal
+                            GradientStop { position: 0.0; color: "transparent" }
+                            GradientStop { position: 1.0; color: Tokens.paper }
+                        }
+                    }
                 }
 
-                // pinned (unfiltered only)
-                Shortcuts {
+                // shortcuts (pinned, unfiltered only) — bordered 56 px cards, then a dashed
+                // "Add shortcut" card of the same height
+                ColumnLayout {
                     Layout.fillWidth: true
                     visible: page.selected === ""
-                    picks: Personal.picks
-                    onRemoved: (id) => Personal.removePick(id)
+                    spacing: Style.sp(4)
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: Style.sp(2)
+                        Icon { Layout.alignment: Qt.AlignVCenter; name: "dashboard"; size: Style.fs.md; color: Tokens.inkMuted }
+                        SectionHeading { Layout.fillWidth: true; title: "// Shortcuts"; mark: Style.decorRich ? "選" : "" }
+                    }
+                    Flow {
+                        id: pinFlow
+                        Layout.fillWidth: true
+                        spacing: Style.sp(4)
+
+                        Repeater {
+                            model: Personal.picks
+                            delegate: Rectangle {
+                                id: pin
+                                required property var modelData
+                                readonly property bool round: pin.modelData && pin.modelData.kind === "artist"
+                                width: Style.sp(85)
+                                height: Style.sp(14)
+                                radius: Style.radiusCard
+                                color: pinHover.hovered ? Tokens.tint5 : "transparent"
+                                border.width: 1
+                                border.color: pinHover.hovered ? Tokens.lineStrong : Tokens.line
+                                Behavior on color { ColorAnimation { duration: Style.motion.snap } }
+                                Behavior on border.color { ColorAnimation { duration: Style.motion.snap } }
+                                RowLayout {
+                                    anchors.fill: parent
+                                    anchors.leftMargin: Style.sp(2)
+                                    anchors.rightMargin: Style.sp(2)
+                                    spacing: Style.sp(3)
+                                    Artwork {
+                                        Layout.alignment: Qt.AlignVCenter
+                                        url: pin.modelData && pin.modelData.thumbnail ? pin.modelData.thumbnail : ""
+                                        px: Style.sp(10)
+                                        round: pin.round
+                                        placeholderIcon: pin.round ? "user"
+                                            : (pin.modelData && Ids.isOnRepeatId(pin.modelData.id)) ? "on-repeat" : "music"
+                                    }
+                                    ColumnLayout {
+                                        Layout.fillWidth: true
+                                        spacing: Style.sp(0.5)
+                                        Text {
+                                            Layout.fillWidth: true
+                                            text: pin.modelData ? pin.modelData.title : ""
+                                            color: Tokens.ink
+                                            font.family: Style.fontUi
+                                            font.pixelSize: Style.fs.md
+                                            font.weight: Font.Medium
+                                            elide: Text.ElideRight
+                                        }
+                                        Text {
+                                            Layout.fillWidth: true
+                                            text: (pin.modelData && pin.modelData.subtitle) ? pin.modelData.subtitle
+                                                : (pin.modelData ? pin.modelData.kind : "")
+                                            color: Tokens.inkMuted
+                                            font.family: Style.fontUi
+                                            font.pixelSize: Style.fs.sm
+                                            elide: Text.ElideRight
+                                            textFormat: Text.PlainText
+                                        }
+                                    }
+                                    IconButton {
+                                        visible: pinHover.hovered
+                                        icon: "close"
+                                        iconSize: Style.fs.sm
+                                        diameter: Style.sp(7)
+                                        tip: "Remove"
+                                        onClicked: Personal.removePick(pin.modelData.id)
+                                    }
+                                }
+                                HoverHandler { id: pinHover }
+                                TapHandler {
+                                    onTapped: {
+                                        if (pin.modelData.kind === "song")
+                                            Playback.play(Browse.asSong(pin.modelData));
+                                        else
+                                            Router.push(pin.modelData.kind, { id: pin.modelData.id, title: pin.modelData.title });
+                                    }
+                                }
+                            }
+                        }
+
+                        // dashed "Add shortcut" card
+                        Item {
+                            id: addTile
+                            width: Style.sp(85)
+                            height: Style.sp(14)
+                            Shape {
+                                anchors.fill: parent
+                                preferredRendererType: Shape.CurveRenderer
+                                ShapePath {
+                                    strokeColor: addHover.hovered ? Tokens.lineStrong : Tokens.line
+                                    strokeWidth: 1
+                                    fillColor: addHover.hovered ? Tokens.tint5 : "transparent"
+                                    strokeStyle: ShapePath.DashLine
+                                    dashPattern: [4, 4]
+                                    joinStyle: ShapePath.RoundJoin
+                                    PathSvg {
+                                        path: {
+                                            var o = 0.5;
+                                            var w = addTile.width - o * 2;
+                                            var h = addTile.height - o * 2;
+                                            var r = Style.radiusCard;
+                                            return "M " + (o + r) + " " + o
+                                                + " H " + (o + w - r)
+                                                + " A " + r + " " + r + " 0 0 1 " + (o + w) + " " + (o + r)
+                                                + " V " + (o + h - r)
+                                                + " A " + r + " " + r + " 0 0 1 " + (o + w - r) + " " + (o + h)
+                                                + " H " + (o + r)
+                                                + " A " + r + " " + r + " 0 0 1 " + o + " " + (o + h - r)
+                                                + " V " + (o + r)
+                                                + " A " + r + " " + r + " 0 0 1 " + (o + r) + " " + o
+                                                + " Z";
+                                        }
+                                    }
+                                }
+                            }
+                            RowLayout {
+                                anchors.centerIn: parent
+                                spacing: Style.sp(2)
+                                Icon { name: "add"; size: Style.fs.md; color: Tokens.inkMuted }
+                                ColumnLayout {
+                                    spacing: Style.sp(0.5)
+                                    Text { text: "Add shortcut"; color: Tokens.inkMuted; font.family: Style.fontUi; font.pixelSize: Style.fs.md; font.weight: Font.Medium }
+                                    Text { text: "Library or any card"; color: Tokens.inkFaint; font.family: Style.fontUi; font.pixelSize: Style.fs.xs }
+                                }
+                            }
+                            HoverHandler { id: addHover }
+                            MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: Router.push("search") }
+                        }
+                    }
                 }
 
                 // the personal blocks (unfiltered only): Jump back in, the Familiar artists index and
