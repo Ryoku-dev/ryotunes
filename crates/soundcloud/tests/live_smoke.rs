@@ -95,5 +95,8 @@ async fn live_smoke() {
     assert!(!detail.tracks.is_empty(), "system playlist hydrated no tracks");
     assert_eq!(detail.playlist.id, 0);
     assert_eq!(detail.playlist.set_type.as_deref(), Some("system"));
-    eprintln!("first system track: \"{}\" by {}", detail.tracks[0].title, detail.tracks[0].user.username);
+    eprintln!(
+        "first system track: \"{}\" by {}",
+        detail.tracks[0].title, detail.tracks[0].user.username
+    );
 }
