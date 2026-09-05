@@ -17,6 +17,9 @@ import "../components"
 // App's right panel; the stage is the immersive lyrics view.
 Item {
     id: root
+    // The 0.6 backdrop blurs past its own bounds; clip so the wash never leaks over the title bar
+    // or the rail.
+    clip: true
 
     // App's coupling flags, one-way in; writes go back as signals so App owns the mutation.
     property bool nowPlayingOpen: false
@@ -68,7 +71,7 @@ Item {
     // The playing cover as the room's light, stronger here than on a page (spec 1).
     Backdrop {
         anchors.fill: parent
-        strength: 0.6
+        strength: 0.32
     }
 
     ColumnLayout {
