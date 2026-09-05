@@ -24,7 +24,7 @@ case $1 in
     setsid qs -p "$DIR" > "/tmp/ryotest-$NAME.log" 2>&1 &
     echo $!;;
   ctl)
-    printf '%s\n' "$3" | socat - "UNIX-CONNECT:$XDG_RUNTIME_DIR/ryotunes/ctl-$2.sock";;
+    printf "%s\n" "$3" | socat -t 1 - "UNIX-CONNECT:$XDG_RUNTIME_DIR/ryotunes/ctl-$2.sock";;
   shot)
     OUT=$3; T=$(mktemp -d)
     (cd "$T" && WAYLAND_DISPLAY=$SOCK weston-screenshooter >/dev/null 2>&1)
