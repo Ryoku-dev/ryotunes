@@ -1,6 +1,7 @@
 pragma Singleton
 import QtQuick
 import Quickshell
+import Quickshell.Io
 import Ryoku.Ui.Singletons
 import "lib/style.js" as Fns
 
@@ -17,27 +18,60 @@ Singleton {
     readonly property real uiScale: Tokens.uiScale
     function sp(n) { return Math.round(n * 4 * root.uiScale); }
 
-    readonly property int radius: Math.round(6 * root.uiScale)       // --ryo-radius
-    readonly property int radiusCard: Math.round(10 * root.uiScale)
+    // Geometry (docs/superpowers/specs/2026-09-05-native-client-visual-design.md, section 2).
+    readonly property int radius: Math.round(8 * root.uiScale)        // controls
+    readonly property int radiusCard: Math.round(12 * root.uiScale)   // cards, hero art
+    readonly property int rowH: Math.round(52 * root.uiScale)         // table rows
+    readonly property int ctlH: Math.round(36 * root.uiScale)         // buttons, fields
+    readonly property int heroArt: Math.round(168 * root.uiScale)     // page hero art, card
+    readonly property int cardW: Math.round(168 * root.uiScale)
+    readonly property int sidebarW: Math.round(248 * root.uiScale)
+    readonly property int panelW: Math.round(340 * root.uiScale)
+    readonly property int titleBarH: Math.round(44 * root.uiScale)
+    readonly property int playerBarH: Math.round(88 * root.uiScale)
+    readonly property int pagePad: Math.round(32 * root.uiScale)
 
     readonly property string fontUi: "Space Grotesk"
     readonly property string fontMono: "SpaceMono Nerd Font"
     readonly property string fontCjk: "Noto Sans CJK JP"
+    readonly property string fontDisplay: Tokens.display
 
-    // Compact type scale (px), scaled with the UI. Metadata/eyebrow sizes at the low end, a page
-    // hero at the top, matching the ryotunes.css font-size ladder.
+    // Type roles (px at uiScale 1). At most four per screen. micro is the tracked mono label
+    // (letterSpacing 1.4); xl/title/hero are Fraunces.
     readonly property var fs: ({
-        xs: Math.round(9 * root.uiScale),
-        sm: Math.round(11 * root.uiScale),
-        md: Math.round(13 * root.uiScale),
-        lg: Math.round(16 * root.uiScale),
-        xl: Math.round(22 * root.uiScale),
-        hero: Math.round(34 * root.uiScale)
+        micro: Math.round(10 * root.uiScale),
+        xs: Math.round(11 * root.uiScale),
+        sm: Math.round(13 * root.uiScale),
+        md: Math.round(15 * root.uiScale),
+        lg: Math.round(18 * root.uiScale),
+        xl: Math.round(24 * root.uiScale),
+        title: Math.round(36 * root.uiScale),
+        hero: Math.round(44 * root.uiScale)
+    })
+    readonly property real trackMicro: 1.4
+
+    // Durations (ms), from Ryoku's motion tokens so reduce-motion and the motion scale reach every
+    // animation. snap: hover/press; move: a selector travelling; swap: content exchanging;
+    // slow: a panel or page.
+    readonly property var motion: ({
+        snap: Tokens.snap,
+        move: Tokens.move,
+        swap: Tokens.swap,
+        slow: Tokens.durDefaultEffects
     })
 
-    // Durations (ms). shell.services Perf (reduce-motion, power tiers) is not importable under
-    // `qs -p client`, so these are constants; Task 3+ can gate them on Perf once App hosts the shell.
-    readonly property var motion: ({ snap: 120, move: 170, slow: 260 })
+    // --- ambient motion and the power gate -----------------------------------------------------
+    // Passive animation (bloom drift, LIVE breath, the spectrum) runs only while something plays,
+    // motion is not reduced, and the machine is not in power-saver. The profile is polled from
+    // powerprofilesctl every 30 s; a missing tool reads as "not saving".
+    property bool powerSaver: false
+    readonly property bool ambient: !!Playback.now && !Playback.paused && !Tokens.reduceMotion && !root.powerSaver
+    Process {
+        id: profileProbe
+        command: ["sh", "-c", "command -v powerprofilesctl >/dev/null 2>&1 && powerprofilesctl get || echo balanced"]
+        stdout: StdioCollector { onStreamFinished: root.powerSaver = this.text.trim() === "power-saver" }
+    }
+    Timer { interval: 30000; running: true; repeat: true; triggeredOnStart: true; onTriggered: profileProbe.running = true }
 
     // The two local palettes, --ryo-* from ryotunes.css. Selected by the theme mode in Task 7; the
     // live Follow System palette is read straight from Tokens.
@@ -70,6 +104,38 @@ Singleton {
     // the daemon has no UI_SETTINGS key for the theme, so the mode is session state.
     property string themeMode: "system"   // "system" | "light" | "dark"
 
+    // --- artwork accent -----------------------------------------------------------------------
+    // The one saturated colour the chrome borrows: the playing cover's accent (sampled by
+    // components/ArtAccent into Playback.artAccent) while a track plays, the wallpaper's primary
+    // otherwise. Progress fills, the live meter, active chips and the mini's glow read this.
+    readonly property color accent: (!!Playback.now && Playback.artAccent.a > 0) ? Playback.artAccent : Tokens.sun
+    // A darkened/lightened accent the pattern of Tokens.sunDeep, for fills over paper.
+    readonly property color accentDeep: Qt.darker(accent, 1.3)
+
+    // --- decor level --------------------------------------------------------------------------
+    // Ryoku's calm / rich switch, owned by this client (Prefs.decor) rather than the desktop's
+    // hubDecor: Tokens re-reads shell.json on every change and would revert it, so the level is
+    // re-applied whenever Tokens moves.
+    readonly property bool decorRich: Prefs.decor === "rich"
+    function applyDecor() {
+        var want = root.decorRich ? "rich" : "calm";
+        if (Tokens.decor !== want)
+            Tokens.decor = want;
+    }
+    function applyPrefs() {
+        root.themeMode = Prefs.themeMode;
+        root.applyDecor();
+    }
+    Connections {
+        target: Tokens
+        function onDecorChanged(): void { root.applyDecor(); }
+    }
+    Connections {
+        target: Prefs
+        function onDecorChanged(): void { root.applyDecor(); }
+        function onThemeModeChanged(): void { root.themeMode = Prefs.themeMode; }
+    }
+
     function scheme(p) {
         return {
             surface: p.paper,
@@ -88,7 +154,13 @@ Singleton {
         else
             Tokens.namedScheme = root.scheme(root.themeMode === "light" ? root.light : root.dark);
     }
-    onThemeModeChanged: root.applyTheme()
+    onThemeModeChanged: {
+        root.applyTheme();
+        if (Prefs.themeMode !== root.themeMode) {
+            Prefs.themeMode = root.themeMode;
+            Prefs.save();
+        }
+    }
 
     function thumb(url, px) { return Fns.thumb(url, px); }
     function fmtTime(secs) { return Fns.fmtTime(secs); }

@@ -23,6 +23,9 @@ Item {
     // visible to this; the title-bar and player-bar mini buttons toggle it, MiniPlayer clears it.
     property bool miniOpen: false
 
+    // The persistent right panel (Queue | Lyrics). Open by default on a wide window.
+    property bool panelOpen: width >= Style.sp(350)
+
     // The Now Playing overlay's coupling with the player bar. Exactly one of queue/lyrics is the
     // active tab while the overlay is open; opening a tab opens the overlay, and closing it clears
     // all three. NowPlaying reads these and asks for changes through its tabRequested/closeRequested.
@@ -47,6 +50,14 @@ Item {
             app.npClose();
         else
             app.npOpenTab(app.lyricsOpen ? "lyrics" : "queue");
+    }
+
+    // One accent sampler per window (Canvas paints only inside a rendering window).
+    ArtAccent {}
+
+    Connections {
+        target: Playback
+        function onNowPlayingRequested(tab: string): void { app.npOpenTab(tab); }
     }
 
     ColumnLayout {

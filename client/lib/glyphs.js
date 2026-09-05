@@ -277,6 +277,54 @@ var glyphs = {
     "fill": false,
     "cap": "round",
     "w": 1.5
+  },
+  "more": {
+    "d": "M12 12h.01 M18.5 12h.01 M5.5 12h.01",
+    "fill": false,
+    "cap": "round",
+    "w": 2.5
+  },
+  "sound": {
+    "d": "M4 6h8 M16 6h4 M4 12h3 M11 12h9 M4 18h10 M18 18h2 M12 4v4 M7 10v4 M14 16v4",
+    "fill": false,
+    "cap": "round",
+    "w": 1.5
+  },
+  "panel": {
+    "d": "M3 5.5A2.5 2.5 0 0 1 5.5 3h13A2.5 2.5 0 0 1 21 5.5v13a2.5 2.5 0 0 1-2.5 2.5h-13A2.5 2.5 0 0 1 3 18.5z M15 3v18",
+    "fill": false,
+    "cap": "round",
+    "w": 1.5
+  },
+  "sidebar": {
+    "d": "M3 5.5A2.5 2.5 0 0 1 5.5 3h13A2.5 2.5 0 0 1 21 5.5v13a2.5 2.5 0 0 1-2.5 2.5h-13A2.5 2.5 0 0 1 3 18.5z M9 3v18",
+    "fill": false,
+    "cap": "round",
+    "w": 1.5
+  },
+  "expand": {
+    "d": "M4 9V6a2 2 0 0 1 2-2h3 M20 9V6a2 2 0 0 0-2-2h-3 M4 15v3a2 2 0 0 0 2 2h3 M20 15v3a2 2 0 0 1-2 2h-3",
+    "fill": false,
+    "cap": "round",
+    "w": 1.5
+  },
+  "chevron-down": {
+    "d": "M6 9l6 6 6-6",
+    "fill": false,
+    "cap": "round",
+    "w": 1.5
+  },
+  "chevron-right": {
+    "d": "M9 6l6 6-6 6",
+    "fill": false,
+    "cap": "round",
+    "w": 1.5
+  },
+  "sort": {
+    "d": "M7 4v16 M3 8l4-4 4 4 M17 20V4 M13 16l4 4 4-4",
+    "fill": false,
+    "cap": "round",
+    "w": 1.5
   }
 };
 

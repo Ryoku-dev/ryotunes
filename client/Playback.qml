@@ -12,6 +12,8 @@ Singleton {
 
     // --- mirrored state ----------------------------------------------------------------------
     property var now: null
+    // The playing cover's sampled accent (components/ArtAccent); transparent until sampled.
+    property color artAccent: "transparent"
     property var queue: ({ items: [], currentIndex: 0 })
     property real position: 0
     property real duration: 0
@@ -37,6 +39,8 @@ Singleton {
 
     // A message the daemon surfaced (error/notice/cover-error/lt-notice), for the toast layer.
     signal toast(string message, string kind)
+    // A page asking the App to open the Now Playing overlay on a tab ("queue" | "lyrics").
+    signal nowPlayingRequested(string tab)
 
     // --- events + opening snapshot -----------------------------------------------------------
     Connections {

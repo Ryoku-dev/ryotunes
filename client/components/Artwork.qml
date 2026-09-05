@@ -23,7 +23,7 @@ Item {
     width: px
     height: px
 
-    readonly property real cornerRadius: root.round ? width / 2 : Style.radius
+    property real cornerRadius: root.round ? width / 2 : Style.radius
 
     Rectangle {
         id: plate

@@ -13,6 +13,8 @@ Item {
     property int diameter: Style.sp(8)
     property bool active: false
     property bool primary: false
+    // A hairline ring, for a button that sits beside a Btn in an action row.
+    property bool outlined: false
     property string tip: ""
     property color iconColor: root.primary ? Tokens.inkOnBone
         : !root.enabled ? Tokens.inkFaint
@@ -31,8 +33,11 @@ Item {
         radius: Style.radius
         color: root.primary ? Tokens.bone
             : ma.pressed ? Tokens.tint16
-            : hover.hovered ? Tokens.tint5
+            : hover.hovered ? Tokens.tint10
             : "transparent"
+        border.width: root.outlined ? 1 : 0
+        border.color: hover.hovered ? Tokens.lineStrong : Tokens.line
+        Behavior on color { ColorAnimation { duration: Style.motion.snap } }
     }
 
     Icon {

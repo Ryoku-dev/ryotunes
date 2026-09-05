@@ -213,34 +213,73 @@ Item {
                 y: Style.sp(6)
                 spacing: Style.sp(5)
 
-                // hero
-                ColumnLayout {
+                // hero: the copy, search and key hints on the left, the listening deck on the right
+                // (HomeHero.svelte's two-column head). Narrow windows stack the deck under the copy.
+                GridLayout {
+                    id: hero
                     Layout.fillWidth: true
-                    spacing: Style.sp(2)
-                    RowLayout {
+                    readonly property bool wide: width >= Style.sp(200)
+                    columns: wide ? 2 : 1
+                    columnSpacing: Style.sp(12)
+                    rowSpacing: Style.sp(5)
+
+                    ColumnLayout {
+                        Layout.preferredWidth: hero.wide ? Style.sp(90) : hero.width
+                        Layout.maximumWidth: hero.wide ? Style.sp(90) : hero.width
+                        Layout.alignment: Qt.AlignVCenter
                         spacing: Style.sp(2)
-                        Rectangle { Layout.preferredWidth: Style.sp(4); Layout.preferredHeight: 1; Layout.alignment: Qt.AlignVCenter; color: Tokens.ink }
-                        Text { text: "聴"; color: Tokens.ink; font.family: Tokens.jp; font.pixelSize: Style.fs.sm }
-                        Rectangle { Layout.preferredWidth: Style.sp(13); Layout.preferredHeight: 1; Layout.alignment: Qt.AlignVCenter; color: Tokens.lineSoft }
+                        RowLayout {
+                            spacing: Style.sp(2)
+                            Rectangle { Layout.preferredWidth: Style.sp(4); Layout.preferredHeight: 1; Layout.alignment: Qt.AlignVCenter; color: Tokens.ink }
+                            Text { text: "聴"; color: Tokens.ink; font.family: Tokens.jp; font.pixelSize: Style.fs.sm }
+                            Rectangle { Layout.preferredWidth: Style.sp(13); Layout.preferredHeight: 1; Layout.alignment: Qt.AlignVCenter; color: Tokens.lineSoft }
+                            Text {
+                                text: "RYOKU // MUSIC"
+                                color: Tokens.inkFaint
+                                font.family: Style.fontMono
+                                font.pixelSize: Style.fs.xs
+                                font.letterSpacing: 1
+                            }
+                        }
                         Text {
-                            text: "RYOKU // MUSIC"
-                            color: Tokens.inkFaint
-                            font.family: Style.fontMono
-                            font.pixelSize: Style.fs.xs
-                            font.letterSpacing: 1
+                            Layout.fillWidth: true
+                            text: page.greeting() + ((Playback.auth && Playback.auth.signedIn && Playback.auth.name) ? (", " + Playback.auth.name) : "")
+                            color: Tokens.ink
+                            font.family: Tokens.display
+                            font.pixelSize: Style.fs.hero
+                            elide: Text.ElideRight
+                        }
+                        Text {
+                            Layout.fillWidth: true
+                            text: "Pick up where you left off, or find the next thing worth hearing."
+                            color: Tokens.inkMuted
+                            font.family: Style.fontUi
+                            font.pixelSize: Style.fs.md
+                            wrapMode: Text.WordWrap
+                        }
+                        SearchSuggest {
+                            id: heroSearch
+                            Layout.fillWidth: true
+                            Layout.topMargin: Style.sp(2)
+                            placeholder: "Search tracks, albums, artists…"
+                            onSubmitted: if (value.trim() !== "") Router.push("search", { q: value.trim() })
+                            onPicked: if (value.trim() !== "") Router.push("search", { q: value.trim() })
+                            z: 40
+                        }
+                        RowLayout {
+                            spacing: Style.sp(2)
+                            Text { text: "CTRL K"; color: Tokens.inkMuted; font.family: Style.fontMono; font.pixelSize: Style.fs.xs; font.letterSpacing: 0.7 }
+                            Text { text: "command search"; color: Tokens.inkFaint; font.family: Style.fontUi; font.pixelSize: Style.fs.xs }
+                            Rectangle { Layout.preferredWidth: Style.sp(4); Layout.preferredHeight: 1; color: Tokens.lineSoft }
+                            Text { text: "SPACE"; color: Tokens.inkMuted; font.family: Style.fontMono; font.pixelSize: Style.fs.xs; font.letterSpacing: 0.7 }
+                            Text { text: "play / pause"; color: Tokens.inkFaint; font.family: Style.fontUi; font.pixelSize: Style.fs.xs }
                         }
                     }
-                    Text {
-                        text: page.greeting() + ((Playback.auth && Playback.auth.signedIn && Playback.auth.name) ? (", " + Playback.auth.name) : "")
-                        color: Tokens.ink
-                        font.family: Tokens.display
-                        font.pixelSize: Style.fs.hero
-                    }
-                    Text {
-                        text: "Pick up where you left off, or let the feed find you something new."
-                        color: Tokens.inkMuted
-                        font.family: Style.fontUi
-                        font.pixelSize: Style.fs.md
+
+                    MusicDeck {
+                        Layout.fillWidth: true
+                        Layout.alignment: Qt.AlignVCenter
+                        onOpenNowPlaying: tab => Playback.nowPlayingRequested(tab)
                     }
                 }
 
