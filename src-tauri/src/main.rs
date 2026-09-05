@@ -3,55 +3,40 @@
 
 fn main() {
     #[cfg(target_os = "linux")]
-    if daemon::defer_to_live_daemon() {
+    if daemon::defer_to_native() {
         return;
     }
     app_lib::run();
 }
 
-/// The Tauri app and `ryotunesd` each own a libmpv player. Launching this binary while a daemon is
-/// playing (the desktop's `ryotunes` keybind, the dock, the desktop entry, all of which predate the
-/// daemon) started a second engine over the first, so two songs played at once. `/usr/bin/ryotunes`
-/// therefore asks a live daemon to `show` (raise its client, or open `ryotunes-qml`) and exits;
-/// only with no daemon running does it become the standalone app it always was.
+/// The native client is the default: `/usr/bin/ryotunes` (the desktop's keybind, dock and launcher)
+/// asks `ryotunesd` to `show`, which raises the connected client or opens `ryotunes-qml`. Connecting
+/// to the socket is what starts the daemon when systemd holds it idle (socket activation), so a
+/// cold boot lands in the native client too. The Tauri app, with its own player, runs only on
+/// `ryotunes --tauri` (or `RYOTUNES_TAURI=1`) or when no daemon socket exists at all, so a box
+/// without the daemon installed keeps working.
 #[cfg(target_os = "linux")]
 mod daemon {
     use std::io::{BufRead, BufReader, Write};
-    use std::os::fd::AsRawFd;
     use std::os::unix::net::UnixStream;
 
-    /// True when a daemon is running and took the hand-off. Liveness is the daemon's own instance
-    /// lock (`ryotunesd.sock.lock`, held with flock for its lifetime), never the socket: systemd
-    /// keeps `ryotunesd.sock` listening while the daemon is idle-exited, and connecting to it
-    /// would start a daemon just to be asked "show", which would then open a client the user never
-    /// asked for.
-    pub fn defer_to_live_daemon() -> bool {
-        let sock = ryotunes_protocol::socket_path();
-        let Some(dir) = sock.parent() else { return false };
-        let Ok(lock) =
-            std::fs::OpenOptions::new().write(true).open(dir.join("ryotunesd.sock.lock"))
-        else {
-            return false;
-        };
-        // Safe: a plain advisory-lock syscall on a fd we own.
-        let rc = unsafe { libc::flock(lock.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) };
-        if rc == 0 {
-            // We got the lock, so nobody holds it: no daemon. Release it before the app starts.
-            unsafe { libc::flock(lock.as_raw_fd(), libc::LOCK_UN) };
+    pub fn defer_to_native() -> bool {
+        if std::env::args().any(|a| a == "--tauri") || std::env::var_os("RYOTUNES_TAURI").is_some()
+        {
             return false;
         }
-        if std::io::Error::last_os_error().raw_os_error() != Some(libc::EWOULDBLOCK) {
+        let sock = ryotunes_protocol::socket_path();
+        if !sock.exists() {
+            tracing_lite("no ryotunesd socket; starting the Tauri app");
             return false;
         }
         match show(&sock) {
             Ok(reply) => {
-                tracing_lite(&format!("ryotunesd is running; asked it to show ({reply})"));
+                tracing_lite(&format!("asked ryotunesd to show ({reply})"));
                 true
             }
             Err(e) => {
-                tracing_lite(&format!(
-                    "ryotunesd holds its lock but `show` failed: {e}; starting the app"
-                ));
+                tracing_lite(&format!("ryotunesd `show` failed: {e}; starting the Tauri app"));
                 false
             }
         }

@@ -32,7 +32,7 @@ ryotunes-qml            # == qs -p /usr/share/ryotunes/client
 
 It needs the optional `quickshell` dependency and the Ryoku QML runtime (`Ryoku.Ui.Singletons`).
 
-The two clients share one rule: **only one player at a time**. `ryotunesd` and the Tauri app each carry their own audio engine, so `/usr/bin/ryotunes` first checks for a running daemon (its instance lock, never the socket, which systemd keeps open while the daemon is idle-exited). With a daemon live it asks it to `show` (raise the connected client, or open `ryotunes-qml`) and exits; with none it is the standalone Tauri app as before. The daemon's tray "Show" and second-launch path always open `ryotunes-qml`. So the desktop's launcher, keybind and dock keep running plain `ryotunes` and get whichever client owns playback.
+The native client is the default. `/usr/bin/ryotunes` (the desktop's launcher, keybind and dock) asks `ryotunesd` to `show`: the daemon raises the connected client or opens `ryotunes-qml`, and connecting to the socket is what starts the daemon after a boot (systemd socket activation), so a cold start lands in the native client too. The Tauri app, which carries its own player, runs only on `ryotunes --tauri` (or `RYOTUNES_TAURI=1`), or when the daemon's socket does not exist at all. Only one player ever runs.
 
 ## Build from source
 

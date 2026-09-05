@@ -1,6 +1,6 @@
 [Desktop Entry]
 Type=Application
-Name=Ryotunes (QML)
+Name=Ryotunes Native
 GenericName=Music Player
 Comment=Ryoku-oriented desktop music client (native Quickshell client)
 Exec=ryotunes-qml
