@@ -38,6 +38,7 @@ Item {
         root.openItem(item);
         root.picked();
     }
+    function forceFocus() { input.forceActiveFocus(); }
     function runQuery() {
         var q = root.value.trim().replace(/\s+/g, " ");
         if (q.length < 2) {

@@ -45,6 +45,7 @@ ShellRoot {
         else if (cmd === "decor") { Prefs.decor = arg; Prefs.save(); }
         else if (cmd === "theme") { Prefs.themeMode = arg; Prefs.save(); }
         else if (cmd === "provider") Playback.setProvider(arg);
+        else if (cmd === "suggest") appRoot.devSuggest(arg);
     }
 
     SocketServer {

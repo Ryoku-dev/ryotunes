@@ -82,6 +82,13 @@ Item {
             app.panelOpenTab(tab);
     }
 
+    // Rig hook: type into the current page's hero search (Home) without a keyboard.
+    function devSuggest(q) {
+        var pg = pageLoader.item;
+        var field = pg ? pg["heroSearch"] : null;
+        if (field) { field.forceFocus(); field.value = q; }
+    }
+
     // One accent sampler per window (Canvas paints only inside a rendering window).
     ArtAccent {}
 

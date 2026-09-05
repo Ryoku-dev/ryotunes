@@ -19,6 +19,9 @@ Item {
     property var home: null
     property var chips: []
     property var forgotten: null
+    property var listenAgain: null
+    // The hero's search field, for the rig's `suggest` hook.
+    property var heroSearch: null
     property string selected: ""
     property bool loading: true
     property string errorMsg: ""
@@ -36,7 +39,7 @@ Item {
 
     // Familiar artists: the most-played artists (topArtistIds) resolved to round cards. Loaded once.
     property var famIds: Personal.topArtistIds(6)
-    property var famCards: []
+    property var famArtists: []
     property bool famLoaded: false
     onFamIdsChanged: page.loadFamiliar()
 
@@ -66,19 +69,21 @@ Item {
         var arr = [];
         var fg = null;
         var secs = (page.home && page.home.sections) ? page.home.sections : [];
-        // Our own Listen again (recents) sits above the feed; drop the feed's duplicate of it.
-        var haveRecents = page.recents.length > 0;
+        // The feed's "Listen again" is drawn by HomePersonal as the numbered list (the original
+        // Home's design); Forgotten favourites keeps its own block; everything else is a shelf.
+        var la = null;
         for (var i = 0; i < secs.length; i++) {
             if (page.isForgotten(secs[i])) {
                 if (!fg)
                     fg = secs[i];
-            } else if (haveRecents && /listen again/i.test(secs[i].title)) {
-                // covered by the personal Listen again shelf
+            } else if (!la && /listen again/i.test(secs[i].title)) {
+                la = secs[i];
             } else {
                 arr.push(secs[i]);
             }
         }
         page.forgotten = fg;
+        page.listenAgain = la;
         page.blocks = arr;
     }
 
@@ -93,15 +98,7 @@ Item {
             return;
         page.famLoaded = true;
         Promise.all(page.famIds.map((id) => Daemon.call("get_artist", { id: id }).catch(() => null)))
-            .then((pages) => {
-                page.famCards = pages.filter((p) => !!p).map((p) => ({
-                    kind: "artist",
-                    id: p.channelId,
-                    title: p.name ? p.name : "Artist",
-                    subtitle: p.monthlyListeners ? p.monthlyListeners : (p.subscribers ? p.subscribers : ""),
-                    thumbnail: p.thumbnail
-                }));
-            });
+            .then((pages) => { page.famArtists = pages.filter((p) => !!p); });
     }
 
     function load(params) {
@@ -206,6 +203,9 @@ Item {
         }
 
         header: Item {
+            // The hero's search panel hangs below its own row: keep the header above the delegates
+            // (the feed shelves) so the panel is never painted under them.
+            z: 2
             width: list.width
             implicitHeight: headerCol.implicitHeight + Style.sp(9)
 
@@ -217,6 +217,7 @@ Item {
                 // hero: greeting, search and key hints on the left; the listening deck on the right
                 // when the page is wide enough (>= 1240 px, i.e. the panel closed or a wider window).
                 GridLayout {
+                    z: 2
                     id: hero
                     Layout.fillWidth: true
                     readonly property bool wide: width >= Style.sp(310)
@@ -260,6 +261,7 @@ Item {
                         }
                         SearchSuggest {
                             id: heroSearch
+                            Component.onCompleted: page.heroSearch = heroSearch
                             Layout.preferredWidth: Style.sp(80)
                             Layout.maximumWidth: Style.sp(80)
                             Layout.topMargin: Style.sp(2)
@@ -326,22 +328,14 @@ Item {
                     onRemoved: (id) => Personal.removePick(id)
                 }
 
-                // listen again (recents, unfiltered only)
-                Shelf {
+                // the personal blocks (unfiltered only): Jump back in, the Familiar artists index and
+                // inspector, and the feed's Listen again as a numbered list
+                HomePersonal {
                     Layout.fillWidth: true
-                    visible: page.selected === "" && page.recents.length > 0
-                    title: "Listen again"
-                    mark: Style.decorRich ? "再" : ""
-                    items: page.recents
-                }
-
-                // familiar artists (round, unfiltered only)
-                Shelf {
-                    Layout.fillWidth: true
-                    visible: page.selected === "" && page.famCards.length >= 3
-                    title: "Familiar artists"
-                    mark: Style.decorRich ? "馴" : ""
-                    items: page.famCards
+                    visible: page.selected === ""
+                    recents: page.recents
+                    artists: page.famArtists
+                    listenAgain: page.listenAgain
                 }
 
                 // forgotten favourites (from the feed)
