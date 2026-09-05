@@ -35,6 +35,7 @@ Rectangle {
     readonly property bool hasYouTubeTrack: !!Playback.now
         && !Ids.isLocalId(Playback.now.videoId) && !Ids.isRadioId(Playback.now.videoId)
     readonly property bool isRadioNow: !!Playback.now && Ids.isRadioId(Playback.now.videoId)
+    readonly property bool scNow: !!Playback.now && String(Playback.now.videoId).startsWith("sc:")
     readonly property bool autoplayTrack: {
         var q = Playback.queue;
         var cur = (q && q.items) ? q.items[q.currentIndex] : null;
@@ -140,7 +141,8 @@ Rectangle {
                     // YouTube Music glyph otherwise.
                     Icon {
                         visible: !!root.now
-                        name: (root.now && root.now.videoId && String(root.now.videoId).startsWith("spotify:")) ? "spotify" : "youtube-music"
+                        name: root.now ? (String(root.now.videoId).startsWith("sc:") ? "soundcloud"
+                            : String(root.now.videoId).startsWith("spotify:") ? "spotify" : "youtube-music") : "youtube-music"
                         size: Style.sp(3.5)
                         color: Tokens.inkMuted
                     }
@@ -305,6 +307,7 @@ Rectangle {
             }
             Slider {
                 id: seekSlider
+                visible: !root.scNow
                 Layout.fillWidth: true
                 Layout.alignment: Qt.AlignVCenter
                 thickness: 2
@@ -316,6 +319,14 @@ Rectangle {
                 value: Playback.shownPosition
                 onMoved: (v) => Playback.seekDrag = v
                 onCommitted: (v) => { Playback.seek(v); Playback.seekDrag = NaN; }
+            }
+            // A SoundCloud track swaps the hairline seek for the 28 px waveform (played in orange).
+            Waveform {
+                visible: root.scNow
+                Layout.fillWidth: true
+                Layout.alignment: Qt.AlignVCenter
+                Layout.preferredHeight: Style.sp(7)
+                samples: Playback.waveform || []
             }
             Text {
                 text: Style.fmtTime(Playback.duration)

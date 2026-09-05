@@ -48,6 +48,10 @@ Item {
         return q.items.length > i ? q.items[i] : null;
     }
 
+    // A SoundCloud track shows its plays / likes / genre in the meta line and its waveform under
+    // the title, the Orange look at full size.
+    readonly property bool scNow: !!Playback.now && String(Playback.now.videoId).startsWith("sc:")
+
     // The spectrum ribbon claims the analyser only while the stage is on screen.
     onVisibleChanged: Spectrum.claim("stage", root.visible)
     Component.onCompleted: Spectrum.claim("stage", root.visible)
@@ -187,11 +191,19 @@ Item {
                         visible: text !== ""
                         text: {
                             var parts = [];
-                            if (root.nowItem && root.nowItem.album)
-                                parts.push(String(root.nowItem.album));
+                            if (root.scNow) {
+                                var n = Playback.now;
+                                var p = Style.fmtCount(n.plays);
+                                if (p) parts.push(p + " PLAYS");
+                                var l = Style.fmtCount(n.likes);
+                                if (l) parts.push(l + " LIKES");
+                                if (n.genre) parts.push(String(n.genre).toUpperCase());
+                            } else if (root.nowItem && root.nowItem.album) {
+                                parts.push(String(root.nowItem.album).toUpperCase());
+                            }
                             if (Playback.duration > 0)
                                 parts.push(Style.fmtTime(Playback.duration));
-                            return parts.join("  ·  ").toUpperCase();
+                            return parts.join("  \u00b7  ");
                         }
                         color: Tokens.inkFaint
                         font.family: Style.fontMono
@@ -199,6 +211,15 @@ Item {
                         font.letterSpacing: Style.trackMicro
                         elide: Text.ElideRight
                     }
+                }
+
+                // SoundCloud waveform (Orange seek), under the title block
+                Waveform {
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: 56
+                    Layout.topMargin: Style.sp(1)
+                    visible: root.scNow
+                    samples: Playback.waveform || []
                 }
             }
 

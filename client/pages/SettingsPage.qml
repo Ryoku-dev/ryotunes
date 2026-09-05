@@ -887,6 +887,33 @@ Item {
                         }
                     }
 
+                    // ── SoundCloud ──────────────────────────────────────────────────────
+                    SectionHeading { Layout.fillWidth: true; Layout.topMargin: Style.sp(3); title: "SoundCloud"; mark: "雲" }
+
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: Style.sp(3)
+                        Icon {
+                            name: "soundcloud"
+                            size: Style.fs.hero
+                            color: Playback.provider === "soundcloud" ? Style.providerColors.soundcloud : Tokens.inkMuted
+                        }
+                        ColumnLayout {
+                            Layout.fillWidth: true
+                            spacing: 1
+                            Text {
+                                text: "Listening as a guest"
+                                color: Tokens.ink; font.family: Style.fontUi; font.pixelSize: Style.fs.lg; font.weight: Font.DemiBold
+                                elide: Text.ElideRight; Layout.fillWidth: true
+                            }
+                            Text {
+                                text: "No account needed \u00b7 SoundCloud's public catalogue plays for everyone."
+                                color: Tokens.inkMuted; font.family: Style.fontUi; font.pixelSize: Style.fs.sm
+                                wrapMode: Text.WordWrap; Layout.fillWidth: true
+                            }
+                        }
+                    }
+
                     // switch account
                     SectionHeading { Layout.fillWidth: true; Layout.topMargin: Style.sp(3); title: "Channels"; mark: "選択"; visible: page.identities.length > 0 }
                     ColumnLayout {

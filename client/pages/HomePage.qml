@@ -267,7 +267,9 @@ Item {
                         }
                         Text {
                             Layout.fillWidth: true
-                            text: "Pick up where you left off, or find the next thing worth hearing."
+                            text: Playback.provider === "soundcloud"
+                                ? "SoundCloud \u00b7 listening as a guest"
+                                : "Pick up where you left off, or find the next thing worth hearing."
                             color: Tokens.inkMuted
                             font.family: Style.fontUi
                             font.pixelSize: Style.fs.sm

@@ -112,10 +112,11 @@ Singleton {
     // to 0.72 on dark paper / 0.42 on light, so the accent always reads against the surface.
     readonly property bool paperDark: (Tokens.paper.r + Tokens.paper.g + Tokens.paper.b) / 3 < 0.5
     // The provider's own colour, the one clear tell of which catalogue is on: YouTube Music's red,
-    // Spotify's green. It tints the room's light (Backdrop's glow, the mini's glow), the provider
-    // pill and the accent's fallback when nothing plays, so switching provider changes the mood
-    // of the whole window at once.
-    readonly property color providerColor: Playback.provider === "spotify" ? "#1db954" : "#ff2d2d"
+    // Spotify's green, SoundCloud's orange. It tints the room's light (Backdrop's glow, the mini's
+    // glow), the provider pill and the accent's fallback when nothing plays, so switching provider
+    // changes the mood of the whole window at once.
+    readonly property var providerColors: ({ spotify: "#1db954", soundcloud: "#ff5500", youtube: "#ff2d2d" })
+    readonly property color providerColor: root.providerColors[Playback.provider] || root.providerColors.youtube
     readonly property color accent: {
         var c = Playback.artAccent;
         if (!Playback.now || c.a <= 0)
@@ -177,4 +178,5 @@ Singleton {
 
     function thumb(url, px) { return Fns.thumb(url, px); }
     function fmtTime(secs) { return Fns.fmtTime(secs); }
+    function fmtCount(v) { return Fns.fmtCount(v); }
 }

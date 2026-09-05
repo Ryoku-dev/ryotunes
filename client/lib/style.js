@@ -26,3 +26,15 @@ function fmtTime(secs) {
     var r = s % 60;
     return m + ":" + (r < 10 ? "0" + r : r);
 }
+
+// A play / like / follower count -> a compact label ("27.3K", "1.2M"). A string passes through (the
+// daemon may already have formatted it); undefined/null/empty and non-finite values yield "".
+function fmtCount(v) {
+    if (v === undefined || v === null || v === "") return "";
+    if (typeof v === "string") return v;
+    var n = Number(v);
+    if (!isFinite(n)) return "";
+    if (n >= 1000000) return (n / 1000000).toFixed(1).replace(/\.0$/, "") + "M";
+    if (n >= 1000) return (n / 1000).toFixed(1).replace(/\.0$/, "") + "K";
+    return String(Math.round(n));
+}

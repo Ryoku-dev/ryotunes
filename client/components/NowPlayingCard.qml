@@ -43,6 +43,22 @@ Rectangle {
         return (s > 0 ? "+" : "") + s + " st";
     }
 
+    // A SoundCloud track shows its waveform and the plays / likes / genre line in place of the
+    // Sound-effect figures, the Orange look on Home.
+    readonly property bool scNow: !!root.now && String(root.now.videoId).startsWith("sc:")
+    readonly property string scMeta: {
+        var n = root.now;
+        if (!n)
+            return "";
+        var parts = [];
+        var p = Style.fmtCount(n.plays);
+        if (p) parts.push(p + " plays");
+        var l = Style.fmtCount(n.likes);
+        if (l) parts.push(l + " likes");
+        if (n.genre) parts.push(String(n.genre));
+        return parts.join("  \u00b7  ");
+    }
+
     // The card claims the spectrum feed only while it is on screen (Spectrum runs cava only when a
     // claim is live AND Style.ambient holds — playing, motion on, not power-saver).
     function claim(on) { Spectrum.claim("npcard", on); }
@@ -184,9 +200,20 @@ Rectangle {
                 font.pixelSize: Style.fs.sm
                 elide: Text.ElideRight
             }
+            Text {
+                Layout.fillWidth: true
+                visible: root.scNow && root.scMeta !== ""
+                text: root.scMeta
+                color: Tokens.inkFaint
+                font.family: Style.fontMono
+                font.pixelSize: Style.fs.micro
+                font.letterSpacing: Style.trackMicro
+                elide: Text.ElideRight
+            }
 
-            // RATIO / SPEED / TEMPO
+            // RATIO / SPEED / TEMPO (a SoundCloud track shows its waveform instead)
             RowLayout {
+                visible: !root.scNow
                 Layout.fillWidth: true
                 spacing: Style.sp(2)
                 Repeater {
@@ -204,6 +231,14 @@ Rectangle {
                         Text { text: cell.modelData.v; color: Tokens.inkDim; font.family: Style.fontUi; font.pixelSize: Style.fs.sm; font.weight: Font.Medium }
                     }
                 }
+            }
+
+            // SoundCloud waveform, in the figures' place
+            Waveform {
+                visible: root.scNow
+                Layout.fillWidth: true
+                Layout.preferredHeight: 56
+                samples: Playback.waveform || []
             }
 
             // transport (prev / play / next) + queue pill

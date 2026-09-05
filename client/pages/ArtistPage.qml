@@ -1,6 +1,7 @@
 pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Layouts
+import QtQuick.Effects
 import Quickshell
 import Ryoku.Ui.Singletons
 import "../"
@@ -37,6 +38,14 @@ Item {
     readonly property var topSongs: (page.artist && page.artist.topSongs) ? page.artist.topSongs : []
     readonly property var popular: page.topSongs.slice(0, 5)
 
+    // SoundCloud user page (the Orange look): get_artist for an sc:user id returns kind:"soundcloud"
+    // with the user's own tracks, albums, playlists and likes rather than the YouTube sections.
+    readonly property bool isSC: !!(page.artist && page.artist.kind === "soundcloud")
+    readonly property var scTracks: (page.artist && page.artist.tracks) || []
+    readonly property var scAlbums: (page.artist && page.artist.albums) || []
+    readonly property var scPlaylists: (page.artist && page.artist.playlists) || []
+    readonly property var scLikes: (page.artist && page.artist.likes) || []
+
     onParamsChanged: page.load()
     Component.onCompleted: page.load()
 
@@ -58,6 +67,37 @@ Item {
         if (a.subscribers) parts.push(a.subscribers);
         if (a.monthlyListeners) parts.push(a.monthlyListeners);
         return parts.join("  \u00b7  ");
+    }
+
+    function scMetaLine() {
+        var a = page.artist;
+        if (!a)
+            return "";
+        var parts = [];
+        if (a.city) parts.push(String(a.city));
+        var f = Style.fmtCount(a.followers);
+        if (f) parts.push(f + " followers");
+        var t = Style.fmtCount(a.trackCount);
+        if (t) parts.push(t + " tracks");
+        return parts.join("  \u00b7  ");
+    }
+    function playSC(start) {
+        if (!page.scTracks.length)
+            return;
+        Daemon.call("play_playlist", { items: page.scTracks, start: start, sourceName: page.artist ? page.artist.name : "" })
+            .catch((e) => Playback.toast((e && e.message) ? e.message : "Could not play", "error"));
+    }
+    function shuffleSC() {
+        if (!page.scTracks.length)
+            return;
+        Daemon.call("play_playlist", { items: page.scTracks, start: null, shuffle: true, sourceName: page.artist ? page.artist.name : "" })
+            .catch((e) => Playback.toast((e && e.message) ? e.message : "Could not play", "error"));
+    }
+    function playLikes(start) {
+        if (!page.scLikes.length)
+            return;
+        Daemon.call("play_playlist", { items: page.scLikes, start: start, sourceName: (page.artist ? page.artist.name : "") + " \u00b7 Likes" })
+            .catch((e) => Playback.toast((e && e.message) ? e.message : "Could not play", "error"));
     }
 
     function load() {
@@ -179,7 +219,7 @@ Item {
     TrackList {
         id: body
         anchors.fill: parent
-        visible: !page.loading && page.errorMsg === "" && page.artist !== null
+        visible: !page.loading && page.errorMsg === "" && page.artist !== null && !page.isSC
         items: page.popular
         showHeader: true
         showAlbum: true
@@ -188,6 +228,319 @@ Item {
         onActivated: (i) => page.playTop(i)
         header: artistHeader
         footer: artistFooter
+    }
+
+    // ── SoundCloud user (the Orange look) ───────────────────────────────────────────────────
+    // A blurred banner with the round avatar overlapping its foot, the name + verified tick and a
+    // city · followers · tracks line, then two columns: the user's tracks on the left, and the
+    // albums / playlists / likes rail (300 px) on the right.
+    component ScMiniCard: Item {
+        id: mc
+        property var card: null
+        property bool playable: false      // a liked track plays; an album/playlist routes
+        signal activated()
+        Layout.fillWidth: true
+        implicitHeight: Style.sp(14) + Style.sp(2)
+
+        Rectangle {
+            anchors.fill: parent
+            radius: Style.radius
+            color: mcHover.hovered ? Tokens.tint5 : "transparent"
+            Behavior on color { ColorAnimation { duration: Style.motion.snap } }
+        }
+        RowLayout {
+            anchors.fill: parent
+            anchors.leftMargin: Style.sp(1)
+            anchors.rightMargin: Style.sp(1)
+            spacing: Style.sp(2)
+            Artwork {
+                Layout.alignment: Qt.AlignVCenter
+                url: (mc.card && mc.card.thumbnail) ? mc.card.thumbnail : ""
+                px: Style.sp(14)
+                placeholderIcon: mc.playable ? "music" : "music"
+            }
+            ColumnLayout {
+                Layout.fillWidth: true
+                spacing: 1
+                Text {
+                    Layout.fillWidth: true
+                    text: (mc.card && mc.card.title) ? mc.card.title : ""
+                    color: Tokens.ink
+                    font.family: Style.fontUi
+                    font.pixelSize: Style.fs.sm
+                    font.weight: Font.Medium
+                    elide: Text.ElideRight
+                }
+                Text {
+                    Layout.fillWidth: true
+                    visible: text !== ""
+                    text: mc.card ? (mc.card.subtitle || mc.card.artists || "") : ""
+                    color: Tokens.inkMuted
+                    font.family: Style.fontUi
+                    font.pixelSize: Style.fs.xs
+                    elide: Text.ElideRight
+                }
+            }
+        }
+        HoverHandler { id: mcHover }
+        MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: mc.activated() }
+    }
+
+    Flickable {
+        id: scView
+        anchors.fill: parent
+        visible: !page.loading && page.errorMsg === "" && page.isSC
+        clip: true
+        contentWidth: width
+        contentHeight: scCol.implicitHeight
+        boundsBehavior: Flickable.StopAtBounds
+
+        ColumnLayout {
+            id: scCol
+            width: scView.width
+            spacing: Style.sp(5)
+
+            // banner + avatar + identity
+            Item {
+                id: scHead
+                Layout.fillWidth: true
+                readonly property int bannerH: Style.sp(50)     // 200
+                readonly property int avatarPx: Style.sp(30)    // 120
+                readonly property int pad: Style.pagePad
+                implicitHeight: Math.max(banner.height + scHead.avatarPx / 2,
+                    banner.height + Style.sp(2) + identity.implicitHeight) + Style.sp(3)
+
+                Item {
+                    id: banner
+                    width: parent.width
+                    height: scHead.bannerH
+                    clip: true
+                    Rectangle { anchors.fill: parent; color: Tokens.paperLift }
+                    Image {
+                        id: bannerImg
+                        anchors.fill: parent
+                        source: (page.artist && page.artist.banner) ? Style.thumb(page.artist.banner, 1200) : ""
+                        fillMode: Image.PreserveAspectCrop
+                        asynchronous: true
+                        cache: true
+                        visible: false
+                    }
+                    MultiEffect {
+                        anchors.fill: parent
+                        source: bannerImg
+                        visible: Style.blurEnabled && bannerImg.status === Image.Ready
+                        blurEnabled: true
+                        blur: 1.0
+                        blurMax: 48
+                        saturation: -0.2
+                        opacity: 0.55
+                    }
+                    // fade the banner to paper so the avatar and name sit on the page
+                    Rectangle {
+                        anchors.fill: parent
+                        gradient: Gradient {
+                            GradientStop { position: 0.0; color: Qt.rgba(Tokens.paper.r, Tokens.paper.g, Tokens.paper.b, 0.35) }
+                            GradientStop { position: 0.6; color: Qt.rgba(Tokens.paper.r, Tokens.paper.g, Tokens.paper.b, 0.55) }
+                            GradientStop { position: 1.0; color: Tokens.paper }
+                        }
+                    }
+                    Hairline { anchors.bottom: parent.bottom; width: parent.width; height: 1 }
+                }
+
+                // round avatar overlapping the banner's bottom edge
+                Item {
+                    x: scHead.pad
+                    y: banner.height - scHead.avatarPx / 2
+                    width: scHead.avatarPx
+                    height: scHead.avatarPx
+                    Artwork {
+                        anchors.fill: parent
+                        url: (page.artist && page.artist.thumbnail) ? page.artist.thumbnail : ""
+                        px: scHead.avatarPx
+                        round: true
+                        placeholderIcon: "user"
+                    }
+                    Rectangle {
+                        anchors.fill: parent
+                        radius: width / 2
+                        color: "transparent"
+                        border.width: 2
+                        border.color: Tokens.paper
+                    }
+                }
+
+                ColumnLayout {
+                    id: identity
+                    x: scHead.pad + scHead.avatarPx + Style.sp(4)
+                    y: banner.height + Style.sp(2)
+                    width: Math.max(Style.sp(40), scHead.width - x - scHead.pad)
+                    spacing: Style.sp(1)
+
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: Style.sp(1.5)
+                        Text {
+                            Layout.maximumWidth: identity.width - Style.sp(6)
+                            text: (page.artist && page.artist.name) ? page.artist.name : "SoundCloud"
+                            color: Tokens.ink
+                            font.family: Style.fontDisplay
+                            font.pixelSize: Style.fs.title
+                            elide: Text.ElideRight
+                        }
+                        Icon {
+                            visible: !!(page.artist && page.artist.verified)
+                            Layout.alignment: Qt.AlignVCenter
+                            name: "check-circle"
+                            size: Style.fs.md
+                            color: Style.providerColors.soundcloud
+                        }
+                        Item { Layout.fillWidth: true }
+                    }
+                    Text {
+                        Layout.fillWidth: true
+                        visible: text !== ""
+                        text: page.scMetaLine()
+                        color: Tokens.inkMuted
+                        font.family: Style.fontUi
+                        font.pixelSize: Style.fs.sm
+                        elide: Text.ElideRight
+                    }
+                    ColumnLayout {
+                        Layout.fillWidth: true
+                        Layout.topMargin: Style.sp(1)
+                        visible: !!(page.artist && page.artist.description)
+                        spacing: Style.sp(0.5)
+                        Text {
+                            Layout.fillWidth: true
+                            text: (page.artist && page.artist.description) ? page.artist.description : ""
+                            color: Tokens.inkDim
+                            font.family: Style.fontUi
+                            font.pixelSize: Style.fs.sm
+                            wrapMode: Text.WordWrap
+                            maximumLineCount: page.expanded ? 999 : 3
+                            elide: Text.ElideRight
+                        }
+                        Text {
+                            text: page.expanded ? "LESS" : "MORE"
+                            color: scDescHover.hovered ? Tokens.ink : Tokens.inkMuted
+                            font.family: Style.fontMono
+                            font.pixelSize: Style.fs.micro
+                            font.letterSpacing: Style.trackMicro
+                            HoverHandler { id: scDescHover }
+                            MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: page.expanded = !page.expanded }
+                        }
+                    }
+                }
+            }
+
+            // play / shuffle
+            RowLayout {
+                Layout.fillWidth: true
+                Layout.leftMargin: Style.pagePad
+                Layout.rightMargin: Style.pagePad
+                spacing: Style.sp(3)
+                Btn { text: "Play"; icon: "play"; primary: true; enabled: page.scTracks.length > 0; onClicked: page.playSC(0) }
+                Btn { text: "Shuffle"; icon: "shuffle"; enabled: page.scTracks.length > 0; onClicked: page.shuffleSC() }
+                Item { Layout.fillWidth: true }
+            }
+
+            // two columns: tracks (left) + albums/playlists/likes rail (right)
+            RowLayout {
+                Layout.fillWidth: true
+                Layout.leftMargin: Style.pagePad
+                Layout.rightMargin: Style.pagePad
+                Layout.bottomMargin: Style.sp(20)
+                Layout.alignment: Qt.AlignTop
+                spacing: Style.sp(6)
+
+                ColumnLayout {
+                    Layout.fillWidth: true
+                    Layout.alignment: Qt.AlignTop
+                    spacing: 0
+                    SectionHeading { Layout.fillWidth: true; Layout.bottomMargin: Style.sp(1); title: "Tracks" }
+                    Repeater {
+                        model: page.scTracks
+                        delegate: Item {
+                            id: trackWrap
+                            required property var modelData
+                            required property int index
+                            Layout.fillWidth: true
+                            implicitHeight: Style.rowH
+                            TrackRow {
+                                anchors.fill: parent
+                                song: trackWrap.modelData
+                                index: trackWrap.index
+                                showPlays: true
+                                menu: false
+                                active: !!(Playback.now && trackWrap.modelData && Playback.now.videoId === trackWrap.modelData.video_id)
+                                onPlay: page.playSC(trackWrap.index)
+                            }
+                        }
+                    }
+                    Text {
+                        Layout.fillWidth: true
+                        Layout.topMargin: Style.sp(2)
+                        visible: page.scTracks.length === 0
+                        text: "No public tracks."
+                        color: Tokens.inkFaint
+                        font.family: Style.fontUi
+                        font.pixelSize: Style.fs.sm
+                    }
+                }
+
+                ColumnLayout {
+                    Layout.preferredWidth: Style.sp(75)     // 300
+                    Layout.maximumWidth: Style.sp(75)
+                    Layout.alignment: Qt.AlignTop
+                    spacing: Style.sp(4)
+
+                    ColumnLayout {
+                        Layout.fillWidth: true
+                        visible: page.scAlbums.length > 0
+                        spacing: Style.sp(0.5)
+                        SectionHeading { Layout.fillWidth: true; Layout.bottomMargin: Style.sp(1); title: "Albums from this user" }
+                        Repeater {
+                            model: page.scAlbums
+                            delegate: ScMiniCard {
+                                required property var modelData
+                                card: modelData
+                                onActivated: Router.push(modelData.kind || "album", { id: modelData.id, title: modelData.title })
+                            }
+                        }
+                    }
+                    ColumnLayout {
+                        Layout.fillWidth: true
+                        visible: page.scPlaylists.length > 0
+                        spacing: Style.sp(0.5)
+                        SectionHeading { Layout.fillWidth: true; Layout.bottomMargin: Style.sp(1); title: "Playlists" }
+                        Repeater {
+                            model: page.scPlaylists
+                            delegate: ScMiniCard {
+                                required property var modelData
+                                card: modelData
+                                onActivated: Router.push(modelData.kind || "playlist", { id: modelData.id, title: modelData.title })
+                            }
+                        }
+                    }
+                    ColumnLayout {
+                        Layout.fillWidth: true
+                        visible: page.scLikes.length > 0
+                        spacing: Style.sp(0.5)
+                        SectionHeading { Layout.fillWidth: true; Layout.bottomMargin: Style.sp(1); title: "Likes" }
+                        Repeater {
+                            model: page.scLikes
+                            delegate: ScMiniCard {
+                                required property var modelData
+                                required property int index
+                                card: modelData
+                                playable: true
+                                onActivated: page.playLikes(index)
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 
     Component {

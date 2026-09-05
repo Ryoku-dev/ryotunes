@@ -30,13 +30,21 @@ Singleton {
     // The Sound dialog's effects, mirrored from the daemon (the `audio-fx` event and the subscribe
     // snapshot). `bass` is dB, reverb/width are 0..1, speed is the tempo multiplier.
     property var audioFx: ({ speed: 1, semitones: 0, reverb: 0, bass: 0, width: 0 })
-    // The active music provider ("youtube" | "spotify"), mirrored from the daemon (the subscribe
-    // snapshot's `provider` and a `provider-changed` event). The title bar's switch reads it.
+    // The active music provider ("youtube" | "spotify" | "soundcloud"), mirrored from the daemon
+    // (the subscribe snapshot's `provider` and a `provider-changed` event). The title bar's switch
+    // reads it; SoundCloud is a guest catalogue with no sign-in gate.
     property string provider: "youtube"
     // The Spotify account, mirrored from the daemon (the subscribe snapshot's `spotify` object and
     // the `spotify-auth` events). `signedIn` gates the Spotify catalogue; `premium` is null until the
     // profile is known. Never a source of truth — every field lands from the daemon.
     property var spotify: ({ signedIn: false, stored: false, name: null, premium: null })
+
+    // --- SoundCloud waveform cache -----------------------------------------------------------
+    // The playing track's 240 amplitude samples (get_waveform), for the Orange seek bar; null for a
+    // non-SoundCloud track or before it resolves. Cached per video id so switching back to a track
+    // (or reopening the stage) never refetches. Only SoundCloud ids ("sc:") carry a waveform.
+    property var waveform: null
+    property var waveformCache: ({})
 
     // --- optimistic drag state ---------------------------------------------------------------
     // NaN when the seek thumb is not held; a number pins the shown position and suppresses the
@@ -92,6 +100,31 @@ Singleton {
         if (snap.spotify)
             root.spotify = { signedIn: !!snap.spotify.signedIn, stored: !!snap.spotify.stored,
                 name: snap.spotify.name, premium: snap.spotify.premium };
+    }
+
+    // --- SoundCloud waveform -----------------------------------------------------------------
+    // On every track change resolve a SoundCloud track's waveform (get_waveform) into the per-id
+    // cache and publish it as `waveform`; a non-SoundCloud track clears it. A cached id is served
+    // straight away and never refetched. onNowChanged also covers the opening snapshot's `now`.
+    onNowChanged: root.ensureWaveform(root.now ? root.now.videoId : null)
+    function ensureWaveform(vid) {
+        if (!vid || String(vid).indexOf("sc:") !== 0) {
+            root.waveform = null;
+            return;
+        }
+        if (root.waveformCache[vid]) {
+            root.waveform = root.waveformCache[vid];
+            return;
+        }
+        root.waveform = null;
+        Daemon.call("get_waveform", { id: vid })
+            .then((r) => {
+                var s = (r && r.samples) ? r.samples : [];
+                root.waveformCache[vid] = s;
+                if (root.now && root.now.videoId === vid)
+                    root.waveform = s;
+            })
+            .catch(() => {});
     }
 
     // --- methods (each a daemon call) --------------------------------------------------------
