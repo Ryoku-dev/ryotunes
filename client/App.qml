@@ -85,7 +85,7 @@ Item {
     // Rig hook: type into the current page's hero search (Home) without a keyboard.
     function devSuggest(q) {
         var pg = pageLoader.item;
-        var field = pg ? pg["heroSearch"] : null;
+        var field = (pg && "heroSearch" in pg) ? pg.heroSearch : null;
         if (field) { field.forceFocus(); field.value = q; }
     }
 
@@ -238,7 +238,7 @@ Item {
             nowPlayingOpen: app.nowPlayingOpen
             onToggleQueue: app.panelToggleTab("queue")
             onToggleLyrics: app.panelToggleTab("lyrics")
-            onToggleNowPlaying: app.npOpenTab("queue")
+            onToggleNowPlaying: app.npToggle()
             onSoundClicked: app.soundOpen = true
         }
     }
@@ -299,6 +299,17 @@ Item {
         sequences: ["Ctrl+K"]
         context: Qt.WindowShortcut
         onActivated: palette.open = !palette.open
+    }
+    // Escape walks the overlays back: palette, then the Now Playing stage. Keyboard actions get
+    // no animation of their own; the stage's own fade is all.
+    Shortcut {
+        sequences: ["Escape"]
+        context: Qt.WindowShortcut
+        enabled: palette.open || app.nowPlayingOpen
+        onActivated: {
+            if (palette.open) palette.open = false;
+            else app.npClose();
+        }
     }
 
     // Account menu (sign in / out via the daemon). A full-surface dismiss layer closes it.
