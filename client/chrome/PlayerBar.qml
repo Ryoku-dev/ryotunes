@@ -1,27 +1,30 @@
 pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Layouts
-import QtQuick.Shapes
 import Ryoku.Ui.Singletons
 import "../"
 import "../components"
 import "../lib/ids.js" as Ids
 
-// The persistent transport, ported from ui/src/lib/components/PlayerBar.svelte. It holds no truth:
-// every control is a Playback method (a daemon call) and every readout is Playback state. The two
-// exceptions are the design's sanctioned optimism — the held seek thumb (Playback.seekDrag) and the
-// volume slider while dragged (Playback.volDrag) — so a mid-drag daemon echo can never yank either
-// out from under the pointer. Queue / Lyrics / Now-Playing / mini toggles raise signals the App
-// owns; their surfaces arrive in later tasks.
+// The persistent transport (spec section 3): three zones with the transport centred on the WINDOW.
+// The left (now playing) and right (tools + volume) zones flow in a full-width RowLayout with a fixed
+// 280 px each; the transport + seek is a separate column anchored to the bar's horizontal centre, so
+// it sits at the window's midline whatever the side content does. It holds no truth: every control is
+// a Playback method (a daemon call) and every readout is Playback state, save the two sanctioned
+// optimisms — the held seek thumb (Playback.seekDrag) and the volume slider while dragged
+// (Playback.volDrag). Queue / Lyrics select App's right panel; expand raises the Now Playing stage;
+// the Sound dialog opens from the tools. The wave is gone: the seek is a hairline with an accent fill.
 Rectangle {
     id: root
 
     signal toggleQueue()
     signal toggleLyrics()
     signal toggleNowPlaying()
-    signal miniClicked()
-    property bool queueOpen: false
-    property bool lyricsOpen: false
+    signal soundClicked()
+
+    // App state, one-way in: the right panel's open flag and active tab, and the stage's open flag.
+    property bool panelOpen: false
+    property string panelTab: "queue"
     property bool nowPlayingOpen: false
 
     // Volume level to return to when un-muting (mute is just volume 0).
@@ -38,8 +41,13 @@ Rectangle {
         return !!(cur && cur.autoplay && Playback.now && cur.video_id === Playback.now.videoId);
     }
 
-    implicitHeight: Style.sp(15)
-    color: Tokens.paper
+    // The fixed side zone width (280) and the outer margin, shared by the flow layout and the centre's
+    // width clamp so the transport never collides with the side content on a narrow window.
+    readonly property int zoneW: Style.sp(70)
+    readonly property int edge: Style.sp(6)
+
+    implicitHeight: Style.playerBarH
+    color: Qt.rgba(Tokens.paper.r, Tokens.paper.g, Tokens.paper.b, 0.9)
 
     function toggleLike() {
         var n = Playback.now;
@@ -77,16 +85,17 @@ Rectangle {
 
     Hairline { anchors.top: parent.top; width: parent.width; height: 1 }
 
+    // ── side zones (left now-playing, right tools) flowing across the bar ───────────────────
     RowLayout {
         anchors.fill: parent
-        anchors.leftMargin: Style.sp(6)
-        anchors.rightMargin: Style.sp(6)
+        anchors.leftMargin: root.edge
+        anchors.rightMargin: root.edge
         spacing: Style.sp(4)
 
-        // ── now playing (left) ───────────────────────────────────────────────────────────
+        // now playing (left, 280)
         RowLayout {
-            Layout.fillWidth: true
-            Layout.preferredWidth: 1
+            Layout.preferredWidth: root.zoneW
+            Layout.fillWidth: false
             spacing: Style.sp(3)
 
             Artwork {
@@ -140,162 +149,33 @@ Rectangle {
                 iconSize: Style.fs.md
                 diameter: Style.sp(8)
                 active: Playback.rating === "like"
-                iconColor: Playback.rating === "like" ? Tokens.sun : Tokens.inkMuted
+                iconColor: Playback.rating === "like" ? Style.accent : Tokens.inkMuted
                 onClicked: root.toggleLike()
             }
         }
 
-        // ── transport + seek (centre) ────────────────────────────────────────────────────
-        ColumnLayout {
-            Layout.fillWidth: true
-            Layout.preferredWidth: 1.5
-            Layout.maximumWidth: Style.sp(120)
-            spacing: Style.sp(1)
+        // the gap the centred transport floats over
+        Item { Layout.fillWidth: true; Layout.fillHeight: true }
 
-            RowLayout {
-                Layout.alignment: Qt.AlignHCenter
-                spacing: Style.sp(1)
-                IconButton {
-                    icon: "shuffle"
-                    iconSize: Style.fs.md
-                    diameter: Style.sp(8)
-                    active: !!(Playback.queue && Playback.queue.shuffle)
-                    onClicked: Playback.toggleShuffle()
-                }
-                IconButton {
-                    icon: "previous"
-                    iconSize: Style.fs.lg
-                    diameter: Style.sp(8)
-                    onClicked: Playback.prev()
-                }
-                IconButton {
-                    icon: Playback.paused ? "play" : "pause"
-                    iconSize: Style.fs.lg
-                    diameter: Style.sp(9)
-                    primary: true
-                    onClicked: Playback.togglePause()
-                }
-                IconButton {
-                    icon: "next"
-                    iconSize: Style.fs.lg
-                    diameter: Style.sp(8)
-                    onClicked: Playback.next()
-                }
-                IconButton {
-                    icon: (Playback.queue && Playback.queue.repeat === "one") ? "repeat-one" : "repeat"
-                    iconSize: Style.fs.md
-                    diameter: Style.sp(8)
-                    active: !!(Playback.queue && Playback.queue.repeat && Playback.queue.repeat !== "off")
-                    onClicked: Playback.cycleRepeat()
-                }
-            }
-
-            RowLayout {
-                Layout.fillWidth: true
-                spacing: Style.sp(2)
-                Text {
-                    text: Style.fmtTime(Playback.shownPosition)
-                    color: Tokens.inkFaint
-                    font.family: Style.fontMono
-                    font.pixelSize: Style.fs.xs
-                }
-
-                // The wave seek: a flat rest line, a sine played portion clipped to the elapsed
-                // fraction, a thumb, and a visuals-off Slider on top for the drag itself.
-                Item {
-                    id: seek
-                    Layout.fillWidth: true
-                    Layout.alignment: Qt.AlignVCenter
-                    implicitHeight: Style.sp(4)
-                    readonly property real pct: seekSlider.pct
-                    property var wavePts: buildWave(width, height)
-
-                    function buildWave(w, h) {
-                        var pts = [];
-                        if (w <= 0)
-                            return pts;
-                        var amp = h * 0.32;
-                        var mid = h / 2;
-                        var period = Style.sp(4);
-                        for (var x = 0; x <= w; x += 2)
-                            pts.push(Qt.point(x, mid - amp * Math.sin((2 * Math.PI * x) / period)));
-                        return pts;
-                    }
-
-                    Rectangle {
-                        anchors.verticalCenter: parent.verticalCenter
-                        x: seek.width * seek.pct
-                        width: Math.max(0, seek.width * (1 - seek.pct))
-                        height: 1
-                        color: Tokens.lineStrong
-                    }
-
-                    Item {
-                        width: seek.width * seek.pct
-                        height: parent.height
-                        clip: true
-                        Shape {
-                            width: seek.width
-                            height: seek.height
-                            ShapePath {
-                                strokeColor: root.live ? Tokens.sun : Tokens.ink
-                                strokeWidth: 1.5
-                                fillColor: "transparent"
-                                capStyle: ShapePath.RoundCap
-                                joinStyle: ShapePath.RoundJoin
-                                PathPolyline { path: seek.wavePts }
-                            }
-                        }
-                    }
-
-                    Rectangle {
-                        width: Style.sp(2.5)
-                        height: width
-                        radius: width / 2
-                        color: Tokens.ink
-                        anchors.verticalCenter: parent.verticalCenter
-                        x: seek.width * seek.pct - width / 2
-                    }
-
-                    Slider {
-                        id: seekSlider
-                        anchors.fill: parent
-                        visualTrack: false
-                        from: 0
-                        to: Playback.duration > 0 ? Playback.duration : 1
-                        value: Playback.shownPosition
-                        onMoved: (v) => Playback.seekDrag = v
-                        onCommitted: (v) => { Playback.seek(v); Playback.seekDrag = NaN; }
-                    }
-                }
-
-                Text {
-                    text: Style.fmtTime(Playback.duration)
-                    color: Tokens.inkFaint
-                    font.family: Style.fontMono
-                    font.pixelSize: Style.fs.xs
-                }
-            }
-        }
-
-        // ── volume + surface toggles (right) ─────────────────────────────────────────────
+        // tools + volume (right, 280)
         RowLayout {
-            Layout.fillWidth: true
-            Layout.preferredWidth: 1
+            Layout.preferredWidth: root.zoneW
+            Layout.fillWidth: false
             layoutDirection: Qt.RightToLeft
             spacing: Style.sp(1)
 
             IconButton {
-                icon: root.nowPlayingOpen ? "arrow-down" : "arrow-up"
+                icon: "expand"
                 iconSize: Style.fs.lg
                 diameter: Style.sp(8)
+                active: root.nowPlayingOpen
                 onClicked: root.toggleNowPlaying()
             }
             IconButton {
                 icon: "queue"
                 iconSize: Style.fs.lg
                 diameter: Style.sp(8)
-                active: root.queueOpen
+                active: root.panelOpen && root.panelTab === "queue"
                 onClicked: root.toggleQueue()
             }
             IconButton {
@@ -303,17 +183,17 @@ Rectangle {
                 iconSize: Style.fs.lg
                 diameter: Style.sp(8)
                 enabled: !root.isRadioNow
-                active: root.lyricsOpen
+                active: root.panelOpen && root.panelTab === "lyrics"
                 onClicked: root.toggleLyrics()
             }
             IconButton {
-                icon: "minimize"
+                icon: "sound"
                 iconSize: Style.fs.lg
                 diameter: Style.sp(8)
-                onClicked: root.miniClicked()
+                onClicked: root.soundClicked()
             }
 
-            Item { Layout.preferredWidth: Style.sp(2) }
+            Item { Layout.fillWidth: true }
 
             // volume group
             RowLayout {
@@ -352,6 +232,83 @@ Rectangle {
                         onWheel: (e) => root.nudgeVolume(e.angleDelta.y > 0 ? 5 : -5)
                     }
                 }
+            }
+        }
+    }
+
+    // ── transport + seek, anchored to the WINDOW's midline (max 480 wide) ───────────────────
+    ColumnLayout {
+        anchors.horizontalCenter: parent.horizontalCenter
+        anchors.verticalCenter: parent.verticalCenter
+        width: Math.min(Style.sp(120), root.width - 2 * (root.zoneW + root.edge + Style.sp(4)))
+        spacing: Style.sp(1)
+
+        RowLayout {
+            Layout.alignment: Qt.AlignHCenter
+            spacing: Style.sp(1)
+            IconButton {
+                icon: "shuffle"
+                iconSize: Style.fs.md
+                diameter: Style.sp(8)
+                active: !!(Playback.queue && Playback.queue.shuffle)
+                onClicked: Playback.toggleShuffle()
+            }
+            IconButton {
+                icon: "previous"
+                iconSize: Style.fs.lg
+                diameter: Style.sp(8)
+                onClicked: Playback.prev()
+            }
+            IconButton {
+                icon: Playback.paused ? "play" : "pause"
+                iconSize: Style.fs.lg
+                diameter: Style.sp(10)
+                primary: true
+                onClicked: Playback.togglePause()
+            }
+            IconButton {
+                icon: "next"
+                iconSize: Style.fs.lg
+                diameter: Style.sp(8)
+                onClicked: Playback.next()
+            }
+            IconButton {
+                icon: (Playback.queue && Playback.queue.repeat === "one") ? "repeat-one" : "repeat"
+                iconSize: Style.fs.md
+                diameter: Style.sp(8)
+                active: !!(Playback.queue && Playback.queue.repeat && Playback.queue.repeat !== "off")
+                onClicked: Playback.cycleRepeat()
+            }
+        }
+
+        RowLayout {
+            Layout.fillWidth: true
+            spacing: Style.sp(2)
+            Text {
+                text: Style.fmtTime(Playback.shownPosition)
+                color: Tokens.inkFaint
+                font.family: Style.fontMono
+                font.pixelSize: Style.fs.xs
+            }
+            Slider {
+                id: seekSlider
+                Layout.fillWidth: true
+                Layout.alignment: Qt.AlignVCenter
+                thickness: 2
+                handleSize: Style.sp(2.5)
+                trackColor: Tokens.lineStrong
+                fillColor: root.live ? Style.accent : Tokens.ink
+                from: 0
+                to: Playback.duration > 0 ? Playback.duration : 1
+                value: Playback.shownPosition
+                onMoved: (v) => Playback.seekDrag = v
+                onCommitted: (v) => { Playback.seek(v); Playback.seekDrag = NaN; }
+            }
+            Text {
+                text: Style.fmtTime(Playback.duration)
+                color: Tokens.inkFaint
+                font.family: Style.fontMono
+                font.pixelSize: Style.fs.xs
             }
         }
     }

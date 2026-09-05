@@ -2,33 +2,46 @@ pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Layouts
 import Ryoku.Ui.Singletons
+import Ryoku.Ui as RU
 import "chrome"
 import "components"
 
-// The app frame: the title register on top, the navigation rail beside the routed page, the
-// transport pinned to the foot while something is loaded, and a foreground layer for the account
-// menu, the toasts and the Ctrl+K palette. The page is chosen from Router.current.page and loaded
-// by URL; Radio/Settings and any unknown route land on a placeholder until their task adds them.
+// The app frame (spec section 3): the title register on top, the collapsible navigation rail and the
+// routed page over the cover bloom, the persistent Queue/Lyrics panel on the right, and the transport
+// pinned to the foot. Above the frame sits a foreground layer for the account menu, the toasts, the
+// Ctrl+K palette, the Sound dialog and the Listen Together sheet. The page is chosen from
+// Router.current.page and loaded by URL; any unknown route lands on a placeholder until its task adds
+// it. The single Backdrop behind the content is the only saturated thing on screen; every chrome
+// surface is Tokens paper (opaque or at alpha) so nothing else competes with the artwork.
 Item {
     id: app
     anchors.fill: parent
 
-    // Surface toggles the transport raises. Their panels/windows are later tasks; the state is real
-    // now so those surfaces bind to it when they arrive, and the toggle buttons already reflect it.
+    // The Now Playing stage's coupling with the transport. Exactly one of queue/lyrics is the active
+    // tab while the stage is open; opening a tab opens it and closing clears all three. NowPlaying
+    // reads these and asks for changes through tabRequested/closeRequested.
     property bool queueOpen: false
     property bool lyricsOpen: false
     property bool nowPlayingOpen: false
 
-    // The mini player window's visibility. shell.qml's "Ryotunes Mini" FloatingWindow binds its
-    // visible to this; the title-bar and player-bar mini buttons toggle it, MiniPlayer clears it.
+    // The persistent right panel (Queue | Lyrics) and its active tab. Open by default on a wide
+    // window (>= 1400 px); hidden entirely below 1100 px, and yielded to the Now Playing stage.
+    property bool panelOpen: app.width >= Style.sp(350)
+    property string panelTab: "queue"
+    readonly property bool panelShown: app.panelOpen && app.width >= Style.sp(275) && !app.nowPlayingOpen
+
+    // The navigation rail's collapse state, toggled from the title bar.
+    property bool sidebarOpen: true
+
+    // The Sound dialog (tempo / pitch / reverb / bass / width). A modal Loader that only exists while
+    // open; SoundWorker lands chrome/SoundDialog.qml and Playback.soundRequested.
+    property bool soundOpen: false
+
+    // The mini player window's visibility. shell.qml's mini PanelWindow binds its visible to this; the
+    // title-bar and player-bar buttons toggle it, MiniPlayer clears it.
     property bool miniOpen: false
 
-    // The persistent right panel (Queue | Lyrics). Open by default on a wide window.
-    property bool panelOpen: width >= Style.sp(350)
-
-    // The Now Playing overlay's coupling with the player bar. Exactly one of queue/lyrics is the
-    // active tab while the overlay is open; opening a tab opens the overlay, and closing it clears
-    // all three. NowPlaying reads these and asks for changes through its tabRequested/closeRequested.
+    // --- Now Playing stage helpers ----------------------------------------------------------
     function npOpenTab(tab) {
         app.nowPlayingOpen = true;
         app.queueOpen = tab === "queue";
@@ -52,20 +65,40 @@ Item {
             app.npOpenTab(app.lyricsOpen ? "lyrics" : "queue");
     }
 
+    // --- right panel helpers ----------------------------------------------------------------
+    function panelOpenTab(tab) {
+        app.panelTab = tab;
+        app.panelOpen = true;
+    }
+    function panelToggleTab(tab) {
+        if (app.panelShown && app.panelTab === tab)
+            app.panelOpen = false;
+        else
+            app.panelOpenTab(tab);
+    }
+
     // One accent sampler per window (Canvas paints only inside a rendering window).
     ArtAccent {}
 
     Connections {
         target: Playback
         function onNowPlayingRequested(tab: string): void { app.npOpenTab(tab); }
+        function onSoundRequested(): void { app.soundOpen = true; }
     }
 
+    // ── frame ────────────────────────────────────────────────────────────────────────────
     ColumnLayout {
+        id: frame
         anchors.fill: parent
         spacing: 0
 
         TitleBar {
             Layout.fillWidth: true
+            sidebarOpen: app.sidebarOpen
+            panelOpen: app.panelShown
+            onSidebarToggleClicked: app.sidebarOpen = !app.sidebarOpen
+            onPanelToggleClicked: app.panelOpen = !app.panelOpen
+            onSoundClicked: app.soundOpen = true
             onAccountClicked: (gx, gy) => accountMenu.openAt(gx, gy)
             onListenTogetherClicked: listenTogether.open = !listenTogether.open
             onMiniClicked: app.miniOpen = !app.miniOpen
@@ -76,34 +109,75 @@ Item {
             Layout.fillHeight: true
             spacing: 0
 
-            Sidebar { Layout.fillHeight: true }
+            Sidebar {
+                Layout.fillHeight: true
+                open: app.sidebarOpen
+            }
 
+            // The content area: the single cover Backdrop, a paper glass over it so the bloom reads
+            // as a subtle wash, and the routed page inset by the shared padding. The Now Playing stage
+            // rises over all of it (right of the rail, above the transport) when open.
             Item {
+                id: contentArea
                 Layout.fillWidth: true
                 Layout.fillHeight: true
 
-                // The routed page is loaded by URL from its type name, so a new page lights up the
-                // moment its file lands — no per-route wiring here. Radio/Settings and any unknown
-                // route fall through to the placeholder until their task adds them.
-                Loader {
-                    id: pageLoader
+                Backdrop {
                     anchors.fill: parent
-                    readonly property string page: Router.current ? Router.current.page : "home"
-                    source: {
-                        var m = { home: "HomePage", search: "SearchPage", library: "LibraryPage",
-                            playlist: "PlaylistPage", album: "AlbumPage", artist: "ArtistPage", list: "ListPage",
-                            radio: "RadioPage", settings: "SettingsPage" };
-                        return m[page] ? Qt.resolvedUrl("pages/" + m[page] + ".qml") : "";
-                    }
+                    strength: Style.paperDark ? 0.22 : 0.14
+                    focusX: 0.82
+                    focusY: 0.12
                 }
-                Loader {
+                Rectangle {
                     anchors.fill: parent
-                    active: pageLoader.status !== Loader.Ready
-                    sourceComponent: placeholder
+                    color: Qt.rgba(Tokens.paper.r, Tokens.paper.g, Tokens.paper.b, 0.88)
                 }
 
-                // The Now Playing surface (artwork + Queue/Lyrics tabs) rises over the routed page,
-                // right of the rail and above the transport, exactly as the Svelte overlay does.
+                Item {
+                    id: pageClip
+                    anchors.fill: parent
+                    anchors.leftMargin: Style.pagePad
+                    anchors.rightMargin: Style.pagePad
+                    anchors.topMargin: Style.sp(6)
+                    anchors.bottomMargin: Style.pagePad
+                    clip: true
+
+                    // The routed page. On each route change it crossfades in and rises 8 px, on the
+                    // render thread (Animators), so the swap costs no main-thread work. The page is
+                    // loaded by URL from its type name, so a new page lights up the moment its file
+                    // lands; unknown routes fall through to the placeholder.
+                    Item {
+                        id: pageStack
+                        width: parent.width
+                        height: parent.height
+                        readonly property string page: Router.current ? Router.current.page : "home"
+
+                        Loader {
+                            id: pageLoader
+                            anchors.fill: parent
+                            source: {
+                                var m = { home: "HomePage", search: "SearchPage", library: "LibraryPage",
+                                    playlist: "PlaylistPage", album: "AlbumPage", artist: "ArtistPage", list: "ListPage",
+                                    radio: "RadioPage", settings: "SettingsPage" };
+                                return m[pageStack.page] ? Qt.resolvedUrl("pages/" + m[pageStack.page] + ".qml") : "";
+                            }
+                        }
+                        Loader {
+                            anchors.fill: parent
+                            active: pageLoader.status !== Loader.Ready
+                            sourceComponent: placeholder
+                        }
+
+                        ParallelAnimation {
+                            id: enter
+                            OpacityAnimator { target: pageStack; from: 0; to: 1; duration: Tokens.durFastEffects; easing.type: Easing.OutCubic }
+                            YAnimator { target: pageStack; from: Style.sp(2); to: 0; duration: Tokens.durFastEffects; easing.type: Easing.OutCubic }
+                        }
+                        onPageChanged: enter.restart()
+                        Component.onCompleted: enter.start()
+                    }
+                }
+
                 NowPlaying {
                     anchors.fill: parent
                     nowPlayingOpen: app.nowPlayingOpen
@@ -113,25 +187,32 @@ Item {
                     onCloseRequested: app.npClose()
                 }
             }
+
+            RightPanel {
+                Layout.fillHeight: true
+                open: app.panelShown
+                tab: app.panelTab
+                onTabRequested: (tab) => app.panelOpenTab(tab)
+                onCloseRequested: app.panelOpen = false
+            }
         }
 
         PlayerBar {
             Layout.fillWidth: true
             visible: !!Playback.now
-            queueOpen: app.queueOpen
-            lyricsOpen: app.lyricsOpen
+            panelOpen: app.panelShown
+            panelTab: app.panelTab
             nowPlayingOpen: app.nowPlayingOpen
-            onToggleQueue: app.npToggleTab("queue")
-            onToggleLyrics: app.npToggleTab("lyrics")
-            onToggleNowPlaying: app.npToggle()
-            onMiniClicked: app.miniOpen = !app.miniOpen
+            onToggleQueue: app.panelToggleTab("queue")
+            onToggleLyrics: app.panelToggleTab("lyrics")
+            onToggleNowPlaying: app.npOpenTab("queue")
+            onSoundClicked: app.soundOpen = true
         }
     }
 
     Component {
         id: placeholder
-        Rectangle {
-            color: Tokens.paper
+        Item {
             ColumnLayout {
                 anchors.centerIn: parent
                 spacing: Style.sp(2)
@@ -163,8 +244,23 @@ Item {
     // ── foreground layer ────────────────────────────────────────────────────────────────
     Toast { }
 
-    // The Ctrl+K command palette and its global shortcut. On top of everything, so it can't be
-    // clipped and covers the whole frame while open.
+    // The Sound dialog: a self-contained modal (its own spec-9 snapshot blur) that only exists while
+    // open. The file may not exist yet — a string source only errors when the Loader activates, so
+    // this stays inert until SoundWorker lands it; the only wiring is its close request.
+    Loader {
+        id: soundLoader
+        anchors.fill: parent
+        active: app.soundOpen
+        source: "chrome/SoundDialog.qml"
+    }
+    Connections {
+        target: soundLoader.item
+        ignoreUnknownSignals: true
+        function onCloseRequested(): void { app.soundOpen = false; }
+    }
+
+    // The Ctrl+K command palette and its global shortcut. On top of everything, so it can't be clipped
+    // and covers the whole frame while open.
     CommandPalette { id: palette }
     Shortcut {
         sequences: ["Ctrl+K"]
@@ -286,4 +382,7 @@ Item {
     // Listen Together session sheet: a foreground overlay toggled from the title bar. It anchors the
     // whole frame and is visible only while open.
     ListenTogether { id: listenTogether }
+
+    // The matte grain, one layer over the whole window at the rich decor level (z 999 in the kit).
+    RU.Grain { anchors.fill: parent; visible: Style.decorRich }
 }
