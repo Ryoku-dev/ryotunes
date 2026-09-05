@@ -1,7 +1,6 @@
 pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Layouts
-import QtQuick.Effects
 import Ryoku.Ui.Singletons
 import Ryoku.Ui as RU
 import "../"
@@ -75,91 +74,109 @@ Item {
     // The playing cover as the room's light, stronger here than on a page (spec 1).
     Backdrop {
         anchors.fill: parent
-        strength: 0.32
+        strength: 0.24
     }
 
     ColumnLayout {
+        id: stage
         anchors.fill: parent
         anchors.margins: Style.sp(12)
-        spacing: Style.sp(4)
+        anchors.topMargin: Style.sp(8)
+        spacing: Style.sp(6)
 
+        // ── header: eyebrow left, the Collapse pill right (in flow, so nothing sits under it) ──
         RowLayout {
+            Layout.fillWidth: true
+            spacing: Style.sp(4)
+            Text {
+                Layout.fillWidth: true
+                text: (root.scNow ? "SOUNDCLOUD" : (Playback.provider === "spotify" ? "SPOTIFY" : "YOUTUBE MUSIC")) + "  \u00b7  NOW PLAYING"
+                color: Tokens.inkFaint
+                font.family: Style.fontMono
+                font.pixelSize: Style.fs.micro
+                font.letterSpacing: Style.trackMicro
+            }
+            Rectangle {
+                id: collapsePill
+                implicitWidth: collapseRow.implicitWidth + Style.sp(6)
+                implicitHeight: Style.sp(9)
+                radius: height / 2
+                color: collapseHover.hovered ? Tokens.tint5 : Tokens.paperLift
+                border.width: 1
+                border.color: collapseHover.hovered ? Tokens.lineStrong : Tokens.line
+                Behavior on color { ColorAnimation { duration: Style.motion.snap } }
+                Behavior on border.color { ColorAnimation { duration: Style.motion.snap } }
+
+                RowLayout {
+                    id: collapseRow
+                    anchors.centerIn: parent
+                    spacing: Style.sp(1.5)
+                    Text {
+                        text: "Collapse"
+                        color: Tokens.inkDim
+                        font.family: Style.fontUi
+                        font.pixelSize: Style.fs.sm
+                        font.weight: Font.Medium
+                    }
+                    Icon { name: "chevron-down"; size: Style.fs.md; color: Tokens.inkDim }
+                }
+
+                HoverHandler { id: collapseHover }
+                MouseArea {
+                    anchors.fill: parent
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: root.closeRequested()
+                }
+            }
+        }
+
+        // ── body: art + track (left, top-aligned) | lyrics (right), tops on one line ──────
+        RowLayout {
+            id: body
             Layout.fillWidth: true
             Layout.fillHeight: true
             spacing: Style.sp(12)
 
-            // ── artwork + track (left) ──────────────────────────────────────────────────
             ColumnLayout {
+                id: artCol
                 Layout.fillHeight: true
                 Layout.fillWidth: false
-                Layout.preferredWidth: Math.min(Style.sp(120), root.width * 0.38)
-                spacing: Style.sp(4)
+                Layout.preferredWidth: Math.min(Style.sp(110), Math.round(root.width * 0.34))
+                spacing: Style.sp(5)
+                // The cover is as wide as the column unless the height says otherwise: the title
+                // block (~3 lines) must always fit beneath it.
+                readonly property int artPx: Math.max(Style.sp(40),
+                    Math.min(width, body.height - Style.sp(30)))
 
-                Item {
-                    id: artHolder
-                    Layout.fillWidth: true
-                    Layout.fillHeight: true
-                    readonly property int artPx: Math.max(Style.sp(40),
-                        Math.min(Style.sp(120), Math.min(artHolder.width, artHolder.height)))
+                Artwork {
+                    id: bigArt
+                    Layout.alignment: Qt.AlignTop | Qt.AlignLeft
+                    Layout.preferredWidth: artCol.artPx
+                    Layout.preferredHeight: artCol.artPx
+                    px: artCol.artPx
+                    cornerRadius: Style.radiusCard
+                    url: (Playback.now && Playback.now.thumbnail) ? Playback.now.thumbnail : ""
+                    placeholderIcon: "music"
 
-                    // A small static source of the cover, tinted to the accent and blurred once into
-                    // a glow behind the art. It re-renders only when the source or the accent change
-                    // — i.e. on track change — so the wash costs nothing per frame.
-                    Image {
-                        id: glowSource
-                        anchors.centerIn: parent
-                        width: 64
-                        height: 64
-                        source: (Playback.now && Playback.now.thumbnail) ? Style.thumb(Playback.now.thumbnail, 64) : ""
-                        sourceSize: Qt.size(64, 64)
-                        fillMode: Image.PreserveAspectCrop
-                        asynchronous: true
-                        cache: true
-                        visible: false
-                    }
-                    MultiEffect {
-                        anchors.centerIn: parent
-                        width: artHolder.artPx * 1.12
-                        height: artHolder.artPx * 1.12
-                        source: glowSource
-                        visible: Style.blurEnabled && glowSource.status === Image.Ready
-                        blurEnabled: true
-                        blur: 1.0
-                        blurMax: 64
-                        colorization: 1.0
-                        colorizationColor: Style.accent
-                        brightness: 0.1
-                        opacity: 0.5
+                    MouseArea {
+                        anchors.fill: parent
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: root.toggle()
                     }
 
-                    Artwork {
-                        id: bigArt
+                    // Flash the action taken, over the cover, so the click visibly did something.
+                    Rectangle {
                         anchors.centerIn: parent
-                        px: artHolder.artPx
-                        cornerRadius: Style.radiusCard
-                        url: (Playback.now && Playback.now.thumbnail) ? Playback.now.thumbnail : ""
-                        placeholderIcon: "music"
-
-                        MouseArea {
-                            anchors.fill: parent
-                            cursorShape: Qt.PointingHandCursor
-                            onClicked: root.toggle()
-                        }
-
-                        // Flash the action taken, over the cover, so the click visibly did something.
-                        Rectangle {
+                        visible: root.flash !== ""
+                        width: Style.sp(14)
+                        height: width
+                        radius: width / 2
+                        color: Qt.rgba(0, 0, 0, 0.55)
+                        Icon {
                             anchors.centerIn: parent
-                            visible: root.flash !== ""
-                            width: Style.sp(14)
-                            height: width
-                            radius: width / 2
-                            color: Qt.rgba(0, 0, 0, 0.55)
-                            Icon {
-                                anchors.centerIn: parent
-                                name: root.flash === "play" ? "play" : "pause"
-                                size: Style.fs.xl
-                                color: "#ffffff"
-                            }
+                            name: root.flash === "play" ? "play" : "pause"
+                            size: Style.fs.xl
+                            color: "#ffffff"
                         }
                     }
                 }
@@ -167,7 +184,8 @@ Item {
                 // title xl Fraunces · artist sm · meta micro
                 ColumnLayout {
                     Layout.fillWidth: true
-                    spacing: Style.sp(0.5)
+                    Layout.maximumWidth: artCol.artPx
+                    spacing: Style.sp(1)
                     Text {
                         Layout.fillWidth: true
                         text: (Playback.now && Playback.now.title) ? Playback.now.title : ""
@@ -213,29 +231,29 @@ Item {
                     }
                 }
 
-                // SoundCloud waveform (Orange seek), under the title block
-                Waveform {
-                    Layout.fillWidth: true
-                    Layout.preferredHeight: 56
-                    Layout.topMargin: Style.sp(1)
-                    visible: root.scNow
-                    samples: Playback.waveform || []
-                }
+                Item { Layout.fillHeight: true }
             }
 
-            // ── lyrics stage (right) ────────────────────────────────────────────────────
             LyricsPanel {
                 Layout.fillWidth: true
                 Layout.fillHeight: true
             }
         }
 
-        // ── spectrum ribbon (foot) ──────────────────────────────────────────────────────
+        // ── foot: ONE band. SoundCloud's own waveform is the seek bar; everything else gets the
+        // live spectrum ribbon. Never both.
         Item {
             Layout.fillWidth: true
             Layout.preferredHeight: Style.sp(14)
+
+            Waveform {
+                anchors.fill: parent
+                visible: root.scNow
+                samples: Playback.waveform || []
+            }
             RU.SpectrumField {
                 anchors.fill: parent
+                visible: !root.scNow
                 levels: Spectrum.levels
                 energy: Spectrum.energy
                 style: "wave"
@@ -248,44 +266,6 @@ Item {
                 opacity: Spectrum.analysing ? 0.6 : 0.25
                 Behavior on opacity { NumberAnimation { duration: Style.motion.swap } }
             }
-        }
-    }
-
-    // Close: a labelled Collapse pill, 24 px in from the top-right edges. Paper-lift fill, hairline
-    // border, a subtle tint on hover; clicking collapses the stage back to the player bar.
-    Rectangle {
-        id: collapsePill
-        anchors.top: parent.top
-        anchors.right: parent.right
-        anchors.margins: Style.sp(6)
-        implicitWidth: collapseRow.implicitWidth + Style.sp(6)
-        implicitHeight: Style.sp(9)
-        radius: height / 2
-        color: collapseHover.hovered ? Tokens.tint5 : Tokens.paperLift
-        border.width: 1
-        border.color: collapseHover.hovered ? Tokens.lineStrong : Tokens.line
-        Behavior on color { ColorAnimation { duration: Style.motion.snap } }
-        Behavior on border.color { ColorAnimation { duration: Style.motion.snap } }
-
-        RowLayout {
-            id: collapseRow
-            anchors.centerIn: parent
-            spacing: Style.sp(1.5)
-            Text {
-                text: "Collapse"
-                color: Tokens.inkDim
-                font.family: Style.fontUi
-                font.pixelSize: Style.fs.sm
-                font.weight: Font.Medium
-            }
-            Icon { name: "chevron-down"; size: Style.fs.md; color: Tokens.inkDim }
-        }
-
-        HoverHandler { id: collapseHover }
-        MouseArea {
-            anchors.fill: parent
-            cursorShape: Qt.PointingHandCursor
-            onClicked: root.closeRequested()
         }
     }
 }

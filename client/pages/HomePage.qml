@@ -530,7 +530,9 @@ Item {
                 // inspector, and the feed's Listen again as a numbered list
                 HomePersonal {
                     Layout.fillWidth: true
-                    visible: page.selected === ""
+                    // The recents / familiar artists are YouTube Music history; under another
+                    // catalogue the provider's own shelves lead instead.
+                    visible: page.selected === "" && Playback.provider === "youtube"
                     recents: page.recents
                     artists: page.famArtists
                     listenAgain: page.listenAgain
