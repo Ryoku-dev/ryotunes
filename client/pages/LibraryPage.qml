@@ -241,29 +241,9 @@ Item {
 
     // The Spotify sign-in empty state: shown when Spotify is selected but not signed in, in place of
     // the library. The button starts the OAuth flow; nothing here touches the daemon.
-    ColumnLayout {
+    SpotifyGate {
         anchors.centerIn: parent
         visible: page.spotifyGate
-        spacing: Style.sp(3)
-        Icon {
-            Layout.alignment: Qt.AlignHCenter
-            name: "spotify"
-            size: Style.sp(10)
-            color: Style.providerColor
-        }
-        Btn {
-            Layout.alignment: Qt.AlignHCenter
-            text: "Sign in to Spotify"
-            primary: true
-            onClicked: Playback.spotifySignIn().catch(() => {})
-        }
-        Text {
-            Layout.alignment: Qt.AlignHCenter
-            text: "Premium is required for playback."
-            color: Tokens.inkMuted
-            font.family: Style.fontUi
-            font.pixelSize: Style.fs.sm
-        }
     }
 
     // new-playlist dialog

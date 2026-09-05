@@ -51,6 +51,10 @@ fn null() -> Result<Value, ErrorBody> {
 
 /// Guards the sign-in flow so two OAuth attempts never run at once (it is fire-and-forget).
 static SPOTIFY_SIGNING_IN: AtomicBool = AtomicBool::new(false);
+/// The authorization URL of the flow in progress, so a repeat `spotify_sign_in` (the user clicked
+/// again because the browser never opened, or closed it) reopens the same page instead of
+/// answering "started" and doing nothing visible.
+static SPOTIFY_AUTH_URL: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
 /// One `client.liked` page (mirrors the crate's private `LIKED_PAGE`); the liked-songs view pages
 /// until a batch comes back short.
 const SPOTIFY_LIKED_PAGE: usize = 100;
@@ -60,6 +64,7 @@ struct SignInGuard;
 impl Drop for SignInGuard {
     fn drop(&mut self) {
         SPOTIFY_SIGNING_IN.store(false, Ordering::SeqCst);
+        *SPOTIFY_AUTH_URL.lock().unwrap_or_else(|e| e.into_inner()) = None;
     }
 }
 
@@ -312,7 +317,11 @@ impl Dispatch for Methods {
                     .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
                     .is_err()
                 {
-                    // A flow is already running; the call is idempotent.
+                    // A flow is already waiting on the browser: hand the same URL out again.
+                    let url = SPOTIFY_AUTH_URL.lock().unwrap_or_else(|e| e.into_inner()).clone();
+                    if let Some(url) = url {
+                        st.emit("spotify-auth", json!({ "state": "url", "url": url }));
+                    }
                     return ok(json!({ "started": true }));
                 }
                 let task = st.clone();
@@ -322,6 +331,8 @@ impl Dispatch for Methods {
                     let result = task
                         .spotify
                         .sign_in(move |url| {
+                            *SPOTIFY_AUTH_URL.lock().unwrap_or_else(|e| e.into_inner()) =
+                                Some(url.clone());
                             emitter.emit("spotify-auth", json!({ "state": "url", "url": url }));
                         })
                         .await;

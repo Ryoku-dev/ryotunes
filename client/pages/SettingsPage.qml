@@ -866,8 +866,13 @@ Item {
                                 elide: Text.ElideRight; Layout.fillWidth: true
                             }
                             Text {
-                                text: (Playback.spotify && Playback.spotify.signedIn) ? "Spotify" : "Premium is required for playback."
-                                color: Tokens.inkMuted; font.family: Style.fontUi; font.pixelSize: Style.fs.sm
+                                readonly property var sp: Playback.spotify || ({})
+                                text: sp.signedIn ? "Connected \u00b7 Premium"
+                                    : (sp.error ? sp.error
+                                    : (sp.flow === "browser" ? "Waiting for your browser\u2026"
+                                    : "Not connected \u00b7 Premium is required for playback."))
+                                color: sp.error ? Style.accent : Tokens.inkMuted; font.family: Style.fontUi; font.pixelSize: Style.fs.sm
+                                wrapMode: Text.WordWrap; Layout.fillWidth: true
                             }
                         }
                         Pill {

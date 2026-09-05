@@ -98,19 +98,26 @@ function applyEvent(s, name, data) {
         // it. The url step is opened in the browser by the caller (a JS library cannot reach
         // Quickshell), so it returns an openUrl the Playback singleton hands to execDetached.
         var st = (data && data.state) ? data.state : "";
-        if (st === "url")
+        if (st === "url") {
+            s.spotify = Object.assign({}, s.spotify, { flow: "browser", error: "" });
             return { toast: "Opening Spotify sign-in in your browser", kind: "info", openUrl: data.url };
+        }
         if (st === "signed_in") {
             s.spotify = { signedIn: true, stored: true, name: (data && data.name) ? data.name : null,
-                premium: (s.spotify && s.spotify.premium !== undefined) ? s.spotify.premium : null };
+                premium: (s.spotify && s.spotify.premium !== undefined) ? s.spotify.premium : null,
+                flow: "", error: "" };
             return { toast: "Signed in to Spotify" + ((data && data.name) ? (" as " + data.name) : ""), kind: "success" };
         }
         if (st === "signed_out") {
             s.spotify = { signedIn: false, stored: false, name: null, premium: null };
             return null;
         }
-        if (st === "error")
-            return { toast: (data && data.message) ? data.message : "Spotify sign-in failed", kind: "error" };
+        if (st === "error") {
+            var msg = (data && data.message) ? data.message : "Spotify sign-in failed";
+            // Keep the reason on the gate: a toast alone reads as "nothing happened".
+            s.spotify = Object.assign({}, s.spotify, { flow: "", error: msg });
+            return { toast: msg, kind: "error" };
+        }
         return null;
     }
     case "playback-error":

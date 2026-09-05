@@ -27,6 +27,8 @@ pub const DEFAULT_REDIRECT_URI: &str = "http://127.0.0.1:8989/login";
 const AUTHORIZE_URL: &str = "https://accounts.spotify.com/authorize";
 const TOKEN_URL: &str = "https://accounts.spotify.com/api/token";
 
+/// How long the browser gets to come back with the redirect before the flow gives up.
+const REDIRECT_WAIT: std::time::Duration = std::time::Duration::from_secs(300);
 const PRODUCT_WAIT: std::time::Duration = std::time::Duration::from_secs(5);
 const PRODUCT_POLL: std::time::Duration = std::time::Duration::from_millis(100);
 
@@ -155,9 +157,10 @@ where
 
     on_url(auth_url.to_string());
 
-    let code = tokio::task::spawn_blocking(move || listen(&address))
+    let code = tokio::time::timeout(REDIRECT_WAIT, listen(&address))
         .await
-        .context("the OAuth callback listener panicked")??;
+        .map_err(|_| anyhow::Error::new(SignInFailure(SignInProblem::Cancelled)))
+        .context("no Spotify redirect arrived in time")??;
 
     let http = reqwest::Client::new();
     let token = client
@@ -170,24 +173,25 @@ where
     Ok(token.access_token().secret().to_owned())
 }
 
-/// Block on a single loopback redirect, mimicking Spotify's own client: bind the redirect socket,
+/// Wait for a single loopback redirect, mimicking Spotify's own client: bind the redirect socket,
 /// accept one connection, pull `code` out of the request target, and reply with a close-me message.
-fn listen(address: &str) -> Result<String> {
-    use std::io::{BufRead as _, BufReader, Write as _};
+/// Async so the caller's deadline can drop it; a blocking accept would hold the port forever and
+/// make every later sign-in a silent no-op.
+async fn listen(address: &str) -> Result<String> {
+    use tokio::io::{AsyncBufReadExt as _, AsyncWriteExt as _, BufReader};
 
-    let listener = std::net::TcpListener::bind(address)
+    let listener = tokio::net::TcpListener::bind(address)
+        .await
         .with_context(|| format!("cannot bind the OAuth callback listener on {address}"))?;
     log::info!("auth: OAuth callback listening on {address}");
 
-    let mut stream = listener
-        .incoming()
-        .flatten()
-        .next()
-        .context("the OAuth callback listener closed before a redirect arrived")?;
+    let (stream, _) = listener.accept().await.context("the OAuth callback listener failed")?;
+    let mut stream = BufReader::new(stream);
 
     let mut request_line = String::new();
-    BufReader::new(&stream)
+    stream
         .read_line(&mut request_line)
+        .await
         .context("cannot read the OAuth redirect request")?;
 
     let target = request_line
@@ -199,7 +203,7 @@ fn listen(address: &str) -> Result<String> {
     let message = "Ryotunes has your Spotify authorization. You can close this tab.";
     let response =
         format!("HTTP/1.1 200 OK\r\ncontent-length: {}\r\n\r\n{}", message.len(), message);
-    let _ = stream.write_all(response.as_bytes());
+    let _ = stream.get_mut().write_all(response.as_bytes()).await;
 
     if let Some(code) = query_param(&redirect, "code") {
         return Ok(code);
