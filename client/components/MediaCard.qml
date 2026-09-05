@@ -6,20 +6,26 @@ import "../"
 import "../lib/ids.js" as Ids
 import "../lib/browse.js" as Browse
 
-// A shelf card, ported from MediaCard.svelte. Square artwork (a circle for an artist), title and
-// subtitle, and a hover-revealed play button on everything but an artist. A primary click opens the
-// item (a song plays; a collection routes to its page); the play button plays the whole thing
-// without leaving Home. Hover is a Tokens.tint5 wash and the button's fade — no transform scaling,
-// which the CSS build dropped for scroll cost anyway.
+// A shelf / grid card (spec section 4): 168 px square artwork (a circle for an artist) at
+// radiusCard, a title in md and a subtitle in sm. Hover lifts the whole card two pixels and rings
+// the art with a lineStrong border, animated over Style.motion.snap. A primary click opens the item
+// (a song plays, a collection routes to its page); the hover play button plays the whole thing
+// without leaving the page.
 Item {
     id: root
 
     property var item: null
-    property int cardWidth: Style.sp(40)
+    property int cardWidth: Style.cardW
     readonly property bool round: root.item && root.item.kind === "artist"
 
     width: cardWidth
     implicitHeight: col.implicitHeight
+
+    // active hover lift (transform, so it never disturbs layout)
+    transform: Translate {
+        y: cardHover.hovered ? -2 : 0
+        Behavior on y { NumberAnimation { duration: Style.motion.snap; easing.type: Easing.OutQuad } }
+    }
 
     function open() {
         if (!root.item)
@@ -54,14 +60,6 @@ Item {
         }
     }
 
-    Rectangle {
-        anchors.fill: parent
-        anchors.margins: -Style.sp(1.5)
-        radius: Style.radius
-        z: -1
-        color: cardHover.hovered ? Tokens.tint5 : "transparent"
-    }
-
     MouseArea {
         anchors.fill: parent
         cursorShape: Qt.PointingHandCursor
@@ -78,14 +76,27 @@ Item {
             implicitHeight: width
 
             Artwork {
+                id: art
                 anchors.fill: parent
                 url: root.item && root.item.thumbnail ? root.item.thumbnail : ""
                 px: root.cardWidth
                 round: root.round
+                cornerRadius: root.round ? art.width / 2 : Style.radiusCard
                 placeholderIcon: root.round ? "user"
                     : (root.item && Ids.isOnRepeatId(root.item.id)) ? "on-repeat" : "music"
             }
 
+            // hover ring
+            Rectangle {
+                anchors.fill: parent
+                visible: cardHover.hovered
+                radius: root.round ? width / 2 : Style.radiusCard
+                color: "transparent"
+                border.width: 1
+                border.color: Tokens.lineStrong
+            }
+
+            // hover play (everything but an artist)
             Rectangle {
                 visible: !root.round && cardHover.hovered
                 anchors.right: parent.right

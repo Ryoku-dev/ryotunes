@@ -3,15 +3,18 @@ import QtQuick
 import Ryoku.Ui.Singletons
 import "../"
 
-// A reused grid of MediaCards — the library's card tabs and any browse grid. A GridView with
-// reuseItems and a bounded cache keeps a long collection to a couple of screenfuls of delegates.
+// A reused grid of MediaCards — the library's card tabs, a radio station wall, an artist's
+// releases. A GridView with reuseItems and a bounded cache keeps a long collection to a couple of
+// screenfuls of delegates. Columns = max(2, floor(width / (cardW + sp(4)))), per spec section 4.
 Item {
     id: root
 
     property var model: []
     property bool loading: false
     property string emptyText: "Nothing here."
-    property int pad: Style.sp(8)
+    property int pad: Style.pagePad
+
+    readonly property int columns: Math.max(2, Math.floor(width / (Style.cardW + Style.sp(4))))
 
     GridView {
         id: grid
@@ -24,7 +27,7 @@ Item {
         reuseItems: true
         cacheBuffer: Math.max(0, Math.round(height * 1.5))
         boundsBehavior: Flickable.StopAtBounds
-        cellWidth: Math.floor((width - 1) / Math.max(1, Math.floor(width / Style.sp(48))))
+        cellWidth: Math.floor(width / Math.max(1, root.columns))
         cellHeight: grid.cellWidth + Style.sp(16)
         model: root.loading ? [] : root.model
 

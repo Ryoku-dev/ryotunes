@@ -5,15 +5,14 @@ import Ryoku.Ui.Singletons
 import "../"
 import "../components"
 import "../chrome"
-import "../lib/browse.js" as Browse
-import "../lib/ids.js" as Ids
 
-// Home, ported from ui/src/routes/+page.svelte. One vertical reused ListView of shelves; the header
-// carries the greeting, the mood-chip rail, the Shortcuts pinboard and (when the feed supplies it)
-// the Forgotten favourites block; the footer carries the loading skeletons, empty/error states and
-// the progressive get_home_more pagination. get_home_more fires when the tail comes within 400 px of
-// the viewport bottom, exactly like the Svelte sentinel. Every list is a ListView with reuseItems
-// and a bounded cache, so scrolling a long feed never mounts more than a screenful or two.
+// Home (spec section 5), ported from ui/src/routes/+page.svelte and reset onto the visual system.
+// One vertical reused ListView of the feed's shelves; the header carries the greeting hero (with
+// the listening deck at its right on a wide page), the mood-chip rail, the Pinned tile grid and the
+// personal shelves — Listen again, Familiar artists and Forgotten favourites. The footer carries the
+// loading skeletons, the empty / error states and the progressive get_home_more pagination
+// (it fires when the tail comes within 400 px of the viewport bottom). The page fills the content
+// rect the frame already pads (32 sides / 24 top / 32 bottom); it never insets itself.
 Item {
     id: page
 
@@ -27,9 +26,17 @@ Item {
     property bool moreError: false
     property var blocks: []
 
-    readonly property int pad: Style.sp(8)
+    // Personal shelves, live off the shared store.
+    readonly property var recents: Personal.recent(12)
+    readonly property var forgottenList: page.forgottenSongs()
 
-    Component.onCompleted: page.load("")
+    // Familiar artists: the most-played artists (topArtistIds) resolved to round cards. Loaded once.
+    property var famIds: Personal.topArtistIds(6)
+    property var famCards: []
+    property bool famLoaded: false
+    onFamIdsChanged: page.loadFamiliar()
+
+    Component.onCompleted: { page.load(""); page.loadFamiliar(); }
 
     function greeting() {
         var h = new Date().getHours();
@@ -49,10 +56,14 @@ Item {
         var arr = [];
         var fg = null;
         var secs = (page.home && page.home.sections) ? page.home.sections : [];
+        // Our own Listen again (recents) sits above the feed; drop the feed's duplicate of it.
+        var haveRecents = page.recents.length > 0;
         for (var i = 0; i < secs.length; i++) {
             if (page.isForgotten(secs[i])) {
                 if (!fg)
                     fg = secs[i];
+            } else if (haveRecents && /listen again/i.test(secs[i].title)) {
+                // covered by the personal Listen again shelf
             } else {
                 arr.push(secs[i]);
             }
@@ -67,57 +78,20 @@ Item {
         return page.forgotten.items.filter((i) => i.kind === "song").slice(0, 15);
     }
 
-    function playForgotten(start) {
-        var songs = page.forgottenSongs();
-        Daemon.call("play_playlist", {
-            items: songs.map(Browse.asSong),
-            start: start,
-            sourceName: page.forgotten ? page.forgotten.title : null
-        }).catch((e) => Playback.toast((e && e.message) ? e.message : "Could not play", "error"));
-    }
-
-    // Open a "Jump back in" recent: a song plays, a collection routes to its page. Mirrors
-    // MediaCard.open / browse.ts openItem.
-    function openRecent(it) {
-        if (!it)
+    function loadFamiliar() {
+        if (page.famLoaded || page.famIds.length < 3)
             return;
-        if (it.kind === "song")
-            Playback.play(Browse.asSong(it));
-        else
-            Router.push(it.kind, { id: it.id, title: it.title });
-        Personal.touchPick(it.id);
-    }
-
-    // Play a recent without leaving Home: an album/playlist is fetched then played, its source id
-    // set so autoplay continues with that context's radio (never for a smart playlist).
-    function playRecent(it) {
-        if (!it)
-            return;
-        Personal.noteRecent(it);
-        if (it.kind === "album") {
-            Daemon.call("get_album", { id: it.id })
-                .then((a) => Daemon.call("play_playlist", { items: a.items, sourceId: a.playlistId, sourceName: it.title }))
-                .catch(() => Playback.toast("Could not play — try opening it", "error"));
-        } else {
-            Daemon.call("get_playlist", { id: it.id })
-                .then((p) => Daemon.call("play_playlist", {
-                    items: p.items,
-                    sourceId: Ids.isSmartPlaylistId(it.id) ? undefined : it.id,
-                    sourceName: it.title,
-                    continuation: p.continuation
-                }))
-                .catch(() => Playback.toast("Could not play — try opening it", "error"));
-        }
-    }
-
-    // Play a familiar artist's top songs (its top-songs shelf becomes the queue), recording the
-    // artist as a recent. Mirrors ArtistIndex.svelte playArtist / player.svelte.ts playFrom.
-    function playArtist(a) {
-        if (!a || !a.topSongs || !a.topSongs.length)
-            return;
-        Personal.noteRecent({ id: a.channelId, kind: "artist", title: a.name, subtitle: a.subscribers, thumbnail: a.thumbnail });
-        Daemon.call("play_playlist", { items: a.topSongs, sourceName: a.name })
-            .catch(() => Playback.toast("Could not play", "error"));
+        page.famLoaded = true;
+        Promise.all(page.famIds.map((id) => Daemon.call("get_artist", { id: id }).catch(() => null)))
+            .then((pages) => {
+                page.famCards = pages.filter((p) => !!p).map((p) => ({
+                    kind: "artist",
+                    id: p.channelId,
+                    title: p.name ? p.name : "Artist",
+                    subtitle: p.monthlyListeners ? p.monthlyListeners : (p.subscribers ? p.subscribers : ""),
+                    thumbnail: p.thumbnail
+                }));
+            });
     }
 
     function load(params) {
@@ -134,7 +108,7 @@ Item {
                     page.chips = h.chips.filter((c) => c.title !== "Podcasts");
                 page.rebuild();
                 page.loading = false;
-                list.positionViewAtBeginning();
+                list.stickTop = true;
             })
             .catch((e) => {
                 if (page.selected !== params)
@@ -183,10 +157,18 @@ Item {
         anchors.fill: parent
         clip: true
         reuseItems: true
-        cacheBuffer: Math.round(height * 1.5)
+        cacheBuffer: Math.max(0, Math.round(height * 1.5))
         boundsBehavior: Flickable.StopAtBounds
         model: page.blocks
         spacing: Style.sp(9)
+
+        // The header (hero + chips + pinned + personal shelves) is taller than the viewport and
+        // grows as the recents / familiar / feed shelves resolve. While the user has not scrolled,
+        // keep it pinned to the very top so a late-arriving shelf never nudges the greeting off the
+        // edge; the first drag or wheel releases the pin. A chip switch re-arms it (load()).
+        property bool stickTop: true
+        onMovementStarted: list.stickTop = false
+        Binding { target: list; property: "contentY"; value: list.originY; when: list.stickTop }
         onContentYChanged: page.maybeLoadMore()
         onContentHeightChanged: page.maybeLoadMore()
 
@@ -196,9 +178,9 @@ Item {
             implicitHeight: shelf.implicitHeight
             Shelf {
                 id: shelf
-                x: page.pad
-                width: parent.width - page.pad * 2
+                width: parent.width
                 section: parent.modelData
+                mark: Style.decorRich ? "章" : ""
             }
         }
 
@@ -208,26 +190,24 @@ Item {
 
             ColumnLayout {
                 id: headerCol
-                x: page.pad
-                width: parent.width - page.pad * 2
-                y: Style.sp(6)
-                spacing: Style.sp(5)
+                width: parent.width
+                spacing: Style.sp(6)
 
-                // hero: the copy, search and key hints on the left, the listening deck on the right
-                // (HomeHero.svelte's two-column head). Narrow windows stack the deck under the copy.
+                // hero: greeting, search and key hints on the left; the listening deck on the right
+                // when the page is wide enough (>= 1240 px, i.e. the panel closed or a wider window).
                 GridLayout {
                     id: hero
                     Layout.fillWidth: true
-                    readonly property bool wide: width >= Style.sp(200)
+                    readonly property bool wide: width >= Style.sp(310)
                     columns: wide ? 2 : 1
-                    columnSpacing: Style.sp(12)
+                    columnSpacing: Style.sp(10)
                     rowSpacing: Style.sp(5)
 
                     ColumnLayout {
-                        Layout.preferredWidth: hero.wide ? Style.sp(90) : hero.width
-                        Layout.maximumWidth: hero.wide ? Style.sp(90) : hero.width
+                        Layout.fillWidth: true
                         Layout.alignment: Qt.AlignVCenter
                         spacing: Style.sp(2)
+
                         RowLayout {
                             spacing: Style.sp(2)
                             Rectangle { Layout.preferredWidth: Style.sp(4); Layout.preferredHeight: 1; Layout.alignment: Qt.AlignVCenter; color: Tokens.ink }
@@ -237,8 +217,8 @@ Item {
                                 text: "RYOKU // MUSIC"
                                 color: Tokens.inkFaint
                                 font.family: Style.fontMono
-                                font.pixelSize: Style.fs.xs
-                                font.letterSpacing: 1
+                                font.pixelSize: Style.fs.micro
+                                font.letterSpacing: Style.trackMicro
                             }
                         }
                         Text {
@@ -254,12 +234,13 @@ Item {
                             text: "Pick up where you left off, or find the next thing worth hearing."
                             color: Tokens.inkMuted
                             font.family: Style.fontUi
-                            font.pixelSize: Style.fs.md
+                            font.pixelSize: Style.fs.sm
                             wrapMode: Text.WordWrap
                         }
                         SearchSuggest {
                             id: heroSearch
-                            Layout.fillWidth: true
+                            Layout.preferredWidth: Style.sp(80)
+                            Layout.maximumWidth: Style.sp(80)
                             Layout.topMargin: Style.sp(2)
                             placeholder: "Search tracks, albums, artists…"
                             onSubmitted: if (value.trim() !== "") Router.push("search", { q: value.trim() })
@@ -267,19 +248,22 @@ Item {
                             z: 40
                         }
                         RowLayout {
+                            Layout.topMargin: Style.sp(1)
                             spacing: Style.sp(2)
-                            Text { text: "CTRL K"; color: Tokens.inkMuted; font.family: Style.fontMono; font.pixelSize: Style.fs.xs; font.letterSpacing: 0.7 }
+                            Text { text: "CTRL K"; color: Tokens.inkMuted; font.family: Style.fontMono; font.pixelSize: Style.fs.micro; font.letterSpacing: Style.trackMicro }
                             Text { text: "command search"; color: Tokens.inkFaint; font.family: Style.fontUi; font.pixelSize: Style.fs.xs }
-                            Rectangle { Layout.preferredWidth: Style.sp(4); Layout.preferredHeight: 1; color: Tokens.lineSoft }
-                            Text { text: "SPACE"; color: Tokens.inkMuted; font.family: Style.fontMono; font.pixelSize: Style.fs.xs; font.letterSpacing: 0.7 }
+                            Rectangle { Layout.preferredWidth: Style.sp(4); Layout.preferredHeight: 1; Layout.alignment: Qt.AlignVCenter; color: Tokens.lineSoft }
+                            Text { text: "SPACE"; color: Tokens.inkMuted; font.family: Style.fontMono; font.pixelSize: Style.fs.micro; font.letterSpacing: Style.trackMicro }
                             Text { text: "play / pause"; color: Tokens.inkFaint; font.family: Style.fontUi; font.pixelSize: Style.fs.xs }
                         }
                     }
 
                     MusicDeck {
-                        Layout.fillWidth: true
-                        Layout.alignment: Qt.AlignVCenter
-                        onOpenNowPlaying: tab => Playback.nowPlayingRequested(tab)
+                        visible: hero.wide
+                        Layout.preferredWidth: Style.sp(140)
+                        Layout.preferredHeight: Style.sp(40)
+                        Layout.alignment: Qt.AlignVCenter | Qt.AlignRight
+                        onOpenNowPlaying: (tab) => Playback.nowPlayingRequested(tab)
                     }
                 }
 
@@ -313,415 +297,40 @@ Item {
                     }
                 }
 
-                // shortcuts (unfiltered only), fed from the shared personal store
+                // pinned (unfiltered only)
                 Shortcuts {
                     Layout.fillWidth: true
                     visible: page.selected === ""
                     picks: Personal.picks
-                    onRemoved: id => Personal.removePick(id)
+                    onRemoved: (id) => Personal.removePick(id)
                 }
 
-                // jump back in (recents, unfiltered only): bare rows, against the surfaced Shortcuts
-                // tiles above — the things you chose are elevated, the ones the app noticed are not.
-                ColumnLayout {
+                // listen again (recents, unfiltered only)
+                Shelf {
                     Layout.fillWidth: true
-                    visible: page.selected === "" && Personal.recent().length > 0
-                    spacing: Style.sp(3)
-                    SectionHeading {
-                        Layout.fillWidth: true
-                        title: "Jump back in"
-                        icon: "jump-back"
-                    }
-                    GridLayout {
-                        Layout.fillWidth: true
-                        columns: 3
-                        columnSpacing: Style.sp(6)
-                        rowSpacing: Style.sp(1)
-                        Repeater {
-                            model: Personal.recent()
-                            delegate: Item {
-                                id: recRow
-                                required property var modelData
-                                readonly property bool round: recRow.modelData && recRow.modelData.kind === "artist"
-                                Layout.fillWidth: true
-                                Layout.preferredWidth: 1
-                                implicitHeight: recLayout.implicitHeight + Style.sp(3)
-
-                                Rectangle {
-                                    anchors.fill: parent
-                                    radius: Style.radius
-                                    color: recHover.hovered ? Tokens.tint5 : "transparent"
-                                }
-                                RowLayout {
-                                    id: recLayout
-                                    anchors.left: parent.left
-                                    anchors.right: parent.right
-                                    anchors.verticalCenter: parent.verticalCenter
-                                    anchors.leftMargin: Style.sp(1.5)
-                                    anchors.rightMargin: Style.sp(1.5)
-                                    spacing: Style.sp(2)
-                                    Artwork {
-                                        url: recRow.modelData && recRow.modelData.thumbnail ? recRow.modelData.thumbnail : ""
-                                        px: Style.sp(10)
-                                        round: recRow.round
-                                        placeholderIcon: recRow.round ? "user"
-                                            : (recRow.modelData && Ids.isOnRepeatId(recRow.modelData.id)) ? "on-repeat" : "music"
-                                    }
-                                    ColumnLayout {
-                                        Layout.fillWidth: true
-                                        spacing: 0
-                                        Text {
-                                            Layout.fillWidth: true
-                                            text: recRow.modelData ? recRow.modelData.title : ""
-                                            color: Tokens.ink
-                                            font.family: Style.fontUi
-                                            font.pixelSize: Style.fs.sm
-                                            font.weight: Font.Medium
-                                            elide: Text.ElideRight
-                                        }
-                                        Text {
-                                            Layout.fillWidth: true
-                                            text: (recRow.modelData && recRow.modelData.subtitle) ? recRow.modelData.subtitle
-                                                : (recRow.modelData ? recRow.modelData.kind : "")
-                                            color: Tokens.inkMuted
-                                            font.family: Style.fontUi
-                                            font.pixelSize: Style.fs.xs
-                                            elide: Text.ElideRight
-                                            textFormat: Text.PlainText
-                                        }
-                                    }
-                                    IconButton {
-                                        visible: !recRow.round && recHover.hovered
-                                        icon: "play"
-                                        iconSize: Style.fs.sm
-                                        diameter: Style.sp(7)
-                                        onClicked: page.playRecent(recRow.modelData)
-                                    }
-                                }
-                                HoverHandler { id: recHover }
-                                MouseArea {
-                                    anchors.fill: parent
-                                    acceptedButtons: Qt.LeftButton
-                                    cursorShape: Qt.PointingHandCursor
-                                    onClicked: page.openRecent(recRow.modelData)
-                                }
-                            }
-                        }
-                    }
+                    visible: page.selected === "" && page.recents.length > 0
+                    title: "Listen again"
+                    mark: Style.decorRich ? "再" : ""
+                    items: page.recents
                 }
 
-                // forgotten favourites
-                ColumnLayout {
+                // familiar artists (round, unfiltered only)
+                Shelf {
                     Layout.fillWidth: true
-                    visible: !!page.forgotten
-                    spacing: Style.sp(3)
-                    SectionHeading {
-                        Layout.fillWidth: true
-                        title: page.forgotten ? page.forgotten.title : ""
-                        icon: "clock"
-                    }
-                    RowLayout {
-                        Layout.fillWidth: true
-                        spacing: Style.sp(6)
-                        Repeater {
-                            model: 3
-                            delegate: ColumnLayout {
-                                id: fgCol
-                                required property int index
-                                Layout.fillWidth: true
-                                Layout.alignment: Qt.AlignTop
-                                spacing: Style.sp(0.5)
-                                Repeater {
-                                    model: {
-                                        var songs = page.forgottenSongs();
-                                        var per = Math.ceil(songs.length / 3);
-                                        return songs.slice(fgCol.index * per, fgCol.index * per + per);
-                                    }
-                                    delegate: Item {
-                                        id: fgRow
-                                        required property var modelData
-                                        required property int index
-                                        readonly property int per: Math.ceil(page.forgottenSongs().length / 3)
-                                        readonly property int globalIndex: fgCol.index * per + index
-                                        Layout.fillWidth: true
-                                        implicitHeight: fgTrack.implicitHeight
-                                        TrackRow {
-                                            id: fgTrack
-                                            anchors.left: parent.left
-                                            anchors.right: parent.right
-                                            song: fgRow.modelData
-                                            compact: true
-                                            active: !!(Playback.now && fgRow.modelData
-                                                && Playback.now.videoId === fgRow.modelData.video_id)
-                                            onPlay: page.playForgotten(fgRow.globalIndex)
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
+                    visible: page.selected === "" && page.famCards.length >= 3
+                    title: "Familiar artists"
+                    mark: Style.decorRich ? "馴" : ""
+                    items: page.famCards
                 }
 
-                // familiar artists (unfiltered only): the artist index, keyed off the shared play
-                // counts (topArtistIds). A list of the most-played artists on the left, an inspector
-                // for the selected one on the right. Ported from ArtistIndex.svelte.
-                Item {
-                    id: familiar
+                // forgotten favourites (from the feed)
+                Shelf {
                     Layout.fillWidth: true
-                    visible: page.selected === "" && familiar.artists.length >= 3
-                    implicitHeight: famCol.implicitHeight
-
-                    property var ids: Personal.topArtistIds(6)
-                    property var artists: []
-                    property string activeId: ""
-                    property bool loaded: false
-                    readonly property var active: {
-                        for (var i = 0; i < familiar.artists.length; i++)
-                            if (familiar.artists[i].channelId === familiar.activeId)
-                                return familiar.artists[i];
-                        return familiar.artists.length ? familiar.artists[0] : null;
-                    }
-
-                    onIdsChanged: familiar.load()
-                    Component.onCompleted: familiar.load()
-                    function load() {
-                        if (familiar.loaded || familiar.ids.length < 3)
-                            return;
-                        familiar.loaded = true;
-                        Promise.all(familiar.ids.map((id) => Daemon.call("get_artist", { id: id }).catch(() => null)))
-                            .then((pages) => {
-                                familiar.artists = pages.filter((p) => !!p);
-                                familiar.activeId = familiar.artists.length ? familiar.artists[0].channelId : "";
-                            });
-                    }
-
-                    ColumnLayout {
-                        id: famCol
-                        anchors.left: parent.left
-                        anchors.right: parent.right
-                        anchors.top: parent.top
-                        spacing: Style.sp(3)
-
-                        SectionHeading {
-                            Layout.fillWidth: true
-                            title: "Familiar artists"
-                            icon: "artists"
-                        }
-
-                        RowLayout {
-                            Layout.fillWidth: true
-                            Layout.alignment: Qt.AlignTop
-                            spacing: Style.sp(6)
-
-                            // the index
-                            ColumnLayout {
-                                Layout.preferredWidth: Style.sp(78)
-                                Layout.alignment: Qt.AlignTop
-                                spacing: Style.sp(0.5)
-                                Repeater {
-                                    model: familiar.artists.slice(0, 6)
-                                    delegate: Rectangle {
-                                        id: artRow
-                                        required property var modelData
-                                        required property int index
-                                        readonly property bool sel: familiar.activeId === artRow.modelData.channelId
-                                        Layout.fillWidth: true
-                                        implicitHeight: artLayout.implicitHeight + Style.sp(2)
-                                        radius: Style.radius
-                                        color: (artRow.sel || artHover.hovered) ? Tokens.tint5 : "transparent"
-                                        RowLayout {
-                                            id: artLayout
-                                            anchors.left: parent.left
-                                            anchors.right: parent.right
-                                            anchors.verticalCenter: parent.verticalCenter
-                                            anchors.leftMargin: Style.sp(1.5)
-                                            anchors.rightMargin: Style.sp(1.5)
-                                            spacing: Style.sp(2)
-                                            Text {
-                                                text: (artRow.index + 1 < 10 ? "0" : "") + (artRow.index + 1)
-                                                color: Tokens.inkFaint
-                                                font.family: Style.fontMono
-                                                font.pixelSize: Style.fs.xs
-                                            }
-                                            Artwork {
-                                                url: artRow.modelData.thumbnail ? artRow.modelData.thumbnail : ""
-                                                px: Style.sp(9)
-                                                round: true
-                                                placeholderIcon: "user"
-                                            }
-                                            ColumnLayout {
-                                                Layout.fillWidth: true
-                                                spacing: 0
-                                                Text {
-                                                    Layout.fillWidth: true
-                                                    text: artRow.modelData.name ? artRow.modelData.name : "Artist"
-                                                    color: Tokens.ink
-                                                    font.family: Style.fontUi
-                                                    font.pixelSize: Style.fs.sm
-                                                    font.weight: Font.Medium
-                                                    elide: Text.ElideRight
-                                                }
-                                                Text {
-                                                    Layout.fillWidth: true
-                                                    text: artRow.modelData.monthlyListeners ? artRow.modelData.monthlyListeners
-                                                        : (artRow.modelData.subscribers ? artRow.modelData.subscribers : "Artist")
-                                                    color: Tokens.inkMuted
-                                                    font.family: Style.fontUi
-                                                    font.pixelSize: Style.fs.xs
-                                                    elide: Text.ElideRight
-                                                }
-                                            }
-                                            Text {
-                                                text: artRow.sel ? "//" : "聴"
-                                                color: artRow.sel ? Tokens.ink : Tokens.inkFaint
-                                                font.family: artRow.sel ? Style.fontMono : Tokens.jp
-                                                font.pixelSize: Style.fs.xs
-                                            }
-                                        }
-                                        HoverHandler { id: artHover }
-                                        MouseArea {
-                                            anchors.fill: parent
-                                            cursorShape: Qt.PointingHandCursor
-                                            onClicked: familiar.activeId = artRow.modelData.channelId
-                                            onDoubleClicked: Router.push("artist", { id: artRow.modelData.channelId, title: artRow.modelData.name })
-                                        }
-                                    }
-                                }
-                            }
-
-                            // the inspector
-                            ColumnLayout {
-                                Layout.fillWidth: true
-                                Layout.alignment: Qt.AlignTop
-                                spacing: Style.sp(3)
-                                visible: !!familiar.active
-
-                                RowLayout {
-                                    Layout.fillWidth: true
-                                    spacing: Style.sp(3)
-                                    Artwork {
-                                        url: familiar.active && familiar.active.thumbnail ? familiar.active.thumbnail : ""
-                                        px: Style.sp(22)
-                                        round: true
-                                        placeholderIcon: "user"
-                                    }
-                                    ColumnLayout {
-                                        Layout.fillWidth: true
-                                        Layout.alignment: Qt.AlignVCenter
-                                        spacing: Style.sp(1)
-                                        Text {
-                                            Layout.fillWidth: true
-                                            text: "SELECTED ARTIST · " + (familiar.active
-                                                ? (familiar.active.monthlyListeners ? familiar.active.monthlyListeners
-                                                    : (familiar.active.subscribers ? familiar.active.subscribers : "LIBRARY SIGNAL"))
-                                                : "")
-                                            color: Tokens.inkFaint
-                                            font.family: Style.fontMono
-                                            font.pixelSize: Style.fs.xs
-                                            font.letterSpacing: 1
-                                            elide: Text.ElideRight
-                                        }
-                                        Text {
-                                            Layout.fillWidth: true
-                                            text: (familiar.active && familiar.active.name) ? familiar.active.name : "Artist"
-                                            color: Tokens.ink
-                                            font.family: Tokens.display
-                                            font.pixelSize: Style.fs.xl
-                                            elide: Text.ElideRight
-                                        }
-                                        RowLayout {
-                                            spacing: Style.sp(2)
-                                            Rectangle {
-                                                implicitWidth: playRow.implicitWidth + Style.sp(5)
-                                                implicitHeight: Style.sp(9)
-                                                radius: Style.radius
-                                                color: Tokens.ink
-                                                RowLayout {
-                                                    id: playRow
-                                                    anchors.centerIn: parent
-                                                    spacing: Style.sp(1.5)
-                                                    Icon { name: "play"; size: Style.fs.sm; color: Tokens.paper }
-                                                    Text { text: "Play"; color: Tokens.paper; font.family: Style.fontUi; font.pixelSize: Style.fs.sm; font.weight: Font.Medium }
-                                                }
-                                                MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: page.playArtist(familiar.active) }
-                                            }
-                                            Rectangle {
-                                                implicitWidth: openRow.implicitWidth + Style.sp(5)
-                                                implicitHeight: Style.sp(9)
-                                                radius: Style.radius
-                                                color: "transparent"
-                                                border.width: 1
-                                                border.color: Tokens.line
-                                                RowLayout {
-                                                    id: openRow
-                                                    anchors.centerIn: parent
-                                                    spacing: Style.sp(1.5)
-                                                    Text { text: "Open artist"; color: Tokens.ink; font.family: Style.fontUi; font.pixelSize: Style.fs.sm; font.weight: Font.Medium }
-                                                    Icon { name: "arrow-right"; size: Style.fs.sm; color: Tokens.ink }
-                                                }
-                                                MouseArea {
-                                                    anchors.fill: parent
-                                                    cursorShape: Qt.PointingHandCursor
-                                                    onClicked: if (familiar.active) Router.push("artist", { id: familiar.active.channelId, title: familiar.active.name })
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-
-                                // top tracks preview
-                                ColumnLayout {
-                                    Layout.fillWidth: true
-                                    spacing: Style.sp(0.5)
-                                    visible: !!(familiar.active && familiar.active.topSongs && familiar.active.topSongs.length)
-                                    Repeater {
-                                        model: (familiar.active && familiar.active.topSongs) ? familiar.active.topSongs.slice(0, 4) : []
-                                        delegate: Item {
-                                            id: topRow
-                                            required property var modelData
-                                            required property int index
-                                            Layout.fillWidth: true
-                                            implicitHeight: topLayout.implicitHeight + Style.sp(2)
-                                            Rectangle {
-                                                anchors.fill: parent
-                                                radius: Style.radius
-                                                color: topHover.hovered ? Tokens.tint5 : "transparent"
-                                            }
-                                            RowLayout {
-                                                id: topLayout
-                                                anchors.left: parent.left
-                                                anchors.right: parent.right
-                                                anchors.verticalCenter: parent.verticalCenter
-                                                anchors.leftMargin: Style.sp(1.5)
-                                                anchors.rightMargin: Style.sp(1.5)
-                                                spacing: Style.sp(2)
-                                                Text {
-                                                    text: (topRow.index + 1 < 10 ? "0" : "") + (topRow.index + 1)
-                                                    color: Tokens.inkFaint
-                                                    font.family: Style.fontMono
-                                                    font.pixelSize: Style.fs.xs
-                                                }
-                                                Text {
-                                                    Layout.fillWidth: true
-                                                    text: topRow.modelData.title ? topRow.modelData.title : ""
-                                                    color: Tokens.ink
-                                                    font.family: Style.fontUi
-                                                    font.pixelSize: Style.fs.sm
-                                                    elide: Text.ElideRight
-                                                }
-                                                Icon { visible: topHover.hovered; name: "play"; size: Style.fs.xs; color: Tokens.inkMuted }
-                                            }
-                                            HoverHandler { id: topHover }
-                                            MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: Playback.play(topRow.modelData) }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
+                    visible: !!page.forgotten && page.forgottenList.length > 0
+                    title: page.forgotten ? page.forgotten.title : "Forgotten favourites"
+                    mark: Style.decorRich ? "忘" : ""
+                    items: page.forgottenList
                 }
-
-                Hairline { Layout.fillWidth: true }
             }
         }
 
@@ -731,9 +340,7 @@ Item {
 
             ColumnLayout {
                 id: footerCol
-                x: page.pad
-                width: parent.width - page.pad * 2
-                y: Style.sp(4)
+                width: parent.width
                 spacing: Style.sp(9)
 
                 // loading skeletons
@@ -745,13 +352,14 @@ Item {
                         Skeleton { Layout.preferredWidth: Style.sp(40); Layout.preferredHeight: Style.sp(4) }
                         RowLayout {
                             Layout.fillWidth: true
-                            spacing: Style.sp(3)
+                            spacing: Style.sp(4)
                             Repeater {
                                 model: 6
                                 delegate: Skeleton {
                                     required property int index
-                                    Layout.preferredWidth: Style.sp(40)
-                                    Layout.preferredHeight: Style.sp(50)
+                                    Layout.preferredWidth: Style.cardW
+                                    Layout.preferredHeight: Style.cardW
+                                    corner: Style.radiusCard
                                 }
                             }
                         }

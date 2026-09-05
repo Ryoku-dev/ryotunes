@@ -1,14 +1,17 @@
 pragma ComponentBehavior: Bound
 import QtQuick
+import QtQuick.Layouts
 import Ryoku.Ui.Singletons
 import "../"
 
 // A reused ListView of TrackRow, the shared body of every track surface (playlist, album, library
 // songs, queue). reuseItems keeps a long list to a couple of screenfuls of live delegates, and a
-// bounded cacheBuffer keeps the scroll cheap. An optional header/footer scrolls with the rows, so a
-// page's hero and its card carousels live in one scroller rather than nesting a second Flickable.
-// When `reorderable`, a grip on each row drags it to a new index and commits with `moved(from,to)`
-// (the queue wires that to move_in_queue); the daemon's queue-changed event repaints the result.
+// bounded cacheBuffer keeps the scroll cheap. An optional page header/footer scrolls with the rows,
+// so a page's hero and its card carousels live in one scroller rather than nesting a second
+// Flickable. When `showHeader`, a micro column legend (#  TITLE  ARTIST  ALBUM  PLAYS  LENGTH) is
+// drawn over a hairline below that page header, aligned to the row columns. When `reorderable`, a
+// grip on each row drags it to a new index and commits with `moved(from,to)` (the queue wires that
+// to move_in_queue); the daemon's queue-changed event repaints the result.
 Item {
     id: root
 
@@ -18,7 +21,9 @@ Item {
 
     property bool reorderable: false
     property bool hideThumb: false
-    property bool showPlayCount: false
+    property bool showHeader: false
+    property bool showAlbum: false
+    property bool showPlays: false
     property bool menu: true
     property bool canAdd: true
     property bool canRemove: false
@@ -30,8 +35,9 @@ Item {
     signal moved(int from, int to)
     signal removeAt(int index)
 
-    readonly property int rowHeight: Style.sp(11)
+    readonly property int rowHeight: Style.rowH
     readonly property alias view: list
+    readonly property bool wideAlbum: root.showAlbum && root.width >= Style.sp(225)
 
     // --- drag-reorder state -----------------------------------------------------------------
     property int dragFrom: -1
@@ -76,7 +82,7 @@ Item {
         cacheBuffer: Math.max(0, Math.round(height * 1.5))
         boundsBehavior: Flickable.StopAtBounds
         model: root.items
-        header: root.header
+        header: (root.showHeader || root.header) ? listHead : null
         footer: root.footer
         // A drag in progress must not also flick the list.
         interactive: root.dragFrom < 0
@@ -95,17 +101,19 @@ Item {
                 anchors.right: parent.right
                 anchors.top: parent.top
                 height: 2
-                color: Tokens.sun
+                color: Style.accent
             }
 
             TrackRow {
                 id: rowItem
                 anchors.left: parent.left
                 anchors.right: parent.right
-                index: -1
+                index: root.showHeader ? rowWrap.index : -1
                 song: rowWrap.modelData
                 hideThumb: root.hideThumb
-                showPlayCount: root.showPlayCount
+                showAlbum: root.showAlbum
+                showPlays: root.showPlays
+                tableColumns: root.showHeader
                 menu: root.menu
                 canAdd: root.canAdd
                 canRemove: root.canRemove
@@ -163,6 +171,53 @@ Item {
                 }
             }
         }
+    }
+
+    // The page header (a hero, carousels) then, when asked, the micro column legend over a hairline.
+    Component {
+        id: listHead
+        Column {
+            width: list.width
+            Loader {
+                width: list.width
+                active: root.header !== null
+                sourceComponent: root.header
+            }
+            Item {
+                width: list.width
+                visible: root.showHeader
+                height: root.showHeader ? Style.sp(8) : 0
+                RowLayout {
+                    anchors.fill: parent
+                    anchors.leftMargin: Style.sp(2)
+                    anchors.rightMargin: Style.sp(2)
+                    spacing: Style.sp(3)
+                    HeadLabel { text: "#"; Layout.preferredWidth: Style.sp(10); horizontalAlignment: Text.AlignHCenter }
+                    Item { visible: !root.hideThumb; Layout.preferredWidth: Style.sp(10) }
+                    HeadLabel { text: "TITLE"; Layout.fillWidth: true; Layout.preferredWidth: Style.sp(60) }
+                    HeadLabel { text: "ARTIST"; Layout.fillWidth: true; Layout.preferredWidth: Style.sp(40) }
+                    HeadLabel { text: "ALBUM"; visible: root.wideAlbum; Layout.preferredWidth: Style.sp(48) }
+                    HeadLabel { text: "PLAYS"; visible: root.showPlays; Layout.preferredWidth: Style.sp(22); horizontalAlignment: Text.AlignRight }
+                    HeadLabel { text: "LENGTH"; Layout.preferredWidth: Style.sp(14); horizontalAlignment: Text.AlignRight }
+                    Item { Layout.preferredWidth: root.menu ? Style.sp(19) : Style.sp(9) }
+                }
+                Rectangle {
+                    anchors { left: parent.left; right: parent.right; bottom: parent.bottom }
+                    height: 1
+                    color: Tokens.line
+                }
+            }
+        }
+    }
+
+    // A column-legend cell: the tracked mono micro label.
+    component HeadLabel: Text {
+        color: Tokens.inkFaint
+        font.family: Style.fontMono
+        font.pixelSize: Style.fs.micro
+        font.letterSpacing: Style.trackMicro
+        verticalAlignment: Text.AlignVCenter
+        elide: Text.ElideRight
     }
 
     // The floating row that follows the grip during a reorder.

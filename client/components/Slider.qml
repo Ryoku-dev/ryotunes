@@ -2,12 +2,13 @@ import QtQuick
 import Ryoku.Ui.Singletons
 import "../"
 
-// A one-dimensional drag control, used for the volume level and (visuals off) as the seek overlay.
-// Strictly unidirectional: it never stores its own value. It reads `value` (bound by the parent to
-// the model) and only emits `moved`/`committed`; the parent updates the model, and the binding
-// feeds the new value straight back, so an incoming daemon echo can never fight the pointer. Qt
-// grabs the pointer on press, so `committed` fires even when the release lands outside the window —
-// the WebKit "release swallowed outside the slider" bug cannot recur here.
+// A one-dimensional drag control (volume, and the seek overlay with visuals off). A 2 px track with
+// an accent fill; the 12 px handle appears only on hover or while held, so the resting control is a
+// quiet hairline (spec section 4). Strictly unidirectional: it never stores its own value. It reads
+// `value` (bound by the parent to the model) and only emits `moved`/`committed`; the parent updates
+// the model, and the binding feeds the new value straight back, so an incoming daemon echo can never
+// fight the pointer. Qt grabs the pointer on press, so `committed` fires even when the release lands
+// outside the window.
 Item {
     id: root
 
@@ -16,13 +17,14 @@ Item {
     property real value: 0
     property bool visualTrack: true
     property bool showHandle: true
-    property int thickness: 3
-    property int handleSize: 10
+    property int thickness: 2
+    property int handleSize: 12
     property color trackColor: Tokens.lineStrong
-    property color fillColor: Tokens.ink
+    property color fillColor: Style.accent
 
     readonly property bool pressed: ma.pressed
     readonly property real pct: to > from ? Math.max(0, Math.min(1, (value - from) / (to - from))) : 0
+    readonly property bool showKnob: root.visualTrack && root.showHandle && (hover.hovered || ma.pressed)
 
     signal moved(real v)
     signal committed(real v)
@@ -52,15 +54,16 @@ Item {
         color: root.fillColor
     }
     Rectangle {
-        visible: root.visualTrack && root.showHandle
+        visible: root.showKnob
         width: root.handleSize
         height: root.handleSize
         radius: height / 2
-        color: Tokens.ink
+        color: root.fillColor
         anchors.verticalCenter: parent.verticalCenter
         x: parent.width * root.pct - width / 2
     }
 
+    HoverHandler { id: hover }
     MouseArea {
         id: ma
         anchors.fill: parent
