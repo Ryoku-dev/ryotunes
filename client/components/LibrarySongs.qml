@@ -43,8 +43,13 @@ Item {
         root.loading = true;
         root.errorMsg = "";
         Daemon.call("get_playlist", { id: root.songsId })
-            .then((p) => { root.pl = p; root.loading = false; })
+            .then((p) => { root.pl = p; root.loading = false; Qt.callLater(root.scrollTop); })
             .catch((e) => { root.errorMsg = (e && e.message) ? e.message : String(e); root.loading = false; });
+    }
+
+    function scrollTop() {
+        if (body.visible && body.view)
+            body.view.positionViewAtBeginning();
     }
     function loadMore() {
         if (!root.pl || !root.pl.continuation || root.loadingMore || root.moreError)
@@ -105,7 +110,9 @@ Item {
         anchors.fill: parent
         visible: !root.loading && root.errorMsg === ""
         items: root.shown
-        showPlayCount: true
+        showHeader: true
+        showAlbum: true
+        showPlays: true
         canAdd: true
         source: root.sourceName
         onActivated: (i) => root.play(i)
@@ -118,12 +125,11 @@ Item {
         id: songsHeader
         Item {
             width: body.view.width
-            implicitHeight: hc.implicitHeight + Style.sp(8)
+            implicitHeight: hc.implicitHeight + Style.sp(6)
             ColumnLayout {
                 id: hc
-                x: Style.sp(8)
-                width: parent.width - Style.sp(16)
-                y: Style.sp(4)
+                width: parent.width
+                y: Style.sp(2)
                 spacing: Style.sp(3)
                 RowLayout {
                     Layout.fillWidth: true
@@ -173,7 +179,6 @@ Item {
                         }
                     }
                 }
-                Hairline { Layout.fillWidth: true }
             }
         }
     }

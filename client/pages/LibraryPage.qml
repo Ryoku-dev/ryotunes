@@ -7,10 +7,11 @@ import "../"
 import "../components"
 
 // The library page, ported from ui/src/routes/library/+page.svelte. Account collections load in
-// parallel on open (get_library / _albums / _artists) and fill the card tabs (All / Playlists /
-// Albums / Artists); Songs, Local and Insights are the ported LibrarySongs / LocalMusic /
+// parallel on open (get_library / _albums / _artists) and fill the card tabs (Albums / Artists /
+// Playlists); Songs, Local and Insights are the ported LibrarySongs / LocalMusic /
 // ListeningInsights, loaded lazily the first time their tab is opened so an unopened tab costs
-// nothing. The toolbar creates a playlist and imports one from a file (over the socket with a path).
+// nothing. A PageHero-less title row carries the count and the toolbar (create a playlist, import
+// one from a file over the socket with a path); a segmented control switches the body.
 Item {
     id: page
 
@@ -19,28 +20,53 @@ Item {
     property var artists: []
     property bool loading: true
     property string errorMsg: ""
-    property string tab: "all"
-    property var opened: ["all"]
+    property string tab: "songs"
+    property var opened: []
     property bool creating: false
     property string newName: ""
 
+    // The sidebar deep-links a tab (Router.push("library", { tab })). Honour it on every navigation,
+    // not just the first mount, so clicking a Library sub-item while already on the page switches
+    // tabs. A plain library nav (no tab) leaves the current tab alone. Tab clicks are local state
+    // (no route push), so they never round-trip through here.
+    readonly property var params: Router.current ? Router.current.params : ({})
+    onParamsChanged: {
+        var t = (page.params && page.params.tab) ? page.params.tab : "";
+        if (t && t !== page.tab)
+            page.selectTab(t);
+    }
+
     readonly property var tabs: [
-        { k: "all", l: "All" },
-        { k: "playlists", l: "Playlists" },
+        { k: "songs", l: "Songs" },
         { k: "albums", l: "Albums" },
         { k: "artists", l: "Artists" },
-        { k: "songs", l: "Songs" },
+        { k: "playlists", l: "Playlists" },
         { k: "local", l: "Local" },
         { k: "insights", l: "Insights" }
     ]
+    readonly property bool gridTab: page.tab === "albums" || page.tab === "artists" || page.tab === "playlists"
     readonly property var gridModel: {
         if (page.tab === "playlists") return page.playlists;
         if (page.tab === "albums") return page.albums;
         if (page.tab === "artists") return page.artists;
-        return page.playlists.concat(page.albums).concat(page.artists);
+        return [];
     }
 
-    Component.onCompleted: page.load()
+    // The count meta beside the title reflects the active tab's collection size where the page owns
+    // it (Songs / Local / Insights load their own rows, so they carry no page-level count).
+    function tabMeta() {
+        if (page.tab === "playlists") return page.playlists.length + (page.playlists.length === 1 ? " playlist" : " playlists");
+        if (page.tab === "albums") return page.albums.length + (page.albums.length === 1 ? " album" : " albums");
+        if (page.tab === "artists") return page.artists.length + (page.artists.length === 1 ? " artist" : " artists");
+        return "";
+    }
+
+    Component.onCompleted: {
+        var t = (Router.current && Router.current.params && Router.current.params.tab)
+            ? Router.current.params.tab : "songs";
+        page.selectTab(t);
+        page.load();
+    }
 
     function selectTab(k) {
         page.tab = k;
@@ -104,33 +130,28 @@ Item {
             .catch((e) => Playback.toast((e && e.message) ? e.message : "Could not import", "error"));
     }
 
-    Rectangle { anchors.fill: parent; color: Tokens.paper }
-
     ColumnLayout {
         anchors.fill: parent
-        spacing: 0
+        spacing: Style.sp(4)
 
-        // header: title + toolbar
+        // title row: display title + active-tab count, then the collection toolbar
         RowLayout {
             Layout.fillWidth: true
-            Layout.leftMargin: Style.sp(8)
-            Layout.rightMargin: Style.sp(8)
-            Layout.topMargin: Style.sp(6)
-            spacing: Style.sp(3)
+            spacing: Style.sp(4)
             ColumnLayout {
-                spacing: Style.sp(0.5)
-                Text {
-                    text: "// COLLECTION"
-                    color: Tokens.inkFaint
-                    font.family: Style.fontMono
-                    font.pixelSize: Style.fs.xs
-                    font.letterSpacing: 1
-                }
+                spacing: Style.sp(1)
                 Text {
                     text: "Library"
                     color: Tokens.ink
-                    font.family: Tokens.display
-                    font.pixelSize: Style.fs.xl
+                    font.family: Style.fontDisplay
+                    font.pixelSize: Style.fs.title
+                }
+                Text {
+                    visible: text !== ""
+                    text: page.tabMeta()
+                    color: Tokens.inkMuted
+                    font.family: Style.fontUi
+                    font.pixelSize: Style.fs.sm
                 }
             }
             Item { Layout.fillWidth: true }
@@ -138,12 +159,9 @@ Item {
             Pill { label: "New playlist"; icon: "playlist"; primary: true; onClicked: { page.newName = ""; newDialog.visible = true; } }
         }
 
-        // tab bar
+        // segmented control
         Flickable {
             Layout.fillWidth: true
-            Layout.leftMargin: Style.sp(8)
-            Layout.rightMargin: Style.sp(8)
-            Layout.topMargin: Style.sp(4)
             implicitHeight: tabRow.implicitHeight
             contentWidth: tabRow.implicitWidth
             contentHeight: tabRow.implicitHeight
@@ -164,27 +182,19 @@ Item {
             }
         }
 
-        Hairline { Layout.fillWidth: true; Layout.topMargin: Style.sp(3); Layout.leftMargin: Style.sp(8); Layout.rightMargin: Style.sp(8) }
+        Hairline { Layout.fillWidth: true }
 
-        // content
+        // body: card grids for the account collections, lazy loaders for the ported sub-surfaces
         Item {
             Layout.fillWidth: true
             Layout.fillHeight: true
 
-            Text {
-                anchors.centerIn: parent
-                visible: page.loading && page.tab !== "local" && page.tab !== "insights"
-                text: "Loading your library…"
-                color: Tokens.inkMuted
-                font.family: Style.fontUi
-                font.pixelSize: Style.fs.md
-            }
-
             CardGrid {
                 anchors.fill: parent
-                visible: page.tab === "all" || page.tab === "playlists" || page.tab === "albums" || page.tab === "artists"
+                visible: page.gridTab
                 loading: page.loading
                 model: page.gridModel
+                pad: 0
                 emptyText: (Playback.auth && Playback.auth.signedIn) ? "Nothing saved yet." : "Sign in to see your library."
             }
 
@@ -216,7 +226,7 @@ Item {
         visible: false
         z: 210
         MouseArea { anchors.fill: parent; onClicked: newDialog.visible = false }
-        Rectangle { anchors.fill: parent; color: "#000000"; opacity: 0.45 }
+        Rectangle { anchors.fill: parent; color: "#000000"; opacity: 0.5 }
         Rectangle {
             anchors.centerIn: parent
             width: Style.sp(90)

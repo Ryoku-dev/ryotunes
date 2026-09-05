@@ -6,7 +6,8 @@ import "../"
 
 // The library Insights tab, ported from ListeningInsights.svelte: on-demand local listening stats
 // per period (no background polling, per the performance budget). listening_stats(period) once per
-// selection; a request counter drops a stale period's answer.
+// selection; a request counter drops a stale period's answer. The summary numbers render as stat
+// cells (tracked micro label + Fraunces value); the top artists / tracks sit under section rules.
 Item {
     id: root
 
@@ -16,6 +17,13 @@ Item {
     property string errorMsg: ""
     property int request: 0
     property bool started: false
+
+    readonly property bool ready: !root.loading && root.errorMsg === "" && root.stats !== null
+
+    readonly property var overview: root.stats ? [
+        { label: "PLAYS", value: String(root.stats.plays) },
+        { label: "KNOWN DURATION", value: root.fmtDuration(root.stats.knownDurationSeconds) }
+    ] : []
 
     function ensureLoaded() {
         if (root.started)
@@ -43,9 +51,7 @@ Item {
 
     Flickable {
         anchors.fill: parent
-        anchors.leftMargin: Style.sp(8)
-        anchors.rightMargin: Style.sp(8)
-        topMargin: Style.sp(4)
+        topMargin: Style.sp(2)
         bottomMargin: Style.sp(20)
         clip: true
         contentWidth: width
@@ -58,7 +64,7 @@ Item {
             spacing: Style.sp(5)
 
             // period selector
-            RowLayout {
+            Row {
                 spacing: Style.sp(2)
                 Repeater {
                     model: [{ k: "day", l: "Day" }, { k: "week", l: "Week" }, { k: "month", l: "Month" }]
@@ -79,33 +85,46 @@ Item {
                 font.pixelSize: Style.fs.md
             }
 
-            // stat cards
-            RowLayout {
+            // overview — the summary stats as responsive stat cells
+            ColumnLayout {
                 Layout.fillWidth: true
-                visible: !root.loading && root.errorMsg === "" && root.stats !== null
-                spacing: Style.sp(4)
-                Repeater {
-                    model: root.stats ? [
-                        { label: "PLAYS", value: String(root.stats.plays), note: "recorded starts in this period" },
-                        { label: "KNOWN DURATION", value: root.fmtDuration(root.stats.knownDurationSeconds), note: "approximate from tracks with duration metadata" }
-                    ] : []
-                    delegate: Rectangle {
-                        id: statCard
-                        required property var modelData
-                        Layout.fillWidth: true
-                        implicitHeight: cardCol.implicitHeight + Style.sp(6)
-                        radius: Style.radiusCard
-                        color: Tokens.tint5
-                        border.width: 1
-                        border.color: Tokens.lineSoft
-                        ColumnLayout {
-                            id: cardCol
-                            anchors.fill: parent
-                            anchors.margins: Style.sp(3)
-                            spacing: Style.sp(1)
-                            Text { text: statCard.modelData.label; color: Tokens.inkMuted; font.family: Style.fontMono; font.pixelSize: Style.fs.xs; font.letterSpacing: 1 }
-                            Text { text: statCard.modelData.value; color: Tokens.ink; font.family: Tokens.display; font.pixelSize: Style.fs.hero }
-                            Text { Layout.fillWidth: true; text: statCard.modelData.note; color: Tokens.inkMuted; font.family: Style.fontUi; font.pixelSize: Style.fs.sm; wrapMode: Text.WordWrap }
+                visible: root.ready
+                spacing: Style.sp(3)
+                SectionHeading { Layout.fillWidth: true; title: "Overview" }
+                Flow {
+                    Layout.fillWidth: true
+                    spacing: Style.sp(3)
+                    Repeater {
+                        model: root.overview
+                        delegate: Rectangle {
+                            id: statCell
+                            required property var modelData
+                            implicitWidth: Math.max(Style.sp(44), cellCol.implicitWidth + Style.sp(8))
+                            implicitHeight: cellCol.implicitHeight + Style.sp(8)
+                            radius: Style.radiusCard
+                            color: Tokens.tint5
+                            border.width: 1
+                            border.color: Tokens.lineSoft
+                            ColumnLayout {
+                                id: cellCol
+                                anchors.left: parent.left
+                                anchors.top: parent.top
+                                anchors.margins: Style.sp(4)
+                                spacing: Style.sp(2)
+                                Text {
+                                    text: statCell.modelData.label
+                                    color: Tokens.inkMuted
+                                    font.family: Style.fontMono
+                                    font.pixelSize: Style.fs.micro
+                                    font.letterSpacing: Style.trackMicro
+                                }
+                                Text {
+                                    text: statCell.modelData.value
+                                    color: Tokens.ink
+                                    font.family: Style.fontDisplay
+                                    font.pixelSize: Style.fs.xl
+                                }
+                            }
                         }
                     }
                 }
@@ -114,9 +133,9 @@ Item {
             // top artists
             ColumnLayout {
                 Layout.fillWidth: true
-                visible: !root.loading && root.stats !== null
+                visible: root.ready
                 spacing: Style.sp(2)
-                Text { text: "// TOP ARTISTS"; color: Tokens.inkFaint; font.family: Style.fontMono; font.pixelSize: Style.fs.xs; font.letterSpacing: 1 }
+                SectionHeading { Layout.fillWidth: true; title: "Top artists" }
                 Repeater {
                     model: (root.stats && root.stats.topArtists) ? root.stats.topArtists : []
                     delegate: RowLayout {
@@ -142,9 +161,9 @@ Item {
             // top tracks
             ColumnLayout {
                 Layout.fillWidth: true
-                visible: !root.loading && root.stats !== null
+                visible: root.ready
                 spacing: Style.sp(2)
-                Text { text: "// TOP TRACKS"; color: Tokens.inkFaint; font.family: Style.fontMono; font.pixelSize: Style.fs.xs; font.letterSpacing: 1 }
+                SectionHeading { Layout.fillWidth: true; title: "Top tracks" }
                 Repeater {
                     model: (root.stats && root.stats.topTracks) ? root.stats.topTracks : []
                     delegate: RowLayout {

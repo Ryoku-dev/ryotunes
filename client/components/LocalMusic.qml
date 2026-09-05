@@ -86,12 +86,11 @@ Item {
 
     ColumnLayout {
         anchors.fill: parent
-        anchors.leftMargin: Style.sp(8)
-        anchors.rightMargin: Style.sp(8)
-        anchors.topMargin: Style.sp(4)
-        spacing: Style.sp(3)
+        spacing: Style.sp(4)
 
-        // folders row
+        // folders group
+        SectionHeading { Layout.fillWidth: true; title: "Folders" }
+
         RowLayout {
             Layout.fillWidth: true
             spacing: Style.sp(2)
@@ -228,6 +227,8 @@ Item {
                 anchors.fill: parent
                 visible: !root.loading && root.view === "songs"
                 items: root.songs
+                showHeader: true
+                showAlbum: true
                 canAdd: false
                 source: "Local music"
                 onActivated: (i) => root.playSongs(i)
@@ -249,7 +250,7 @@ Item {
         id: localSongsHeader
         Item {
             width: localBody.view.width
-            implicitHeight: Style.sp(14)
+            implicitHeight: Style.sp(12)
             RowLayout {
                 anchors.left: parent.left
                 anchors.right: parent.right
