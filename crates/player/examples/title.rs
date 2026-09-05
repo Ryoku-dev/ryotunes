@@ -14,7 +14,7 @@ fn main() {
     let title = std::env::args()
         .nth(2)
         .unwrap_or_else(|| "Ünïcode Artist, \"quoted\" – A Title".to_owned());
-    p.load(&a, &HashMap::new(), None, &title).expect("load");
+    p.load(&a, &HashMap::new(), None, &title, &[]).expect("load");
     let mut got = String::new();
     for _ in 0..40 {
         std::thread::sleep(std::time::Duration::from_millis(100));

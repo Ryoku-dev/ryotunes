@@ -163,10 +163,12 @@ impl Player {
         headers: &HashMap<String, String>,
         gain_db: Option<f64>,
         title: &str,
+        options: &[String],
     ) -> Result<(), Error> {
         self.apply_headers(headers)?;
         self.set_gain(gain_db)?;
-        self.mpv.command("loadfile", &[&quoted(url), "replace", "-1", &title_option(title)])?;
+        self.mpv
+            .command("loadfile", &[&quoted(url), "replace", "-1", &file_options(title, options)])?;
         // Close→pause can happen before mpv's property notification reaches the event thread.
         // Mark the session loaded immediately so background lifecycle can never mistake that tiny
         // transition window for an empty player. The observed property corrects this on failure/EOF.
@@ -485,6 +487,20 @@ fn quoted(arg: &str) -> String {
 /// any bytes verbatim. A per-file option also leaves the gapless lookahead's title untouched.
 fn title_option(title: &str) -> String {
     quoted(&format!("force-media-title=%{}%{}", title.len(), title))
+}
+
+/// The per-file options argument: the media title plus any extra `key=value` pairs (a raw PCM
+/// FIFO's demuxer settings), comma-joined inside one quoted token.
+fn file_options(title: &str, extra: &[String]) -> String {
+    if extra.is_empty() {
+        return title_option(title);
+    }
+    let mut list = format!("force-media-title=%{}%{}", title.len(), title);
+    for opt in extra {
+        list.push(',');
+        list.push_str(opt);
+    }
+    quoted(&list)
 }
 
 /// Slider percent → mpv `volume` value, over a 60 dB range. mpv applies gain = (v/100)³,

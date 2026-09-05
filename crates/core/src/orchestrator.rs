@@ -25,6 +25,11 @@ pub struct PlaybackData {
     pub video_id: String,
     pub stream_url: String,
     pub itag: i64,
+    /// Extra per-file mpv options for `loadfile` (`key=value` pairs), for a stream mpv cannot
+    /// probe: a Spotify track arrives as raw S16LE PCM on a FIFO and needs the rawaudio demuxer
+    /// told so. Empty for every URL mpv can read on its own.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub mpv_options: Vec<String>,
     /// HTTP headers mpv must send with the stream request.
     #[serde(skip)]
     pub headers: std::collections::HashMap<String, String>,
@@ -349,6 +354,7 @@ impl Orchestrator {
                 video_id: video_id.to_owned(),
                 stream_url: c.url,
                 itag: c.itag as i64,
+                mpv_options: Vec::new(),
                 headers: std::collections::HashMap::new(),
                 expires_in_seconds: c.expires_in_seconds as i64,
                 loudness_db: c.loudness_db.map(|f| f as f64),
@@ -418,6 +424,7 @@ impl Orchestrator {
             video_id: video_id.to_owned(),
             stream_url: url,
             itag: format.itag as i64,
+            mpv_options: Vec::new(),
             headers,
             expires_in_seconds: expires,
             loudness_db: format.loudness_db.or(loudness),

@@ -345,6 +345,7 @@ pub fn playback_data(station: &RadioStation) -> PlaybackData {
         video_id: format!("{RADIO_ID_PREFIX}{}", station.station_uuid),
         stream_url: station.stream_url.clone(),
         itag: 0,
+        mpv_options: Vec::new(),
         headers: Default::default(),
         expires_in_seconds: 0,
         loudness_db: None,

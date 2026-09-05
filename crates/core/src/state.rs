@@ -97,6 +97,8 @@ pub struct AppState {
     discord: Option<DiscordHandle>,
     /// Last.fm scrobbler. Same feed again; parks until a session key is set (titlebar button).
     pub lastfm: crate::lastfm::LastfmHandle,
+    /// The Spotify provider: sign-in, the client, and the catalogue selector.
+    pub spotify: Arc<crate::spotify::SpotifyState>,
     queue: Mutex<QueueState>,
     /// Bumped on every explicit `play`/jump so superseded async resolves discard their result
     /// (cancellation without JoinHandle bookkeeping). stream selection §6.
@@ -372,6 +374,13 @@ impl AppState {
         lastfm: crate::lastfm::LastfmHandle,
     ) -> Self {
         let low_resource_mode = db.get_setting("low_resource_mode").as_deref() == Some("true");
+        let selected = db
+            .get_setting("provider")
+            .as_deref()
+            .and_then(crate::spotify::Provider::parse)
+            .unwrap_or(crate::spotify::Provider::Youtube);
+        let spotify =
+            Arc::new(crate::spotify::SpotifyState::new(paths.data_dir.join("spotify"), selected));
         AppState {
             it,
             clients,
@@ -385,6 +394,7 @@ impl AppState {
             media,
             discord,
             lastfm,
+            spotify,
             queue: Mutex::new(QueueState::default()),
             is_playing: AtomicBool::new(false),
             generation: AtomicU64::new(0),
@@ -834,6 +844,7 @@ impl AppState {
                 video_id: video_id.to_owned(),
                 stream_url: c.url,
                 itag: c.itag,
+                mpv_options: Vec::new(),
                 headers: Default::default(),
                 expires_in_seconds: c.expires_at - now,
                 loudness_db: c.loudness_db,
@@ -1591,6 +1602,7 @@ impl AppState {
             &data.headers,
             loudness_gain(data.loudness_db),
             &media_title(&item.title, &item.artists),
+            &data.mpv_options,
         ) {
             self.emit_error(&item.video_id, &e.to_string());
             return false;
@@ -2521,6 +2533,7 @@ impl AppState {
             &data.headers,
             loudness_gain(data.loudness_db),
             &media_title(&track.title, &track.artist),
+            &data.mpv_options,
         ) {
             self.emit_error(&track.id, &e.to_string());
             return;
