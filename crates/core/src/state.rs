@@ -11,7 +11,7 @@ use innertube::{
     AccountIdentity, AccountInfo, AudioQuality, Clients, InnerTube, SongItem, MAIN_CLIENT,
 };
 use listen_protocol::{Playback, PlaybackKind, Track};
-use player::Player;
+use player::{AudioFx, Player};
 use tokio::sync::Mutex;
 
 use crate::db::{now_secs, Db};
@@ -132,6 +132,10 @@ pub struct AppState {
     /// Runtime mirror of Settings → Low resource mode. The renderer owns most of the policy; this
     /// bit lets the native event pump and startup helpers lower their cadence too.
     low_resource_mode: AtomicBool,
+    /// The Sound dialog's live audio effects (spec section 7), mirrored to every client through
+    /// the `audio-fx` event and the subscribe snapshot. Applied to the player as one `af` chain;
+    /// kept here so a newly opened window can be told the current values.
+    audio_fx: parking_lot::RwLock<AudioFx>,
 }
 
 /// Repeat mode for the queue. Serialized lowercase for the UI + `queue_json`.
@@ -393,6 +397,7 @@ impl AppState {
             last_persisted_fingerprint: AtomicU64::new(0),
             stop_after_current: AtomicBool::new(false),
             low_resource_mode: AtomicBool::new(low_resource_mode),
+            audio_fx: parking_lot::RwLock::new(AudioFx::default()),
         }
     }
 
@@ -3672,16 +3677,39 @@ impl AppState {
     }
 
     pub fn set_playback_params(&self, speed: f64, semitones: i32) -> Result<(), String> {
-        if !speed.is_finite() || !(0.25..=2.0).contains(&speed) {
+        // The tempo/pitch steppers are the two oldest fields of the fx set; a change to either
+        // keeps whatever reverb/bass/width the Sound dialog left in place.
+        self.set_audio_fx(AudioFx { speed, semitones, ..self.audio_fx() })
+    }
+
+    /// The current audio-fx values, for a snapshot or the Sound dialog opening cold.
+    pub fn audio_fx(&self) -> AudioFx {
+        *self.audio_fx.read()
+    }
+
+    /// Apply the Sound dialog's effects. Ranges are validated here (the daemon is the one place
+    /// that must not trust a client), applied to the player as one `af` chain, then — only after a
+    /// successful apply — stored and echoed to every client as `audio-fx` so all windows agree.
+    pub fn set_audio_fx(&self, fx: AudioFx) -> Result<(), String> {
+        if !fx.speed.is_finite() || !(0.25..=2.0).contains(&fx.speed) {
             return Err("Tempo must be between 0.25× and 2.00×.".into());
         }
-        if !(-12..=12).contains(&semitones) {
+        if !(-12..=12).contains(&fx.semitones) {
             return Err("Pitch must be between -12 and +12 semitones.".into());
         }
-        // Pitch first: it's the one that can fail (no librubberband), and it rolls itself back, so a
-        // failure leaves nothing applied and the UI can revert both steppers together.
-        self.player.set_pitch(semitones).map_err(|e| e.to_string())?;
-        self.player.set_speed(speed).map_err(|e| e.to_string())
+        if !fx.reverb.is_finite() || !(0.0..=1.0).contains(&fx.reverb) {
+            return Err("Reverb must be between 0 and 1.".into());
+        }
+        if !fx.bass_db.is_finite() || !(-6.0..=12.0).contains(&fx.bass_db) {
+            return Err("Bass must be between -6 and +12 dB.".into());
+        }
+        if !fx.width.is_finite() || !(0.0..=1.0).contains(&fx.width) {
+            return Err("Width must be between 0 and 1.".into());
+        }
+        self.player.set_fx(&fx).map_err(|e| e.to_string())?;
+        *self.audio_fx.write() = fx;
+        self.emit("audio-fx", fx);
+        Ok(())
     }
 }
 

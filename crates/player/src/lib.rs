@@ -62,6 +62,33 @@ fn friendly_error(e: &libmpv2::Error) -> String {
     }
 }
 
+/// The user-tunable audio effects the Sound dialog drives (spec section 7). Applied as one mpv
+/// `af` chain alongside the loudness gain; `speed` is mpv's `speed` property, not part of the
+/// chain. Serialized `{speed, semitones, reverb, bass, width}` for the socket — `bass_db` is
+/// `bass` on the wire.
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct AudioFx {
+    /// Tempo multiplier, 0.25–2.0 (mpv `speed`: time-stretch, pitch preserved).
+    pub speed: f64,
+    /// Pitch shift in semitones, −12..=12, via the rubberband filter.
+    pub semitones: i32,
+    /// Reverb depth 0..1: scales the echo decays; 0 omits the filter.
+    pub reverb: f64,
+    /// Bass shelf gain, −6..+12 dB; 0 omits the filter.
+    #[serde(rename = "bass")]
+    pub bass_db: f64,
+    /// Stereo width 0..1; 0 omits the filter.
+    pub width: f64,
+}
+
+impl Default for AudioFx {
+    /// Everything off: speed 1×, no pitch shift, no effects — the same filterless path playback
+    /// took before the Sound dialog existed.
+    fn default() -> Self {
+        AudioFx { speed: 1.0, semitones: 0, reverb: 0.0, bass_db: 0.0, width: 0.0 }
+    }
+}
+
 /// The player. Wraps `Arc<Mpv>` (Send+Sync); the event loop runs on a dedicated OS thread and
 /// pumps [`PlayerEvent`]s into a channel taken once via [`Player::take_events`].
 pub struct Player {
@@ -70,10 +97,10 @@ pub struct Player {
     /// Event-driven mirror of mpv `idle-active`. Lifecycle code must not synchronously query mpv
     /// from the async event pump: that can race/stall during pause and gapless transitions.
     idle_active: Arc<AtomicBool>,
-    /// `(loudness gain dB, pitch semitones)`. mpv's `af` is one global chain, so the two things
-    /// that write to it have to be re-applied together: a bare `set_property("af", ...)` from
-    /// either one would drop the other's filter.
-    af: std::sync::Mutex<(Option<f64>, i32)>,
+    /// `(loudness gain dB, audio-fx)`. mpv's `af` is one global chain, so everything that writes
+    /// to it — the loudness gain and every effect in [`AudioFx`] — has to be re-applied together:
+    /// a bare `set_property("af", ...)` from any one of them would drop the others' filters.
+    af: parking_lot::Mutex<(Option<f64>, AudioFx)>,
 }
 
 impl Player {
@@ -114,7 +141,7 @@ impl Player {
             .spawn(move || event_loop(ev, tx, event_idle_active))
             .expect("spawn mpv event thread");
 
-        Ok(Player { mpv, events: Some(rx), idle_active, af: std::sync::Mutex::new((None, 0)) })
+        Ok(Player { mpv, events: Some(rx), idle_active, af: parking_lot::Mutex::new((None, AudioFx::default())) })
     }
 
     /// Take the event receiver (once).
@@ -257,7 +284,7 @@ impl Player {
     // round-trip (a few ms) and the filter chain reinits mid-stream. If that ever clicks audibly,
     // keep one labelled filter (`af=@gain:lavfi=[volume=0dB]`) and retune it with `af-command`.
     pub fn set_gain(&self, gain_db: Option<f64>) -> Result<(), Error> {
-        self.af.lock().unwrap().0 = gain_db;
+        self.af.lock().0 = gain_db;
         self.apply_af()
     }
 
@@ -268,53 +295,74 @@ impl Player {
         Ok(())
     }
 
-    /// Pitch shift in semitones, −12..=12 (one octave either way), via the rubberband filter.
-    /// Independent of [`Self::set_speed`]: rubberband takes over the time-stretch mpv would
-    /// otherwise do with scaletempo2, and shifts pitch on top of it.
-    // Note: native `rubberband` only. A libmpv built without librubberband errors out and the
-    // command surfaces that to the user; wire the `lavfi=[rubberband=pitch=...]` fallback if a
-    // Windows/macOS build ever turns up without it.
-    pub fn set_pitch(&self, semitones: i32) -> Result<(), Error> {
-        let wanted = semitones.clamp(-12, 12);
-        let previous = std::mem::replace(&mut self.af.lock().unwrap().1, wanted);
+    /// Apply the full [`AudioFx`] set. Speed is mpv's own `speed` property; the pitch shift and
+    /// the reverb/bass/width filters share the one `af` chain, applied together with the loudness
+    /// gain. Pitch is the only part that can fail — a libmpv built without librubberband rejects
+    /// the whole chain — so a rejection rolls the fx back to what was playing and re-applies it,
+    /// exactly as the old pitch setter did, and surfaces [`Error::NoPitchFilter`] to the user.
+    // Note: native `rubberband` only. If a Windows/macOS build ever turns up without it, wire the
+    // `lavfi=[rubberband=pitch=...]` fallback here.
+    pub fn set_fx(&self, fx: &AudioFx) -> Result<(), Error> {
+        self.set_speed(fx.speed)?;
+        let previous = std::mem::replace(&mut self.af.lock().1, *fx);
         if let Err(e) = self.apply_af() {
-            // No librubberband in this build: mpv rejects the *whole* chain, loudness gain
-            // included, so put the old value back rather than leave every later set_gain failing.
-            // (mpv never applied the bad chain, so this restores what is already playing.)
-            self.af.lock().unwrap().1 = previous;
+            // No librubberband: mpv rejected the *whole* chain, loudness gain included, so put the
+            // old fx back rather than leave every later set_gain failing. (mpv never applied the
+            // bad chain, so this restores what is already playing.)
+            self.af.lock().1 = previous;
             let _ = self.apply_af();
-            return Err(if wanted == 0 { e } else { Error::NoPitchFilter });
+            return Err(if fx.semitones == 0 { e } else { Error::NoPitchFilter });
         }
         Ok(())
     }
 
     fn apply_af(&self) -> Result<(), Error> {
-        let (gain_db, semitones) = *self.af.lock().unwrap();
-        self.mpv.set_property("af", af_chain(gain_db, semitones).as_str())?;
+        let (gain_db, fx) = *self.af.lock();
+        self.mpv.set_property("af", af_chain(gain_db, &fx).as_str())?;
         Ok(())
     }
 }
 
-/// The whole `af` chain: loudness gain, then pitch. Empty when neither is in play, so the default
-/// path stays exactly the filterless one it was before pitch existed.
-fn af_chain(gain_db: Option<f64>, semitones: i32) -> String {
+/// The whole `af` chain: loudness gain, then the [`AudioFx`] filters in order — pitch
+/// (rubberband), reverb (`aecho`), bass shelf (`bass`), stereo width (`stereowiden`). Empty when
+/// nothing is in play, so the default path stays exactly the filterless one it was before any of
+/// this existed. Each effect is omitted at its neutral value, so a lone gain or a lone reverb is
+/// just that one filter.
+fn af_chain(gain_db: Option<f64>, fx: &AudioFx) -> String {
     let mut chain = Vec::new();
     if let Some(g) = gain_db {
         chain.push(format!("lavfi=[volume={g}dB]"));
     }
-    if semitones != 0 {
+    if fx.semitones != 0 {
         // Semitones → frequency multiplier (equal temperament).
+        chain.push(format!("{}=pitch-scale={}", pitch_filter(), 2f64.powf(fx.semitones as f64 / 12.0)));
+    }
+    if fx.reverb > 0.0 {
+        // Three taps at 40/80/120 ms; their decays fall 0.4/0.3/0.2 at full depth, scaled down
+        // toward silence as the depth drops.
         chain.push(format!(
-            "{}=pitch-scale={}",
-            pitch_filter(),
-            2f64.powf(semitones as f64 / 12.0)
+            "lavfi=[aecho=0.8:0.9:40|80|120:{}|{}|{}]",
+            0.4 * fx.reverb,
+            0.3 * fx.reverb,
+            0.2 * fx.reverb
+        ));
+    }
+    if fx.bass_db != 0.0 {
+        chain.push(format!("lavfi=[bass=g={}:f=110:w=0.6]", fx.bass_db));
+    }
+    if fx.width > 0.0 {
+        // Widen the stereo image; drymix falls from 1 toward 0.4 as width rises, mixing in more
+        // of the widened signal.
+        chain.push(format!(
+            "lavfi=[stereowiden=delay=20:feedback=0.3:crossfeed=0.3:drymix={}]",
+            1.0 - 0.6 * fx.width
         ));
     }
     chain.join(",")
 }
 
 /// Test seam. Set it to reproduce a libmpv built without librubberband: mpv then rejects the whole
-/// `af` chain, loudness gain included, which is the failure [`Player::set_pitch`] rolls back from.
+/// `af` chain, loudness gain included, which is the failure [`Player::set_fx`] rolls back from.
 /// A machine that has the filter can't reach that path any other way. Not compiled into the app.
 #[cfg(test)]
 static NO_RUBBERBAND: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
@@ -447,17 +495,40 @@ fn perceptual_to_mpv(percent: i64) -> f64 {
 
 #[cfg(test)]
 mod tests {
-    use super::{af_chain, perceptual_to_mpv, quoted};
+    use super::{af_chain, perceptual_to_mpv, quoted, AudioFx};
 
     #[test]
-    fn gain_and_pitch_share_one_chain() {
-        // The bug this exists for: either setter clobbering the other's filter.
-        assert_eq!(af_chain(None, 0), "");
-        assert_eq!(af_chain(Some(-3.5), 0), "lavfi=[volume=-3.5dB]");
-        assert_eq!(af_chain(None, 12), "rubberband=pitch-scale=2");
-        assert_eq!(af_chain(Some(-6.0), -12), "lavfi=[volume=-6dB],rubberband=pitch-scale=0.5");
-        // One semitone up is the twelfth root of two.
-        assert!(af_chain(None, 1).ends_with("1.0594630943592953"));
+    fn chain_builds_each_effect() {
+        // All off: the filterless path is preserved exactly.
+        assert_eq!(af_chain(None, &AudioFx::default()), "");
+        // Gain alone.
+        assert_eq!(af_chain(Some(-3.5), &AudioFx::default()), "lavfi=[volume=-3.5dB]");
+        // Pitch alone: one semitone up is the twelfth root of two, an octave up is ×2.
+        assert_eq!(af_chain(None, &fx(0.0, 0.0, 0.0, 12)), "rubberband=pitch-scale=2");
+        assert!(af_chain(None, &fx(0.0, 0.0, 0.0, 1)).ends_with("1.0594630943592953"));
+        // Reverb alone: decays 0.4/0.3/0.2 scaled by the depth.
+        assert_eq!(af_chain(None, &fx(1.0, 0.0, 0.0, 0)), "lavfi=[aecho=0.8:0.9:40|80|120:0.4|0.3|0.2]");
+        assert_eq!(af_chain(None, &fx(0.5, 0.0, 0.0, 0)), "lavfi=[aecho=0.8:0.9:40|80|120:0.2|0.15|0.1]");
+        // Bass alone.
+        assert_eq!(af_chain(None, &fx(0.0, 8.0, 0.0, 0)), "lavfi=[bass=g=8:f=110:w=0.6]");
+        // Width alone: drymix = 1 − 0.6·width.
+        assert_eq!(
+            af_chain(None, &fx(0.0, 0.0, 0.5, 0)),
+            "lavfi=[stereowiden=delay=20:feedback=0.3:crossfeed=0.3:drymix=0.7]"
+        );
+        // Everything at once, in chain order: gain, pitch, reverb, bass, width.
+        assert_eq!(
+            af_chain(Some(-6.0), &fx(1.0, -6.0, 0.5, -12)),
+            "lavfi=[volume=-6dB],rubberband=pitch-scale=0.5,\
+             lavfi=[aecho=0.8:0.9:40|80|120:0.4|0.3|0.2],\
+             lavfi=[bass=g=-6:f=110:w=0.6],\
+             lavfi=[stereowiden=delay=20:feedback=0.3:crossfeed=0.3:drymix=0.7]"
+        );
+    }
+
+    /// A convenience constructor: every field but the four under test at its neutral value.
+    fn fx(reverb: f64, bass_db: f64, width: f64, semitones: i32) -> AudioFx {
+        AudioFx { speed: 1.0, semitones, reverb, bass_db, width }
     }
 
     /// Everything above is string-building; this drives a real libmpv and reads `af` back out of
@@ -467,37 +538,38 @@ mod tests {
     /// runs tests in parallel.
     #[test]
     fn mpv_keeps_the_gain_through_pitch_changes_and_failures() {
-        use super::{Error, Player, NO_RUBBERBAND};
+        use super::{AudioFx, Error, Player, NO_RUBBERBAND};
         use std::sync::atomic::Ordering;
 
         let dir = std::env::temp_dir().join("ryotunes-af-test");
         std::fs::create_dir_all(&dir).unwrap();
         let p = Player::new(dir.to_str().unwrap()).expect("libmpv");
         let af = || p.mpv.get_property::<String>("af").unwrap();
+        let pitch = |semitones| AudioFx { semitones, ..AudioFx::default() };
 
         // 1. Loudness normalization, then a pitch round trip. The gain has to survive both steps.
         p.set_gain(Some(-7.7)).unwrap();
         assert!(af().contains("volume=-7.7dB"), "gain missing: {}", af());
-        p.set_pitch(2).unwrap();
+        p.set_fx(&pitch(2)).unwrap();
         assert!(af().contains("volume=-7.7dB"), "pitch dropped the gain: {}", af());
         assert!(af().contains("rubberband"), "pitch missing: {}", af());
-        p.set_pitch(0).unwrap();
+        p.set_fx(&pitch(0)).unwrap();
         assert!(af().contains("volume=-7.7dB"), "reset dropped the gain: {}", af());
         assert!(!af().contains("rubberband"), "pitch 0 left a filter behind: {}", af());
 
-        // 2. Gapless advance: the orchestrator retunes the gain for the next track (state.rs, the
-        // `lookahead_gain` take). A pitch the user set must not fall out of the chain when it does.
-        p.set_pitch(-5).unwrap();
+        // 2. Gapless advance: the orchestrator retunes the gain for the next track. A pitch the
+        // user set must not fall out of the chain when it does.
+        p.set_fx(&pitch(-5)).unwrap();
         p.set_gain(Some(-2.5)).unwrap();
         assert!(af().contains("volume=-2.5dB"), "retune missed: {}", af());
         assert!(af().contains("rubberband"), "retune dropped the pitch: {}", af());
-        p.set_pitch(0).unwrap();
+        p.set_fx(&pitch(0)).unwrap();
 
         // 3. A libmpv without librubberband. mpv rejects the chain wholesale, so this is also the
         // case where loudness normalization could silently disappear.
         let before = af();
         NO_RUBBERBAND.store(true, Ordering::Relaxed);
-        let err = p.set_pitch(3).unwrap_err();
+        let err = p.set_fx(&pitch(3)).unwrap_err();
         NO_RUBBERBAND.store(false, Ordering::Relaxed);
         // The user is told, in words. mpv's own answer is `Raw(-9)`, which says nothing.
         assert!(matches!(err, Error::NoPitchFilter), "rejection must surface: {err}");
@@ -505,12 +577,21 @@ mod tests {
         // mpv never applied the bad chain, and the rollback re-applied the good one either way.
         assert_eq!(af(), before, "a rejected pitch changed the live chain");
         assert!(af().contains("volume=-2.5dB"), "normalization lost: {}", af());
-        // And the rolled-back state is clean: the next per-track retune is gain-only, not a
-        // permanently poisoned chain that fails from here on.
+        // And the rolled-back state is clean: the next per-track retune is gain-only.
         p.set_gain(Some(-4.0)).unwrap();
         let after = af(); // mpv hands the chain back in its own escaped form, hence `contains`
         assert!(after.contains("volume=-4dB"), "retune after a rejection failed: {after}");
         assert!(!after.contains("rubberband"), "stored pitch survived the rollback: {after}");
+
+        // 4. The reverb/bass/width filters reach the live chain and mpv accepts their syntax
+        // (set_property would error otherwise — this is the only proof aecho/bass/stereowiden
+        // parse on this build).
+        p.set_gain(None).unwrap();
+        p.set_fx(&AudioFx { speed: 1.0, semitones: 0, reverb: 1.0, bass_db: 8.0, width: 0.8 }).unwrap();
+        let live = af();
+        assert!(live.contains("aecho"), "reverb missing from live chain: {live}");
+        assert!(live.contains("bass"), "bass missing from live chain: {live}");
+        assert!(live.contains("stereowiden"), "width missing from live chain: {live}");
     }
 
     #[test]

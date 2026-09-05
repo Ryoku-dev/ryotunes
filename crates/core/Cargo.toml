@@ -15,9 +15,11 @@ thiserror = { workspace = true }
 async-trait = { workspace = true }
 futures-util = { workspace = true }
 rand = { workspace = true }
+parking_lot = "0.12"
 listen-protocol = { workspace = true }
 innertube = { path = "../innertube" }
 player = { path = "../player" }
+ryotunes-spotify = { path = "../spotify" }
 rusqlite = { version = "0.32", features = ["bundled"] }
 base64 = "0.22"
 regex = "1"

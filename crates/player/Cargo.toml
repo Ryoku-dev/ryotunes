@@ -8,6 +8,8 @@ license.workspace = true
 tokio = { workspace = true, features = ["sync"] }
 tracing = { workspace = true }
 thiserror = { workspace = true }
+serde = { workspace = true }
+parking_lot = "0.12"
 # libmpv2 is the maintained fork of the abandoned `libmpv` crate.
 libmpv2 = "4"
 libc = "0.2"

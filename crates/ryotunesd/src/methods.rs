@@ -65,6 +65,7 @@ impl Dispatch for Methods {
                     "queue": st.queue_snapshot().await,
                     "settings": st.settings_snapshot(),
                     "auth": st.account_snapshot(),
+                    "audioFx": st.audio_fx(),
                 }))
             }
             "quit" => {
@@ -202,6 +203,12 @@ impl Dispatch for Methods {
                     .map_err(err)?;
                 null()
             }
+            "set_audio_fx" => {
+                let fx: player::AudioFx = serde_json::from_value(params.clone()).map_err(err)?;
+                st.set_audio_fx(fx).map_err(err)?;
+                null()
+            }
+            "get_audio_fx" => ok(st.audio_fx()),
             "get_queue" => ok(st.queue_snapshot().await),
             "get_playback" => ok(st.playback_snapshot().await),
 
