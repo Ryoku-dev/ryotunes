@@ -20,7 +20,13 @@ impl SocketSink {
         self.count.fetch_add(1, Ordering::Relaxed);
     }
 
+    /// Live subscribers, after dropping the ones whose connection has gone. A client killed
+    /// outright leaves its sender open until the next emit would find it closed; `show` reads
+    /// this to decide between raising a client and launching one, so it must not count ghosts
+    /// (a stale count kept the daemon emitting `show` to nobody instead of spawning the client).
     pub fn subscriber_count(&self) -> usize {
+        let mut subs = self.subscribers.lock().unwrap();
+        self.prune(&mut subs);
         self.count.load(Ordering::Relaxed)
     }
 

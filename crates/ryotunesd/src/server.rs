@@ -167,6 +167,12 @@ async fn handle(
         lifecycle.client_gone();
     }
     drop(tx);
+    // The sink still holds this connection's sender, so the writer would idle until the next
+    // event failed a write to the dead socket; abort it now so the receiver goes and every clone
+    // of the sender reports closed. That is what lets `subscriber_count` see the departure
+    // straight away (a `show` right after a client was killed must launch one, not emit into
+    // the void).
+    writer.abort();
     let _ = writer.await;
 }
 
@@ -229,13 +235,10 @@ mod tests {
 
         drop(wr);
         drop(lines);
-        // Pruning is lazy: a subscriber's sender only reports `is_closed()` after the writer
-        // task fails a write to the now-dead socket and drops its receiver, and that failed
-        // write is itself triggered by an emit. So the first post-disconnect emit kills the
-        // writer and a later one reclaims the slot; drive emits until the subscriber is pruned.
+        // The reader loop ends when the client goes and aborts the writer, so the sink's sender
+        // reports closed and the count drops on the next read, without an emit in between.
         let mut pruned = false;
         for _ in 0..100 {
-            sink.emit("position", Value::Null);
             tokio::time::sleep(std::time::Duration::from_millis(10)).await;
             if sink.subscriber_count() == 0 {
                 pruned = true;
