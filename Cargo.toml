@@ -7,6 +7,7 @@ members = [
     "crates/sync-server",
     "crates/core",
     "crates/spotify",
+    "crates/soundcloud",
     "crates/protocol",
     "crates/ryotunesd",
     "crates/ryotunes-cli",
