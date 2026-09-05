@@ -188,3 +188,11 @@ paused: <= 0.3% CPU. Playing, ambient on, no spectrum: <= 3%. Spectrum surface v
 - Icons: `Icon { name }` from `lib/glyphs.js` (baked 24 px stroke paths). Add a glyph by
   appending to the table (d, fill, cap, w); names now include more, sound, panel, sidebar,
   expand, chevron-down, chevron-right, sort.
+
+## 11. Providers
+
+YouTube Music and Spotify are peers, never one replacing the other. A segmented pill in the
+TitleBar (two 28 px logo buttons, `youtube-music` / `spotify`, active = bone) selects
+`Playback.provider`; the daemon holds the selection, routes search / browse / library /
+playback by it, and keeps the two catalogues apart by id space (`spotify:` URIs vs video ids).
+The queue may mix both. Sign-in for Spotify lives in Settings > Accounts next to the Google one.
