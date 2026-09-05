@@ -74,6 +74,17 @@ Rectangle {
         }
     }
 
+    // The recurring one-pixel divider between rows (Sonora's table rule). Softened under the
+    // playing row so its tint reads as one block.
+    Rectangle {
+        anchors { left: parent.left; right: parent.right; bottom: parent.bottom }
+        anchors.leftMargin: Style.sp(2)
+        anchors.rightMargin: Style.sp(2)
+        height: 1
+        color: Tokens.lineSoft
+        visible: !root.active
+    }
+
     RowLayout {
         anchors.fill: parent
         anchors.leftMargin: Style.sp(2)
