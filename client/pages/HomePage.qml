@@ -408,7 +408,7 @@ Item {
                                 id: pin
                                 required property var modelData
                                 readonly property bool round: pin.modelData && pin.modelData.kind === "artist"
-                                width: Style.sp(85)
+                                width: Style.sp(80)
                                 height: Style.sp(14)
                                 radius: Style.radiusCard
                                 color: pinHover.hovered ? Tokens.tint5 : "transparent"
@@ -476,7 +476,7 @@ Item {
                         // dashed "Add shortcut" card
                         Item {
                             id: addTile
-                            width: Style.sp(85)
+                            width: Style.sp(80)
                             height: Style.sp(14)
                             Shape {
                                 anchors.fill: parent
