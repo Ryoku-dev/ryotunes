@@ -5,29 +5,74 @@ import Ryoku.Ui as RU
 import Ryoku.Ui.Singletons
 import "../"
 import "../components"
-import "../lib/browse.js" as Browse
 
-// The navigation rail (spec section 3): the masthead register, the three route groups (Discover /
-// Collection / System) as micro labels over hairlines, 40 px nav rows with an icon, a body label and
-// a kana seal at the rich decor level, the Library group expanding to its five tabs while you are in
-// it, the PINNED shortcuts from the shared personal store as 40 px art rows, and the edition tag at
-// the foot. The active route is read from Router.current; a click routes there. `open` collapses the
-// rail: the layout slot animates to zero while a fixed-width glass body anchored to the right slides
-// off to the left, so the content never reflows mid-slide.
+// The navigation rail (spec section 3, eye-candy pass): a bordered brand card (力 tile + RYOTUNES /
+// RYOKU // MUSIC eyebrow + a collapse button), the three route groups (Discover / Collection /
+// System) as tracked mono micro eyebrows over hairlines, 40 px nav rows with an icon and a body
+// label whose active state is a paper-lift fill plus a 2 px accent left border (hover is a faint
+// tint), the Library group expanding to its five tabs while you are in it, a Playlists group with a
+// full-width outlined "New playlist" button over the user's library playlists (from get_library,
+// merged with any pinned playlists), and a RYOKU // MUSIC ··· LIVE register at the foot. The active
+// route is read from Router.current; a click routes there. `open` collapses the rail: the layout
+// slot animates to zero while a fixed-width glass body anchored to the right slides off to the left,
+// so the content never reflows mid-slide. The collapse button raises `collapseRequested` (App owns
+// the sidebarOpen truth), the same door the title bar's rail toggle opens.
 Rectangle {
     id: root
 
     property bool open: true
+    signal collapseRequested()
+
     readonly property string activePage: Router.current ? Router.current.page : "home"
     readonly property string activeTab: (Router.current && Router.current.params && Router.current.params.tab)
         ? Router.current.params.tab : "songs"
+
+    // The user's library playlists (get_library, kind "playlist" — includes the smart On Repeat /
+    // Recently Played cards and device playlists), merged with any pinned playlists from the shared
+    // personal store, deduped by id. Reloaded on (re)connect and after a create.
+    property var libPlaylists: []
+    readonly property var playlists: {
+        var seen = ({}), out = [];
+        for (var i = 0; i < root.libPlaylists.length; i++) {
+            var p = root.libPlaylists[i];
+            if (p && p.id && !seen[p.id]) { seen[p.id] = true; out.push(p); }
+        }
+        var picks = Personal.picks;
+        for (var j = 0; j < picks.length; j++) {
+            var q = picks[j];
+            if (q && q.kind === "playlist" && q.id && !seen[q.id]) { seen[q.id] = true; out.push(q); }
+        }
+        return out;
+    }
+    function loadPlaylists() {
+        Daemon.call("get_library")
+            .then((r) => { root.libPlaylists = (r || []).filter((i) => i && i.kind === "playlist"); })
+            .catch(() => { root.libPlaylists = []; });
+    }
+    // create_playlist exists in crates/ryotunesd/src/methods.rs (returns the new id); make one and
+    // open it so the user can name and fill it. No dialog lives in the rail.
+    function newPlaylist() {
+        Daemon.call("create_playlist", { title: "New playlist" })
+            .then((id) => {
+                root.loadPlaylists();
+                Playback.toast("Playlist created", "success");
+                if (id) Router.push("playlist", { id: id, title: "New playlist" });
+            })
+            .catch((e) => Playback.toast((e && e.message) ? e.message : "Could not create", "error"));
+    }
+    Component.onCompleted: if (Daemon.connected) root.loadPlaylists();
+    Connections {
+        target: Daemon
+        function onSnapshot(snap): void { root.loadPlaylists(); }
+    }
 
     color: "transparent"
     implicitWidth: root.open ? Style.sidebarW : 0
     clip: true
     Behavior on implicitWidth { NumberAnimation { duration: Style.motion.slow; easing.type: Easing.OutCubic } }
 
-    // A top-level nav row: 40 px, icon + body label + optional kana seal, bone plate when current.
+    // A top-level nav row: 40 px, icon + body label + optional kana seal. Active = paper-lift fill +
+    // a 2 px accent left border; hover = a faint tint.
     component NavRow: Rectangle {
         id: nr
         property string label: ""
@@ -39,33 +84,45 @@ Rectangle {
         Layout.fillWidth: true
         implicitHeight: Style.sp(10)
         radius: Style.radius
-        color: nr.current ? Tokens.bone : navHover.hovered ? Tokens.tint10 : "transparent"
+        color: nr.current ? Tokens.paperLift : navHover.hovered ? Tokens.tint5 : "transparent"
         Behavior on color { ColorAnimation { duration: Style.motion.snap } }
+
+        // The 2 px accent left border of the active row (state, per the eye-candy brief).
+        Rectangle {
+            visible: nr.current
+            anchors.left: parent.left
+            anchors.verticalCenter: parent.verticalCenter
+            width: Style.sp(0.5)
+            height: parent.height - Style.sp(4)
+            radius: width / 2
+            color: Style.accent
+        }
 
         RowLayout {
             anchors.fill: parent
-            anchors.leftMargin: Style.sp(2.5)
-            anchors.rightMargin: Style.sp(2.5)
+            anchors.leftMargin: Style.sp(3)
+            anchors.rightMargin: Style.sp(3)
             spacing: Style.sp(3)
             Icon {
                 name: nr.icon
                 size: Style.fs.lg
-                color: nr.current ? Tokens.inkOnBone : Tokens.inkMuted
+                color: nr.current ? Tokens.ink : Tokens.inkMuted
             }
             Text {
                 Layout.fillWidth: true
-                text: (nr.current ? "// " : "") + nr.label
-                color: nr.current ? Tokens.inkOnBone : Tokens.inkDim
+                Layout.minimumWidth: 0
+                text: nr.label
+                color: nr.current ? Tokens.ink : Tokens.inkDim
                 font.family: Style.fontUi
                 font.pixelSize: Style.fs.md
-                font.weight: Font.Medium
+                font.weight: nr.current ? Font.Medium : Font.Normal
                 elide: Text.ElideRight
             }
             Text {
                 visible: Style.decorRich && nr.kana !== ""
                 text: nr.kana
-                color: nr.current ? Tokens.inkOnBone : Tokens.inkFaint
-                opacity: nr.current ? 0.75 : 0.55
+                color: nr.current ? Tokens.inkMuted : Tokens.inkFaint
+                opacity: nr.current ? 0.9 : 0.6
                 font.family: Tokens.jp
                 font.pixelSize: Style.fs.sm
             }
@@ -78,29 +135,31 @@ Rectangle {
         }
     }
 
-    // A section register: number, tracked label, hairline and (rich) seal.
+    // A section register: number, tracked mono micro label, a hairline to the right and (rich) seal.
     component SectionLabel: RowLayout {
         id: sl
         property string num: ""
         property string label: ""
         property string seal: ""
         Layout.fillWidth: true
-        Layout.topMargin: Style.sp(1.5)
-        Layout.bottomMargin: Style.sp(0.5)
+        Layout.leftMargin: Style.sp(3)
+        Layout.rightMargin: Style.sp(3)
+        Layout.topMargin: Style.sp(3)
+        Layout.bottomMargin: Style.sp(1)
         spacing: Style.sp(2)
         Text {
             text: sl.num
             color: Tokens.inkFaint
             font.family: Style.fontMono
-            font.pixelSize: Style.fs.xs
+            font.pixelSize: Style.fs.micro
+            font.letterSpacing: Style.trackMicro
         }
         Text {
             text: sl.label
             color: Tokens.inkMuted
-            font.family: Style.fontUi
-            font.pixelSize: Style.fs.xs
-            font.weight: Font.DemiBold
-            font.letterSpacing: 1.75
+            font.family: Style.fontMono
+            font.pixelSize: Style.fs.micro
+            font.letterSpacing: Style.trackMicro
         }
         Hairline { Layout.fillWidth: true; soft: true }
         Text {
@@ -128,7 +187,7 @@ Rectangle {
         RowLayout {
             anchors.fill: parent
             anchors.leftMargin: Style.sp(7)
-            anchors.rightMargin: Style.sp(2.5)
+            anchors.rightMargin: Style.sp(3)
             spacing: Style.sp(2)
             Rectangle {
                 Layout.alignment: Qt.AlignVCenter
@@ -140,6 +199,7 @@ Rectangle {
             }
             Text {
                 Layout.fillWidth: true
+                Layout.minimumWidth: 0
                 text: sr.label
                 color: sr.current ? Tokens.ink : Tokens.inkMuted
                 font.family: Style.fontUi
@@ -153,6 +213,63 @@ Rectangle {
             anchors.fill: parent
             cursorShape: Qt.PointingHandCursor
             onClicked: sr.activated()
+        }
+    }
+
+    // A playlist row: a 40 px art tile, the title and its "N songs" sub, over a faint hover tint.
+    component PlaylistRow: Rectangle {
+        id: plr
+        property var item: null
+        signal activated()
+
+        Layout.fillWidth: true
+        implicitHeight: Style.sp(12)
+        radius: Style.radius
+        color: plHover.hovered ? Tokens.tint5 : "transparent"
+        Behavior on color { ColorAnimation { duration: Style.motion.snap } }
+
+        RowLayout {
+            anchors.fill: parent
+            anchors.leftMargin: Style.sp(2)
+            anchors.rightMargin: Style.sp(2)
+            spacing: Style.sp(2)
+            Artwork {
+                url: (plr.item && plr.item.thumbnail) ? plr.item.thumbnail : ""
+                px: Style.sp(10)
+                placeholderIcon: "playlist"
+            }
+            ColumnLayout {
+                Layout.fillWidth: true
+                Layout.minimumWidth: 0
+                spacing: 0
+                Text {
+                    Layout.fillWidth: true
+                    Layout.minimumWidth: 0
+                    text: plr.item ? plr.item.title : ""
+                    color: Tokens.ink
+                    font.family: Style.fontUi
+                    font.pixelSize: Style.fs.sm
+                    font.weight: Font.Medium
+                    elide: Text.ElideRight
+                }
+                Text {
+                    Layout.fillWidth: true
+                    Layout.minimumWidth: 0
+                    text: (plr.item && plr.item.subtitle) ? plr.item.subtitle : "Playlist"
+                    color: Tokens.inkMuted
+                    font.family: Style.fontMono
+                    font.pixelSize: Style.fs.micro
+                    font.letterSpacing: Style.trackMicro
+                    elide: Text.ElideRight
+                    textFormat: Text.PlainText
+                }
+            }
+        }
+        HoverHandler { id: plHover }
+        MouseArea {
+            anchors.fill: parent
+            cursorShape: Qt.PointingHandCursor
+            onClicked: plr.activated()
         }
     }
 
@@ -172,37 +289,71 @@ Rectangle {
 
         ColumnLayout {
             anchors.fill: parent
-            anchors.margins: Style.sp(2.5)
+            anchors.margins: Style.sp(2)
             spacing: Style.sp(1)
 
-            // --- masthead register ----------------------------------------------------------
-            RowLayout {
+            // --- brand card -----------------------------------------------------------------
+            Rectangle {
                 Layout.fillWidth: true
                 Layout.bottomMargin: Style.sp(2)
-                spacing: Style.sp(2.5)
-                Text {
-                    text: "力"
-                    color: Tokens.inkDim
-                    font.family: Tokens.jp
-                    font.pixelSize: Style.fs.xl
-                }
-                ColumnLayout {
-                    Layout.fillWidth: true
-                    spacing: 1
-                    Text {
-                        text: "RYOTUNES"
-                        color: Tokens.ink
-                        font.family: Style.fontUi
-                        font.pixelSize: Style.fs.md
-                        font.weight: Font.DemiBold
-                        font.letterSpacing: 2
+                implicitHeight: Style.sp(14)
+                radius: Style.radiusCard
+                color: "transparent"
+                border.width: 1
+                border.color: Tokens.lineSoft
+
+                RowLayout {
+                    anchors.fill: parent
+                    anchors.leftMargin: Style.sp(2)
+                    anchors.rightMargin: Style.sp(1)
+                    spacing: Style.sp(2)
+
+                    Rectangle {
+                        Layout.preferredWidth: Style.sp(10)
+                        Layout.preferredHeight: Style.sp(10)
+                        radius: Style.radius
+                        color: Tokens.paperLift
+                        border.width: 1
+                        border.color: Tokens.lineSoft
+                        Text {
+                            anchors.centerIn: parent
+                            text: "力"
+                            color: Tokens.ink
+                            font.family: Tokens.jp
+                            font.pixelSize: Style.fs.xl
+                        }
                     }
-                    Text {
-                        text: "RYOKU // MUSIC"
-                        color: Tokens.inkFaint
-                        font.family: Style.fontMono
-                        font.pixelSize: Style.fs.xs
-                        font.letterSpacing: 1.2
+                    ColumnLayout {
+                        Layout.fillWidth: true
+                        Layout.minimumWidth: 0
+                        spacing: 1
+                        Text {
+                            Layout.fillWidth: true
+                            text: "RYOTUNES"
+                            color: Tokens.ink
+                            font.family: Style.fontUi
+                            font.pixelSize: Style.fs.md
+                            font.weight: Font.DemiBold
+                            font.letterSpacing: 2
+                            elide: Text.ElideRight
+                        }
+                        Text {
+                            Layout.fillWidth: true
+                            text: "RYOKU // MUSIC"
+                            color: Tokens.inkFaint
+                            font.family: Style.fontMono
+                            font.pixelSize: Style.fs.micro
+                            font.letterSpacing: Style.trackMicro
+                            elide: Text.ElideRight
+                        }
+                    }
+                    IconButton {
+                        icon: "rail-collapse"
+                        iconSize: Style.fs.lg
+                        diameter: Style.sp(8)
+                        outlined: true
+                        tip: "Collapse"
+                        onClicked: root.collapseRequested()
                     }
                 }
             }
@@ -244,88 +395,58 @@ Rectangle {
                     SectionLabel { num: "03"; label: "SYSTEM"; seal: "設" }
                     NavRow { label: "Settings"; icon: "settings"; kana: "設"; current: root.activePage === "settings"; onActivated: if (root.activePage !== "settings") Router.push("settings") }
 
-                    // PINNED shortcuts
-                    SectionLabel { visible: Personal.picks.length > 0; num: "留"; label: "PINNED"; seal: "留" }
+                    // PLAYLISTS
+                    SectionLabel { num: "04"; label: "PLAYLISTS"; seal: "列" }
+                    Btn {
+                        Layout.fillWidth: true
+                        Layout.topMargin: Style.sp(1)
+                        Layout.bottomMargin: Style.sp(1)
+                        text: "New playlist"
+                        icon: "add"
+                        onClicked: root.newPlaylist()
+                    }
                     Repeater {
-                        model: Personal.picks
-                        delegate: Rectangle {
-                            id: pin
+                        model: root.playlists
+                        delegate: PlaylistRow {
+                            id: plRow
                             required property var modelData
-                            readonly property bool round: pin.modelData && pin.modelData.kind === "artist"
-                            Layout.fillWidth: true
-                            implicitHeight: Style.sp(11)
-                            radius: Style.radius
-                            color: pinHover.hovered ? Tokens.tint5 : "transparent"
-
-                            RowLayout {
-                                anchors.fill: parent
-                                anchors.leftMargin: Style.sp(1.5)
-                                anchors.rightMargin: Style.sp(1.5)
-                                spacing: Style.sp(2)
-                                Artwork {
-                                    url: pin.modelData && pin.modelData.thumbnail ? pin.modelData.thumbnail : ""
-                                    px: Style.sp(10)
-                                    round: pin.round
-                                    placeholderIcon: pin.round ? "user"
-                                        : (pin.modelData && pin.modelData.kind === "album") ? "cd"
-                                        : (pin.modelData && pin.modelData.kind === "playlist") ? "playlist" : "music"
-                                }
-                                ColumnLayout {
-                                    Layout.fillWidth: true
-                                    spacing: 0
-                                    Text {
-                                        Layout.fillWidth: true
-                                        text: pin.modelData ? pin.modelData.title : ""
-                                        color: Tokens.ink
-                                        font.family: Style.fontUi
-                                        font.pixelSize: Style.fs.sm
-                                        font.weight: Font.Medium
-                                        elide: Text.ElideRight
-                                    }
-                                    Text {
-                                        Layout.fillWidth: true
-                                        text: (pin.modelData && pin.modelData.subtitle) ? pin.modelData.subtitle
-                                            : (pin.modelData ? pin.modelData.kind : "")
-                                        color: Tokens.inkMuted
-                                        font.family: Style.fontUi
-                                        font.pixelSize: Style.fs.xs
-                                        elide: Text.ElideRight
-                                        textFormat: Text.PlainText
-                                    }
-                                }
-                            }
-                            HoverHandler { id: pinHover }
-                            MouseArea {
-                                anchors.fill: parent
-                                cursorShape: Qt.PointingHandCursor
-                                onClicked: {
-                                    var it = pin.modelData;
-                                    if (!it)
-                                        return;
-                                    if (it.kind === "song")
-                                        Playback.play(Browse.asSong(it));
-                                    else
-                                        Router.push(it.kind, { id: it.id, title: it.title });
-                                    Personal.touchPick(it.id);
-                                }
+                            item: plRow.modelData
+                            onActivated: {
+                                if (!plRow.modelData)
+                                    return;
+                                Router.push("playlist", { id: plRow.modelData.id, title: plRow.modelData.title });
                             }
                         }
                     }
                 }
             }
 
-            // --- edition register (dead-space ornament, per the design language) ------------
+            // --- LIVE register --------------------------------------------------------------
             RowLayout {
                 Layout.fillWidth: true
                 Layout.topMargin: Style.sp(1)
-                spacing: Style.sp(1.5)
-                Hairline { Layout.fillWidth: true; soft: true }
+                spacing: Style.sp(2)
                 Text {
-                    text: "ED. 力 // NATIVE"
+                    text: "RYOKU // MUSIC"
                     color: Tokens.inkFaint
                     font.family: Style.fontMono
-                    font.pixelSize: Style.fs.xs
-                    font.letterSpacing: 1.2
+                    font.pixelSize: Style.fs.micro
+                    font.letterSpacing: Style.trackMicro
+                }
+                Hairline { Layout.fillWidth: true; soft: true }
+                Rectangle {
+                    Layout.alignment: Qt.AlignVCenter
+                    Layout.preferredWidth: Style.sp(2)
+                    Layout.preferredHeight: Style.sp(2)
+                    radius: Style.sp(1)
+                    color: Style.ambient ? Style.accent : Tokens.inkFaint
+                }
+                Text {
+                    text: "LIVE"
+                    color: Style.ambient ? Tokens.inkDim : Tokens.inkFaint
+                    font.family: Style.fontMono
+                    font.pixelSize: Style.fs.micro
+                    font.letterSpacing: Style.trackMicro
                 }
             }
         }

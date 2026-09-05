@@ -49,7 +49,7 @@ Item {
 
                 RowLayout {
                     anchors.fill: parent
-                    anchors.leftMargin: Style.sp(3)
+                    anchors.leftMargin: Style.sp(2)
                     anchors.rightMargin: Style.sp(2)
                     spacing: Style.sp(2)
 
@@ -134,6 +134,7 @@ Item {
             Item {
                 Layout.fillWidth: true
                 Layout.fillHeight: true
+                clip: true
 
                 QueuePanel {
                     anchors.fill: parent
@@ -141,6 +142,7 @@ Item {
                 }
                 LyricsPanel {
                     anchors.fill: parent
+                    anchors.margins: Style.sp(4)
                     visible: root.open && root.tab === "lyrics"
                     compact: false
                 }
