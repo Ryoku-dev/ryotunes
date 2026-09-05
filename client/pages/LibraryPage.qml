@@ -25,6 +25,10 @@ Item {
     property bool creating: false
     property string newName: ""
 
+
+    // Spotify is selected but not signed in: show the sign-in empty state instead of loading a
+    // library from the daemon.
+    readonly property bool spotifyGate: Playback.provider === "spotify" && !(Playback.spotify && Playback.spotify.signedIn)
     // The sidebar deep-links a tab (Router.push("library", { tab })). Honour it on every navigation,
     // not just the first mount, so clicking a Library sub-item while already on the page switches
     // tabs. A plain library nav (no tab) leaves the current tab alone. Tab clicks are local state
@@ -68,6 +72,12 @@ Item {
         page.load();
     }
 
+    // A provider switch swaps the whole library: reload (or fall to the sign-in card).
+    Connections {
+        target: Playback
+        function onProviderChanged(): void { page.load(); }
+    }
+
     function selectTab(k) {
         page.tab = k;
         if (page.opened.indexOf(k) < 0)
@@ -76,6 +86,15 @@ Item {
     function isOpened(k) { return page.opened.indexOf(k) >= 0; }
 
     function load() {
+        // Gated: no daemon call, the sign-in card carries the page.
+        if (page.spotifyGate) {
+            page.playlists = [];
+            page.albums = [];
+            page.artists = [];
+            page.errorMsg = "";
+            page.loading = false;
+            return;
+        }
         page.loading = true;
         page.errorMsg = "";
         Promise.all([
@@ -132,6 +151,7 @@ Item {
 
     ColumnLayout {
         anchors.fill: parent
+        visible: !page.spotifyGate
         spacing: Style.sp(4)
 
         // title row: display title + active-tab count, then the collection toolbar
@@ -200,22 +220,49 @@ Item {
 
             Loader {
                 anchors.fill: parent
-                active: page.isOpened("songs")
+                active: page.isOpened("songs") && !page.spotifyGate
                 visible: page.tab === "songs"
                 sourceComponent: LibrarySongs {}
             }
             Loader {
                 anchors.fill: parent
-                active: page.isOpened("local")
+                active: page.isOpened("local") && !page.spotifyGate
                 visible: page.tab === "local"
                 sourceComponent: LocalMusic {}
             }
             Loader {
                 anchors.fill: parent
-                active: page.isOpened("insights")
+                active: page.isOpened("insights") && !page.spotifyGate
                 visible: page.tab === "insights"
                 sourceComponent: ListeningInsights {}
             }
+        }
+    }
+
+    // The Spotify sign-in empty state: shown when Spotify is selected but not signed in, in place of
+    // the library. The button starts the OAuth flow; nothing here touches the daemon.
+    ColumnLayout {
+        anchors.centerIn: parent
+        visible: page.spotifyGate
+        spacing: Style.sp(3)
+        Icon {
+            Layout.alignment: Qt.AlignHCenter
+            name: "spotify"
+            size: Style.sp(10)
+            color: Style.providerColor
+        }
+        Btn {
+            Layout.alignment: Qt.AlignHCenter
+            text: "Sign in to Spotify"
+            primary: true
+            onClicked: Playback.spotifySignIn().catch(() => {})
+        }
+        Text {
+            Layout.alignment: Qt.AlignHCenter
+            text: "Premium is required for playback."
+            color: Tokens.inkMuted
+            font.family: Style.fontUi
+            font.pixelSize: Style.fs.sm
         }
     }
 

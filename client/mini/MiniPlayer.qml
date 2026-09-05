@@ -144,13 +144,25 @@ Item {
                     font.letterSpacing: -0.14
                     elide: Text.ElideRight
                 }
-                Text {
+                RowLayout {
                     Layout.fillWidth: true
-                    text: (root.now && root.now.artists) ? root.now.artists : "Ryotunes is ready"
-                    color: Qt.rgba(1, 1, 1, 0.70)
-                    font.family: Style.fontUi
-                    font.pixelSize: 10
-                    elide: Text.ElideRight
+                    spacing: 4
+                    // The provider tell for the playing track: spotify glyph for spotify: ids, the
+                    // YouTube Music glyph otherwise.
+                    Icon {
+                        visible: !!root.now
+                        name: (root.now && root.now.videoId && String(root.now.videoId).startsWith("spotify:")) ? "spotify" : "youtube-music"
+                        size: 14
+                        color: Qt.rgba(1, 1, 1, 0.70)
+                    }
+                    Text {
+                        Layout.fillWidth: true
+                        text: (root.now && root.now.artists) ? root.now.artists : "Ryotunes is ready"
+                        color: Qt.rgba(1, 1, 1, 0.70)
+                        font.family: Style.fontUi
+                        font.pixelSize: 10
+                        elide: Text.ElideRight
+                    }
                 }
             }
             // Tap the cover to play / pause (the full window's preview does the same); drag it to
@@ -311,14 +323,26 @@ Item {
                             font.letterSpacing: -0.8
                             elide: Text.ElideRight
                         }
-                        Text {
+                        RowLayout {
                             Layout.fillWidth: true
-                            text: (root.now && root.now.artists) ? root.now.artists : "Ryotunes is ready"
-                            color: Tokens.inkMuted
-                            font.family: Style.fontUi
-                            font.pixelSize: 11
-                            font.weight: Font.Medium
-                            elide: Text.ElideRight
+                            spacing: 5
+                            // The provider tell for the playing track: spotify glyph for spotify:
+                            // ids, the YouTube Music glyph otherwise.
+                            Icon {
+                                visible: !!root.now
+                                name: (root.now && root.now.videoId && String(root.now.videoId).startsWith("spotify:")) ? "spotify" : "youtube-music"
+                                size: 14
+                                color: Tokens.inkMuted
+                            }
+                            Text {
+                                Layout.fillWidth: true
+                                text: (root.now && root.now.artists) ? root.now.artists : "Ryotunes is ready"
+                                color: Tokens.inkMuted
+                                font.family: Style.fontUi
+                                font.pixelSize: 11
+                                font.weight: Font.Medium
+                                elide: Text.ElideRight
+                            }
                         }
                     }
                     Item { Layout.fillHeight: true }

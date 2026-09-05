@@ -323,6 +323,7 @@ Item {
             anchors.margins: Style.sp(1)
             spacing: Style.sp(1)
 
+            // ── YouTube Music ────────────────────────────────────────────────────────────
             RowLayout {
                 Layout.fillWidth: true
                 Layout.margins: Style.sp(1)
@@ -336,7 +337,7 @@ Item {
                 }
                 Icon {
                     visible: !(Playback.auth && Playback.auth.signedIn && Playback.auth.avatar)
-                    name: "account"
+                    name: "youtube-music"
                     size: Style.fs.lg
                     color: Tokens.inkMuted
                 }
@@ -364,15 +365,12 @@ Item {
                 }
             }
 
-            Hairline { Layout.fillWidth: true }
-
-            // action row
             Rectangle {
-                id: signAction
+                id: ytAction
                 Layout.fillWidth: true
                 implicitHeight: Style.sp(9)
                 radius: Style.radius
-                color: actHover.hovered ? Tokens.tint5 : "transparent"
+                color: ytHover.hovered ? Tokens.tint5 : "transparent"
                 readonly property bool signedIn: !!(Playback.auth && Playback.auth.signedIn)
                 RowLayout {
                     anchors.fill: parent
@@ -380,25 +378,98 @@ Item {
                     anchors.rightMargin: Style.sp(2)
                     spacing: Style.sp(2)
                     Icon {
-                        name: signAction.signedIn ? "close" : "account"
+                        name: ytAction.signedIn ? "close" : "account"
                         size: Style.fs.md
-                        color: signAction.signedIn ? Tokens.alert : Tokens.ink
+                        color: ytAction.signedIn ? Tokens.alert : Tokens.ink
                     }
                     Text {
                         Layout.fillWidth: true
-                        text: signAction.signedIn ? "Sign out" : "Sign in with Google"
-                        color: signAction.signedIn ? Tokens.alert : Tokens.ink
+                        text: ytAction.signedIn ? "Sign out" : "Sign in with Google"
+                        color: ytAction.signedIn ? Tokens.alert : Tokens.ink
                         font.family: Style.fontUi
                         font.pixelSize: Style.fs.md
                     }
                 }
-                HoverHandler { id: actHover }
+                HoverHandler { id: ytHover }
                 MouseArea {
                     anchors.fill: parent
                     cursorShape: Qt.PointingHandCursor
                     onClicked: {
                         accountMenu.visible = false;
-                        Daemon.call(signAction.signedIn ? "sign_out" : "sign_in").catch(() => {});
+                        Daemon.call(ytAction.signedIn ? "sign_out" : "sign_in").catch(() => {});
+                    }
+                }
+            }
+
+            Hairline { Layout.fillWidth: true }
+
+            // ── Spotify ──────────────────────────────────────────────────────────────────
+            RowLayout {
+                Layout.fillWidth: true
+                Layout.margins: Style.sp(1)
+                spacing: Style.sp(2)
+                Icon {
+                    name: "spotify"
+                    size: Style.fs.lg
+                    color: (Playback.spotify && Playback.spotify.signedIn) ? Style.providerColor : Tokens.inkMuted
+                }
+                ColumnLayout {
+                    Layout.fillWidth: true
+                    spacing: 0
+                    Text {
+                        text: (Playback.spotify && Playback.spotify.signedIn && Playback.spotify.name)
+                            ? Playback.spotify.name : "Not signed in"
+                        color: Tokens.ink
+                        font.family: Style.fontUi
+                        font.pixelSize: Style.fs.md
+                        font.weight: Font.Medium
+                        elide: Text.ElideRight
+                        Layout.fillWidth: true
+                    }
+                    Text {
+                        text: (Playback.spotify && Playback.spotify.signedIn) ? "Spotify" : "Premium required"
+                        color: Tokens.inkMuted
+                        font.family: Style.fontUi
+                        font.pixelSize: Style.fs.sm
+                        elide: Text.ElideRight
+                        Layout.fillWidth: true
+                    }
+                }
+            }
+
+            Rectangle {
+                id: spAction
+                Layout.fillWidth: true
+                implicitHeight: Style.sp(9)
+                radius: Style.radius
+                color: spHover.hovered ? Tokens.tint5 : "transparent"
+                readonly property bool signedIn: !!(Playback.spotify && Playback.spotify.signedIn)
+                RowLayout {
+                    anchors.fill: parent
+                    anchors.leftMargin: Style.sp(2)
+                    anchors.rightMargin: Style.sp(2)
+                    spacing: Style.sp(2)
+                    Icon {
+                        name: spAction.signedIn ? "close" : "spotify"
+                        size: Style.fs.md
+                        color: spAction.signedIn ? Tokens.alert : Tokens.ink
+                    }
+                    Text {
+                        Layout.fillWidth: true
+                        text: spAction.signedIn ? "Sign out" : "Sign in to Spotify"
+                        color: spAction.signedIn ? Tokens.alert : Tokens.ink
+                        font.family: Style.fontUi
+                        font.pixelSize: Style.fs.md
+                    }
+                }
+                HoverHandler { id: spHover }
+                MouseArea {
+                    anchors.fill: parent
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: {
+                        accountMenu.visible = false;
+                        if (spAction.signedIn) Playback.spotifySignOut().catch(() => {});
+                        else Playback.spotifySignIn().catch(() => {});
                     }
                 }
             }

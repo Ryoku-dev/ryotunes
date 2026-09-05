@@ -33,6 +33,10 @@ Singleton {
     // The active music provider ("youtube" | "spotify"), mirrored from the daemon (the subscribe
     // snapshot's `provider` and a `provider-changed` event). The title bar's switch reads it.
     property string provider: "youtube"
+    // The Spotify account, mirrored from the daemon (the subscribe snapshot's `spotify` object and
+    // the `spotify-auth` events). `signedIn` gates the Spotify catalogue; `premium` is null until the
+    // profile is known. Never a source of truth — every field lands from the daemon.
+    property var spotify: ({ signedIn: false, stored: false, name: null, premium: null })
 
     // --- optimistic drag state ---------------------------------------------------------------
     // NaN when the seek thumb is not held; a number pins the shown position and suppresses the
@@ -55,7 +59,11 @@ Singleton {
         target: Daemon
         function onEvent(name, data) {
             var fx = PB.applyEvent(root, name, data);
-            if (fx) root.toast(fx.toast, fx.kind);
+            if (fx) {
+                if (fx.toast) root.toast(fx.toast, fx.kind);
+                // The spotify-auth url step asks the browser to open the OAuth page.
+                if (fx.openUrl) Quickshell.execDetached(["xdg-open", fx.openUrl]);
+            }
         }
         function onSnapshot(snap) { root.loadSnapshot(snap); }
     }
@@ -81,6 +89,9 @@ Singleton {
         if (snap.auth) root.auth = { signedIn: !!snap.auth.signedIn, name: snap.auth.name, avatar: snap.auth.avatar };
         if (snap.audioFx) root.audioFx = snap.audioFx;
         if (snap.provider) root.provider = snap.provider;
+        if (snap.spotify)
+            root.spotify = { signedIn: !!snap.spotify.signedIn, stored: !!snap.spotify.stored,
+                name: snap.spotify.name, premium: snap.spotify.premium };
     }
 
     // --- methods (each a daemon call) --------------------------------------------------------
@@ -101,6 +112,10 @@ Singleton {
         root.provider = p;
         return Daemon.call("set_provider", { provider: p }).catch(() => {});
     }
+    // Start the Spotify OAuth flow; the daemon spawns the task and drives the rest through
+    // spotify-auth events (the url step opens the browser). Idempotent while a flow is running.
+    function spotifySignIn() { return Daemon.call("spotify_sign_in"); }
+    function spotifySignOut() { return Daemon.call("spotify_sign_out"); }
     function toggleShuffle() { return Daemon.call("toggle_shuffle"); }
     // off -> all -> one -> off, matching player.svelte.ts cycleRepeat.
     function cycleRepeat() {

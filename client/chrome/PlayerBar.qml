@@ -133,13 +133,25 @@ Rectangle {
                         color: Tokens.inkMuted
                     }
                 }
-                Text {
+                RowLayout {
                     Layout.fillWidth: true
-                    text: root.now && root.now.artists ? root.now.artists : ""
-                    color: Tokens.inkMuted
-                    font.family: Style.fontUi
-                    font.pixelSize: Style.fs.sm
-                    elide: Text.ElideRight
+                    spacing: Style.sp(1)
+                    // The provider tell for the playing track: spotify glyph for spotify: ids, the
+                    // YouTube Music glyph otherwise.
+                    Icon {
+                        visible: !!root.now
+                        name: (root.now && root.now.videoId && String(root.now.videoId).startsWith("spotify:")) ? "spotify" : "youtube-music"
+                        size: Style.sp(3.5)
+                        color: Tokens.inkMuted
+                    }
+                    Text {
+                        Layout.fillWidth: true
+                        text: root.now && root.now.artists ? root.now.artists : ""
+                        color: Tokens.inkMuted
+                        font.family: Style.fontUi
+                        font.pixelSize: Style.fs.sm
+                        elide: Text.ElideRight
+                    }
                 }
             }
 

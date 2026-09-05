@@ -31,6 +31,10 @@ Item {
     property string expandedCont: ""
     property bool expandedLoading: false
 
+    // Spotify is selected but not signed in: show the sign-in empty state instead of searching the
+    // daemon (search is gated on a signed-in Spotify account).
+    readonly property bool spotifyGate: Playback.provider === "spotify" && !(Playback.spotify && Playback.spotify.signedIn)
+
     // A ?q= arrival (the Ctrl+K palette's "All results", or a card's search intent) runs the search.
     readonly property var params: Router.current ? Router.current.params : ({})
     onParamsChanged: page.applyParams()
@@ -38,6 +42,21 @@ Item {
     function applyParams() {
         if (page.params && page.params.q && page.params.q !== page.searched) {
             page.query = page.params.q;
+            page.runSearch();
+        }
+    }
+
+    // A provider switch swaps the catalogue: re-run the current query against the new provider (or
+    // fall to the sign-in card).
+    Connections {
+        target: Playback
+        function onProviderChanged(): void {
+            if (page.spotifyGate || page.searched === "")
+                return;
+            page.res = null;
+            page.songs = [];
+            page.expandedCat = "";
+            page.query = page.searched;
             page.runSearch();
         }
     }
@@ -78,7 +97,8 @@ Item {
 
     function runSearch() {
         var q = page.query.trim().replace(/\s+/g, " ");
-        if (!q)
+        // Gated: no daemon call, the sign-in card carries the page.
+        if (!q || page.spotifyGate)
             return;
         page.latest = q;
         page.searched = q;
@@ -187,7 +207,7 @@ Item {
         id: root
         anchors.fill: parent
         spacing: Style.sp(4)
-        visible: page.expandedCat === ""
+        visible: page.expandedCat === "" && !page.spotifyGate
 
         ColumnLayout {
             Layout.fillWidth: true
@@ -492,7 +512,7 @@ Item {
     // --- expanded category view ----------------------------------------------------------------
     Item {
         anchors.fill: parent
-        visible: page.expandedCat !== ""
+        visible: page.expandedCat !== "" && !page.spotifyGate
 
         RowLayout {
             id: backBar
@@ -547,6 +567,33 @@ Item {
             loading: page.expandedLoading && page.expandedItems.length === 0
             model: page.expandedItems
             emptyText: "No results."
+        }
+    }
+
+    // The Spotify sign-in empty state: shown when Spotify is selected but not signed in, in place of
+    // the search surface. The button starts the OAuth flow; nothing here touches the daemon.
+    ColumnLayout {
+        anchors.centerIn: parent
+        visible: page.spotifyGate
+        spacing: Style.sp(3)
+        Icon {
+            Layout.alignment: Qt.AlignHCenter
+            name: "spotify"
+            size: Style.sp(10)
+            color: Style.providerColor
+        }
+        Btn {
+            Layout.alignment: Qt.AlignHCenter
+            text: "Sign in to Spotify"
+            primary: true
+            onClicked: Playback.spotifySignIn().catch(() => {})
+        }
+        Text {
+            Layout.alignment: Qt.AlignHCenter
+            text: "Premium is required for playback."
+            color: Tokens.inkMuted
+            font.family: Style.fontUi
+            font.pixelSize: Style.fs.sm
         }
     }
 }

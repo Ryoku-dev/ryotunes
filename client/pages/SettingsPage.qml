@@ -846,6 +846,42 @@ Item {
                         }
                     }
 
+                    // ── Spotify ─────────────────────────────────────────────────────────
+                    SectionHeading { Layout.fillWidth: true; Layout.topMargin: Style.sp(3); title: "Spotify"; mark: "緑" }
+
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: Style.sp(3)
+                        Icon {
+                            name: "spotify"
+                            size: Style.fs.hero
+                            color: (Playback.spotify && Playback.spotify.signedIn) ? Style.providerColor : Tokens.inkMuted
+                        }
+                        ColumnLayout {
+                            Layout.fillWidth: true
+                            spacing: 1
+                            Text {
+                                text: (Playback.spotify && Playback.spotify.signedIn && Playback.spotify.name) ? Playback.spotify.name : "Not signed in"
+                                color: Tokens.ink; font.family: Style.fontUi; font.pixelSize: Style.fs.lg; font.weight: Font.DemiBold
+                                elide: Text.ElideRight; Layout.fillWidth: true
+                            }
+                            Text {
+                                text: (Playback.spotify && Playback.spotify.signedIn) ? "Spotify" : "Premium is required for playback."
+                                color: Tokens.inkMuted; font.family: Style.fontUi; font.pixelSize: Style.fs.sm
+                            }
+                        }
+                        Pill {
+                            label: (Playback.spotify && Playback.spotify.signedIn) ? "Sign out" : "Sign in to Spotify"
+                            icon: (Playback.spotify && Playback.spotify.signedIn) ? "close" : "spotify"
+                            primary: !(Playback.spotify && Playback.spotify.signedIn)
+                            onClicked: {
+                                var out = !!(Playback.spotify && Playback.spotify.signedIn);
+                                if (out) Playback.spotifySignOut().catch((e) => Playback.toast((e && e.message) ? e.message : String(e), "error"));
+                                else Playback.spotifySignIn().catch((e) => Playback.toast((e && e.message) ? e.message : String(e), "error"));
+                            }
+                        }
+                    }
+
                     // switch account
                     SectionHeading { Layout.fillWidth: true; Layout.topMargin: Style.sp(3); title: "Channels"; mark: "選択"; visible: page.identities.length > 0 }
                     ColumnLayout {

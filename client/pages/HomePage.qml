@@ -26,6 +26,10 @@ Item {
     property bool moreError: false
     property var blocks: []
 
+    // Spotify is selected but not signed in: show the sign-in empty state instead of calling the
+    // daemon (browsing is gated on a signed-in Spotify account).
+    readonly property bool spotifyGate: Playback.provider === "spotify" && !(Playback.spotify && Playback.spotify.signedIn)
+
     // Personal shelves, live off the shared store.
     readonly property var recents: Personal.recent(12)
     readonly property var forgottenList: page.forgottenSongs()
@@ -37,6 +41,12 @@ Item {
     onFamIdsChanged: page.loadFamiliar()
 
     Component.onCompleted: { page.load(""); page.loadFamiliar(); }
+
+    // A provider switch swaps the whole catalogue: reload the feed (or fall to the sign-in card).
+    Connections {
+        target: Playback
+        function onProviderChanged(): void { page.load(page.selected); }
+    }
 
     function greeting() {
         var h = new Date().getHours();
@@ -96,9 +106,19 @@ Item {
 
     function load(params) {
         page.selected = params;
+        page.moreError = false;
+        // Gated: no daemon call, the sign-in card carries the page.
+        if (page.spotifyGate) {
+            page.home = null;
+            page.blocks = [];
+            page.forgotten = null;
+            page.chips = [];
+            page.errorMsg = "";
+            page.loading = false;
+            return;
+        }
         page.loading = true;
         page.errorMsg = "";
-        page.moreError = false;
         Daemon.call("get_home", { params: params ? params : null })
             .then((h) => {
                 if (page.selected !== params)
@@ -155,6 +175,7 @@ Item {
     ListView {
         id: list
         anchors.fill: parent
+        visible: !page.spotifyGate
         clip: true
         reuseItems: true
         cacheBuffer: Math.max(0, Math.round(height * 1.5))
@@ -422,6 +443,33 @@ Item {
                     onClicked: { page.moreError = false; page.loadMore(); }
                 }
             }
+        }
+    }
+
+    // The Spotify sign-in empty state: shown when Spotify is selected but not signed in, in place of
+    // the feed. It never touches the daemon — the button starts the OAuth flow.
+    ColumnLayout {
+        anchors.centerIn: parent
+        visible: page.spotifyGate
+        spacing: Style.sp(3)
+        Icon {
+            Layout.alignment: Qt.AlignHCenter
+            name: "spotify"
+            size: Style.sp(10)
+            color: Style.providerColor
+        }
+        Btn {
+            Layout.alignment: Qt.AlignHCenter
+            text: "Sign in to Spotify"
+            primary: true
+            onClicked: Playback.spotifySignIn().catch(() => {})
+        }
+        Text {
+            Layout.alignment: Qt.AlignHCenter
+            text: "Premium is required for playback."
+            color: Tokens.inkMuted
+            font.family: Style.fontUi
+            font.pixelSize: Style.fs.sm
         }
     }
 }
