@@ -1,6 +1,7 @@
 pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Layouts
+import QtQuick.Effects
 import Ryoku.Ui.Singletons
 import Ryoku.Ui as RU
 import "chrome"
@@ -40,6 +41,10 @@ Item {
     // The mini player window's visibility. shell.qml's mini PanelWindow binds its visible to this; the
     // title-bar and player-bar buttons toggle it, MiniPlayer clears it.
     property bool miniOpen: false
+
+    // Any full-window modal (Sound dialog, Ctrl+K palette, Listen Together): the frame behind it is
+    // snapshot-blurred while one of these is open (spec 9).
+    readonly property bool modalOpen: app.soundOpen || palette.open || listenTogether.open
 
     // --- Now Playing stage helpers ----------------------------------------------------------
     function npOpenTab(tab) {
@@ -91,6 +96,18 @@ Item {
         id: frame
         anchors.fill: parent
         spacing: 0
+
+        // Spec-9 snapshot blur: a modal captures the whole frame behind it once (layer.live: false)
+        // and blurs that frozen texture, then draws its scrim + card sharp on top. No live subtree is
+        // ever blurred per frame; the overlays (Toast, SoundDialog, palette, menu, grain) sit outside
+        // this layer, so they stay crisp.
+        layer.enabled: app.modalOpen
+        layer.live: false
+        layer.effect: MultiEffect {
+            blurEnabled: true
+            blur: 1.0
+            blurMax: 32
+        }
 
         TitleBar {
             Layout.fillWidth: true
