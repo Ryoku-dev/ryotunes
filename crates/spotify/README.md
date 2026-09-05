@@ -168,7 +168,7 @@ the mapping table.
 ## Testing
 
 ```sh
-CARGO_TARGET_DIR=/home/nero/Work/ryotunes/target cargo test -p ryotunes-spotify
+cargo test -p ryotunes-spotify
 ```
 
 All unit tests are offline (protobuf/pb-codec/wire/pathfinder-request/hash-registry parsing, lyric

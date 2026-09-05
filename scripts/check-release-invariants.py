@@ -81,7 +81,8 @@ req(json.loads(read('ui/package.json')).get('version') == '2.4.1', 'UI version i
 req("PRODUCT_VERSION = 'v2.4'" in settings and "'2.4.1'" in settings, 'Settings version identity incorrect')
 req('pkgver=2.4.1' in read('packaging/arch/PKGBUILD'), 'Arch source pkgver incorrect')
 req('ryotunes-v2.4 2.4.1-1' in read('README.md') and 'ryotunes-v2.4 2.4.1-1' in read('RELEASE_NOTES.md'), 'public package identity missing from docs')
-req('name = "httpdate"' not in lock and 'name = "tauri-plugin-window-state"' not in lock, 'stale v2.0 lock entries returned')
+# httpdate is no longer a stale-lock tell: librespot-core (crates/spotify) pulls it legitimately.
+req('name = "tauri-plugin-window-state"' not in lock, 'stale v2.0 lock entries returned')
 
 # --- audio-only / background architecture ----------------------------------
 active = '\n'.join(read(p) for p in [
