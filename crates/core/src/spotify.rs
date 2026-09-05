@@ -56,6 +56,7 @@ pub fn spotify_track_id(id: &str) -> Option<&str> {
 pub const SC_TRACK_PREFIX: &str = "sc:track:";
 pub const SC_USER_PREFIX: &str = "sc:user:";
 pub const SC_PLAYLIST_PREFIX: &str = "sc:playlist:";
+pub const SC_SYSTEM_PREFIX: &str = "sc:system:";
 
 /// True for any id the daemon minted for a SoundCloud item (`sc:<kind>:<num>`). SoundCloud tracks
 /// stream over plain HTTPS (an HLS m3u8), not the Spotify FIFO — see `AppState::resolve`.
@@ -76,6 +77,12 @@ pub fn sc_user_id(id: &str) -> Option<u64> {
 /// The numeric id of a SoundCloud playlist/album id (`sc:playlist:<num>`).
 pub fn sc_playlist_id(id: &str) -> Option<u64> {
     id.strip_prefix(SC_PLAYLIST_PREFIX)?.parse().ok()
+}
+
+/// The permalink of a SoundCloud system-playlist id (`sc:system:<permalink>`) — a curated/charts
+/// playlist keyed by permalink rather than a numeric id. `None` for anything else.
+pub fn sc_system_id(id: &str) -> Option<&str> {
+    id.strip_prefix(SC_SYSTEM_PREFIX).filter(|s| !s.is_empty())
 }
 
 /// Owns the Spotify sign-in, the current client and the catalogue selector. Construct once with the

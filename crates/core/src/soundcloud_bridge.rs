@@ -21,12 +21,14 @@
 use innertube::models::metadata::ArtistRun;
 use innertube::{AlbumPage, BrowseItem, HomePage, PlaylistPage, SearchResults, Section, SongItem};
 use ryotunes_soundcloud::{
-    Playlist, PlaylistDetail, SearchResults as ScResults, Track, User, UserRef,
+    DiscoverItem, Playlist, PlaylistDetail, SearchResults as ScResults, Selection, SystemPlaylist,
+    Track, User, UserRef,
 };
 
 const TRACK: &str = "sc:track:";
 const USER: &str = "sc:user:";
 const PLAYLIST: &str = "sc:playlist:";
+const SYSTEM: &str = "sc:system:";
 
 // --- tracks ----------------------------------------------------------------------------------
 
@@ -116,14 +118,14 @@ pub fn album_to_card(pl: &Playlist) -> BrowseItem {
     }
 }
 
-/// A SoundCloud [`Playlist`] (not an album) as a `playlist` [`BrowseItem`]; the subtitle is its
-/// track count.
+/// A SoundCloud [`Playlist`] (not an album) as a `playlist` [`BrowseItem`]; the subtitle reads
+/// "<user> · N tracks".
 pub fn playlist_to_card(pl: &Playlist) -> BrowseItem {
     BrowseItem {
         kind: "playlist",
         id: format!("{PLAYLIST}{}", pl.id),
         title: pl.title.clone(),
-        subtitle: Some(track_count_line(pl.track_count)),
+        subtitle: Some(playlist_subtitle(pl)),
         thumbnail: pl.artwork.clone(),
         duration: None,
         artist_runs: Vec::new(),
@@ -179,15 +181,64 @@ pub fn playlist_page(detail: &PlaylistDetail) -> PlaylistPage {
     }
 }
 
-/// The home page for SoundCloud: the daemon's chart shelves (`title`, tracks) as titled card
-/// carousels. Empty shelves are dropped so a failed chart fetch never leaves a blank row.
-pub fn home_page(shelves: Vec<(String, Vec<Track>)>) -> HomePage {
-    let sections = shelves
-        .into_iter()
-        .filter(|(_, tracks)| !tracks.is_empty())
-        .map(|(title, tracks)| card_section(title, tracks.iter().map(track_to_card).collect()))
+/// The SoundCloud home: one shelf per discover [`Selection`], in the order SoundCloud returns them
+/// ("Trending by genre", "Curated by SoundCloud", "Artists to watch out for", …). Empty shelves
+/// are dropped so a partial fetch never leaves a blank row.
+pub fn discover_home(selections: &[Selection]) -> HomePage {
+    let sections = selections
+        .iter()
+        .filter_map(|sel| {
+            let items: Vec<BrowseItem> = sel.items.iter().map(discover_item_to_card).collect();
+            (!items.is_empty()).then(|| card_section(sel.title.clone(), items))
+        })
         .collect();
     HomePage { chips: Vec::new(), sections, continuation: None }
+}
+
+/// One discover shelf entry as a card: a regular playlist, or a SoundCloud system playlist (a
+/// curated/charts list keyed by permalink).
+fn discover_item_to_card(item: &DiscoverItem) -> BrowseItem {
+    match item {
+        DiscoverItem::Playlist(pl) => playlist_to_card(pl),
+        DiscoverItem::System(sp) => system_to_card(sp),
+    }
+}
+
+/// A SoundCloud [`SystemPlaylist`] as a `playlist` [`BrowseItem`], id `sc:system:<permalink>`. The
+/// title is the short title and the subtitle reads "Trending · N tracks".
+pub fn system_to_card(sp: &SystemPlaylist) -> BrowseItem {
+    BrowseItem {
+        kind: "playlist",
+        id: format!("{SYSTEM}{}", sp.permalink),
+        title: sp.short_title.clone(),
+        subtitle: Some(format!("Trending · {}", track_count_line(sp.track_count))),
+        thumbnail: sp.artwork.clone(),
+        duration: None,
+        artist_runs: Vec::new(),
+        play_count: None,
+        is_video: false,
+        is_upload: false,
+        explicit: false,
+    }
+}
+
+/// A SoundCloud system playlist ([`PlaylistDetail`] from `system_playlist`) as the playlist page.
+/// System playlists have no owner, so the subtitle reads "SoundCloud".
+pub fn system_playlist_page(detail: &PlaylistDetail) -> PlaylistPage {
+    let pl = &detail.playlist;
+    PlaylistPage {
+        title: Some(pl.title.clone()),
+        subtitle: Some("SoundCloud".to_owned()),
+        thumbnail: pl.artwork.clone(),
+        description: detail.description.clone(),
+        privacy: None,
+        cover: None,
+        items: detail.tracks.iter().map(track_to_song).collect(),
+        continuation: None,
+        owned: false,
+        collaborative: false,
+        sort_menu: None,
+    }
 }
 
 /// SoundCloud [`ScResults`] as the `search_all` payload. SoundCloud has no "top result" shelf, so
@@ -302,6 +353,15 @@ fn album_line(pl: &Playlist) -> String {
 
 fn track_count_line(n: u64) -> String {
     format!("{n} track{}", if n == 1 { "" } else { "s" })
+}
+
+/// "<user> · N tracks" for a playlist card, or just "N tracks" when the playlist has no owner.
+fn playlist_subtitle(pl: &Playlist) -> String {
+    if pl.user.username.is_empty() {
+        track_count_line(pl.track_count)
+    } else {
+        format!("{} · {}", pl.user.username, track_count_line(pl.track_count))
+    }
 }
 
 /// The leading four-digit year of a SoundCloud date string (`2019-05-10T00:00:00Z`), if it starts
@@ -470,5 +530,52 @@ mod tests {
         assert_eq!(all.albums[0].kind, "album");
         assert_eq!(all.playlists.len(), 1);
         assert_eq!(all.playlists[0].kind, "playlist");
+    }
+
+    #[test]
+    fn discover_home_maps_system_and_playlist_shelves() {
+        let sys = SystemPlaylist {
+            permalink: "trending-by-genre:trap".to_owned(),
+            urn: "soundcloud:system-playlists:trending-by-genre:trap".to_owned(),
+            title: "Trending: Trap".to_owned(),
+            short_title: "Trap".to_owned(),
+            description: None,
+            artwork: Some("https://cdn/trap.jpg".to_owned()),
+            track_count: 49,
+        };
+        let pl = Playlist {
+            id: 9,
+            title: "Fresh Finds".to_owned(),
+            user: user_ref(),
+            artwork: None,
+            is_album: false,
+            set_type: None,
+            track_count: 12,
+            release_date: None,
+            duration_ms: 0,
+        };
+        let selections = vec![
+            Selection {
+                slug: "trending-by-genre".to_owned(),
+                title: "Trending by genre".to_owned(),
+                items: vec![DiscoverItem::System(sys)],
+            },
+            Selection {
+                slug: "artists-to-watch".to_owned(),
+                title: "Artists to watch out for".to_owned(),
+                items: vec![DiscoverItem::Playlist(pl)],
+            },
+        ];
+        let home = discover_home(&selections);
+        assert_eq!(home.sections.len(), 2);
+        assert_eq!(home.sections[0].title, "Trending by genre");
+        let sys_card = &home.sections[0].items[0];
+        assert_eq!(sys_card.kind, "playlist");
+        assert_eq!(sys_card.id, "sc:system:trending-by-genre:trap");
+        assert_eq!(sys_card.title, "Trap");
+        assert_eq!(sys_card.subtitle.as_deref(), Some("Trending · 49 tracks"));
+        let pl_card = &home.sections[1].items[0];
+        assert_eq!(pl_card.id, "sc:playlist:9");
+        assert_eq!(pl_card.subtitle.as_deref(), Some("Klingande · 12 tracks"));
     }
 }

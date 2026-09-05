@@ -11,7 +11,9 @@ use std::sync::Arc;
 use innertube::{BrowseItem, PlaylistPage, PlaylistSort, Rating, SongItem, YouTubeClient};
 use ryotunes_core::db::LocalPlaylist;
 use ryotunes_core::soundcloud_bridge;
-use ryotunes_core::spotify::{sc_playlist_id, sc_track_id, sc_user_id, spotify_track_id, Provider};
+use ryotunes_core::spotify::{
+    sc_playlist_id, sc_system_id, sc_track_id, sc_user_id, spotify_track_id, Provider,
+};
 use ryotunes_core::spotify_bridge;
 use ryotunes_core::state::{
     is_local_playlist_id, is_smart_playlist_id, song_to_track, AppState, RepeatMode,
@@ -21,7 +23,6 @@ use ryotunes_core::state::{
 };
 use ryotunes_core::{local, radio};
 use ryotunes_protocol::{ErrorBody, PROTOCOL_VERSION};
-use ryotunes_soundcloud::ChartKind;
 use serde::de::DeserializeOwned;
 use serde_json::{json, Value};
 
@@ -941,40 +942,12 @@ async fn spotify_edit_playlist(
 
 // --- SoundCloud command bodies ----------------------------------------------------------------
 
-/// The genre chart shelves the SoundCloud home shows, as `(title, "soundcloud:genres:<key>")`.
-const SC_GENRE_SHELVES: [(&str, &str); 6] = [
-    ("House", "soundcloud:genres:house"),
-    ("Hip-hop & Rap", "soundcloud:genres:hiphoprap"),
-    ("Electronic", "soundcloud:genres:electronic"),
-    ("Pop", "soundcloud:genres:pop"),
-    ("R&B & Soul", "soundcloud:genres:rbsoul"),
-    ("Dance & EDM", "soundcloud:genres:danceedm"),
-];
-
-/// SoundCloud home: the "Top 50 · All music" and "Trending" charts plus six genre charts, fetched
-/// concurrently. A shelf that fails to load is dropped (empty), never an error — home stays useful.
+/// SoundCloud home: the "discover" selections, one shelf per selection in the order SoundCloud
+/// returns them ("Trending by genre", "Curated by SoundCloud", "Artists to watch out for"). No
+/// account needed; a fetch failure surfaces as an error toast rather than a blank page.
 async fn soundcloud_home(st: &Arc<AppState>) -> Result<Value, ErrorBody> {
-    const ALL: &str = "soundcloud:genres:all-music";
-    let sc = &st.soundcloud;
-    let (top, trending, g0, g1, g2, g3, g4, g5) = tokio::join!(
-        sc.charts(ChartKind::Top, ALL),
-        sc.charts(ChartKind::Trending, ALL),
-        sc.charts(ChartKind::Top, SC_GENRE_SHELVES[0].1),
-        sc.charts(ChartKind::Top, SC_GENRE_SHELVES[1].1),
-        sc.charts(ChartKind::Top, SC_GENRE_SHELVES[2].1),
-        sc.charts(ChartKind::Top, SC_GENRE_SHELVES[3].1),
-        sc.charts(ChartKind::Top, SC_GENRE_SHELVES[4].1),
-        sc.charts(ChartKind::Top, SC_GENRE_SHELVES[5].1),
-    );
-    let genres = [g0, g1, g2, g3, g4, g5];
-    let mut shelves = vec![
-        ("Top 50 · All music".to_owned(), top.unwrap_or_default()),
-        ("Trending".to_owned(), trending.unwrap_or_default()),
-    ];
-    for ((title, _), tracks) in SC_GENRE_SHELVES.iter().zip(genres) {
-        shelves.push(((*title).to_owned(), tracks.unwrap_or_default()));
-    }
-    ok(soundcloud_bridge::home_page(shelves))
+    let selections = st.soundcloud.discover().await.map_err(soundcloud_err)?;
+    ok(soundcloud_bridge::discover_home(&selections))
 }
 
 async fn soundcloud_search_all(st: &Arc<AppState>, query: &str) -> Result<Value, ErrorBody> {
@@ -1004,6 +977,14 @@ async fn soundcloud_album(st: &Arc<AppState>, id: u64) -> Result<Value, ErrorBod
 async fn soundcloud_playlist(st: &Arc<AppState>, id: u64) -> Result<Value, ErrorBody> {
     let detail = st.soundcloud.playlist(id).await.map_err(soundcloud_err)?;
     ok(soundcloud_bridge::playlist_page(&detail))
+}
+
+async fn soundcloud_system_playlist(
+    st: &Arc<AppState>,
+    permalink: &str,
+) -> Result<Value, ErrorBody> {
+    let detail = st.soundcloud.system_playlist(permalink).await.map_err(soundcloud_err)?;
+    ok(soundcloud_bridge::system_playlist_page(&detail))
 }
 
 /// The Orange/SoundCloud artist page: the user profile plus their tracks, albums, playlists and
@@ -1121,6 +1102,9 @@ async fn get_playlist(st: &Arc<AppState>, params: &Value) -> Result<Value, Error
     let id = arg::<String>(params, "id")?;
     if let Some(pid) = id.strip_prefix("spotify:playlist:") {
         return spotify_playlist(st, pid).await;
+    }
+    if let Some(permalink) = sc_system_id(&id) {
+        return soundcloud_system_playlist(st, permalink).await;
     }
     if let Some(pid) = sc_playlist_id(&id) {
         return soundcloud_playlist(st, pid).await;
