@@ -463,11 +463,8 @@ mod tests {
             release_date: None,
             duration_ms: 0,
         };
-        let results = ScResults {
-            tracks: vec![],
-            users: vec![],
-            playlists: vec![mk(1, true), mk(2, false)],
-        };
+        let results =
+            ScResults { tracks: vec![], users: vec![], playlists: vec![mk(1, true), mk(2, false)] };
         let all = search_all(&results);
         assert_eq!(all.albums.len(), 1);
         assert_eq!(all.albums[0].kind, "album");
