@@ -98,14 +98,19 @@ Rectangle {
                         Layout.preferredWidth: Style.sp(7)
                         Layout.fillHeight: true
                         radius: Style.radius - 1
-                        color: prov.selected ? Tokens.bone
+                        // The selected provider wears its own colour as a soft plate, the one
+                        // place the brand colours appear as chrome; the glyph stays ink.
+                        readonly property color brand: prov.modelData.key === "spotify" ? "#1db954" : "#ff2d2d"
+                        color: prov.selected ? Qt.rgba(prov.brand.r, prov.brand.g, prov.brand.b, 0.22)
                             : provHover.hovered ? Tokens.tint5 : "transparent"
+                        border.width: prov.selected ? 1 : 0
+                        border.color: Qt.rgba(prov.brand.r, prov.brand.g, prov.brand.b, 0.55)
                         Behavior on color { ColorAnimation { duration: Style.motion.snap } }
                         Icon {
                             anchors.centerIn: parent
                             name: prov.modelData.icon
                             size: Style.fs.lg
-                            color: prov.selected ? Tokens.inkOnBone : Tokens.inkMuted
+                            color: prov.selected ? prov.brand : Tokens.inkMuted
                         }
                         HoverHandler { id: provHover }
                         MouseArea {

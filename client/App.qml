@@ -149,6 +149,8 @@ Item {
                     anchors.fill: parent
                     color: Qt.rgba(Tokens.paper.r, Tokens.paper.g, Tokens.paper.b, 0.88)
                 }
+                // The provider's light over the glass: red for YouTube Music, green for Spotify.
+                ProviderGlow { anchors.fill: parent; focusX: 0.82; focusY: 0.1 }
 
                 Item {
                     id: pageClip
@@ -192,6 +194,13 @@ Item {
                         }
                         onPageChanged: enter.restart()
                         Component.onCompleted: enter.start()
+                        // A provider switch swaps the catalogue under every page (a YouTube
+                        // library is not a Spotify one), so the content re-enters the way a
+                        // route change does while the room's light tweens to the new colour.
+                        Connections {
+                            target: Playback
+                            function onProviderChanged(): void { enter.restart(); }
+                        }
                     }
                 }
 

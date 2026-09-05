@@ -111,10 +111,15 @@ Singleton {
     // Sonora's derivation keeps the cover's hue but pins saturation to 0.6-0.85 and the lightness
     // to 0.72 on dark paper / 0.42 on light, so the accent always reads against the surface.
     readonly property bool paperDark: (Tokens.paper.r + Tokens.paper.g + Tokens.paper.b) / 3 < 0.5
+    // The provider's own colour, the one clear tell of which catalogue is on: YouTube Music's red,
+    // Spotify's green. It tints the room's light (Backdrop's glow, the mini's glow), the provider
+    // pill and the accent's fallback when nothing plays, so switching provider changes the mood
+    // of the whole window at once.
+    readonly property color providerColor: Playback.provider === "spotify" ? "#1db954" : "#ff2d2d"
     readonly property color accent: {
         var c = Playback.artAccent;
         if (!Playback.now || c.a <= 0)
-            return Tokens.sun;
+            return root.providerColor;
         return Qt.hsla(c.hslHue < 0 ? 0 : c.hslHue, Math.max(0.6, Math.min(0.85, c.hslSaturation)), root.paperDark ? 0.72 : 0.42, 1);
     }
     readonly property color accentDeep: Qt.hsla(accent.hslHue < 0 ? 0 : accent.hslHue, accent.hslSaturation, root.paperDark ? 0.44 : 0.5, 1)

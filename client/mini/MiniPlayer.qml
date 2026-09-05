@@ -75,23 +75,7 @@ Item {
 
         // Paper tinted 3% toward the accent, the accent's glow ellipse off the top-left.
         Rectangle { anchors.fill: parent; color: root.mix(Tokens.paper, Style.accent, 0.03) }
-        Canvas {
-            id: glow
-            anchors.fill: parent
-            opacity: 0.68
-            onPaint: {
-                var c = getContext("2d");
-                c.clearRect(0, 0, width, height);
-                var g = c.createRadialGradient(width * 0.32, -30, 0, width * 0.32, -30, 300);
-                var a = Style.accent;
-                g.addColorStop(0, Qt.rgba(a.r, a.g, a.b, 0.11));
-                g.addColorStop(0.7, Qt.rgba(a.r, a.g, a.b, 0));
-                g.addColorStop(1, Qt.rgba(a.r, a.g, a.b, 0));
-                c.fillStyle = g;
-                c.fillRect(0, 0, width, height);
-            }
-            Connections { target: Style; function onAccentChanged() { glow.requestPaint(); } }
-        }
+        ProviderGlow { anchors.fill: parent; focusX: 0.32; focusY: -0.05; strength: 0.22; radius: 0.45 }
 
         // ── artwork column ─────────────────────────────────────────────────────────────
         Item {
