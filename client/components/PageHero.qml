@@ -1,13 +1,13 @@
 pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Layouts
-import Ryoku.Ui as RU
 import Ryoku.Ui.Singletons
 import "../"
 
 // A page's head, Sonora's fixed art-plus-title block in Ryoku's type: 168 px art (a circle for
 // artists), then the tracked eyebrow (ALBUM / PLAYLIST / ARTIST), the Fraunces title, a meta line
-// and the action row (Play, like, more). Register crosses sit behind it at the rich decor level.
+// and the action row (Play, like, more). Flat paper behind it: the print texture rides the chrome
+// (the nav rail), never the content (docs/ui-ux.md).
 Item {
     id: root
 
@@ -28,13 +28,6 @@ Item {
 
     implicitHeight: Math.max(Style.heroArt, copy.implicitHeight) + Style.sp(4)
 
-    RU.Reg {
-        anchors.fill: parent
-        anchors.margins: -Style.sp(2)
-        visible: Style.decorRich
-        cell: Style.sp(10)
-        opacity: 0.6
-    }
 
     RowLayout {
         anchors.fill: parent

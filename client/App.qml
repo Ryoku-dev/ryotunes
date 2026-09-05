@@ -99,7 +99,7 @@ Item {
 
         // Spec-9 snapshot blur: a modal captures the whole frame behind it once (layer.live: false)
         // and blurs that frozen texture, then draws its scrim + card sharp on top. No live subtree is
-        // ever blurred per frame; the overlays (Toast, SoundDialog, palette, menu, grain) sit outside
+        // ever blurred per frame; the overlays (Toast, SoundDialog, palette, menu) sit outside
         // this layer, so they stay crisp.
         layer.enabled: app.modalOpen
         layer.live: false
@@ -400,6 +400,4 @@ Item {
     // whole frame and is visible only while open.
     ListenTogether { id: listenTogether }
 
-    // The matte grain, one layer over the whole window at the rich decor level (z 999 in the kit).
-    RU.Grain { anchors.fill: parent; visible: Style.decorRich }
 }

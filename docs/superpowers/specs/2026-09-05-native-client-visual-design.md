@@ -8,8 +8,9 @@ literally, set in 9–11 px type with per-page margins, and laid it out for a 90
 reference is Sonora (github.com/nolight132/sonora): a fixed three-column frame, one spacing
 rhythm, table-style track lists, page heroes with a fixed art-plus-title block, and the playing
 artwork's colour as the adaptive theme. The skin is Ryoku's: ink/bone/paper tokens, Fraunces
-display type, Space Grotesk body, tracked mono labels, one-pixel lines, kana marks, grain and
-register crosses at the rich decor level.
+display type, Space Grotesk body, tracked mono labels, one-pixel lines, kana glosses, and the
+register backdrop behind the nav rail only. No grain, anywhere: Ryoku's paper is flat
+(ryoku-arch docs/ui-ux.md, "the print texture rides the chrome, never the content").
 
 ## 1. One rule for colour
 
@@ -25,9 +26,14 @@ The artwork is the only saturated thing on screen, and it is allowed to bleed:
 - Everything else is Tokens: `paper`, `paperLift`, `ink`, `inkDim`, `inkMuted`, `inkFaint`,
   `line`, `lineSoft`, `lineStrong`, `bone`/`inkOnBone`, `tint5`/`tint10`/`tint16`.
   Primary buttons are bone (Ryoku), not accent (Sonora).
-- Rich decor (`Style.decorRich`, Prefs, default on): `Ryoku.Ui.Grain` over the window,
-  `Ryoku.Ui.Reg` register crosses behind page heroes, kana marks on section headings and the
-  sidebar seals. Calm drops all three; nothing else changes.
+- Decor level (`Style.decorRich`, Prefs, default on): `Ryoku.Ui.Reg` behind the sidebar
+  rail (the Hub does the same behind its NavRail) and the kana glosses on nav items and
+  section headings. Calm drops both. Never `Grain`, never a texture behind a page, a hero,
+  a table or a control: the paper under content is flat paper.
+- Emphasis is inversion (a bone plate), the way the Hub does it. The artwork accent is
+  data, not chrome: it may mark what is PLAYING (the progress fill, the playing row's note,
+  the liked heart, the spectrum ramp) and nothing else. Active tabs, selected nav items and
+  primary buttons are bone plates, not accent.
 
 ## 2. Scale
 
@@ -178,7 +184,7 @@ paused: <= 0.3% CPU. Playing, ambient on, no spectrum: <= 3%. Spectrum surface v
 ## 10. Implementation notes
 
 - `import Ryoku.Ui as RU` (qualified): Ryoku.Ui ships its own `Btn`, `Icon`-like names that
-  shadow the client's components when imported bare. Use `RU.Reg`, `RU.Grain`, `RU.Anim`,
+  shadow the client's components when imported bare. Use `RU.Reg`, `RU.Anim`,
   `RU.Entrance`, `RU.SpectrumField`, `RU.DitherImage`.
 - Client singletons: `Style` (scale, fs roles, accent, ambient, decorRich), `Prefs`,
   `Spectrum` (claim/levels/energy), `Playback`, `Daemon`, `Router`, `Personal`.

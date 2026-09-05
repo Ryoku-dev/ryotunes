@@ -1,6 +1,7 @@
 pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Layouts
+import Ryoku.Ui as RU
 import Ryoku.Ui.Singletons
 import "../"
 import "../components"
@@ -134,7 +135,7 @@ Rectangle {
                 Layout.preferredWidth: Style.sp(1)
                 Layout.preferredHeight: sr.current ? Style.sp(3.5) : Style.sp(1)
                 radius: Style.sp(0.5)
-                color: sr.current ? Style.accent : Tokens.lineStrong
+                color: sr.current ? Tokens.ink : Tokens.lineStrong
                 Behavior on Layout.preferredHeight { NumberAnimation { duration: Style.motion.snap } }
             }
             Text {
@@ -159,6 +160,9 @@ Rectangle {
     Rectangle {
         id: glass
         width: Style.sidebarW
+        // The registration sheet behind the rail, the way the Hub's NavRail sits on one: the print
+        // texture rides the chrome, never the content.
+        RU.Reg { anchors.fill: parent; visible: Style.decorRich; opacity: 0.7 }
         anchors.right: parent.right
         anchors.top: parent.top
         anchors.bottom: parent.bottom

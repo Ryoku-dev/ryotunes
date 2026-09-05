@@ -268,7 +268,7 @@ Item {
                                         anchors { left: parent.left; right: parent.right; bottom: parent.bottom; leftMargin: 14; rightMargin: 14; bottomMargin: 3 }
                                         height: 2
                                         radius: 2
-                                        color: root.mix(Style.accent, Tokens.ink, 0.42)
+                                        color: Tokens.ink
                                         opacity: 0.78
                                     }
                                     HoverHandler { id: tabHover; cursorShape: Qt.PointingHandCursor }
