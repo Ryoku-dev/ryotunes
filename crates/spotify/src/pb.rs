@@ -125,7 +125,5 @@ impl<'a> Reader<'a> {
 }
 
 pub(crate) fn text(bytes: &[u8]) -> Result<String> {
-    Ok(std::str::from_utf8(bytes)
-        .context("field is not utf-8")?
-        .to_owned())
+    Ok(std::str::from_utf8(bytes).context("field is not utf-8")?.to_owned())
 }

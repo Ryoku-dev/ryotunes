@@ -205,9 +205,7 @@ pub(crate) async fn page(session: &Session, genre_id: &str) -> Result<GenreDetai
 }
 
 fn cards(data: Start) -> Result<Vec<Genre>> {
-    let start = data
-        .start
-        .context("browseAll Pathfinder response has no browse")?;
+    let start = data.start.context("browseAll Pathfinder response has no browse")?;
 
     Ok(start
         .sections
@@ -222,31 +220,17 @@ fn cards(data: Start) -> Result<Vec<Genre>> {
 }
 
 fn detail(data: Page) -> Result<GenreDetail> {
-    let browse = data
-        .browse
-        .context("browsePage Pathfinder response has no browse")?;
+    let browse = data.browse.context("browsePage Pathfinder response has no browse")?;
     let header = browse.header;
 
     Ok(GenreDetail {
-        name: header
-            .and_then(|header| header.title)
-            .map(|title| title.label)
-            .unwrap_or_default(),
-        sections: browse
-            .sections
-            .items
-            .into_iter()
-            .filter_map(section)
-            .collect(),
+        name: header.and_then(|header| header.title).map(|title| title.label).unwrap_or_default(),
+        sections: browse.sections.items.into_iter().filter_map(section).collect(),
     })
 }
 
 fn section(section: Section) -> Option<GenreSection> {
-    let title = section
-        .data
-        .title
-        .map(|title| title.label)
-        .unwrap_or_default();
+    let title = section.data.title.map(|title| title.label).unwrap_or_default();
     let items: Vec<GenreItem> = section.items.items.into_iter().filter_map(item).collect();
 
     (!items.is_empty()).then_some(GenreSection { title, items })
@@ -319,30 +303,17 @@ fn genre(uri: &str, container: WireCard) -> Option<Genre> {
 }
 
 fn shows(cover: &str) -> bool {
-    cover
-        .rsplit('/')
-        .next()
-        .is_some_and(|file| file.starts_with(SHOW_ART))
+    cover.rsplit('/').next().is_some_and(|file| file.starts_with(SHOW_ART))
 }
 
 fn image(artwork: &Artwork) -> Option<String> {
-    artwork
-        .sources
-        .first()
-        .map(|source| source.url.clone())
-        .filter(|url| !url.is_empty())
+    artwork.sources.first().map(|source| source.url.clone()).filter(|url| !url.is_empty())
 }
 
 fn joined(artists: &[ArtistRef]) -> String {
-    artists
-        .iter()
-        .map(|artist| artist.name.as_str())
-        .collect::<Vec<_>>()
-        .join(", ")
+    artists.iter().map(|artist| artist.name.as_str()).collect::<Vec<_>>().join(", ")
 }
 
 fn trimmed(uri: &str, prefix: &str) -> Option<String> {
-    uri.strip_prefix(prefix)
-        .filter(|id| !id.is_empty())
-        .map(str::to_owned)
+    uri.strip_prefix(prefix).filter(|id| !id.is_empty()).map(str::to_owned)
 }

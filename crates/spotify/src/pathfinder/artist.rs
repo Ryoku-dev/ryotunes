@@ -168,43 +168,27 @@ fn variables(artist_id: &str) -> serde_json::Value {
 }
 
 fn overview(data: Data, artist_id: &str) -> Result<Overview> {
-    let artist = data
-        .artist
-        .context("artist Pathfinder response has no artist")?;
-    let discography = artist
-        .discography
-        .context("artist Pathfinder response has no discography")?;
-    let Discography {
-        top_tracks,
-        albums,
-        singles,
-        compilations,
-    } = discography;
+    let artist = data.artist.context("artist Pathfinder response has no artist")?;
+    let discography =
+        artist.discography.context("artist Pathfinder response has no discography")?;
+    let Discography { top_tracks, albums, singles, compilations } = discography;
     let tracks = top_tracks
         .into_iter()
         .flat_map(|tracks| tracks.items)
         .map(|item| {
-            let count = item
-                .track
-                .playcount
-                .and_then(|count| count.parse().ok())
-                .and_then(super::reported);
+            let count =
+                item.track.playcount.and_then(|count| count.parse().ok()).and_then(super::reported);
             (item.track.uri, count)
         })
         .collect();
-    let artist_ref = ArtistRef {
-        name: artist.profile.name.clone(),
-        id: Some(artist_id.to_owned()),
-    };
+    let artist_ref =
+        ArtistRef { name: artist.profile.name.clone(), id: Some(artist_id.to_owned()) };
     let albums = releases(albums, singles, compilations, &artist_ref);
 
     Ok(Overview {
         name: artist.profile.name,
         cover_large: cover(&artist.visuals.avatar.sources, true),
-        biography: artist
-            .profile
-            .biography
-            .and_then(|biography| biography.text),
+        biography: artist.profile.biography.and_then(|biography| biography.text),
         monthly_listeners: artist.stats.and_then(|stats| stats.monthly_listeners),
         tracks,
         albums,
@@ -232,11 +216,7 @@ fn releases(
 
 fn album(release: Release, artist: &ArtistRef) -> Album {
     let release_date = release.date.as_ref().map(date).unwrap_or_default();
-    let year = release
-        .date
-        .as_ref()
-        .map(|date| date.year)
-        .unwrap_or_default();
+    let year = release.date.as_ref().map(|date| date.year).unwrap_or_default();
 
     Album {
         id: release.id,
@@ -250,12 +230,7 @@ fn album(release: Release, artist: &ArtistRef) -> Album {
         track_count: release.tracks.total_count,
         release_date,
         label: release.label,
-        copyrights: release
-            .copyright
-            .items
-            .into_iter()
-            .map(|copyright| copyright.text)
-            .collect(),
+        copyrights: release.copyright.items.into_iter().map(|copyright| copyright.text).collect(),
         added_at: None,
     }
 }
@@ -318,16 +293,10 @@ mod tests {
         assert_eq!(overview.albums.len(), 1);
         assert_eq!(overview.albums[0].name, "Release");
         assert_eq!(overview.albums[0].cover.as_deref(), Some("album-small"));
-        assert_eq!(
-            overview.albums[0].cover_large.as_deref(),
-            Some("album-large")
-        );
+        assert_eq!(overview.albums[0].cover_large.as_deref(), Some("album-large"));
         assert_eq!(overview.albums[0].release_date, "2024-03-02");
         assert_eq!(overview.albums[0].track_count, 12);
-        assert_eq!(
-            overview.albums[0].artist_refs[0].id.as_deref(),
-            Some("artist")
-        );
+        assert_eq!(overview.albums[0].artist_refs[0].id.as_deref(), Some("artist"));
     }
 
     #[test]

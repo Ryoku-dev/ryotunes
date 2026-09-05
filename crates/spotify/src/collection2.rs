@@ -45,39 +45,20 @@ pub(crate) struct SavedItem {
 }
 
 pub async fn set_track_saved(session: &Session, track_id: &str, saved: bool) -> Result<()> {
-    set_saved(
-        session,
-        COLLECTION,
-        &format!("spotify:track:{track_id}"),
-        saved,
-    )
-    .await
+    set_saved(session, COLLECTION, &format!("spotify:track:{track_id}"), saved).await
 }
 
 pub async fn set_album_saved(session: &Session, album_id: &str, saved: bool) -> Result<()> {
-    set_saved(
-        session,
-        COLLECTION,
-        &format!("spotify:album:{album_id}"),
-        saved,
-    )
-    .await
+    set_saved(session, COLLECTION, &format!("spotify:album:{album_id}"), saved).await
 }
 
 pub async fn set_artist_saved(session: &Session, artist_id: &str, saved: bool) -> Result<()> {
-    set_saved(
-        session,
-        ARTISTS,
-        &format!("spotify:artist:{artist_id}"),
-        saved,
-    )
-    .await
+    set_saved(session, ARTISTS, &format!("spotify:artist:{artist_id}"), saved).await
 }
 
 async fn set_saved(session: &Session, set: &str, uri: &str, saved: bool) -> Result<()> {
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .context("cannot read the current time")?;
+    let now =
+        SystemTime::now().duration_since(UNIX_EPOCH).context("cannot read the current time")?;
     let added_at = match saved {
         true => now
             .as_secs()
@@ -133,11 +114,7 @@ pub(crate) async fn saved_items(
 
         let page = response(&raw).context("cannot decode the collection page")?;
 
-        found.extend(
-            page.items
-                .into_iter()
-                .filter(|item| item.uri.starts_with(prefix)),
-        );
+        found.extend(page.items.into_iter().filter(|item| item.uri.starts_with(prefix)));
 
         token = page.next;
         if found.len() >= limit || token.is_empty() {
@@ -166,10 +143,7 @@ fn request(username: &str, set: &str, token: &str) -> Vec<u8> {
 }
 
 fn response(bytes: &[u8]) -> Result<Page> {
-    let mut page = Page {
-        items: Vec::new(),
-        next: String::new(),
-    };
+    let mut page = Page { items: Vec::new(), next: String::new() };
     let mut reader = Reader::new(bytes);
 
     while let Some((field, value)) = reader.field()? {
@@ -201,15 +175,10 @@ fn kept(bytes: &[u8]) -> Result<Option<SavedItem>> {
     }
 
     if added_at.is_none() && uri.is_some() && !removed {
-        log::debug!(
-            "collection: saved item has no date, fields: {}",
-            fields(bytes)
-        );
+        log::debug!("collection: saved item has no date, fields: {}", fields(bytes));
     }
 
-    Ok(uri
-        .filter(|_| !removed)
-        .map(|uri| SavedItem { uri, added_at }))
+    Ok(uri.filter(|_| !removed).map(|uri| SavedItem { uri, added_at }))
 }
 
 fn fields(bytes: &[u8]) -> String {

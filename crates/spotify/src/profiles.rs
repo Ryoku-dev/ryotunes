@@ -40,17 +40,11 @@ struct Circle {
 
 impl Profile {
     fn label(&self) -> Option<&str> {
-        self.display_name
-            .as_deref()
-            .or(self.name.as_deref())
-            .filter(|label| !label.is_empty())
+        self.display_name.as_deref().or(self.name.as_deref()).filter(|label| !label.is_empty())
     }
 
     fn avatar(&self) -> Option<String> {
-        self.image_url
-            .as_deref()
-            .filter(|url| !url.is_empty())
-            .map(str::to_owned)
+        self.image_url.as_deref().filter(|url| !url.is_empty()).map(str::to_owned)
     }
 }
 
@@ -108,11 +102,7 @@ pub async fn display_names(
     session: &Session,
     usernames: HashSet<String>,
 ) -> HashMap<String, String> {
-    contributors(session, usernames)
-        .await
-        .into_iter()
-        .map(|(id, found)| (id, found.name))
-        .collect()
+    contributors(session, usernames).await.into_iter().map(|(id, found)| (id, found.name)).collect()
 }
 
 async fn counts(session: &Session, username: &str, found: &Profile) -> (Option<u64>, Option<u64>) {
@@ -162,11 +152,7 @@ async fn fetch(session: &Session, username: &str, playlists: u32) -> Option<Prof
 }
 
 fn listed(found: &Listed) -> Option<Playlist> {
-    let id = found
-        .uri
-        .as_deref()?
-        .strip_prefix(PLAYLIST_PREFIX)
-        .filter(|id| !id.is_empty())?;
+    let id = found.uri.as_deref()?.strip_prefix(PLAYLIST_PREFIX).filter(|id| !id.is_empty())?;
     let name = found.name.as_deref().filter(|name| !name.is_empty())?;
 
     Some(Playlist {
@@ -182,11 +168,7 @@ fn listed(found: &Listed) -> Option<Playlist> {
         collaborative: false,
         blend: false,
         public: true,
-        cover: found
-            .image_url
-            .as_deref()
-            .filter(|url| wire::fetchable(url))
-            .map(str::to_owned),
+        cover: found.image_url.as_deref().filter(|url| wire::fetchable(url)).map(str::to_owned),
         track_count: 0,
         modified_at: None,
     })

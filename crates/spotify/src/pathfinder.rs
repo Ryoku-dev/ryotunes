@@ -73,16 +73,10 @@ async fn send<T: DeserializeOwned>(
         },
     }))
     .with_context(|| format!("cannot encode {operation} Pathfinder request"))?;
-    let token = session
-        .login5()
-        .auth_token()
-        .await
-        .context("cannot obtain Spotify access token")?;
-    let client_token = session
-        .spclient()
-        .client_token()
-        .await
-        .context("cannot obtain Spotify client token")?;
+    let token =
+        session.login5().auth_token().await.context("cannot obtain Spotify access token")?;
+    let client_token =
+        session.spclient().client_token().await.context("cannot obtain Spotify client token")?;
     let request = Request::builder()
         .method(Method::POST)
         .uri(ENDPOINT)
@@ -90,10 +84,7 @@ async fn send<T: DeserializeOwned>(
         .header(header::CONTENT_TYPE, "application/json")
         .header("app-platform", APP_PLATFORM)
         .header("spotify-app-version", APP_VERSION)
-        .header(
-            header::AUTHORIZATION,
-            format!("{} {}", token.token_type, token.access_token),
-        )
+        .header(header::AUTHORIZATION, format!("{} {}", token.token_type, token.access_token))
         .header(CLIENT_TOKEN, client_token)
         .body(Bytes::from(body))
         .with_context(|| format!("cannot build {operation} Pathfinder request"))?;
@@ -109,17 +100,11 @@ fn decoded<T: DeserializeOwned>(bytes: &[u8], operation: &str) -> Result<T> {
     let response: Response<T> = serde_json::from_slice(bytes)
         .with_context(|| format!("cannot decode {operation} Pathfinder response"))?;
     if !response.errors.is_empty() {
-        let messages = response
-            .errors
-            .into_iter()
-            .map(|error| error.message)
-            .collect::<Vec<_>>()
-            .join("; ");
+        let messages =
+            response.errors.into_iter().map(|error| error.message).collect::<Vec<_>>().join("; ");
         bail!("Spotify rejected {operation} Pathfinder query: {messages}");
     }
-    response
-        .data
-        .with_context(|| format!("{operation} Pathfinder response has no data"))
+    response.data.with_context(|| format!("{operation} Pathfinder response has no data"))
 }
 
 fn reported(count: u64) -> Option<u64> {
@@ -140,11 +125,8 @@ mod tests {
 
     #[test]
     fn reports_graphql_error() {
-        let error = decoded::<Value>(
-            br#"{"data":null,"errors":[{"message":"bad hash"}]}"#,
-            "test",
-        )
-        .unwrap_err();
+        let error = decoded::<Value>(br#"{"data":null,"errors":[{"message":"bad hash"}]}"#, "test")
+            .unwrap_err();
         assert!(error.to_string().contains("bad hash"));
     }
 }

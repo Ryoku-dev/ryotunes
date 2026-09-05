@@ -182,28 +182,16 @@ fn page(data: Data) -> Result<Page> {
         .into_iter()
         .map(|item| track_from(item.track, &header))
         .collect::<Result<_>>()?;
-    Ok(Page {
-        album: header,
-        tracks,
-        items,
-        total,
-    })
+    Ok(Page { album: header, tracks, items, total })
 }
 
 fn album_from(album: &PathAlbum) -> Album {
     let (artists, artist_refs) = artists(&album.artists);
     let release_date = album.date.as_ref().map(date).unwrap_or_default();
-    let year = release_date
-        .get(..4)
-        .and_then(|year| year.parse().ok())
-        .unwrap_or_default();
+    let year = release_date.get(..4).and_then(|year| year.parse().ok()).unwrap_or_default();
 
     Album {
-        id: album
-            .uri
-            .strip_prefix(ALBUM_PREFIX)
-            .unwrap_or(&album.uri)
-            .to_owned(),
+        id: album.uri.strip_prefix(ALBUM_PREFIX).unwrap_or(&album.uri).to_owned(),
         name: non_empty(&album.name).unwrap_or(UNKNOWN).to_owned(),
         artists,
         artist_refs,
@@ -266,17 +254,10 @@ fn artists(artists: &Artists) -> (String, Vec<ArtistRef>) {
         .iter()
         .filter_map(|artist| {
             let name = non_empty(&artist.profile.name)?.to_owned();
-            Some(ArtistRef {
-                name,
-                id: artist.uri.strip_prefix(ARTIST_PREFIX).map(str::to_owned),
-            })
+            Some(ArtistRef { name, id: artist.uri.strip_prefix(ARTIST_PREFIX).map(str::to_owned) })
         })
         .collect();
-    let names = refs
-        .iter()
-        .map(|artist| artist.name.as_str())
-        .collect::<Vec<_>>()
-        .join(", ");
+    let names = refs.iter().map(|artist| artist.name.as_str()).collect::<Vec<_>>().join(", ");
     (names, refs)
 }
 

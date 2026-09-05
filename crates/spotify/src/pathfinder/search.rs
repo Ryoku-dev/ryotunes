@@ -164,9 +164,7 @@ pub(crate) async fn albums(session: &Session, term: &str) -> Result<Vec<Album>> 
         return Ok(Vec::new());
     };
     let data = query::<AlbumSearch>(session, ALBUMS, variables(term)).await?;
-    let results = data
-        .search
-        .context("searchAlbums Pathfinder response has no search")?;
+    let results = data.search.context("searchAlbums Pathfinder response has no search")?;
 
     Ok(results.albums.items.into_iter().filter_map(album).collect())
 }
@@ -176,17 +174,10 @@ pub(crate) async fn playlists(session: &Session, term: &str) -> Result<Vec<Playl
         return Ok(Vec::new());
     };
     let data = query::<PlaylistSearch>(session, PLAYLISTS, variables(term)).await?;
-    let results = data
-        .search
-        .context("searchPlaylists Pathfinder response has no search")?;
+    let results = data.search.context("searchPlaylists Pathfinder response has no search")?;
     let username = session.username();
 
-    Ok(results
-        .playlists
-        .items
-        .into_iter()
-        .filter_map(|hit| playlist(hit, &username))
-        .collect())
+    Ok(results.playlists.items.into_iter().filter_map(|hit| playlist(hit, &username)).collect())
 }
 
 fn album(hit: AlbumHit) -> Option<Album> {
@@ -225,19 +216,13 @@ fn playlist(hit: PlaylistHit, username: &str) -> Option<Playlist> {
     Some(Playlist {
         id: trimmed(&playlist.uri, PLAYLIST_PREFIX)?,
         name: playlist.name,
-        owned: owner
-            .as_ref()
-            .is_some_and(|account| account.username == username),
+        owned: owner.as_ref().is_some_and(|account| account.username == username),
         owner: owner.map(|account| account.name).unwrap_or_default(),
         owner_id: String::new(),
         collaborative: false,
         blend: false,
         public: true,
-        cover: playlist
-            .images
-            .items
-            .first()
-            .and_then(|artwork| cover(&artwork.sources, false)),
+        cover: playlist.images.items.first().and_then(|artwork| cover(&artwork.sources, false)),
         track_count: 0,
         modified_at: None,
     })
@@ -254,11 +239,7 @@ fn artists(artists: Artists) -> (String, Vec<ArtistRef>) {
             })
         })
         .collect();
-    let names = refs
-        .iter()
-        .map(|artist| artist.name.as_str())
-        .collect::<Vec<_>>()
-        .join(", ");
+    let names = refs.iter().map(|artist| artist.name.as_str()).collect::<Vec<_>>().join(", ");
     (names, refs)
 }
 
@@ -291,7 +272,5 @@ fn wanted(term: &str) -> Option<&str> {
 }
 
 fn trimmed(uri: &str, prefix: &str) -> Option<String> {
-    uri.strip_prefix(prefix)
-        .filter(|id| !id.is_empty())
-        .map(str::to_owned)
+    uri.strip_prefix(prefix).filter(|id| !id.is_empty()).map(str::to_owned)
 }

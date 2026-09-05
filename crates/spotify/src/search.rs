@@ -13,11 +13,8 @@ pub async fn search(session: &Session, query: &str) -> Result<Vec<Track>> {
     }
 
     let uri = format!("spotify:search:{}", escaped(query));
-    let context = session
-        .spclient()
-        .get_context(&uri)
-        .await
-        .context("cannot resolve the search context")?;
+    let context =
+        session.spclient().get_context(&uri).await.context("cannot resolve the search context")?;
 
     let uris: Vec<String> = context
         .pages
@@ -31,10 +28,7 @@ pub async fn search(session: &Session, query: &str) -> Result<Vec<Track>> {
     }
 
     let known = collection::metadata(session, &uris).await?;
-    Ok(uris
-        .iter()
-        .filter_map(|uri| known.get(uri).cloned())
-        .collect())
+    Ok(uris.iter().filter_map(|uri| known.get(uri).cloned()).collect())
 }
 
 fn escaped(query: &str) -> String {

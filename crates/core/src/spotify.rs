@@ -21,10 +21,7 @@ pub struct SpotifyState {
 
 impl SpotifyState {
     pub fn new(data_dir: PathBuf) -> Self {
-        Self {
-            provider: SpotifyProvider::new(data_dir),
-            client: RwLock::new(None),
-        }
+        Self { provider: SpotifyProvider::new(data_dir), client: RwLock::new(None) }
     }
 
     /// Whether a credential file exists to restore from (no network).

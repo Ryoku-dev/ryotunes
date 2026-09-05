@@ -12,10 +12,9 @@ use protobuf::Message as _;
 
 use crate::stream::{self, StreamHandle};
 use crate::{
-    albums, artists, collection, collection2, lyrics, pathfinder, playlists, profiles, radio,
-    search, wire, Album, AlbumDetail, Artist, ArtistProfile, ArtistRef, Genre, GenreDetail,
-    HomeFeed, Lyrics, MediaKind, Playlist, PlaylistDetail, SavedArtist, Track, UserDetail,
-    UserProfile,
+    Album, AlbumDetail, Artist, ArtistProfile, ArtistRef, Genre, GenreDetail, HomeFeed, Lyrics,
+    MediaKind, Playlist, PlaylistDetail, SavedArtist, Track, UserDetail, UserProfile, albums,
+    artists, collection, collection2, lyrics, pathfinder, playlists, profiles, radio, search, wire,
 };
 
 const MADE_FOR_YOU: &str = "0JQ5DAt0tbjZptfcdMSKl3";
@@ -76,11 +75,7 @@ impl Client {
 
     pub async fn profile(&self) -> Result<UserProfile> {
         let username = self.session.username();
-        let body = self
-            .session
-            .spclient()
-            .get_user_profile(&username, None, None)
-            .await?;
+        let body = self.session.spclient().get_user_profile(&username, None, None).await?;
 
         let profile: wire::Named = serde_json::from_slice(&body).unwrap_or_default();
         Ok(UserProfile {
@@ -177,7 +172,8 @@ impl Client {
         let mut detail = playlists::playlist(&self.session, playlist_id).await?;
         let owner = detail.playlist.owner_id.clone();
         if !owner.is_empty() {
-            let names = profiles::display_names(&self.session, HashSet::from([owner.clone()])).await;
+            let names =
+                profiles::display_names(&self.session, HashSet::from([owner.clone()])).await;
             if let Some(name) = names.get(&owner) {
                 detail.playlist.owner = name.clone();
             }
@@ -194,11 +190,7 @@ impl Client {
     }
 
     pub async fn playlists(&self, limit: u32) -> Result<Vec<Playlist>> {
-        let body = self
-            .session
-            .spclient()
-            .get_rootlist(0, Some(limit as usize))
-            .await?;
+        let body = self.session.spclient().get_rootlist(0, Some(limit as usize)).await?;
 
         let rootlist =
             RootList::parse_from_bytes(&body).context("cannot decode the rootlist protobuf")?;
@@ -254,7 +246,11 @@ impl Client {
         playlists::add_track(&self.session, playlist_id, track_id).await
     }
 
-    pub async fn remove_track_from_playlist(&self, playlist_id: &str, track_id: &str) -> Result<()> {
+    pub async fn remove_track_from_playlist(
+        &self,
+        playlist_id: &str,
+        track_id: &str,
+    ) -> Result<()> {
         playlists::remove_track(&self.session, playlist_id, track_id).await
     }
 
@@ -281,12 +277,7 @@ impl Client {
         });
         let artists = artists_of(&tracks);
 
-        Ok(SearchResults {
-            tracks,
-            albums,
-            artists,
-            playlists,
-        })
+        Ok(SearchResults { tracks, albums, artists, playlists })
     }
 
     pub async fn search_albums(&self, query: &str) -> Result<Vec<Album>> {
@@ -301,10 +292,7 @@ impl Client {
         let mut sections = pathfinder::genre(&self.session, MADE_FOR_YOU).await?.sections;
         playlists::name_blanks(&self.session, &mut sections).await;
 
-        Ok(HomeFeed {
-            sections,
-            ..HomeFeed::default()
-        })
+        Ok(HomeFeed { sections, ..HomeFeed::default() })
     }
 
     pub async fn genres(&self) -> Result<Vec<Genre>> {

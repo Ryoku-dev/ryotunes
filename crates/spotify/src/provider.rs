@@ -7,9 +7,9 @@ use std::path::PathBuf;
 
 use anyhow::Result;
 
+use crate::Client;
 use crate::auth::{self, AuthConfig};
 use crate::credentials;
-use crate::Client;
 
 /// Provider settings the daemon may override. Defaults are Sonora's public web client id and the
 /// loopback redirect the OAuth listener binds.

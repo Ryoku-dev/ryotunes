@@ -38,10 +38,7 @@ pub(super) async fn resolve(session: &Session, operation: &str) -> Result<Hash> 
         .filter(|registry| aged(registry) < MAX_AGE)
         .and_then(|registry| registry.operations.get(operation).cloned())
     {
-        return Ok(Hash {
-            value,
-            tried: false,
-        });
+        return Ok(Hash { value, tried: false });
     }
     let latest = match fetched(session).await {
         Ok(operations) => operations,
@@ -60,15 +57,10 @@ pub(super) async fn resolve(session: &Session, operation: &str) -> Result<Hash> 
 }
 
 pub(super) async fn refetch(session: &Session, operation: &str, stale: &str) -> Option<String> {
-    refreshed(session, Some(stale))
-        .await
-        .ok()?
-        .get(operation)
-        .cloned()
-        .or_else(|| {
-            log::warn!("pathfinder: the hash registry has no {operation} query");
-            None
-        })
+    refreshed(session, Some(stale)).await.ok()?.get(operation).cloned().or_else(|| {
+        log::warn!("pathfinder: the hash registry has no {operation} query");
+        None
+    })
 }
 
 async fn fetched(session: &Session) -> Result<HashMap<String, String>> {
@@ -112,11 +104,7 @@ fn parsed(body: &[u8]) -> Result<HashMap<String, String>> {
     if answer.operations.is_empty() {
         bail!("the query hash registry is empty");
     }
-    if let Some((operation, _)) = answer
-        .operations
-        .iter()
-        .find(|(_, hash)| !sane(hash.as_str()))
-    {
+    if let Some((operation, _)) = answer.operations.iter().find(|(_, hash)| !sane(hash.as_str())) {
         bail!("the {operation} query hash is malformed");
     }
     Ok(answer.operations)
@@ -131,10 +119,7 @@ fn aged(registry: &Registry) -> Duration {
 }
 
 fn now() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs()
+    SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs()
 }
 
 fn registry() -> Option<Registry> {
@@ -142,10 +127,7 @@ fn registry() -> Option<Registry> {
 }
 
 fn store(operations: &HashMap<String, String>) {
-    let registry = Registry {
-        fetched: now(),
-        operations: operations.clone(),
-    };
+    let registry = Registry { fetched: now(), operations: operations.clone() };
     write(&registry);
     if let Ok(mut cache) = cache().lock() {
         *cache = Some(registry);

@@ -9,7 +9,7 @@
 
 use std::path::PathBuf;
 
-use anyhow::{anyhow, Context as _, Result};
+use anyhow::{Context as _, Result, anyhow};
 use librespot_core::authentication::Credentials;
 use librespot_core::cache::Cache;
 use librespot_core::{Session, SessionConfig};
@@ -93,9 +93,7 @@ impl AuthConfig {
 /// The loopback authority (`host:port`) a redirect URI redirects to, so the callback listener knows
 /// where to bind.
 fn socket_address(uri: &str) -> Option<String> {
-    let rest = uri
-        .strip_prefix("http://")
-        .or_else(|| uri.strip_prefix("https://"))?;
+    let rest = uri.strip_prefix("http://").or_else(|| uri.strip_prefix("https://"))?;
     let authority = rest.split('/').next().filter(|host| !host.is_empty())?;
     match authority.rsplit_once(':') {
         Some((_, port)) if port.chars().all(|digit| digit.is_ascii_digit()) => {
@@ -127,10 +125,7 @@ where
     let access_token = authorize(config, on_url).await?;
 
     let session = session(config)?;
-    session
-        .connect(Credentials::with_access_token(access_token), true)
-        .await
-        .map_err(denied)?;
+    session.connect(Credentials::with_access_token(access_token), true).await.map_err(denied)?;
     credentials::secure(&config.file());
     premium(&session).await?;
     Ok(session)
@@ -140,12 +135,8 @@ async fn authorize<F>(config: &AuthConfig, on_url: F) -> Result<String>
 where
     F: FnOnce(String) + Send + 'static,
 {
-    let address = socket_address(&config.redirect_uri).ok_or_else(|| {
-        anyhow!(
-            "cannot read a socket address from {}",
-            config.redirect_uri
-        )
-    })?;
+    let address = socket_address(&config.redirect_uri)
+        .ok_or_else(|| anyhow!("cannot read a socket address from {}", config.redirect_uri))?;
 
     let client = BasicClient::new(ClientId::new(config.client_id.clone()))
         .set_auth_uri(AuthUrl::new(AUTHORIZE_URL.to_owned()).context("invalid authorize URL")?)
@@ -206,11 +197,8 @@ fn listen(address: &str) -> Result<String> {
     let redirect = format!("http://localhost{target}");
 
     let message = "Ryotunes has your Spotify authorization. You can close this tab.";
-    let response = format!(
-        "HTTP/1.1 200 OK\r\ncontent-length: {}\r\n\r\n{}",
-        message.len(),
-        message
-    );
+    let response =
+        format!("HTTP/1.1 200 OK\r\ncontent-length: {}\r\n\r\n{}", message.len(), message);
     let _ = stream.write_all(response.as_bytes());
 
     if let Some(code) = query_param(&redirect, "code") {
@@ -225,9 +213,7 @@ fn listen(address: &str) -> Result<String> {
 
 fn query_param(redirect_url: &str, key: &str) -> Option<String> {
     let url = url::Url::parse(redirect_url).ok()?;
-    url.query_pairs()
-        .find(|(name, _)| name == key)
-        .map(|(_, value)| value.into_owned())
+    url.query_pairs().find(|(name, _)| name == key).map(|(_, value)| value.into_owned())
 }
 
 async fn premium(session: &Session) -> Result<()> {
@@ -280,10 +266,8 @@ fn session(config: &AuthConfig) -> Result<Session> {
     let cache = Cache::new(Some(config.cache_dir.as_path()), None, None, None)
         .with_context(|| format!("cannot open cache at {}", config.cache_dir.display()))?;
 
-    let session_config = SessionConfig {
-        client_id: config.client_id.clone(),
-        ..Default::default()
-    };
+    let session_config =
+        SessionConfig { client_id: config.client_id.clone(), ..Default::default() };
 
     Ok(Session::new(session_config, Some(cache)))
 }
@@ -302,10 +286,7 @@ mod tests {
 
     #[test]
     fn defaults_the_port_when_absent() {
-        assert_eq!(
-            socket_address("http://localhost/login").as_deref(),
-            Some("localhost:80")
-        );
+        assert_eq!(socket_address("http://localhost/login").as_deref(), Some("localhost:80"));
     }
 
     #[test]

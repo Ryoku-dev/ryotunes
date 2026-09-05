@@ -66,10 +66,7 @@ pub struct Named {
 
 impl Named {
     pub fn label(&self) -> Option<&str> {
-        self.display_name
-            .as_deref()
-            .or(self.name.as_deref())
-            .filter(|label| !label.is_empty())
+        self.display_name.as_deref().or(self.name.as_deref()).filter(|label| !label.is_empty())
     }
 }
 
@@ -123,10 +120,7 @@ pub fn playlists_from(rootlist: &RootList) -> Vec<models::Playlist> {
                 id: id.to_owned(),
                 name: name.to_owned(),
                 owner: owner.to_owned(),
-                owner_id: meta
-                    .map(|meta| meta.owner_username())
-                    .unwrap_or_default()
-                    .to_owned(),
+                owner_id: meta.map(|meta| meta.owner_username()).unwrap_or_default().to_owned(),
                 owned: false,
                 collaborative: meta.is_some_and(|meta| meta.attributes.collaborative()),
                 blend: meta.is_some_and(|meta| blend(&meta.attributes)),

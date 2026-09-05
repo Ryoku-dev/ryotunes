@@ -9,8 +9,8 @@ use librespot_protocol::metadata::{Artist as ArtistMessage, Image};
 use protobuf::{EnumOrUnknown, Message as _};
 
 use crate::collection2::SavedItem;
-use crate::{albums, collection, collection2, pathfinder, wire};
 use crate::{Album, Artist, ArtistProfile, ReleaseType, SavedArtist, Track};
+use crate::{albums, collection, collection2, pathfinder, wire};
 
 const ARTIST_PREFIX: &str = "spotify:artist:";
 const ALBUM_PREFIX: &str = "spotify:album:";
@@ -91,10 +91,7 @@ async fn legacy_artist(session: &Session, artist_id: &str) -> Result<Artist> {
     };
     let (tracks, releases) = tokio::join!(tracks, releases(session, &message));
     let known_tracks = tracks?;
-    let ranked = track_uris
-        .iter()
-        .filter_map(|uri| known_tracks.get(uri).cloned())
-        .collect();
+    let ranked = track_uris.iter().filter_map(|uri| known_tracks.get(uri).cloned()).collect();
     let releases = releases?;
     let top_tracks = deepened(session, ranked, &releases).await;
 
@@ -125,11 +122,7 @@ async fn popular(session: &Session, releases: &[Album], known: &[Track]) -> Resu
     if mined.is_empty() {
         return Ok(Vec::new());
     }
-    log::debug!(
-        "artists: ranking the tracks of {} of {} releases",
-        mined.len(),
-        releases.len()
-    );
+    log::debug!("artists: ranking the tracks of {} of {} releases", mined.len(), releases.len());
 
     let uris = albums::track_uris(session, &mined).await?;
     if uris.is_empty() {
@@ -145,10 +138,7 @@ async fn popular(session: &Session, releases: &[Album], known: &[Track]) -> Resu
         .collect();
     rest.sort_by_key(|track| std::cmp::Reverse(track.popularity));
 
-    let mut seen: HashSet<String> = known
-        .iter()
-        .map(|track| track.name.to_lowercase())
-        .collect();
+    let mut seen: HashSet<String> = known.iter().map(|track| track.name.to_lowercase()).collect();
     rest.retain(|track| seen.insert(track.name.to_lowercase()));
     Ok(rest)
 }
@@ -165,9 +155,7 @@ async fn releases(session: &Session, artist: &ArtistMessage) -> Result<Vec<Album
     }
 
     let known = albums::metadata(session, &uris).await?;
-    Ok(newest_first(
-        uris.iter().filter_map(|uri| known.get(uri).cloned()),
-    ))
+    Ok(newest_first(uris.iter().filter_map(|uri| known.get(uri).cloned())))
 }
 
 fn newest_first(releases: impl Iterator<Item = Album>) -> Vec<Album> {
@@ -266,9 +254,7 @@ async fn cards(session: &Session, ids: &[String]) -> Result<HashMap<String, Save
             let Some(id) = entity.entity_uri.strip_prefix(ARTIST_PREFIX) else {
                 continue;
             };
-            let smallest = portraits(&message)
-                .into_iter()
-                .min_by_key(|image| image_width(image));
+            let smallest = portraits(&message).into_iter().min_by_key(|image| image_width(image));
 
             found.insert(
                 id.to_owned(),
@@ -367,12 +353,7 @@ fn top_track_uris(artist: &ArtistMessage, country: &str) -> Vec<String> {
         .top_track
         .iter()
         .find(|tracks| tracks.country() == country)
-        .or_else(|| {
-            artist
-                .top_track
-                .iter()
-                .find(|tracks| tracks.country().is_empty())
-        })
+        .or_else(|| artist.top_track.iter().find(|tracks| tracks.country().is_empty()))
         .into_iter()
         .flat_map(|tracks| tracks.track.iter())
         .filter_map(|track| collection::base62(track.gid()))
@@ -455,10 +436,8 @@ mod tests {
             ]
             .into_iter(),
         );
-        let names: Vec<_> = releases
-            .iter()
-            .map(|album| (album.name.as_str(), album.release_type))
-            .collect();
+        let names: Vec<_> =
+            releases.iter().map(|album| (album.name.as_str(), album.release_type)).collect();
 
         assert_eq!(
             names,

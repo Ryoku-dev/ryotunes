@@ -12,21 +12,17 @@ use librespot_protocol::metadata::{
 };
 use protobuf::{EnumOrUnknown, Message as _};
 
-use crate::{collection2, wire};
 use crate::{ArtistRef, Credit, Track};
+use crate::{collection2, wire};
 
 const TRACK_PREFIX: &str = "spotify:track:";
 const UNKNOWN: &str = "Unknown";
 const BATCH: usize = 500;
 
 pub async fn saved_tracks(session: &Session, limit: u32) -> Result<Vec<Track>> {
-    let items = collection2::saved_items(
-        session,
-        collection2::COLLECTION,
-        TRACK_PREFIX,
-        limit as usize,
-    )
-    .await?;
+    let items =
+        collection2::saved_items(session, collection2::COLLECTION, TRACK_PREFIX, limit as usize)
+            .await?;
     if items.is_empty() {
         return Ok(Vec::new());
     }
@@ -89,12 +85,8 @@ pub(crate) async fn extended(
             ..Default::default()
         };
         let response = session.spclient().get_extended_metadata(request).await?;
-        entities.extend(
-            response
-                .extended_metadata
-                .into_iter()
-                .flat_map(|array| array.extension_data),
-        );
+        entities
+            .extend(response.extended_metadata.into_iter().flat_map(|array| array.extension_data));
     }
     Ok(entities)
 }
@@ -105,9 +97,7 @@ fn track_from(uri: &str, track: &TrackMessage) -> Track {
     Track {
         id: uri.strip_prefix(TRACK_PREFIX).map(str::to_owned),
         playable: !track.file.is_empty() || !track.alternative.is_empty(),
-        name: non_empty(track.name.as_deref())
-            .unwrap_or(UNKNOWN)
-            .to_owned(),
+        name: non_empty(track.name.as_deref()).unwrap_or(UNKNOWN).to_owned(),
         artists,
         artist_refs,
         album: track
@@ -143,11 +133,7 @@ fn track_from(uri: &str, track: &TrackMessage) -> Track {
                     Some(7) => "Orchestra",
                     _ => "Performer",
                 };
-                Some(Credit {
-                    name,
-                    role: role.to_owned(),
-                    id: base62(credit.artist_gid()),
-                })
+                Some(Credit { name, role: role.to_owned(), id: base62(credit.artist_gid()) })
             })
             .collect(),
     }
@@ -158,28 +144,18 @@ pub(crate) fn artists_from(artists: &[ArtistMessage]) -> (String, Vec<ArtistRef>
         .iter()
         .filter_map(|artist| {
             let name = non_empty(artist.name.as_deref())?.to_owned();
-            Some(ArtistRef {
-                name,
-                id: base62(artist.gid()),
-            })
+            Some(ArtistRef { name, id: base62(artist.gid()) })
         })
         .collect();
     let names = match refs.is_empty() {
         true => UNKNOWN.to_owned(),
-        false => refs
-            .iter()
-            .map(|artist| artist.name.as_str())
-            .collect::<Vec<_>>()
-            .join(", "),
+        false => refs.iter().map(|artist| artist.name.as_str()).collect::<Vec<_>>().join(", "),
     };
     (names, refs)
 }
 
 pub(crate) fn base62(gid: &[u8]) -> Option<String> {
-    librespot_core::SpotifyId::from_raw(gid)
-        .ok()?
-        .to_base62()
-        .ok()
+    librespot_core::SpotifyId::from_raw(gid).ok()?.to_base62().ok()
 }
 
 fn non_empty(value: Option<&str>) -> Option<&str> {
@@ -187,18 +163,15 @@ fn non_empty(value: Option<&str>) -> Option<&str> {
 }
 
 fn cover_url(album: &AlbumMessage) -> Option<String> {
-    let smallest = album
-        .cover_group
-        .as_ref()?
-        .image
-        .iter()
-        .filter(|image| image.has_file_id())
-        .min_by_key(|image| match image.size() {
-            ImageSize::SMALL => 0,
-            ImageSize::DEFAULT => 1,
-            ImageSize::LARGE => 2,
-            ImageSize::XLARGE => 3,
-        })?;
+    let smallest =
+        album.cover_group.as_ref()?.image.iter().filter(|image| image.has_file_id()).min_by_key(
+            |image| match image.size() {
+                ImageSize::SMALL => 0,
+                ImageSize::DEFAULT => 1,
+                ImageSize::LARGE => 2,
+                ImageSize::XLARGE => 3,
+            },
+        )?;
 
     wire::image_url(smallest.file_id())
 }

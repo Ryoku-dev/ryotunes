@@ -22,11 +22,8 @@ struct MediaItem {
 pub async fn track_radio(session: &Session, track_id: &str) -> Result<Vec<Track>> {
     let uri =
         SpotifyUri::from_uri(&format!("{TRACK_PREFIX}{track_id}")).context("invalid track ID")?;
-    let body = session
-        .spclient()
-        .get_radio_for_track(&uri)
-        .await
-        .context("cannot build track radio")?;
+    let body =
+        session.spclient().get_radio_for_track(&uri).await.context("cannot build track radio")?;
     let response: RadioResponse =
         serde_json::from_slice(&body).context("cannot decode track radio response")?;
     let playlist_id =
@@ -36,10 +33,7 @@ pub async fn track_radio(session: &Session, track_id: &str) -> Result<Vec<Track>
 }
 
 fn radio_playlist_id(response: &RadioResponse) -> Option<&str> {
-    response
-        .media_items
-        .iter()
-        .find_map(|item| item.uri.strip_prefix(PLAYLIST_PREFIX))
+    response.media_items.iter().find_map(|item| item.uri.strip_prefix(PLAYLIST_PREFIX))
 }
 
 #[cfg(test)]

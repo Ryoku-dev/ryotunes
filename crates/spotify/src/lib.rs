@@ -29,8 +29,8 @@ mod search;
 mod stream;
 mod wire;
 
-pub use client::{Client, SearchResults};
 pub use auth::{SignInFailure, SignInProblem};
+pub use client::{Client, SearchResults};
 pub use models::*;
 pub use provider::{SpotifyConfig, SpotifyProvider};
 pub use stream::{StreamEvent, StreamHandle};

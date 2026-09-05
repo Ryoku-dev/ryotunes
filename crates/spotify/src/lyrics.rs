@@ -7,8 +7,8 @@
 
 use anyhow::{Context as _, Result};
 use bytes::Bytes;
-use http::{header, Method, Request};
-use librespot_core::{spclient::CLIENT_TOKEN, Session};
+use http::{Method, Request, header};
+use librespot_core::{Session, spclient::CLIENT_TOKEN};
 use serde::Deserialize;
 
 use crate::{Lyrics, LyricsLine, LyricsWord, Voice};
@@ -52,27 +52,16 @@ struct Syllable {
 }
 
 pub async fn lyrics(session: &Session, track_id: &str) -> Result<Option<Lyrics>> {
-    let token = session
-        .login5()
-        .auth_token()
-        .await
-        .context("cannot obtain Spotify access token")?;
-    let client_token = session
-        .spclient()
-        .client_token()
-        .await
-        .context("cannot obtain Spotify client token")?;
+    let token =
+        session.login5().auth_token().await.context("cannot obtain Spotify access token")?;
+    let client_token =
+        session.spclient().client_token().await.context("cannot obtain Spotify client token")?;
     let request = Request::builder()
         .method(Method::GET)
-        .uri(format!(
-            "{ENDPOINT}/{track_id}?format=json&vocalRemoval=false&market=from_token"
-        ))
+        .uri(format!("{ENDPOINT}/{track_id}?format=json&vocalRemoval=false&market=from_token"))
         .header(header::ACCEPT, "application/json")
         .header("app-platform", APP_PLATFORM)
-        .header(
-            header::AUTHORIZATION,
-            format!("{} {}", token.token_type, token.access_token),
-        )
+        .header(header::AUTHORIZATION, format!("{} {}", token.token_type, token.access_token))
         .header(CLIENT_TOKEN, client_token)
         .body(Bytes::new())
         .context("cannot build the Spotify lyrics request")?;
@@ -102,9 +91,7 @@ fn sheet(sheet: Sheet) -> Option<Lyrics> {
 
     let mut lines: Vec<LyricsLine> = sheet.lines.iter().filter_map(verse).collect();
     normalize(&mut lines);
-    (!lines.is_empty()).then(|| Lyrics::Synced {
-        lines: lines.into(),
-    })
+    (!lines.is_empty()).then(|| Lyrics::Synced { lines: lines.into() })
 }
 
 /// Order the lines and, where a verse gave no end cue, close it at the next verse's start. Spotify
@@ -151,11 +138,7 @@ fn verse(verse: &Verse) -> Option<LyricsLine> {
 }
 
 fn stamp(millis: &str) -> Option<std::time::Duration> {
-    millis
-        .trim()
-        .parse()
-        .ok()
-        .map(std::time::Duration::from_millis)
+    millis.trim().parse().ok().map(std::time::Duration::from_millis)
 }
 
 #[cfg(test)]

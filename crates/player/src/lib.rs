@@ -141,7 +141,12 @@ impl Player {
             .spawn(move || event_loop(ev, tx, event_idle_active))
             .expect("spawn mpv event thread");
 
-        Ok(Player { mpv, events: Some(rx), idle_active, af: parking_lot::Mutex::new((None, AudioFx::default())) })
+        Ok(Player {
+            mpv,
+            events: Some(rx),
+            idle_active,
+            af: parking_lot::Mutex::new((None, AudioFx::default())),
+        })
     }
 
     /// Take the event receiver (once).
@@ -335,7 +340,11 @@ fn af_chain(gain_db: Option<f64>, fx: &AudioFx) -> String {
     }
     if fx.semitones != 0 {
         // Semitones → frequency multiplier (equal temperament).
-        chain.push(format!("{}=pitch-scale={}", pitch_filter(), 2f64.powf(fx.semitones as f64 / 12.0)));
+        chain.push(format!(
+            "{}=pitch-scale={}",
+            pitch_filter(),
+            2f64.powf(fx.semitones as f64 / 12.0)
+        ));
     }
     if fx.reverb > 0.0 {
         // Three taps at 40/80/120 ms; their decays fall 0.4/0.3/0.2 at full depth, scaled down
@@ -507,8 +516,14 @@ mod tests {
         assert_eq!(af_chain(None, &fx(0.0, 0.0, 0.0, 12)), "rubberband=pitch-scale=2");
         assert!(af_chain(None, &fx(0.0, 0.0, 0.0, 1)).ends_with("1.0594630943592953"));
         // Reverb alone: decays 0.4/0.3/0.2 scaled by the depth.
-        assert_eq!(af_chain(None, &fx(1.0, 0.0, 0.0, 0)), "lavfi=[aecho=0.8:0.9:40|80|120:0.4|0.3|0.2]");
-        assert_eq!(af_chain(None, &fx(0.5, 0.0, 0.0, 0)), "lavfi=[aecho=0.8:0.9:40|80|120:0.2|0.15|0.1]");
+        assert_eq!(
+            af_chain(None, &fx(1.0, 0.0, 0.0, 0)),
+            "lavfi=[aecho=0.8:0.9:40|80|120:0.4|0.3|0.2]"
+        );
+        assert_eq!(
+            af_chain(None, &fx(0.5, 0.0, 0.0, 0)),
+            "lavfi=[aecho=0.8:0.9:40|80|120:0.2|0.15|0.1]"
+        );
         // Bass alone.
         assert_eq!(af_chain(None, &fx(0.0, 8.0, 0.0, 0)), "lavfi=[bass=g=8:f=110:w=0.6]");
         // Width alone: drymix = 1 − 0.6·width.
@@ -587,7 +602,8 @@ mod tests {
         // (set_property would error otherwise — this is the only proof aecho/bass/stereowiden
         // parse on this build).
         p.set_gain(None).unwrap();
-        p.set_fx(&AudioFx { speed: 1.0, semitones: 0, reverb: 1.0, bass_db: 8.0, width: 0.8 }).unwrap();
+        p.set_fx(&AudioFx { speed: 1.0, semitones: 0, reverb: 1.0, bass_db: 8.0, width: 0.8 })
+            .unwrap();
         let live = af();
         assert!(live.contains("aecho"), "reverb missing from live chain: {live}");
         assert!(live.contains("bass"), "bass missing from live chain: {live}");

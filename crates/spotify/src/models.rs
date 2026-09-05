@@ -38,11 +38,7 @@ pub struct Contributor {
 impl Contributor {
     pub fn unnamed(id: impl Into<String>) -> Self {
         let id = id.into();
-        Self {
-            name: id.clone(),
-            id,
-            avatar: None,
-        }
+        Self { name: id.clone(), id, avatar: None }
     }
 }
 
@@ -223,10 +219,7 @@ impl Lyrics {
     /// Unsynced lyrics. Ryotunes does not romanize (Sonora did, via kakasi); `romanized` stays
     /// `None` so daemon-side serialization keeps the same shape.
     pub fn plain(text: impl Into<String>) -> Self {
-        Self::Plain {
-            text: text.into(),
-            romanized: None,
-        }
+        Self::Plain { text: text.into(), romanized: None }
     }
 
     pub fn synced(&self) -> bool {
@@ -251,10 +244,7 @@ impl Lyrics {
         let Self::Synced { lines } = self else {
             return None;
         };
-        lines
-            .iter()
-            .map(|line| line.end.unwrap_or(line.start))
-            .max()
+        lines.iter().map(|line| line.end.unwrap_or(line.start)).max()
     }
 }
 
@@ -287,11 +277,7 @@ impl LyricsLine {
             .and_then(|words| words.iter().rev().find(|word| !word.text.trim().is_empty()))
             .map(|word| word.end.max(word.start).max(self.start))
             .or(self.end);
-        self.secondary
-            .iter()
-            .filter_map(LyricsLane::sung_end)
-            .chain(primary)
-            .max()
+        self.secondary.iter().filter_map(LyricsLane::sung_end).chain(primary).max()
     }
 }
 

@@ -12,8 +12,8 @@ use librespot_protocol::playlist4_external::{
 use protobuf::{Message as _, MessageField};
 use tokio::task::JoinSet;
 
-use crate::{collection, profiles, wire};
 use crate::{Contributor, GenreItem, GenreSection, Playlist, PlaylistDetail, Track};
+use crate::{collection, profiles, wire};
 
 const TRACK_PREFIX: &str = "spotify:track:";
 const PLAYLIST_PREFIX: &str = "spotify:playlist:";
@@ -47,17 +47,13 @@ pub async fn add_to_library(session: &Session, playlist_id: &str) -> Result<()> 
     let uri = format!("{PLAYLIST_PREFIX}{playlist_id}");
     let rootlist = fetch_rootlist(session).await?;
     let body = changes(rootlist.revision.as_deref(), add_op(&uri));
-    rootlist_edit(session, &body)
-        .await
-        .context("cannot add the playlist to the library")?;
+    rootlist_edit(session, &body).await.context("cannot add the playlist to the library")?;
     Ok(())
 }
 
 pub async fn rename(session: &Session, playlist_id: &str, name: &str) -> Result<()> {
     let body = changes(None, rename_op(name));
-    edit(session, playlist_id, &body)
-        .await
-        .context("cannot rename the playlist")?;
+    edit(session, playlist_id, &body).await.context("cannot rename the playlist")?;
     Ok(())
 }
 
@@ -67,9 +63,7 @@ pub async fn delete(session: &Session, playlist_id: &str) -> Result<()> {
         .context("cannot remove the deleted playlist from the library")?;
 
     let body = changes(None, delete_op());
-    edit(session, playlist_id, &body)
-        .await
-        .context("cannot delete the playlist")?;
+    edit(session, playlist_id, &body).await.context("cannot delete the playlist")?;
     Ok(())
 }
 
@@ -94,9 +88,7 @@ pub async fn set_public(session: &Session, playlist_id: &str, public: bool) -> R
     let (rootlist, index) = rootlist(session, &uri).await?;
 
     let body = changes(rootlist.revision.as_deref(), visibility_op(index, public));
-    rootlist_edit(session, &body)
-        .await
-        .context("cannot change playlist visibility")?;
+    rootlist_edit(session, &body).await.context("cannot change playlist visibility")?;
     Ok(())
 }
 
@@ -105,9 +97,7 @@ pub async fn add_track(session: &Session, playlist_id: &str, track_id: &str) -> 
     let content = snapshot(session, playlist_id).await?;
     let body = changes(content.revision.as_deref(), add_op(&uri));
 
-    edit(session, playlist_id, &body)
-        .await
-        .context("cannot add the track to the playlist")?;
+    edit(session, playlist_id, &body).await.context("cannot add the track to the playlist")?;
     Ok(())
 }
 
@@ -118,9 +108,7 @@ pub async fn remove_track(session: &Session, playlist_id: &str, track_id: &str) 
         position(&content, &uri).ok_or_else(|| anyhow!("cannot find the track in the playlist"))?;
 
     let body = changes(content.revision.as_deref(), remove_op(&uri, index));
-    edit(session, playlist_id, &body)
-        .await
-        .context("cannot remove the track from the playlist")?;
+    edit(session, playlist_id, &body).await.context("cannot remove the track from the playlist")?;
     Ok(())
 }
 
@@ -161,11 +149,7 @@ async fn credit(session: &Session, playlist: &Playlist, tracks: &mut [Track]) {
 pub async fn header(session: &Session, playlist_id: &str) -> Result<Playlist> {
     let content = snapshot(session, playlist_id).await?;
 
-    Ok(wire::playlist_from(
-        playlist_id,
-        &content,
-        &session.username(),
-    ))
+    Ok(wire::playlist_from(playlist_id, &content, &session.username()))
 }
 
 pub async fn name_blanks(session: &Session, sections: &mut Vec<GenreSection>) {
@@ -237,10 +221,7 @@ pub async fn covers(session: &Session, playlist_id: &str, wanted: usize) -> Resu
     }
 
     let known = collection::metadata(session, &uris).await?;
-    let tracks: Vec<Track> = uris
-        .iter()
-        .filter_map(|uri| known.get(uri).cloned())
-        .collect();
+    let tracks: Vec<Track> = uris.iter().filter_map(|uri| known.get(uri).cloned()).collect();
 
     Ok(crate::distinct_covers(&tracks, wanted))
 }
@@ -252,11 +233,7 @@ async fn tracks_from(session: &Session, content: &SelectedListContent) -> Result
         .iter()
         .filter(|item| item.uri().starts_with(TRACK_PREFIX))
         .map(|item| {
-            (
-                item.uri().to_owned(),
-                wire::seconds(item.attributes.timestamp()),
-                contributor(item),
-            )
+            (item.uri().to_owned(), wire::seconds(item.attributes.timestamp()), contributor(item))
         })
         .collect();
     if added.is_empty() {
@@ -325,11 +302,7 @@ async fn stamp(session: &Session, playlist_id: &str) -> Option<i64> {
 
 async fn snapshot(session: &Session, playlist_id: &str) -> Result<SelectedListContent> {
     let id = SpotifyId::from_base62(playlist_id).context("cannot read the playlist id")?;
-    let body = session
-        .spclient()
-        .get_playlist(&id)
-        .await
-        .context("cannot read the playlist")?;
+    let body = session.spclient().get_playlist(&id).await.context("cannot read the playlist")?;
 
     SelectedListContent::parse_from_bytes(&body).context("cannot decode the playlist")
 }
@@ -362,10 +335,8 @@ async fn rootlist_edit(session: &Session, body: &ListChanges) -> Result<Vec<u8>>
 }
 
 async fn post(session: &Session, endpoint: &str, body: &ListChanges) -> Result<Vec<u8>> {
-    let reply = session
-        .spclient()
-        .request_with_protobuf(&Method::POST, endpoint, None, body)
-        .await?;
+    let reply =
+        session.spclient().request_with_protobuf(&Method::POST, endpoint, None, body).await?;
     Ok(reply.to_vec())
 }
 
@@ -545,10 +516,7 @@ mod tests {
             let body = changes(None, rename_op(name));
             let bytes = body.write_to_bytes().expect("encode");
             let decoded = ListChanges::parse_from_bytes(&bytes).expect("decode");
-            let values = &decoded.deltas[0].ops[0]
-                .update_list_attributes
-                .new_attributes
-                .values;
+            let values = &decoded.deltas[0].ops[0].update_list_attributes.new_attributes.values;
 
             assert_eq!(values.name(), name);
         }

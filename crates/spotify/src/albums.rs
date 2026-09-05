@@ -7,21 +7,17 @@ use librespot_protocol::metadata::Album as AlbumMessage;
 use librespot_protocol::metadata::album::Type as AlbumType;
 use protobuf::Message as _;
 
-use crate::{collection, collection2, pathfinder, wire};
 use crate::{Album, AlbumDetail, ReleaseType, Track};
+use crate::{collection, collection2, pathfinder, wire};
 
 const ALBUM_PREFIX: &str = "spotify:album:";
 const TRACK_PREFIX: &str = "spotify:track:";
 const UNKNOWN: &str = "Unknown";
 
 pub async fn saved_albums(session: &Session, limit: u32) -> Result<Vec<Album>> {
-    let items = collection2::saved_items(
-        session,
-        collection2::COLLECTION,
-        ALBUM_PREFIX,
-        limit as usize,
-    )
-    .await?;
+    let items =
+        collection2::saved_items(session, collection2::COLLECTION, ALBUM_PREFIX, limit as usize)
+            .await?;
     if items.is_empty() {
         return Ok(Vec::new());
     }
@@ -57,17 +53,13 @@ async fn legacy_album(session: &Session, album_id: &str) -> Result<AlbumDetail> 
             .find_map(|entity| AlbumMessage::parse_from_bytes(&entity.extension_data.value).ok())
             .context("album metadata is missing")?;
     let album = album_from(&uri, &message);
-    let uris: Vec<_> = track_ids(&message)
-        .into_iter()
-        .map(|id| format!("{TRACK_PREFIX}{id}"))
-        .collect();
+    let uris: Vec<_> =
+        track_ids(&message).into_iter().map(|id| format!("{TRACK_PREFIX}{id}")).collect();
     let tracks = match uris.is_empty() {
         true => Vec::new(),
         false => {
             let known = collection::metadata(session, &uris).await?;
-            uris.iter()
-                .filter_map(|uri| known.get(uri).cloned())
-                .collect()
+            uris.iter().filter_map(|uri| known.get(uri).cloned()).collect()
         }
     };
     Ok(AlbumDetail { album, tracks })
@@ -84,10 +76,7 @@ fn track_ids(album: &AlbumMessage) -> Vec<String> {
         .flat_map(|disc| disc.track.iter())
         .filter_map(|track| {
             let gid = track.gid.as_ref()?;
-            librespot_core::SpotifyId::from_raw(gid)
-                .ok()?
-                .to_base62()
-                .ok()
+            librespot_core::SpotifyId::from_raw(gid).ok()?.to_base62().ok()
         })
         .collect()
 }
@@ -133,9 +122,7 @@ fn album_from(uri: &str, album: &AlbumMessage) -> Album {
 
     Album {
         id: uri.strip_prefix(ALBUM_PREFIX).unwrap_or(uri).to_owned(),
-        name: non_empty(album.name.as_deref())
-            .unwrap_or(UNKNOWN)
-            .to_owned(),
+        name: non_empty(album.name.as_deref()).unwrap_or(UNKNOWN).to_owned(),
         artists,
         artist_refs,
         cover: cover(album),

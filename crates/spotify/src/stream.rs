@@ -76,11 +76,7 @@ impl Engine {
         let uri = track_uri(track_id)?;
         let events = self.player.get_player_event_channel();
         self.player.load(uri, true, 0);
-        Ok(StreamHandle {
-            player: self.player.clone(),
-            fifo: self.fifo.clone(),
-            events,
-        })
+        Ok(StreamHandle { player: self.player.clone(), fifo: self.fifo.clone(), events })
     }
 }
 
@@ -146,7 +142,9 @@ fn translate(event: PlayerEvent) -> Option<StreamEvent> {
         | PlayerEvent::PositionCorrection { position_ms, .. } => {
             Some(StreamEvent::Position(millis(position_ms)))
         }
-        PlayerEvent::Stopped { .. } | PlayerEvent::EndOfTrack { .. } => Some(StreamEvent::EndOfTrack),
+        PlayerEvent::Stopped { .. } | PlayerEvent::EndOfTrack { .. } => {
+            Some(StreamEvent::EndOfTrack)
+        }
         PlayerEvent::Unavailable { .. } => Some(StreamEvent::Unavailable),
         _ => None,
     }
@@ -182,9 +180,7 @@ impl Drop for Fifo {
 }
 
 fn runtime_dir() -> PathBuf {
-    std::env::var_os("XDG_RUNTIME_DIR")
-        .map(PathBuf::from)
-        .unwrap_or_else(std::env::temp_dir)
+    std::env::var_os("XDG_RUNTIME_DIR").map(PathBuf::from).unwrap_or_else(std::env::temp_dir)
 }
 
 #[cfg(unix)]
