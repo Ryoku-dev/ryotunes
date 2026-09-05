@@ -5,11 +5,13 @@
 //! the ones that only used the `AppHandle` for asset-scope allow-listing drop it (the daemon serves
 //! no webview assets). Plus the control methods `hello`, `subscribe`, `quit` and `sign_in`.
 
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 
 use innertube::{BrowseItem, PlaylistPage, PlaylistSort, Rating, SongItem, YouTubeClient};
 use ryotunes_core::db::LocalPlaylist;
+use ryotunes_core::spotify::{spotify_track_id, Provider};
+use ryotunes_core::spotify_bridge;
 use ryotunes_core::state::{
     is_local_playlist_id, is_smart_playlist_id, song_to_track, AppState, RepeatMode,
     LOCAL_PLAYLIST_PREFIX, ON_REPEAT_ID, ON_REPEAT_LIMIT, ON_REPEAT_WINDOW_SECS,
@@ -17,8 +19,6 @@ use ryotunes_core::state::{
     SMART_PLAYLIST_LIMIT, UI_SETTINGS,
 };
 use ryotunes_core::{local, radio};
-use ryotunes_core::spotify::{spotify_track_id, Provider};
-use ryotunes_core::spotify_bridge;
 use ryotunes_protocol::{ErrorBody, PROTOCOL_VERSION};
 use serde::de::DeserializeOwned;
 use serde_json::{json, Value};
@@ -328,7 +328,10 @@ impl Dispatch for Methods {
                     match result {
                         Ok(()) => {
                             let name = spotify_name(&task).await;
-                            task.emit("spotify-auth", json!({ "state": "signed_in", "name": name }));
+                            task.emit(
+                                "spotify-auth",
+                                json!({ "state": "signed_in", "name": name }),
+                            );
                         }
                         Err(e) => {
                             task.emit(
@@ -560,10 +563,7 @@ impl Dispatch for Methods {
                     if pid == "liked" {
                         client.set_track_saved(tid, false).await.map_err(spotify_err)?;
                     } else {
-                        client
-                            .remove_track_from_playlist(pid, tid)
-                            .await
-                            .map_err(spotify_err)?;
+                        client.remove_track_from_playlist(pid, tid).await.map_err(spotify_err)?;
                     }
                     return null();
                 }

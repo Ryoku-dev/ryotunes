@@ -885,8 +885,7 @@ impl AppState {
                 let vid = video_id.to_owned();
                 tokio::spawn(async move { me.watch_spotify_stream(vid, handle).await })
             };
-            let previous =
-                self.spotify_stream.lock().replace(SpotifyStream { controls, watcher });
+            let previous = self.spotify_stream.lock().replace(SpotifyStream { controls, watcher });
             if let Some(prev) = previous {
                 prev.watcher.abort();
             }
@@ -2292,10 +2291,8 @@ impl AppState {
             let mut q = self.queue.lock().await;
             // A Spotify track's length is seeded from its queue item (`seed_spotify_duration`);
             // mpv reports 0/inf for a FIFO and would clobber it. Ignore mpv here for Spotify.
-            let spotify = q
-                .items
-                .get(q.current)
-                .is_some_and(|i| crate::spotify::is_spotify_id(&i.video_id));
+            let spotify =
+                q.items.get(q.current).is_some_and(|i| crate::spotify::is_spotify_id(&i.video_id));
             if spotify {
                 return;
             }
@@ -2886,7 +2883,13 @@ impl AppState {
             controls.seek(Duration::from_secs_f64(position));
             self.set_spotify_base(position);
             self.player
-                .load(controls.fifo_path().to_string_lossy().as_ref(), &Default::default(), None, &title, &spotify_mpv_options())
+                .load(
+                    controls.fifo_path().to_string_lossy().as_ref(),
+                    &Default::default(),
+                    None,
+                    &title,
+                    &spotify_mpv_options(),
+                )
                 .map_err(|e| e.to_string())?;
             let _ = self.player.play();
             controls.play();
@@ -4004,8 +4007,7 @@ mod tests {
         guest_insert_index, is_mix, loudness_gain, merge_radio, next_index, parse_duration_ms,
         persist_fingerprint, position_with_base, queue_fingerprint, radio_seed_for, read_personal,
         shuffle_new_queue, shuffle_upcoming, splice_radio_into, spotify_mpv_options, unshuffled,
-        upcoming_queued, validate_personal_blob,
-        QueueState, RepeatMode, PERSONAL_JSON_KEY,
+        upcoming_queued, validate_personal_blob, QueueState, RepeatMode, PERSONAL_JSON_KEY,
     };
     use crate::db::Db;
 

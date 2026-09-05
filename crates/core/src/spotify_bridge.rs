@@ -479,7 +479,10 @@ mod tests {
             playable: true,
             artists: "Taylor Swift, Bon Iver".to_owned(),
             artist_refs: vec![
-                ArtistRef { name: "Taylor Swift".to_owned(), id: Some("06HL4z0CvFAxyc27GXpf02".to_owned()) },
+                ArtistRef {
+                    name: "Taylor Swift".to_owned(),
+                    id: Some("06HL4z0CvFAxyc27GXpf02".to_owned()),
+                },
                 ArtistRef { name: "Bon Iver".to_owned(), id: None },
             ],
             album: "The Tortured Poets Department".to_owned(),
@@ -557,7 +560,10 @@ mod tests {
         // Runs reproduce the display line, each linked name carrying a spotify: artist id.
         assert_eq!(song.artist_runs.len(), 3);
         assert_eq!(song.artist_runs[0].text, "Taylor Swift");
-        assert_eq!(song.artist_runs[0].id.as_deref(), Some("spotify:artist:06HL4z0CvFAxyc27GXpf02"));
+        assert_eq!(
+            song.artist_runs[0].id.as_deref(),
+            Some("spotify:artist:06HL4z0CvFAxyc27GXpf02")
+        );
         assert_eq!(song.artist_runs[1].text, ", ");
         assert_eq!(song.artist_runs[1].id, None);
         assert_eq!(song.artist_runs[2].text, "Bon Iver");
@@ -688,7 +694,10 @@ mod tests {
             tracks: vec![track()],
             albums: vec![album()],
             artists: vec![
-                ArtistRef { name: "Taylor Swift".to_owned(), id: Some("06HL4z0CvFAxyc27GXpf02".to_owned()) },
+                ArtistRef {
+                    name: "Taylor Swift".to_owned(),
+                    id: Some("06HL4z0CvFAxyc27GXpf02".to_owned()),
+                },
                 ArtistRef { name: "Unlinked".to_owned(), id: None },
             ],
             playlists: vec![playlist()],
