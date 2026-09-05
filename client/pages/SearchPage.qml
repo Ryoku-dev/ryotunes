@@ -6,6 +6,7 @@ import "../"
 import "../components"
 import "../chrome"
 import "../lib/browse.js" as Browse
+import "../lib/ids.js" as Ids
 
 // The search page, ported from ui/src/routes/search/+page.svelte. The field runs one mixed page
 // (search_all) plus one songs page (search_page) in parallel, then lays the result out as the same
@@ -58,6 +59,13 @@ Item {
         return out.filter((s) => s.list ? page.songRows.length : (s.items && s.items.length));
     }
 
+    // Derived views onto the result shape for the rebuilt layout: the single hero Top result, the
+    // capped song rows the TrackList shows, and the album/artist/playlist card shelves.
+    readonly property var topItem: (page.res && page.res.top && page.res.top.length) ? page.res.top[0] : null
+    readonly property int songsMax: 6
+    readonly property var songsShown: page.songRows.slice(0, page.songsMax)
+    readonly property var cardSections: page.sections.filter((s) => !s.list && s.key !== "top")
+
     function rememberQuery(q) {
         if (!q)
             return;
@@ -89,6 +97,9 @@ Item {
             page.songs = r[1].items || [];
             page.searched = q;
             page.searching = false;
+            // Land the results list at the top: a ListView with a tall header (the Top-result card)
+            // can otherwise settle with contentY > 0 and clip the card.
+            Qt.callLater(page.scrollTop);
         }).catch((e) => {
             if (page.latest !== q)
                 return;
@@ -97,8 +108,46 @@ Item {
         });
     }
 
+    function scrollTop() {
+        if (body.visible && body.view)
+            body.view.positionViewAtBeginning();
+    }
+
     function playSong(song) {
         Playback.play(song).catch((e) => Playback.toast((e && e.message) ? e.message : "Could not play", "error"));
+    }
+
+    // The hero Top result: a click opens it (a song plays, a collection routes), the Play affordance
+    // plays it — mirroring MediaCard so an album/playlist top hit still starts straight from the card.
+    function openTop(item) {
+        if (!item)
+            return;
+        if (item.kind === "song")
+            Playback.play(Browse.asSong(item));
+        else
+            Router.push(item.kind, { id: item.id, title: item.title });
+    }
+    function playTop(item) {
+        if (!item)
+            return;
+        if (item.kind === "song") {
+            page.playSong(Browse.asSong(item));
+        } else if (item.kind === "album") {
+            Daemon.call("get_album", { id: item.id })
+                .then((a) => Daemon.call("play_playlist", { items: a.items, sourceId: a.playlistId, sourceName: item.title }))
+                .catch(() => Playback.toast("Could not play — try opening it", "error"));
+        } else if (item.kind === "playlist") {
+            Daemon.call("get_playlist", { id: item.id })
+                .then((p) => Daemon.call("play_playlist", {
+                    items: p.items,
+                    sourceId: Ids.isSmartPlaylistId(item.id) ? undefined : item.id,
+                    sourceName: item.title,
+                    continuation: p.continuation
+                }))
+                .catch(() => Playback.toast("Could not play — try opening it", "error"));
+        } else {
+            Router.push(item.kind, { id: item.id, title: item.title });
+        }
     }
 
     function showMore(sec) {
@@ -130,48 +179,67 @@ Item {
             .catch(() => page.expandedLoading = false);
     }
 
-    Rectangle { anchors.fill: parent; color: Tokens.paper }
-
-    readonly property int pad: Style.sp(8)
-
-    Flickable {
-        id: scroll
+    // --- sections view -------------------------------------------------------------------------
+    // The field sits fixed above the results (its typeahead dropdown then overlays them), and the
+    // resolved sections scroll inside one TrackList: the Top card and Songs heading ride in the
+    // header, the song rows are the list body, and the card shelves ride in the footer.
+    ColumnLayout {
+        id: root
         anchors.fill: parent
-        anchors.leftMargin: page.pad
-        anchors.rightMargin: page.pad
-        topMargin: Style.sp(6)
-        bottomMargin: Style.sp(20)
-        clip: true
-        contentWidth: width
-        contentHeight: col.implicitHeight
-        boundsBehavior: Flickable.StopAtBounds
+        spacing: Style.sp(4)
         visible: page.expandedCat === ""
 
         ColumnLayout {
-            id: col
-            width: scroll.width
-            spacing: Style.sp(6)
-
-            // header
-            ColumnLayout {
-                Layout.fillWidth: true
-                spacing: Style.sp(1)
-                Text { text: "// MUSIC / DISCOVERY"; color: Tokens.inkFaint; font.family: Style.fontMono; font.pixelSize: Style.fs.xs; font.letterSpacing: 1 }
-                Text { text: "Search"; color: Tokens.ink; font.family: Tokens.display; font.pixelSize: Style.fs.hero }
+            Layout.fillWidth: true
+            spacing: Style.sp(1)
+            Text {
+                text: "// MUSIC / DISCOVERY"
+                color: Tokens.inkFaint
+                font.family: Style.fontMono
+                font.pixelSize: Style.fs.micro
+                font.letterSpacing: Style.trackMicro
             }
+            Text {
+                text: "Search"
+                color: Tokens.ink
+                font.family: Style.fontDisplay
+                font.pixelSize: Style.fs.title
+            }
+        }
 
-            SearchSuggest {
-                id: suggest
-                Layout.fillWidth: true
-                Layout.maximumWidth: Style.sp(160)
-                value: page.query
-                onValueChanged: page.query = value
-                onSubmitted: page.runSearch()
-                onPicked: page.query = value
-                z: 40
+        SearchSuggest {
+            id: suggest
+            Layout.fillWidth: true
+            Layout.maximumWidth: Style.sp(160)
+            value: page.query
+            onValueChanged: page.query = value
+            onSubmitted: page.runSearch()
+            onPicked: page.query = value
+            z: 40
+        }
+
+        Item {
+            Layout.fillWidth: true
+            Layout.fillHeight: true
+
+            TrackList {
+                id: body
+                anchors.fill: parent
+                visible: !page.searching && !!page.res && page.sections.length > 0
+                items: page.songsShown
+                showHeader: true
+                showAlbum: true
+                showPlays: true
+                canAdd: true
+                onActivated: (i) => { if (page.songsShown[i]) page.playSong(page.songsShown[i]); }
+                header: searchHeader
+                footer: searchFooter
             }
 
             Text {
+                anchors.top: parent.top
+                anchors.left: parent.left
+                anchors.topMargin: Style.sp(2)
                 visible: page.searching
                 text: "Resolving songs, artists, albums and playlists…"
                 color: Tokens.inkMuted
@@ -180,6 +248,9 @@ Item {
             }
 
             Text {
+                anchors.top: parent.top
+                anchors.left: parent.left
+                anchors.topMargin: Style.sp(2)
                 visible: page.errorMsg !== ""
                 text: page.errorMsg
                 color: Tokens.alert
@@ -187,12 +258,32 @@ Item {
                 font.pixelSize: Style.fs.md
             }
 
+            Text {
+                anchors.top: parent.top
+                anchors.left: parent.left
+                anchors.topMargin: Style.sp(2)
+                visible: !page.searching && !!page.res && page.sections.length === 0
+                text: "No results for \u201C" + page.searched + "\u201D."
+                color: Tokens.inkMuted
+                font.family: Style.fontUi
+                font.pixelSize: Style.fs.md
+            }
+
             // idle: recent searches
             ColumnLayout {
-                Layout.fillWidth: true
+                anchors.top: parent.top
+                anchors.left: parent.left
+                anchors.right: parent.right
+                anchors.topMargin: Style.sp(2)
                 visible: !page.searching && !page.res && page.errorMsg === ""
                 spacing: Style.sp(2)
-                Text { text: "// RECENT SEARCHES"; color: Tokens.inkFaint; font.family: Style.fontMono; font.pixelSize: Style.fs.xs; font.letterSpacing: 1 }
+                Text {
+                    text: "RECENT SEARCHES"
+                    color: Tokens.inkFaint
+                    font.family: Style.fontMono
+                    font.pixelSize: Style.fs.micro
+                    font.letterSpacing: Style.trackMicro
+                }
                 Repeater {
                     model: page.history
                     delegate: Rectangle {
@@ -223,78 +314,173 @@ Item {
                     font.pixelSize: Style.fs.sm
                 }
             }
+        }
+    }
 
-            // no results
-            Text {
-                visible: !page.searching && !!page.res && page.sections.length === 0
-                text: "No results for \u201C" + page.searched + "\u201D."
-                color: Tokens.inkMuted
-                font.family: Style.fontUi
-                font.pixelSize: Style.fs.md
-            }
+    // header: the Top result card + the Songs heading, riding above the song rows.
+    Component {
+        id: searchHeader
+        Item {
+            width: body.view.width
+            implicitHeight: headerCol.implicitHeight + Style.sp(6)
 
-            // sections
-            Repeater {
-                model: (!page.searching && page.res) ? page.sections : []
-                delegate: ColumnLayout {
-                    id: secCol
-                    required property var modelData
+            ColumnLayout {
+                id: headerCol
+                width: parent.width
+                spacing: Style.sp(6)
+
+                // Top result — a wide card
+                ColumnLayout {
                     Layout.fillWidth: true
+                    visible: page.topItem !== null
                     spacing: Style.sp(3)
 
                     SectionHeading {
                         Layout.fillWidth: true
-                        title: secCol.modelData.label
-                        more: secCol.modelData.more
-                        onMoreClicked: page.showMore(secCol.modelData)
+                        title: "Top result"
                     }
 
-                    // songs list
-                    ColumnLayout {
+                    Rectangle {
+                        id: topCard
                         Layout.fillWidth: true
-                        visible: secCol.modelData.list
-                        spacing: Style.sp(0.5)
-                        Repeater {
-                            model: secCol.modelData.list ? page.songRows.slice(0, secCol.modelData.max) : []
-                            delegate: TrackRow {
-                                id: sr
-                                required property var modelData
+                        Layout.maximumWidth: Style.sp(140)
+                        implicitHeight: topRow.implicitHeight + Style.sp(6)
+                        radius: Style.radiusCard
+                        color: Tokens.paperLift
+                        border.width: 1
+                        border.color: topHover.hovered ? Tokens.lineStrong : Tokens.line
+                        Behavior on border.color { ColorAnimation { duration: Style.motion.snap } }
+
+                        HoverHandler { id: topHover }
+
+                        RowLayout {
+                            id: topRow
+                            anchors.left: parent.left
+                            anchors.right: parent.right
+                            anchors.verticalCenter: parent.verticalCenter
+                            anchors.leftMargin: Style.sp(3)
+                            anchors.rightMargin: Style.sp(3)
+                            spacing: Style.sp(3)
+
+                            Artwork {
+                                Layout.preferredWidth: Style.sp(24)
+                                Layout.preferredHeight: Style.sp(24)
+                                url: (page.topItem && page.topItem.thumbnail) ? page.topItem.thumbnail : ""
+                                px: Style.sp(24)
+                                round: !!(page.topItem && page.topItem.kind === "artist")
+                                placeholderIcon: (page.topItem && page.topItem.kind === "artist") ? "user"
+                                    : (page.topItem && page.topItem.kind === "album") ? "cd"
+                                    : (page.topItem && page.topItem.kind === "playlist") ? "playlist" : "music"
+                            }
+
+                            // identity block — clicking it opens the item
+                            MouseArea {
                                 Layout.fillWidth: true
-                                song: sr.modelData
-                                showPlayCount: true
-                                menu: true
-                                canAdd: true
-                                active: !!(Playback.now && Playback.now.videoId === sr.modelData.video_id)
-                                onPlay: page.playSong(sr.modelData)
-                                onMenuRequested: (sx, sy) => {
-                                    var p = searchMenu.mapFromItem(null, sx, sy);
-                                    searchMenu.song = sr.modelData;
-                                    searchMenu.openAt(p.x, p.y);
+                                Layout.fillHeight: true
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: page.openTop(page.topItem)
+                                ColumnLayout {
+                                    anchors.left: parent.left
+                                    anchors.right: parent.right
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    spacing: Style.sp(1)
+                                    Text {
+                                        Layout.fillWidth: true
+                                        text: page.topItem ? page.topItem.kind.toUpperCase() : ""
+                                        color: Tokens.inkFaint
+                                        font.family: Style.fontMono
+                                        font.pixelSize: Style.fs.micro
+                                        font.letterSpacing: Style.trackMicro
+                                    }
+                                    Text {
+                                        Layout.fillWidth: true
+                                        text: page.topItem ? page.topItem.title : ""
+                                        color: Tokens.ink
+                                        font.family: Style.fontUi
+                                        font.pixelSize: Style.fs.md
+                                        font.weight: Font.DemiBold
+                                        elide: Text.ElideRight
+                                    }
+                                    Text {
+                                        Layout.fillWidth: true
+                                        visible: !!(page.topItem && page.topItem.subtitle)
+                                        text: (page.topItem && page.topItem.subtitle) ? page.topItem.subtitle : ""
+                                        color: Tokens.inkMuted
+                                        font.family: Style.fontUi
+                                        font.pixelSize: Style.fs.sm
+                                        elide: Text.ElideRight
+                                    }
                                 }
+                            }
+
+                            Btn {
+                                Layout.alignment: Qt.AlignVCenter
+                                visible: !!(page.topItem && page.topItem.kind !== "artist")
+                                text: "Play"
+                                icon: "play"
+                                primary: true
+                                onClicked: page.playTop(page.topItem)
                             }
                         }
                     }
+                }
 
-                    // card rail
-                    Flickable {
+                // Songs heading — the list rows below carry the songs
+                SectionHeading {
+                    Layout.fillWidth: true
+                    visible: page.songRows.length > 0
+                    title: "Songs"
+                    more: true
+                    onMoreClicked: page.showMore({ key: "songs" })
+                }
+            }
+        }
+    }
+
+    // footer: album / artist / playlist card shelves, each with an in-place "Show more".
+    Component {
+        id: searchFooter
+        Item {
+            width: body.view.width
+            implicitHeight: footerCol.implicitHeight + Style.sp(20)
+
+            ColumnLayout {
+                id: footerCol
+                width: parent.width
+                spacing: Style.sp(6)
+
+                Repeater {
+                    model: page.cardSections
+                    delegate: ColumnLayout {
+                        id: secCol
+                        required property var modelData
                         Layout.fillWidth: true
-                        visible: !secCol.modelData.list
-                        implicitHeight: Style.sp(66)
-                        contentWidth: cardRow.implicitWidth
-                        contentHeight: height
-                        flickableDirection: Flickable.HorizontalFlick
-                        boundsBehavior: Flickable.StopAtBounds
-                        clip: true
-                        Row {
-                            id: cardRow
+                        Layout.topMargin: Style.sp(3)
+                        spacing: Style.sp(3)
+
+                        SectionHeading {
+                            Layout.fillWidth: true
+                            title: secCol.modelData.label
+                            more: secCol.modelData.more
+                            onMoreClicked: page.showMore(secCol.modelData)
+                        }
+
+                        ListView {
+                            Layout.fillWidth: true
+                            Layout.preferredHeight: Style.sp(66)
+                            orientation: ListView.Horizontal
+                            flickableDirection: Flickable.HorizontalFlick
+                            boundsBehavior: Flickable.StopAtBounds
+                            snapMode: ListView.SnapOneItem
+                            reuseItems: true
+                            clip: true
+                            cacheBuffer: Math.round(width)
                             spacing: Style.sp(3)
-                            Repeater {
-                                model: secCol.modelData.list ? [] : secCol.modelData.items.slice(0, secCol.modelData.max)
-                                delegate: MediaCard {
-                                    required property var modelData
-                                    item: modelData
-                                    cardWidth: Style.sp(40)
-                                }
+                            model: secCol.modelData.items.slice(0, secCol.modelData.max)
+                            delegate: MediaCard {
+                                required property var modelData
+                                item: modelData
+                                cardWidth: Style.sp(40)
                             }
                         }
                     }
@@ -303,26 +489,23 @@ Item {
         }
     }
 
-    // --- expanded category view ------------------------------------------------------------
+    // --- expanded category view ----------------------------------------------------------------
     Item {
         anchors.fill: parent
         visible: page.expandedCat !== ""
 
-        // back bar
         RowLayout {
             id: backBar
             anchors.top: parent.top
             anchors.left: parent.left
             anchors.right: parent.right
-            anchors.leftMargin: page.pad
-            anchors.rightMargin: page.pad
-            anchors.topMargin: Style.sp(5)
+            anchors.topMargin: Style.sp(2)
             spacing: Style.sp(2)
-            Item {
-                implicitWidth: Style.sp(8); implicitHeight: Style.sp(8)
-                Icon { anchors.centerIn: parent; name: "arrow-left"; size: Style.fs.lg; color: backHover.hovered ? Tokens.ink : Tokens.inkMuted }
-                HoverHandler { id: backHover }
-                MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: page.expandedCat = "" }
+            IconButton {
+                icon: "arrow-left"
+                iconSize: Style.fs.lg
+                diameter: Style.sp(9)
+                onClicked: page.expandedCat = ""
             }
             Text {
                 Layout.fillWidth: true
@@ -344,7 +527,9 @@ Item {
             anchors.topMargin: Style.sp(3)
             visible: page.expandedCat === "songs"
             items: page.expandedItems
-            showPlayCount: true
+            showHeader: true
+            showAlbum: true
+            showPlays: true
             canAdd: true
             onActivated: (i) => { if (page.expandedItems[i]) page.playSong(page.expandedItems[i]); }
             Component.onCompleted: view.contentYChanged.connect(page.loadMoreExpanded)
@@ -358,12 +543,10 @@ Item {
             anchors.bottom: parent.bottom
             anchors.topMargin: Style.sp(3)
             visible: page.expandedCat !== "" && page.expandedCat !== "songs"
-            pad: page.pad
+            pad: 0
             loading: page.expandedLoading && page.expandedItems.length === 0
             model: page.expandedItems
             emptyText: "No results."
         }
     }
-
-    Menu { id: searchMenu }
 }

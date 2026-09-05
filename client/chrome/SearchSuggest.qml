@@ -80,6 +80,7 @@ Item {
         color: Tokens.paperLift
         border.width: 1
         border.color: input.activeFocus ? Tokens.lineStrong : Tokens.line
+        Behavior on border.color { ColorAnimation { duration: Style.motion.snap } }
         RowLayout {
             anchors.fill: parent
             anchors.leftMargin: Style.sp(3)
@@ -127,7 +128,8 @@ Item {
         }
     }
 
-    // typeahead panel
+    // typeahead panel: paper over the backdrop, a hairline frame, a tracked micro section label and
+    // ranked rows (top hit slightly taller, a per-kind tracked micro tag, hairlines between rows).
     Rectangle {
         id: panel
         visible: root.panelOpen && (root.items.length > 0 || root.loading)
@@ -151,14 +153,43 @@ Item {
             reuseItems: true
             boundsBehavior: Flickable.StopAtBounds
             model: root.items
+
+            header: Item {
+                width: sugg.width
+                implicitHeight: Style.sp(8)
+                Text {
+                    anchors.left: parent.left
+                    anchors.bottom: parent.bottom
+                    anchors.leftMargin: Style.sp(2)
+                    anchors.bottomMargin: Style.sp(1.5)
+                    text: "SUGGESTIONS"
+                    color: Tokens.inkFaint
+                    font.family: Style.fontMono
+                    font.pixelSize: Style.fs.micro
+                    font.letterSpacing: Style.trackMicro
+                }
+            }
+
             delegate: Rectangle {
                 id: sRow
                 required property var modelData
                 required property int index
                 width: sugg.width
                 implicitHeight: sRow.index === 0 ? Style.sp(14) : Style.sp(12)
-                radius: Style.radius
                 color: (root.active === sRow.index) ? Tokens.tint10 : sHover.hovered ? Tokens.tint5 : "transparent"
+
+                // hairline between rows
+                Rectangle {
+                    visible: sRow.index < root.items.length - 1
+                    anchors.left: parent.left
+                    anchors.right: parent.right
+                    anchors.bottom: parent.bottom
+                    anchors.leftMargin: Style.sp(2)
+                    anchors.rightMargin: Style.sp(2)
+                    height: 1
+                    color: Tokens.lineSoft
+                }
+
                 RowLayout {
                     anchors.fill: parent
                     anchors.leftMargin: Style.sp(2)
@@ -195,7 +226,8 @@ Item {
                         text: sRow.modelData.kind.toUpperCase()
                         color: Tokens.inkFaint
                         font.family: Style.fontMono
-                        font.pixelSize: Style.fs.xs
+                        font.pixelSize: Style.fs.micro
+                        font.letterSpacing: Style.trackMicro
                     }
                 }
                 HoverHandler { id: sHover }
