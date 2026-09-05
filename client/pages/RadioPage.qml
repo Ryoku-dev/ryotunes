@@ -114,7 +114,7 @@ Item {
         reuseItems: true
         cacheBuffer: Math.max(0, Math.round(height * 1.5))
         boundsBehavior: Flickable.StopAtBounds
-        topMargin: Style.sp(4)
+        topMargin: 0
         bottomMargin: Style.sp(20)
         // The full grid clears while a fresh query resolves, mirroring the Svelte loading branch;
         // paging keeps the current cards and only appends beneath them.

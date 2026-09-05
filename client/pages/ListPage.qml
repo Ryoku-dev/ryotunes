@@ -50,7 +50,7 @@ Item {
     GridView {
         id: grid
         anchors.fill: parent
-        topMargin: Style.sp(2)
+        topMargin: 0
         bottomMargin: Style.sp(20)
         clip: true
         reuseItems: true
