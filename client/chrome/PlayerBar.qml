@@ -211,6 +211,7 @@ Rectangle {
                     id: volSlider
                     Layout.preferredWidth: Style.sp(24)
                     Layout.alignment: Qt.AlignVCenter
+                    fillColor: Tokens.ink
                     from: 0
                     to: 100
                     value: Playback.volume
