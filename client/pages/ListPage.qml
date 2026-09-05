@@ -8,7 +8,8 @@ import "../components"
 // A browse grid, ported from ui/src/routes/list/+page.svelte. One get_browse_grid call for the
 // {id, params} the caller routed with (a shelf's "See all"); the result is however many cards
 // YouTube sends, drawn in a reused GridView so a long grid never mounts more than a couple of
-// screenfuls. The title comes from the route params, the same heading the shelf carried.
+// screenfuls. A browse list has no cover or play-all, so it opens with a plain page-title header
+// (tracked eyebrow + Fraunces title) rather than the media pages' PageHero, then the card grid.
 Item {
     id: page
 
@@ -46,22 +47,17 @@ Item {
             });
     }
 
-    Rectangle { anchors.fill: parent; color: Tokens.paper }
-
-    readonly property int pad: Style.sp(8)
-
     GridView {
         id: grid
         anchors.fill: parent
-        anchors.leftMargin: page.pad
-        anchors.rightMargin: page.pad
-        topMargin: Style.sp(6)
+        topMargin: Style.sp(2)
         bottomMargin: Style.sp(20)
         clip: true
         reuseItems: true
         cacheBuffer: Math.max(0, Math.round(height * 1.5))
         boundsBehavior: Flickable.StopAtBounds
-        cellWidth: Math.floor((width - Style.sp(1)) / Math.max(1, Math.floor(width / Style.sp(48))))
+        readonly property int cols: Math.max(2, Math.floor(width / (Style.cardW + Style.sp(4))))
+        cellWidth: Math.floor(width / grid.cols)
         cellHeight: grid.cellWidth + Style.sp(16)
         model: page.loading || page.errorMsg ? [] : page.items
 
@@ -73,18 +69,18 @@ Item {
                 width: parent.width
                 spacing: Style.sp(1)
                 Text {
-                    text: "// BROWSE"
+                    text: "BROWSE"
                     color: Tokens.inkFaint
                     font.family: Style.fontMono
-                    font.pixelSize: Style.fs.xs
-                    font.letterSpacing: 1
+                    font.pixelSize: Style.fs.micro
+                    font.letterSpacing: Style.trackMicro
                 }
                 Text {
                     Layout.fillWidth: true
                     text: page.title
                     color: Tokens.ink
-                    font.family: Tokens.display
-                    font.pixelSize: Style.fs.xl
+                    font.family: Style.fontDisplay
+                    font.pixelSize: Style.fs.title
                     elide: Text.ElideRight
                 }
             }
@@ -119,7 +115,7 @@ Item {
             Layout.alignment: Qt.AlignHCenter
             visible: page.errorMsg !== ""
             implicitWidth: Style.sp(20)
-            implicitHeight: Style.sp(9)
+            implicitHeight: Style.ctlH
             radius: Style.radius
             color: retryHover.hovered ? Tokens.tint10 : "transparent"
             border.width: 1

@@ -1,14 +1,17 @@
 pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Layouts
+import QtQuick.Effects
 import Ryoku.Ui.Singletons
 import "../"
 
 // The "Add to playlist" picker, ported from AddToPlaylist.svelte. A reusable overlay any surface can
-// raise with open(songs): it fills its parent, dims behind a dismiss layer, lists the library's
-// editable playlists (On Repeat and Liked Music dropped — one takes local play counts, the other
-// takes likes), and adds sequentially so a whole album is a handful of calls, never a parallel
-// hammer. A track YouTube already holds is refused and simply not re-counted.
+// raise with open(songs): it fills its parent, blurs the page behind it once on open (spec §9) under
+// a 0.5 scrim, lists the library's editable playlists (On Repeat and Liked Music dropped — one takes
+// local play counts, the other takes likes), and adds sequentially so a whole album is a handful of
+// calls, never a parallel hammer. A track YouTube already holds is refused and simply not re-counted.
+// `blurSource` is the sibling page content to snapshot behind the card; when unset (a Menu-embedded
+// picker) it falls back to scrim only. Data flows are unchanged.
 Item {
     id: root
 
@@ -16,6 +19,7 @@ Item {
     visible: root.open
     z: 200
 
+    property Item blurSource: null
     property bool open: false
     property var songs: []
     property var playlists: []
@@ -31,6 +35,8 @@ Item {
         root.createName = "";
         root.playlists = [];
         root.open = true;
+        if (root.blurSource)
+            snap.scheduleUpdate();
         root.load();
     }
 
@@ -95,7 +101,27 @@ Item {
             .catch((e) => Playback.toast((e && e.message) ? e.message : "Could not create", "error"));
     }
 
-    // dismiss layer
+    // snapshot blur of the page behind, captured once on open (spec §9)
+    ShaderEffectSource {
+        id: snap
+        anchors.fill: parent
+        visible: false
+        sourceItem: root.blurSource
+        live: false
+        hideSource: false
+        recursive: false
+    }
+    MultiEffect {
+        anchors.fill: parent
+        visible: root.blurSource !== null && Style.blurEnabled
+        source: snap
+        blurEnabled: true
+        blur: 1.0
+        blurMax: 32
+        autoPaddingEnabled: false
+    }
+
+    // dismiss layer + scrim
     MouseArea {
         anchors.fill: parent
         onClicked: root.close()
@@ -103,18 +129,18 @@ Item {
     Rectangle {
         anchors.fill: parent
         color: "#000000"
-        opacity: 0.45
+        opacity: 0.5
     }
 
     Rectangle {
         anchors.centerIn: parent
         width: Style.sp(90)
-        implicitHeight: sheet.implicitHeight + Style.sp(4)
+        implicitHeight: sheet.implicitHeight + Style.sp(12)
         height: implicitHeight
         radius: Style.radiusCard
-        color: Tokens.paperLift
+        color: Tokens.paper
         border.width: 1
-        border.color: Tokens.lineStrong
+        border.color: Tokens.line
 
         // swallow clicks so they don't reach the dismiss layer
         MouseArea { anchors.fill: parent }
@@ -122,7 +148,7 @@ Item {
         ColumnLayout {
             id: sheet
             anchors.fill: parent
-            anchors.margins: Style.sp(4)
+            anchors.margins: Style.sp(6)
             spacing: Style.sp(3)
 
             RowLayout {
@@ -245,7 +271,7 @@ Item {
                 Layout.fillWidth: true
                 implicitHeight: Style.sp(10)
                 radius: Style.radius
-                color: Tokens.paper
+                color: Tokens.paperLift
                 border.width: 1
                 border.color: nameField.activeFocus ? Tokens.lineStrong : Tokens.line
                 TextInput {

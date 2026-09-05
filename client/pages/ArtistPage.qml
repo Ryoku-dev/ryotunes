@@ -6,11 +6,12 @@ import Ryoku.Ui.Singletons
 import "../"
 import "../components"
 
-// The artist page, ported from ui/src/routes/artist/[id]/+page.svelte. get_artist(id) once; the
-// page is one TrackList whose header is the photo hero (name, counts, Shuffle / Radio / Subscribe)
-// and the "Top songs" heading, whose rows are topSongs, and whose footer is the card carousels
-// (music-video shelves filtered out, matching supportedSection). Shuffle prefers the full top-songs
-// playlist (topSongsId) so it covers more than the five visible rows.
+// The artist page, ported from ui/src/routes/artist/[id]/+page.svelte. get_artist(id) once; the page
+// is one TrackList whose header is a PageHero (round artist art, name, counts, Play/Shuffle/Radio/
+// Subscribe) followed by the "Popular" heading, whose rows are the five top songs (Show all opens the
+// full top-songs playlist), and whose footer is Releases — a CardGrid with a Singles/Albums/EPs chip
+// filter — and the remaining carousels. Shuffle prefers the full top-songs playlist (topSongsId) so it
+// covers more than the visible rows. Data flows are unchanged.
 Item {
     id: page
 
@@ -23,6 +24,7 @@ Item {
     property bool expanded: false
     property bool subscribed: false
     property bool subBusy: false
+    property int releaseTab: 0
 
     readonly property bool signedIn: !!(Playback.auth && Playback.auth.signedIn)
     readonly property var sections: {
@@ -30,6 +32,10 @@ Item {
             return [];
         return page.artist.sections.filter((s) => !/music\s*videos?|video\s+for\s+you/i.test(s.title));
     }
+    readonly property var releaseSections: page.sections.filter((s) => /album|single|\bep/i.test(s.title))
+    readonly property var otherSections: page.sections.filter((s) => !/album|single|\bep/i.test(s.title))
+    readonly property var topSongs: (page.artist && page.artist.topSongs) ? page.artist.topSongs : []
+    readonly property var popular: page.topSongs.slice(0, 5)
 
     onParamsChanged: page.load()
     Component.onCompleted: page.load()
@@ -44,12 +50,23 @@ Item {
         };
     }
 
+    function metaLine() {
+        var a = page.artist;
+        if (!a)
+            return "";
+        var parts = [];
+        if (a.subscribers) parts.push(a.subscribers);
+        if (a.monthlyListeners) parts.push(a.monthlyListeners);
+        return parts.join("  \u00b7  ");
+    }
+
     function load() {
         if (!page.artistId)
             return;
         page.loading = true;
         page.errorMsg = "";
         page.expanded = false;
+        page.releaseTab = 0;
         var reqId = page.artistId;
         Daemon.call("get_artist", { id: page.artistId })
             .then((a) => {
@@ -58,6 +75,7 @@ Item {
                 page.artist = a;
                 page.subscribed = !!a.subscribed;
                 page.loading = false;
+                Qt.callLater(page.scrollTop);
             })
             .catch((e) => {
                 if (page.artistId !== reqId)
@@ -67,8 +85,13 @@ Item {
             });
     }
 
+    function scrollTop() {
+        if (body.visible && body.view)
+            body.view.positionViewAtBeginning();
+    }
+
     function playTop(start) {
-        if (!page.artist || !page.artist.topSongs.length)
+        if (!page.artist || !page.topSongs.length)
             return;
         Daemon.call("play_playlist", {
             items: page.artist.topSongs,
@@ -96,7 +119,7 @@ Item {
         page.shuffleVisible();
     }
     function shuffleVisible() {
-        if (!page.artist || !page.artist.topSongs.length)
+        if (!page.artist || !page.topSongs.length)
             return Promise.resolve();
         return Daemon.call("play_playlist", {
             items: page.artist.topSongs, start: null, sourceName: page.artist.name, shuffle: true
@@ -144,8 +167,6 @@ Item {
         return title;
     }
 
-    Rectangle { anchors.fill: parent; color: Tokens.paper }
-
     Text {
         anchors.centerIn: parent
         visible: page.loading || page.errorMsg !== ""
@@ -159,8 +180,10 @@ Item {
         id: body
         anchors.fill: parent
         visible: !page.loading && page.errorMsg === "" && page.artist !== null
-        items: (page.artist && page.artist.topSongs) ? page.artist.topSongs : []
-        showPlayCount: true
+        items: page.popular
+        showHeader: true
+        showAlbum: true
+        showPlays: true
         source: page.artist ? page.artist.name : ""
         onActivated: (i) => page.playTop(i)
         header: artistHeader
@@ -171,138 +194,88 @@ Item {
         id: artistHeader
         Item {
             width: body.view.width
-            implicitHeight: Style.sp(70) + topHeadingWrap.implicitHeight + Style.sp(6)
+            implicitHeight: headerCol.implicitHeight + Style.sp(3)
 
-            // photo hero
-            Item {
-                id: hero
+            ColumnLayout {
+                id: headerCol
                 width: parent.width
-                height: Style.sp(70)
-                clip: true
-                Image {
-                    anchors.fill: parent
-                    source: (page.artist && page.artist.thumbnail) ? Style.thumb(page.artist.thumbnail, 640) : ""
-                    fillMode: Image.PreserveAspectCrop
-                    asynchronous: true
-                    cache: true
-                    visible: !!(page.artist && page.artist.thumbnail)
-                }
-                Rectangle {
-                    anchors.fill: parent
-                    gradient: Gradient {
-                        GradientStop { position: 0.0; color: "transparent" }
-                        GradientStop { position: 0.55; color: Qt.rgba(0, 0, 0, 0.25) }
-                        GradientStop { position: 1.0; color: Tokens.paper }
+                spacing: Style.sp(4)
+
+                PageHero {
+                    id: hero
+                    Layout.fillWidth: true
+                    round: true
+                    eyebrow: "Artist"
+                    title: (page.artist && page.artist.name) ? page.artist.name : "Artist"
+                    meta: page.metaLine()
+                    art: (page.artist && page.artist.thumbnail) ? page.artist.thumbnail : ""
+                    placeholderIcon: "user"
+                    primaryLabel: "Play"
+                    likeable: false
+                    showMore: true
+                    onPrimary: page.playTop(null)
+                    onMore: {
+                        var p = hero.mapToItem(page, Style.sp(44), hero.height - Style.sp(8));
+                        artistMenu.openAt(p.x, p.y);
                     }
                 }
+
+                // controls: Shuffle, Radio, Subscribe
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: Style.sp(3)
+                    Btn {
+                        text: "Shuffle"
+                        icon: "shuffle"
+                        enabled: page.topSongs.length > 0
+                        onClicked: page.shuffle()
+                    }
+                    Btn {
+                        text: "Radio"
+                        icon: "radio"
+                        onClicked: page.radio()
+                    }
+                    Btn {
+                        text: !page.signedIn ? "Save to library" : (page.subscribed ? "Subscribed" : "Subscribe")
+                        icon: page.subscribed ? "check-circle" : "add"
+                        enabled: !page.subBusy
+                        onClicked: page.toggleSub()
+                    }
+                    Item { Layout.fillWidth: true }
+                }
+
+                // description (collapsible)
                 ColumnLayout {
-                    anchors.left: parent.left
-                    anchors.right: parent.right
-                    anchors.bottom: parent.bottom
-                    anchors.leftMargin: Style.sp(8)
-                    anchors.rightMargin: Style.sp(8)
-                    anchors.bottomMargin: Style.sp(6)
-                    spacing: Style.sp(2)
+                    Layout.fillWidth: true
+                    visible: !!(page.artist && page.artist.description)
+                    spacing: Style.sp(0.5)
                     Text {
                         Layout.fillWidth: true
-                        text: (page.artist && page.artist.name) ? page.artist.name : ""
-                        color: Tokens.ink
-                        font.family: Tokens.display
-                        font.pixelSize: Style.fs.hero
+                        text: (page.artist && page.artist.description) ? page.artist.description : ""
+                        color: Tokens.inkDim
+                        font.family: Style.fontUi
+                        font.pixelSize: Style.fs.sm
+                        wrapMode: Text.WordWrap
+                        maximumLineCount: page.expanded ? 999 : 2
                         elide: Text.ElideRight
                     }
                     Text {
-                        visible: !!(page.artist && (page.artist.subscribers || page.artist.monthlyListeners))
-                        text: {
-                            var a = page.artist;
-                            if (!a) return "";
-                            var parts = [];
-                            if (a.subscribers) parts.push(a.subscribers);
-                            if (a.monthlyListeners) parts.push(a.monthlyListeners);
-                            return parts.join("  ·  ");
-                        }
-                        color: Tokens.inkMuted
-                        font.family: Style.fontUi
-                        font.pixelSize: Style.fs.sm
-                    }
-                    ColumnLayout {
-                        Layout.fillWidth: true
-                        visible: !!(page.artist && page.artist.description)
-                        spacing: Style.sp(1)
-                        Text {
-                            Layout.fillWidth: true
-                            Layout.maximumWidth: Style.sp(150)
-                            text: (page.artist && page.artist.description) ? page.artist.description : ""
-                            color: Tokens.inkDim
-                            font.family: Style.fontUi
-                            font.pixelSize: Style.fs.sm
-                            wrapMode: Text.WordWrap
-                            maximumLineCount: page.expanded ? 999 : 2
-                            elide: Text.ElideRight
-                        }
-                        Text {
-                            text: page.expanded ? "LESS" : "MORE"
-                            color: descHover.hovered ? Tokens.ink : Tokens.inkMuted
-                            font.family: Style.fontMono
-                            font.pixelSize: Style.fs.xs
-                            HoverHandler { id: descHover }
-                            MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: page.expanded = !page.expanded }
-                        }
-                    }
-                    RowLayout {
-                        Layout.topMargin: Style.sp(1)
-                        spacing: Style.sp(3)
-                        Pill {
-                            label: "Shuffle"; icon: "shuffle"; primary: true
-                            enabled: !!(page.artist && page.artist.topSongs && page.artist.topSongs.length)
-                            onClicked: page.shuffle()
-                        }
-                        Pill { label: "Radio"; icon: "radio"; onClicked: page.radio() }
-                        Pill {
-                            label: !page.signedIn ? "Save to library" : (page.subscribed ? "Subscribed" : "Subscribe")
-                            icon: page.subscribed ? "check-circle" : "add"
-                            active: page.subscribed
-                            enabled: !page.subBusy
-                            onClicked: page.toggleSub()
-                        }
-                        Item {
-                            id: artistMenuBtn
-                            implicitWidth: Style.sp(10); implicitHeight: Style.sp(10)
-                            Rectangle { anchors.fill: parent; radius: width / 2; color: aHover.hovered ? Tokens.tint5 : "transparent"; border.width: 1; border.color: Tokens.line }
-                            Row {
-                                anchors.centerIn: parent
-                                spacing: Style.sp(0.75)
-                                Repeater { model: 3; delegate: Rectangle { width: Math.max(2, Style.sp(0.75)); height: width; radius: width / 2; color: aHover.hovered ? Tokens.ink : Tokens.inkMuted } }
-                            }
-                            HoverHandler { id: aHover }
-                            MouseArea {
-                                anchors.fill: parent
-                                cursorShape: Qt.PointingHandCursor
-                                onClicked: {
-                                    var p = artistMenuBtn.mapToItem(page, 0, artistMenuBtn.height);
-                                    artistMenu.openAt(p.x, p.y);
-                                }
-                            }
-                        }
+                        text: page.expanded ? "LESS" : "MORE"
+                        color: descHover.hovered ? Tokens.ink : Tokens.inkMuted
+                        font.family: Style.fontMono
+                        font.pixelSize: Style.fs.micro
+                        font.letterSpacing: Style.trackMicro
+                        HoverHandler { id: descHover }
+                        MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: page.expanded = !page.expanded }
                     }
                 }
-            }
 
-            // "Top songs" heading (above the rows)
-            Item {
-                id: topHeadingWrap
-                anchors.top: hero.bottom
-                anchors.left: parent.left
-                anchors.right: parent.right
-                anchors.topMargin: Style.sp(5)
-                implicitHeight: (page.artist && page.artist.topSongs && page.artist.topSongs.length) ? topHeading.implicitHeight : 0
-                visible: !!(page.artist && page.artist.topSongs && page.artist.topSongs.length)
+                // "Popular" heading over the rows
                 SectionHeading {
-                    id: topHeading
-                    x: Style.sp(8)
-                    width: parent.width - Style.sp(16)
-                    title: "Top songs"
-                    icon: "music"
+                    Layout.fillWidth: true
+                    Layout.topMargin: Style.sp(2)
+                    visible: page.popular.length > 0
+                    title: "Popular"
                     more: !!(page.artist && page.artist.topSongsId)
                     onMoreClicked: page.seeAllTop()
                 }
@@ -314,16 +287,58 @@ Item {
         id: artistFooter
         Item {
             width: body.view.width
-            implicitHeight: page.sections.length ? (footerCol.implicitHeight + Style.sp(24)) : Style.sp(20)
+            implicitHeight: footerCol.implicitHeight + Style.sp(24)
             ColumnLayout {
                 id: footerCol
-                x: Style.sp(8)
-                width: parent.width - Style.sp(16)
-                y: Style.sp(9)
+                width: parent.width
+                y: Style.sp(6)
                 spacing: Style.sp(9)
-                visible: page.sections.length > 0
+
+                // Releases: chip filter + card grid
+                ColumnLayout {
+                    Layout.fillWidth: true
+                    visible: page.releaseSections.length > 0
+                    spacing: Style.sp(4)
+                    SectionHeading { Layout.fillWidth: true; title: "Releases" }
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: Style.sp(2)
+                        Repeater {
+                            model: page.releaseSections
+                            delegate: Chip {
+                                required property var modelData
+                                required property int index
+                                text: modelData.title
+                                active: page.releaseTab === index
+                                onClicked: page.releaseTab = index
+                            }
+                        }
+                        Item { Layout.fillWidth: true }
+                    }
+                    Grid {
+                        id: relGrid
+                        Layout.fillWidth: true
+                        readonly property int cols: Math.max(2, Math.floor(width / (Style.cardW + Style.sp(4))))
+                        readonly property real cw: relGrid.cols > 0 ? (width - (relGrid.cols - 1) * Style.sp(4)) / relGrid.cols : Style.cardW
+                        readonly property var relItems: (page.releaseSections[page.releaseTab] && page.releaseSections[page.releaseTab].items)
+                            ? page.releaseSections[page.releaseTab].items : []
+                        columns: relGrid.cols
+                        columnSpacing: Style.sp(4)
+                        rowSpacing: Style.sp(6)
+                        Repeater {
+                            model: relGrid.relItems
+                            delegate: MediaCard {
+                                required property var modelData
+                                item: modelData
+                                cardWidth: relGrid.cw
+                            }
+                        }
+                    }
+                }
+
+                // remaining carousels (related artists, featured on, …)
                 Repeater {
-                    model: page.sections
+                    model: page.otherSections
                     delegate: Shelf {
                         required property var modelData
                         Layout.fillWidth: true

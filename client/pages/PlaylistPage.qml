@@ -9,9 +9,10 @@ import "../lib/ids.js" as Ids
 
 // The playlist page, ported from ui/src/routes/playlist/[id]/+page.svelte. get_playlist(id) once,
 // then get_playlist_more on the scroll sentinel — a five-figure Liked Songs list stays a single
-// reused TrackList so scrolling never mounts more than a couple of screenfuls. The header carries
-// the hero, Play/Shuffle, the 80 ms filter box, the sort menu (server orders YouTube stores) and
-// the owner ⋯ (edit / cover / delete). Smart and local playlists drop the controls YouTube can't do.
+// reused TrackList so scrolling never mounts more than a couple of screenfuls. The visual system is
+// spec §5: a PageHero (art, eyebrow, title, meta, Play/like/more), a slim controls row (Shuffle,
+// sort, the 80 ms filter box), the optional description, then a TrackList with a table header. Smart
+// and local playlists drop the controls YouTube can't do. All data flows are unchanged.
 Item {
     id: page
 
@@ -73,6 +74,23 @@ Item {
         return "Default";
     }
 
+    // The Sonora meta line: prefer the daemon's formatted subtitle (owner / N tracks · duration);
+    // only synthesise a track count when no subtitle is present, so we never double up the count.
+    function metaLine() {
+        if (!page.pl)
+            return "";
+        if (page.pl.subtitle)
+            return page.pl.subtitle;
+        var n = page.pl.items ? page.pl.items.length : 0;
+        return n ? (n + (n === 1 ? " track" : " tracks") + (page.pl.continuation ? "+" : "")) : "";
+    }
+    function eyebrowText() {
+        if (page.isSmart) return "Smart playlist";
+        if (page.isLocal) return "Local playlist";
+        if (page.isLiked) return "Your library";
+        return "Playlist";
+    }
+
     function load() {
         if (!page.playlistId)
             return;
@@ -94,6 +112,9 @@ Item {
                 if (p.sortMenu && p.sortMenu.selected)
                     page.sortKey = p.sortMenu.selected;
                 page.loading = false;
+                // A fresh navigation lands at the top: a ListView with a tall header can otherwise
+                // settle with contentY > 0, clipping the hero. loadMore never calls this.
+                Qt.callLater(page.scrollTop);
             })
             .catch((e) => {
                 if (page.playlistId !== reqId)
@@ -101,6 +122,11 @@ Item {
                 page.errorMsg = (e && e.message) ? e.message : String(e);
                 page.loading = false;
             });
+    }
+
+    function scrollTop() {
+        if (body.visible && body.view)
+            body.view.positionViewAtBeginning();
     }
 
     function loadMore() {
@@ -222,8 +248,6 @@ Item {
         return out;
     }
 
-    Rectangle { anchors.fill: parent; color: Tokens.paper }
-
     Text {
         anchors.centerIn: parent
         visible: page.loading || page.errorMsg !== ""
@@ -238,7 +262,9 @@ Item {
         anchors.fill: parent
         visible: !page.loading && page.errorMsg === "" && page.pl !== null
         items: page.shown
-        showPlayCount: true
+        showHeader: true
+        showAlbum: true
+        showPlays: true
         canAdd: !page.isLocal
         canRemove: page.owned
         removeLabel: "Remove from playlist"
@@ -254,109 +280,56 @@ Item {
         id: plHeader
         Item {
             width: body.view.width
-            implicitHeight: headerCol.implicitHeight + Style.sp(12)
+            implicitHeight: headerCol.implicitHeight + Style.sp(3)
 
             ColumnLayout {
                 id: headerCol
-                x: Style.sp(8)
-                width: parent.width - Style.sp(16)
-                y: Style.sp(8)
+                width: parent.width
                 spacing: Style.sp(4)
 
-                RowLayout {
+                PageHero {
+                    id: hero
                     Layout.fillWidth: true
-                    spacing: Style.sp(5)
-                    Artwork {
-                        url: (page.pl && (page.pl.cover || page.pl.thumbnail)) ? (page.pl.cover || page.pl.thumbnail) : ""
-                        px: Style.sp(30)
-                        placeholderIcon: page.isSmart ? "on-repeat" : "playlist"
-                    }
-                    ColumnLayout {
-                        Layout.fillWidth: true
-                        Layout.alignment: Qt.AlignBottom
-                        spacing: Style.sp(1)
-                        Text {
-                            text: "PLAYLIST"
-                            color: Tokens.inkMuted
-                            font.family: Style.fontMono
-                            font.pixelSize: Style.fs.xs
-                            font.letterSpacing: 1
-                        }
-                        Text {
-                            Layout.fillWidth: true
-                            text: (page.pl && page.pl.title) ? page.pl.title : "Playlist"
-                            color: Tokens.ink
-                            font.family: Tokens.display
-                            font.pixelSize: Style.fs.hero
-                            wrapMode: Text.WordWrap
-                            maximumLineCount: 2
-                            elide: Text.ElideRight
-                        }
-                        Text {
-                            visible: !!(page.pl && page.pl.subtitle)
-                            text: (page.pl && page.pl.subtitle) ? page.pl.subtitle : ""
-                            color: Tokens.inkMuted
-                            font.family: Style.fontUi
-                            font.pixelSize: Style.fs.sm
-                        }
-                        ColumnLayout {
-                            Layout.fillWidth: true
-                            Layout.topMargin: Style.sp(1)
-                            visible: !!(page.pl && page.pl.description)
-                            spacing: Style.sp(0.5)
-                            Text {
-                                Layout.fillWidth: true
-                                text: (page.pl && page.pl.description) ? page.pl.description : ""
-                                color: Tokens.inkDim
-                                font.family: Style.fontUi
-                                font.pixelSize: Style.fs.sm
-                                wrapMode: Text.WordWrap
-                                maximumLineCount: page.expanded ? 999 : 2
-                                elide: Text.ElideRight
-                            }
-                            Text {
-                                visible: !!(page.pl && page.pl.description && page.pl.description.length > 120)
-                                text: page.expanded ? "LESS" : "MORE"
-                                color: descHover.hovered ? Tokens.ink : Tokens.inkMuted
-                                font.family: Style.fontMono
-                                font.pixelSize: Style.fs.xs
-                                HoverHandler { id: descHover }
-                                MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: page.expanded = !page.expanded }
-                            }
-                        }
+                    eyebrow: page.eyebrowText()
+                    title: (page.pl && page.pl.title) ? page.pl.title : "Playlist"
+                    meta: page.metaLine()
+                    art: (page.pl && (page.pl.cover || page.pl.thumbnail)) ? (page.pl.cover || page.pl.thumbnail) : ""
+                    placeholderIcon: page.isSmart ? "on-repeat" : "playlist"
+                    primaryLabel: "Play"
+                    likeable: false
+                    showMore: true
+                    onPrimary: page.play(null)
+                    onMore: {
+                        var p = hero.mapToItem(page, Style.sp(44), hero.height - Style.sp(8));
+                        plMenu.openAt(p.x, p.y);
                     }
                 }
 
-                // controls row
+                // controls: Shuffle, sort, filter
                 RowLayout {
                     Layout.fillWidth: true
                     spacing: Style.sp(3)
-                    Pill {
-                        label: "Play"; icon: "play"; primary: true
-                        enabled: !!(page.pl && page.pl.items && page.pl.items.length)
-                        onClicked: page.play(null)
-                    }
-                    Pill {
-                        label: "Shuffle"; icon: "shuffle"
+                    Btn {
+                        text: "Shuffle"
+                        icon: "shuffle"
                         enabled: !!(page.pl && page.pl.items && page.pl.items.length)
                         onClicked: page.shuffle()
                     }
-                    Item { Layout.fillWidth: true }
-                    // sort
-                    Pill {
+                    Btn {
                         id: sortBtn
                         visible: page.hasSortMenu
-                        label: page.sortLabel()
-                        icon: "arrow-down"
+                        text: page.sortLabel()
+                        icon: "sort"
                         onClicked: {
                             var p = sortBtn.mapToItem(page, 0, sortBtn.height);
                             sortMenu.openAt(p.x, p.y);
                         }
                     }
-                    // filter
+                    Item { Layout.fillWidth: true }
                     Rectangle {
                         Layout.preferredWidth: Style.sp(52)
-                        implicitHeight: Style.sp(10)
+                        Layout.alignment: Qt.AlignVCenter
+                        implicitHeight: Style.ctlH
                         radius: Style.radius
                         color: Tokens.paperLift
                         border.width: 1
@@ -387,29 +360,34 @@ Item {
                             }
                         }
                     }
-                    // ⋯
-                    Item {
-                        id: plMenuBtn
-                        implicitWidth: Style.sp(10); implicitHeight: Style.sp(10)
-                        Rectangle { anchors.fill: parent; radius: width / 2; color: pmHover.hovered ? Tokens.tint5 : "transparent"; border.width: 1; border.color: Tokens.line }
-                        Row {
-                            anchors.centerIn: parent
-                            spacing: Style.sp(0.75)
-                            Repeater { model: 3; delegate: Rectangle { width: Math.max(2, Style.sp(0.75)); height: width; radius: width / 2; color: pmHover.hovered ? Tokens.ink : Tokens.inkMuted } }
-                        }
-                        HoverHandler { id: pmHover }
-                        MouseArea {
-                            anchors.fill: parent
-                            cursorShape: Qt.PointingHandCursor
-                            onClicked: {
-                                var p = plMenuBtn.mapToItem(page, 0, plMenuBtn.height);
-                                plMenu.openAt(p.x, p.y);
-                            }
-                        }
-                    }
                 }
 
-                Hairline { Layout.fillWidth: true; Layout.topMargin: Style.sp(1) }
+                // description (collapsible)
+                ColumnLayout {
+                    Layout.fillWidth: true
+                    visible: !!(page.pl && page.pl.description)
+                    spacing: Style.sp(0.5)
+                    Text {
+                        Layout.fillWidth: true
+                        text: (page.pl && page.pl.description) ? page.pl.description : ""
+                        color: Tokens.inkDim
+                        font.family: Style.fontUi
+                        font.pixelSize: Style.fs.sm
+                        wrapMode: Text.WordWrap
+                        maximumLineCount: page.expanded ? 999 : 2
+                        elide: Text.ElideRight
+                    }
+                    Text {
+                        visible: !!(page.pl && page.pl.description && page.pl.description.length > 120)
+                        text: page.expanded ? "LESS" : "MORE"
+                        color: descHover.hovered ? Tokens.ink : Tokens.inkMuted
+                        font.family: Style.fontMono
+                        font.pixelSize: Style.fs.micro
+                        font.letterSpacing: Style.trackMicro
+                        HoverHandler { id: descHover }
+                        MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: page.expanded = !page.expanded }
+                    }
+                }
             }
         }
     }
@@ -433,7 +411,7 @@ Item {
                 Rectangle {
                     Layout.alignment: Qt.AlignHCenter
                     visible: page.moreError
-                    implicitWidth: Style.sp(24); implicitHeight: Style.sp(9)
+                    implicitWidth: Style.sp(24); implicitHeight: Style.ctlH
                     radius: Style.radius
                     color: tryHover.hovered ? Tokens.tint10 : "transparent"
                     border.width: 1; border.color: Tokens.line
@@ -447,7 +425,8 @@ Item {
                     text: (page.pl ? page.pl.items.length : 0) + " tracks"
                     color: Tokens.inkFaint
                     font.family: Style.fontMono
-                    font.pixelSize: Style.fs.xs
+                    font.pixelSize: Style.fs.micro
+                    font.letterSpacing: Style.trackMicro
                 }
                 Text {
                     Layout.alignment: Qt.AlignHCenter
@@ -467,7 +446,7 @@ Item {
     }
     Menu {
         id: sortMenu
-        customItems: page.sorts.map((s) => ({ icon: page.sortKey === s.key ? "check-circle" : "arrow-down",
+        customItems: page.sorts.map((s) => ({ icon: page.sortKey === s.key ? "check-circle" : "sort",
             label: s.label, danger: false, act: () => page.chooseSort(s.key) }))
     }
 
@@ -480,6 +459,7 @@ Item {
     Component {
         id: editDialog
         EditPlaylist {
+            blurSource: body
             playlistId: page.playlistId
             initialName: (page.pl && page.pl.title) ? page.pl.title : ""
             initialDescription: (page.pl && page.pl.description) ? page.pl.description : ""
@@ -495,21 +475,21 @@ Item {
         visible: page.confirmingDelete
         z: 220
         MouseArea { anchors.fill: parent; onClicked: page.confirmingDelete = false }
-        Rectangle { anchors.fill: parent; color: "#000000"; opacity: 0.45 }
+        Rectangle { anchors.fill: parent; color: "#000000"; opacity: 0.5 }
         Rectangle {
             anchors.centerIn: parent
             width: Style.sp(90)
-            implicitHeight: delCol.implicitHeight + Style.sp(8)
+            implicitHeight: delCol.implicitHeight + Style.sp(12)
             height: implicitHeight
             radius: Style.radiusCard
-            color: Tokens.paperLift
+            color: Tokens.paper
             border.width: 1
-            border.color: Tokens.lineStrong
+            border.color: Tokens.line
             MouseArea { anchors.fill: parent }
             ColumnLayout {
                 id: delCol
                 anchors.fill: parent
-                anchors.margins: Style.sp(4)
+                anchors.margins: Style.sp(6)
                 spacing: Style.sp(3)
                 Text {
                     text: "Delete this playlist?"

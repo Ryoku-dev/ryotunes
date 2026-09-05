@@ -8,10 +8,11 @@ import "../components"
 import "../lib/ids.js" as Ids
 
 // The album page, ported from ui/src/routes/album/[id]/+page.svelte. get_album(id) once; the whole
-// page is one TrackList scroller whose header carries the hero (cover, artist, controls, filter)
-// and whose footer carries the card carousels YouTube hangs under the tracks. Play/Shuffle seed the
-// queue with the full album (never just the filtered rows); a local album has no YouTube identity,
-// so save/radio/share hide for it. The two personal actions are wired by the personal store.
+// page is one TrackList scroller whose header carries the PageHero (cover, eyebrow, title, meta,
+// Play primary, the library-save heart, the ⋯ menu) plus a slim controls row (Shuffle, filter) and
+// the description, and whose footer carries the card carousels YouTube hangs under the tracks.
+// Play/Shuffle seed the queue with the full album (never just the filtered rows); a local album has
+// no YouTube identity, so save/radio/share hide for it. Data flows are unchanged.
 Item {
     id: page
 
@@ -53,6 +54,24 @@ Item {
         };
     }
 
+    function metaLine() {
+        if (!page.album)
+            return "";
+        var parts = [];
+        if (page.album.artist)
+            parts.push(page.album.artist);
+        // secondSubtitle already carries the song count + duration; only synthesise a track count
+        // when it is absent, so we never print "1 song · 1 track".
+        if (page.album.secondSubtitle) {
+            parts.push(page.album.secondSubtitle);
+        } else {
+            var n = page.album.items ? page.album.items.length : 0;
+            if (n)
+                parts.push(n + (n === 1 ? " track" : " tracks"));
+        }
+        return parts.join("  \u00b7  ");
+    }
+
     function load() {
         if (!page.albumId)
             return;
@@ -67,6 +86,7 @@ Item {
                     return;
                 page.album = a;
                 page.loading = false;
+                Qt.callLater(page.scrollTop);
             })
             .catch((e) => {
                 if (page.albumId !== reqId)
@@ -74,6 +94,11 @@ Item {
                 page.errorMsg = (e && e.message) ? e.message : String(e);
                 page.loading = false;
             });
+    }
+
+    function scrollTop() {
+        if (body.visible && body.view)
+            body.view.positionViewAtBeginning();
     }
 
     function playAll(start) {
@@ -142,9 +167,6 @@ Item {
         Router.push("list", { id: section.moreBrowseId, title: section.title, params: section.moreParams });
     }
 
-    Rectangle { anchors.fill: parent; color: Tokens.paper }
-
-    // loading / error
     Text {
         anchors.centerIn: parent
         visible: page.loading || page.errorMsg !== ""
@@ -160,7 +182,9 @@ Item {
         visible: !page.loading && page.errorMsg === "" && page.album !== null
         items: page.shown
         hideThumb: true
-        showPlayCount: true
+        showHeader: true
+        showAlbum: false
+        showPlays: true
         canAdd: !page.isLocal
         source: page.album ? page.album.title : ""
         onActivated: (i) => page.playAll(i)
@@ -172,146 +196,87 @@ Item {
         id: albumHeader
         Item {
             width: body.view.width
-            implicitHeight: headerCol.implicitHeight + Style.sp(10)
-
-            // faint cover wash
-            Image {
-                anchors.fill: parent
-                source: (page.album && page.album.thumbnail) ? Style.thumb(page.album.thumbnail, 96) : ""
-                fillMode: Image.PreserveAspectCrop
-                asynchronous: true
-                cache: true
-                opacity: 0.22
-                visible: !!(page.album && page.album.thumbnail)
-            }
-            Rectangle {
-                anchors.fill: parent
-                gradient: Gradient {
-                    GradientStop { position: 0.0; color: "transparent" }
-                    GradientStop { position: 1.0; color: Tokens.paper }
-                }
-            }
-
-            // filter box (top-right)
-            Rectangle {
-                anchors.right: parent.right
-                anchors.top: parent.top
-                anchors.rightMargin: Style.sp(8)
-                anchors.topMargin: Style.sp(6)
-                width: Style.sp(56)
-                implicitHeight: Style.sp(9)
-                radius: Style.radius
-                color: Tokens.paperLift
-                border.width: 1
-                border.color: albumFilter.activeFocus ? Tokens.lineStrong : Tokens.line
-                RowLayout {
-                    anchors.fill: parent
-                    anchors.leftMargin: Style.sp(2)
-                    anchors.rightMargin: Style.sp(2)
-                    spacing: Style.sp(2)
-                    Icon { name: "search"; size: Style.fs.sm; color: Tokens.inkMuted }
-                    TextInput {
-                        id: albumFilter
-                        Layout.fillWidth: true
-                        verticalAlignment: TextInput.AlignVCenter
-                        clip: true
-                        color: Tokens.ink
-                        font.family: Style.fontUi
-                        font.pixelSize: Style.fs.sm
-                        text: page.query
-                        onTextChanged: page.query = text
-                        Text {
-                            anchors.verticalCenter: parent.verticalCenter
-                            visible: albumFilter.text.length === 0
-                            text: "Search this album"
-                            color: Tokens.inkFaint
-                            font: albumFilter.font
-                        }
-                    }
-                }
-            }
+            implicitHeight: headerCol.implicitHeight + Style.sp(3)
 
             ColumnLayout {
                 id: headerCol
-                x: Style.sp(8)
-                width: parent.width - Style.sp(16)
-                y: Style.sp(9)
+                width: parent.width
                 spacing: Style.sp(4)
 
-                // hero row
+                PageHero {
+                    id: hero
+                    Layout.fillWidth: true
+                    eyebrow: (page.album && page.album.subtitle) ? page.album.subtitle : "Album"
+                    title: (page.album && page.album.title) ? page.album.title : "Album"
+                    meta: page.metaLine()
+                    art: (page.album && page.album.thumbnail) ? page.album.thumbnail : ""
+                    placeholderIcon: "cd"
+                    primaryLabel: "Play"
+                    likeable: !page.isLocal
+                    liked: page.inLibrary
+                    showMore: true
+                    onPrimary: page.playAll(null)
+                    onLike: page.toggleLibrary()
+                    onMore: {
+                        var p = hero.mapToItem(page, Style.sp(44), hero.height - Style.sp(8));
+                        albumMenu.openAt(p.x, p.y);
+                    }
+                }
+
+                // controls: Shuffle, filter
                 RowLayout {
                     Layout.fillWidth: true
-                    spacing: Style.sp(5)
-                    Artwork {
-                        url: (page.album && page.album.thumbnail) ? page.album.thumbnail : ""
-                        px: Style.sp(28)
-                        placeholderIcon: "cd"
+                    spacing: Style.sp(3)
+                    Btn {
+                        text: "Shuffle"
+                        icon: "shuffle"
+                        enabled: !!(page.album && page.album.items && page.album.items.length)
+                        onClicked: page.shuffle()
                     }
-                    ColumnLayout {
-                        Layout.fillWidth: true
-                        Layout.alignment: Qt.AlignBottom
-                        spacing: Style.sp(1)
-                        Text {
-                            text: (page.album && page.album.subtitle) ? page.album.subtitle : "Album"
-                            color: Tokens.inkMuted
-                            font.family: Style.fontMono
-                            font.pixelSize: Style.fs.xs
-                            font.letterSpacing: 1
-                        }
-                        Text {
-                            Layout.fillWidth: true
-                            text: (page.album && page.album.title) ? page.album.title : "Album"
-                            color: Tokens.ink
-                            font.family: Tokens.display
-                            font.pixelSize: Style.fs.hero
-                            wrapMode: Text.WordWrap
-                            maximumLineCount: 2
-                            elide: Text.ElideRight
-                        }
+                    Item { Layout.fillWidth: true }
+                    Rectangle {
+                        Layout.preferredWidth: Style.sp(52)
+                        Layout.alignment: Qt.AlignVCenter
+                        implicitHeight: Style.ctlH
+                        radius: Style.radius
+                        color: Tokens.paperLift
+                        border.width: 1
+                        border.color: albumFilter.activeFocus ? Tokens.lineStrong : Tokens.line
                         RowLayout {
-                            Layout.fillWidth: true
+                            anchors.fill: parent
+                            anchors.leftMargin: Style.sp(2)
+                            anchors.rightMargin: Style.sp(2)
                             spacing: Style.sp(2)
-                            Rectangle {
-                                visible: !!(page.album && page.album.explicit)
-                                implicitWidth: Style.sp(4.5); implicitHeight: Style.sp(4.5)
-                                radius: Style.sp(1); color: "transparent"
-                                border.width: 1; border.color: Tokens.inkMuted
-                                Text { anchors.centerIn: parent; text: "E"; color: Tokens.inkMuted; font.family: Style.fontUi; font.pixelSize: Style.fs.xs; font.weight: Font.DemiBold }
-                            }
-                            Text {
-                                visible: !!(page.album && page.album.artist)
-                                text: (page.album && page.album.artist) ? page.album.artist : ""
-                                color: artistHover.hovered ? Tokens.ink : Tokens.inkDim
-                                font.family: Style.fontUi
-                                font.pixelSize: Style.fs.md
-                                font.weight: Font.Medium
-                                HoverHandler { id: artistHover; enabled: !!(page.album && page.album.artistId) }
-                                MouseArea {
-                                    anchors.fill: parent
-                                    enabled: !!(page.album && page.album.artistId)
-                                    cursorShape: Qt.PointingHandCursor
-                                    onClicked: Router.push("artist", { id: page.album.artistId })
-                                }
-                            }
-                            Text {
-                                visible: !!(page.album && page.album.secondSubtitle)
-                                text: (page.album && page.album.secondSubtitle) ? ("· " + page.album.secondSubtitle) : ""
-                                color: Tokens.inkMuted
+                            Icon { name: "search"; size: Style.fs.sm; color: Tokens.inkMuted }
+                            TextInput {
+                                id: albumFilter
+                                Layout.fillWidth: true
+                                verticalAlignment: TextInput.AlignVCenter
+                                clip: true
+                                color: Tokens.ink
                                 font.family: Style.fontUi
                                 font.pixelSize: Style.fs.sm
+                                text: page.query
+                                onTextChanged: page.query = text
+                                Text {
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    visible: albumFilter.text.length === 0
+                                    text: "Search this album"
+                                    color: Tokens.inkFaint
+                                    font: albumFilter.font
+                                }
                             }
                         }
                     }
                 }
 
-                // description
+                // description (collapsible)
                 ColumnLayout {
                     Layout.fillWidth: true
                     visible: !!(page.album && page.album.description)
-                    spacing: Style.sp(1)
+                    spacing: Style.sp(0.5)
                     Text {
                         Layout.fillWidth: true
-                        Layout.maximumWidth: Style.sp(150)
                         text: (page.album && page.album.description) ? page.album.description : ""
                         color: Tokens.inkDim
                         font.family: Style.fontUi
@@ -324,56 +289,12 @@ Item {
                         text: page.expanded ? "LESS" : "MORE"
                         color: moreHover.hovered ? Tokens.ink : Tokens.inkMuted
                         font.family: Style.fontMono
-                        font.pixelSize: Style.fs.xs
+                        font.pixelSize: Style.fs.micro
+                        font.letterSpacing: Style.trackMicro
                         HoverHandler { id: moreHover }
                         MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: page.expanded = !page.expanded }
                     }
                 }
-
-                // controls
-                RowLayout {
-                    Layout.fillWidth: true
-                    spacing: Style.sp(3)
-                    Pill {
-                        label: "Play"; icon: "play"; primary: true
-                        enabled: !!(page.album && page.album.items && page.album.items.length)
-                        onClicked: page.playAll(null)
-                    }
-                    Pill {
-                        label: "Shuffle"; icon: "shuffle"
-                        enabled: !!(page.album && page.album.items && page.album.items.length)
-                        onClicked: page.shuffle()
-                    }
-                    Pill {
-                        visible: !page.isLocal
-                        label: page.inLibrary ? "In library" : "Save to library"
-                        icon: "add"
-                        active: page.inLibrary
-                        enabled: !page.savingLibrary
-                        onClicked: page.toggleLibrary()
-                    }
-                    Item {
-                        id: albumMenuBtn
-                        implicitWidth: Style.sp(10); implicitHeight: Style.sp(10)
-                        Rectangle { anchors.fill: parent; radius: width / 2; color: amHover.hovered ? Tokens.tint5 : "transparent"; border.width: 1; border.color: Tokens.line }
-                        Row {
-                            anchors.centerIn: parent
-                            spacing: Style.sp(0.75)
-                            Repeater { model: 3; delegate: Rectangle { width: Math.max(2, Style.sp(0.75)); height: width; radius: width / 2; color: amHover.hovered ? Tokens.ink : Tokens.inkMuted } }
-                        }
-                        HoverHandler { id: amHover }
-                        MouseArea {
-                            anchors.fill: parent
-                            cursorShape: Qt.PointingHandCursor
-                            onClicked: {
-                                var p = albumMenuBtn.mapToItem(page, 0, albumMenuBtn.height);
-                                albumMenu.openAt(p.x, p.y);
-                            }
-                        }
-                    }
-                }
-
-                Hairline { Layout.fillWidth: true; Layout.topMargin: Style.sp(2) }
             }
         }
     }
@@ -386,8 +307,7 @@ Item {
                 ? (footerCol.implicitHeight + Style.sp(24)) : Style.sp(20)
             ColumnLayout {
                 id: footerCol
-                x: Style.sp(8)
-                width: parent.width - Style.sp(16)
+                width: parent.width
                 y: Style.sp(6)
                 spacing: Style.sp(9)
                 visible: !!(page.album && page.album.sections && page.album.sections.length)
@@ -409,7 +329,7 @@ Item {
         id: albumMenu
         customItems: page.buildAlbumMenu()
     }
-    AddToPlaylist { id: albumPicker }
+    AddToPlaylist { id: albumPicker; blurSource: body }
 
     function buildAlbumMenu() {
         var out = [];
@@ -417,6 +337,9 @@ Item {
         out.push({ icon: "queue", label: "Add to queue", danger: false, act: () => page.queueAlbum(false) });
         if (!page.isLocal && page.album && page.album.playlistId)
             out.push({ icon: "radio", label: "Start radio", danger: false, act: () => page.radio() });
+        if (page.album && page.album.artistId)
+            out.push({ icon: "artists", label: "Go to artist", danger: false,
+                act: () => Router.push("artist", { id: page.album.artistId }) });
         if (!page.isLocal)
             out.push({ icon: "add", label: "Save to playlist", danger: false,
                 act: () => albumPicker.openWith(page.album ? page.album.items : []) });

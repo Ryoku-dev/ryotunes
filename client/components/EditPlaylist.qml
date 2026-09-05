@@ -1,18 +1,21 @@
 pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Layouts
+import QtQuick.Effects
 import Ryoku.Ui.Singletons
 import "../"
 
 // "Edit playlist" details, ported from EditPlaylistDialog.svelte: name, description and visibility.
 // edit_playlist_details merges only the fields sent, so an untouched one is never overwritten; the
-// page reloads on save to pick up whatever YouTube accepted.
+// page reloads on save to pick up whatever YouTube accepted. A centred modal card over a one-shot
+// snapshot blur of the page behind (spec §9) under a 0.5 scrim. Data flows are unchanged.
 Item {
     id: root
 
     anchors.fill: parent
     z: 210
 
+    property Item blurSource: null
     property string playlistId: ""
     property string initialName: ""
     property string initialDescription: ""
@@ -25,6 +28,8 @@ Item {
     property string nameText: initialName
     property string descText: initialDescription
     property bool isPublic: initialPublic
+
+    Component.onCompleted: { if (root.blurSource) snap.scheduleUpdate(); }
 
     function submit() {
         if (root.saving || !root.nameText.trim())
@@ -39,24 +44,44 @@ Item {
             .catch((e) => { root.saving = false; Playback.toast((e && e.message) ? e.message : "Could not save", "error"); });
     }
 
+    // snapshot blur of the page behind, captured once on open (spec §9)
+    ShaderEffectSource {
+        id: snap
+        anchors.fill: parent
+        visible: false
+        sourceItem: root.blurSource
+        live: false
+        hideSource: false
+        recursive: false
+    }
+    MultiEffect {
+        anchors.fill: parent
+        visible: root.blurSource !== null && Style.blurEnabled
+        source: snap
+        blurEnabled: true
+        blur: 1.0
+        blurMax: 32
+        autoPaddingEnabled: false
+    }
+
     MouseArea { anchors.fill: parent; onClicked: root.closed() }
-    Rectangle { anchors.fill: parent; color: "#000000"; opacity: 0.45 }
+    Rectangle { anchors.fill: parent; color: "#000000"; opacity: 0.5 }
 
     Rectangle {
         anchors.centerIn: parent
         width: Style.sp(100)
-        implicitHeight: col.implicitHeight + Style.sp(8)
+        implicitHeight: col.implicitHeight + Style.sp(12)
         height: implicitHeight
         radius: Style.radiusCard
-        color: Tokens.paperLift
+        color: Tokens.paper
         border.width: 1
-        border.color: Tokens.lineStrong
+        border.color: Tokens.line
         MouseArea { anchors.fill: parent }
 
         ColumnLayout {
             id: col
             anchors.fill: parent
-            anchors.margins: Style.sp(4)
+            anchors.margins: Style.sp(6)
             spacing: Style.sp(3)
 
             Text {
@@ -72,7 +97,7 @@ Item {
                 Layout.fillWidth: true
                 implicitHeight: Style.sp(10)
                 radius: Style.radius
-                color: Tokens.paper
+                color: Tokens.paperLift
                 border.width: 1
                 border.color: nameField.activeFocus ? Tokens.lineStrong : Tokens.line
                 TextInput {
@@ -104,7 +129,7 @@ Item {
                 Layout.fillWidth: true
                 implicitHeight: Style.sp(24)
                 radius: Style.radius
-                color: Tokens.paper
+                color: Tokens.paperLift
                 border.width: 1
                 border.color: descField.activeFocus ? Tokens.lineStrong : Tokens.line
                 TextEdit {
@@ -130,20 +155,10 @@ Item {
             // public toggle
             RowLayout {
                 Layout.fillWidth: true
-                spacing: Style.sp(2)
-                Rectangle {
-                    implicitWidth: Style.sp(9)
-                    implicitHeight: Style.sp(5)
-                    radius: height / 2
-                    color: root.isPublic ? Tokens.sun : Tokens.tint16
-                    Rectangle {
-                        width: Style.sp(4); height: Style.sp(4); radius: width / 2
-                        color: Tokens.paper
-                        y: Style.sp(0.5)
-                        x: root.isPublic ? parent.width - width - Style.sp(0.5) : Style.sp(0.5)
-                        Behavior on x { NumberAnimation { duration: Style.motion.snap } }
-                    }
-                    MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: root.isPublic = !root.isPublic }
+                spacing: Style.sp(3)
+                Toggle {
+                    checked: root.isPublic
+                    onToggled: (v) => root.isPublic = v
                 }
                 Text {
                     Layout.fillWidth: true
