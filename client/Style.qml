@@ -108,9 +108,17 @@ Singleton {
     // The one saturated colour the chrome borrows: the playing cover's accent (sampled by
     // components/ArtAccent into Playback.artAccent) while a track plays, the wallpaper's primary
     // otherwise. Progress fills, the live meter, active chips and the mini's glow read this.
-    readonly property color accent: (!!Playback.now && Playback.artAccent.a > 0) ? Playback.artAccent : Tokens.sun
-    // A darkened/lightened accent the pattern of Tokens.sunDeep, for fills over paper.
-    readonly property color accentDeep: Qt.darker(accent, 1.3)
+    // Sonora's derivation keeps the cover's hue but pins saturation to 0.6-0.85 and the lightness
+    // to 0.72 on dark paper / 0.42 on light, so the accent always reads against the surface.
+    readonly property bool paperDark: (Tokens.paper.r + Tokens.paper.g + Tokens.paper.b) / 3 < 0.5
+    readonly property color accent: {
+        var c = Playback.artAccent;
+        if (!Playback.now || c.a <= 0)
+            return Tokens.sun;
+        return Qt.hsla(c.hslHue < 0 ? 0 : c.hslHue, Math.max(0.6, Math.min(0.85, c.hslSaturation)), root.paperDark ? 0.72 : 0.42, 1);
+    }
+    readonly property color accentDeep: Qt.hsla(accent.hslHue < 0 ? 0 : accent.hslHue, accent.hslSaturation, root.paperDark ? 0.44 : 0.5, 1)
+    readonly property color accentSoft: Qt.rgba(accent.r, accent.g, accent.b, 0.16)
 
     // --- decor level --------------------------------------------------------------------------
     // Ryoku's calm / rich switch, owned by this client (Prefs.decor) rather than the desktop's
