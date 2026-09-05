@@ -210,7 +210,9 @@ Item {
             // (the feed shelves) so the panel is never painted under them.
             z: 2
             width: list.width
-            implicitHeight: headerCol.implicitHeight
+            // The list's spacing runs between delegates only; the header carries its own section
+            // gap so the first shelf never rides up against the last header block.
+            implicitHeight: headerCol.implicitHeight + Style.sp(10)
 
             ColumnLayout {
                 id: headerCol
