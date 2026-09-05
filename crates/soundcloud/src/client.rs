@@ -357,36 +357,63 @@ impl SoundCloud {
         Ok(w.collection.into_iter().map(map_track).collect())
     }
 
-    /// A guest chart (`/charts?kind=…&genre=…`). If the charts endpoint stops answering (or comes
-    /// back empty), fall back to a genre-filtered track search.
-    pub async fn charts(&self, kind: ChartKind, genre: &str) -> Result<Vec<Track>> {
-        let url = format!("{API}/charts");
-        let params = [
-            ("kind", kind.as_str().to_string()),
-            ("genre", genre.to_string()),
-            ("limit", LIMIT.into()),
-        ];
-        if let Ok(w) = self.get_json::<WireCharts>(&url, &params).await {
-            let tracks: Vec<Track> =
-                w.collection.into_iter().filter_map(|i| i.track).map(map_track).collect();
-            if !tracks.is_empty() {
-                return Ok(tracks);
+    /// The guest Discover feed (`/mixed-selections`): titled shelves of playlists and system
+    /// playlists. This replaces the retired `/charts` endpoint for guest Home.
+    pub async fn discover(&self) -> Result<Vec<Selection>> {
+        let url = format!("{API}/mixed-selections");
+        let w: WireCollection<WireSelection> =
+            self.get_json(&url, &[("limit", LIMIT.into())]).await?;
+        let mut out = Vec::with_capacity(w.collection.len());
+        for sel in w.collection {
+            let slug =
+                sel.urn.strip_prefix("soundcloud:selections:").unwrap_or(&sel.urn).to_string();
+            let mut items = Vec::new();
+            for item in sel.items.collection {
+                match item.get("kind").and_then(|k| k.as_str()) {
+                    Some("playlist") => {
+                        if let Ok(p) = serde_json::from_value::<WirePlaylist>(item) {
+                            items.push(DiscoverItem::Playlist(map_playlist(&p)));
+                        }
+                    }
+                    Some("system-playlist") => {
+                        if let Ok(s) = serde_json::from_value::<WireSystemPlaylist>(item) {
+                            items.push(DiscoverItem::System(map_system_playlist(&s)));
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            if !items.is_empty() {
+                out.push(Selection { slug, title: sel.title, items });
             }
         }
-        // Fallback: the genre tail (`soundcloud:genres:house` -> `house`) as both query and filter.
-        let tail = genre.rsplit(':').next().unwrap_or(genre);
-        let url = format!("{API}/search/tracks");
-        let w: WireCollection<WireTrack> = self
-            .get_json(
-                &url,
-                &[
-                    ("q", tail.into()),
-                    ("filter.genre_or_tag", tail.into()),
-                    ("limit", LIMIT.into()),
-                ],
-            )
-            .await?;
-        Ok(w.collection.into_iter().map(map_track).collect())
+        Ok(out)
+    }
+
+    /// Hydrate a system playlist (`/system-playlists/{urn}`) into a `PlaylistDetail`. `permalink`
+    /// is e.g. "trending-by-genre:trap"; the response carries id-stub tracks, hydrated via
+    /// `tracks()` in order. The synthetic playlist has id 0 and `set_type = "system"`.
+    pub async fn system_playlist(&self, permalink: &str) -> Result<PlaylistDetail> {
+        let urn = format!("soundcloud:system-playlists:{permalink}");
+        let url = format!("{API}/system-playlists/{urn}");
+        let w: WireSystemPlaylist = self.get_json(&url, &[]).await?;
+
+        let ids: Vec<u64> = w.tracks.iter().map(|t| t.id).collect();
+        let tracks = self.tracks(&ids).await?;
+        let duration_ms = tracks.iter().map(|t| t.duration_ms).sum();
+        let system = map_system_playlist(&w);
+        let playlist = Playlist {
+            id: 0,
+            title: system.title.clone(),
+            user: UserRef::default(),
+            artwork: system.artwork.clone(),
+            is_album: false,
+            set_type: Some("system".to_string()),
+            track_count: system.track_count,
+            release_date: None,
+            duration_ms,
+        };
+        Ok(PlaylistDetail { playlist, tracks, description: system.description.clone() })
     }
 }
 
@@ -413,15 +440,13 @@ struct WireWaveform {
     samples: Vec<u32>,
 }
 
-/// The `/charts` envelope: `{collection: [{track}]}`.
+/// A `/mixed-selections` shelf: `{urn:"soundcloud:selections:<slug>", title, items:{collection}}`.
 #[derive(Deserialize, Default)]
-struct WireCharts {
+struct WireSelection {
     #[serde(default)]
-    collection: Vec<WireChartItem>,
-}
-
-#[derive(Deserialize)]
-struct WireChartItem {
+    urn: String,
     #[serde(default)]
-    track: Option<WireTrack>,
+    title: String,
+    #[serde(default)]
+    items: WireCollection<serde_json::Value>,
 }

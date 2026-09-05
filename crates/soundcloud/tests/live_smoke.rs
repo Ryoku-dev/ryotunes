@@ -3,9 +3,9 @@
 //!   cargo test -p ryotunes-soundcloud -- --ignored --nocapture
 //!
 //! It searches "klingande messiah", then fetches the track, its stream URL, its waveform, the
-//! artist, the artist's albums, and a chart — printing one line of evidence for each.
+//! artist, the artist's albums, the Discover feed, and a system playlist — one line of evidence each.
 
-use ryotunes_soundcloud::{ChartKind, SoundCloud};
+use ryotunes_soundcloud::{DiscoverItem, SoundCloud};
 
 /// Host portion of a URL, for terse evidence output.
 fn host_of(url: &str) -> &str {
@@ -61,9 +61,39 @@ async fn live_smoke() {
         None => eprintln!("first album: <this artist has no albums>"),
     }
 
-    // 7. A chart.
-    let chart = sc.charts(ChartKind::Top, "soundcloud:genres:all-music").await.expect("charts");
-    assert!(!chart.is_empty(), "chart came back empty");
-    eprintln!("chart tracks: {}", chart.len());
-    eprintln!("first chart track: \"{}\" by {}", chart[0].title, chart[0].user.username);
+    // 7. The Discover feed, and a system playlist drilled into from it.
+    let selections = sc.discover().await.expect("discover");
+    assert!(!selections.is_empty(), "discover came back empty");
+    let total_items: usize = selections.iter().map(|s| s.items.len()).sum();
+    eprintln!("discover shelves: {} ({} items)", selections.len(), total_items);
+    eprintln!(
+        "first shelf: \"{}\" (slug {}) with {} items",
+        selections[0].title,
+        selections[0].slug,
+        selections[0].items.len()
+    );
+
+    // Find the first system playlist anywhere in the feed and hydrate it.
+    let system = selections
+        .iter()
+        .flat_map(|s| &s.items)
+        .find_map(|i| match i {
+            DiscoverItem::System(sp) => Some(sp.clone()),
+            DiscoverItem::Playlist(_) => None,
+        })
+        .expect("discover has at least one system playlist");
+    eprintln!("system playlist: \"{}\" (permalink {})", system.title, system.permalink);
+
+    let detail = sc.system_playlist(&system.permalink).await.expect("system_playlist");
+    eprintln!(
+        "hydrated system playlist \"{}\": {} tracks, set_type {:?}, id {}",
+        detail.playlist.title,
+        detail.tracks.len(),
+        detail.playlist.set_type,
+        detail.playlist.id
+    );
+    assert!(!detail.tracks.is_empty(), "system playlist hydrated no tracks");
+    assert_eq!(detail.playlist.id, 0);
+    assert_eq!(detail.playlist.set_type.as_deref(), Some("system"));
+    eprintln!("first system track: \"{}\" by {}", detail.tracks[0].title, detail.tracks[0].user.username);
 }

@@ -13,7 +13,8 @@ mod models;
 
 pub use client::{Error, Result, SoundCloud};
 pub use models::{
-    ChartKind, Page, Playlist, PlaylistDetail, SearchResults, Track, Transcoding, User, UserRef,
+    DiscoverItem, Page, Playlist, PlaylistDetail, SearchResults, Selection, SystemPlaylist, Track,
+    Transcoding, User, UserRef,
 };
 
 use std::sync::LazyLock;

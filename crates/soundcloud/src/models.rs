@@ -107,20 +107,32 @@ pub struct SearchResults {
     pub playlists: Vec<Playlist>,
 }
 
-/// Which chart to pull (`/charts?kind=…`).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ChartKind {
-    Top,
-    Trending,
+/// A "system playlist" from the Discover feed — an algorithmic set (e.g. `trending-by-genre:trap`)
+/// keyed by a permalink/urn rather than a numeric id.
+#[derive(Clone, Debug, Default)]
+pub struct SystemPlaylist {
+    pub permalink: String,
+    pub urn: String,
+    pub title: String,
+    pub short_title: String,
+    pub description: Option<String>,
+    pub artwork: Option<String>,
+    pub track_count: u64,
 }
 
-impl ChartKind {
-    pub(crate) fn as_str(self) -> &'static str {
-        match self {
-            ChartKind::Top => "top",
-            ChartKind::Trending => "trending",
-        }
-    }
+/// One tile in a Discover selection: either a normal (numeric-id) playlist or a system playlist.
+#[derive(Clone, Debug)]
+pub enum DiscoverItem {
+    Playlist(Playlist),
+    System(SystemPlaylist),
+}
+
+/// A Discover shelf (`/mixed-selections`): a titled row of playlists/system-playlists.
+#[derive(Clone, Debug)]
+pub struct Selection {
+    pub slug: String,
+    pub title: String,
+    pub items: Vec<DiscoverItem>,
 }
 
 // ---------------------------------------------------------------------------
@@ -283,6 +295,31 @@ pub(crate) struct WirePlaylist {
     pub tracks: Vec<WireTrack>,
 }
 
+/// A system playlist as it arrives inside `/mixed-selections` items and from
+/// `/system-playlists/{urn}`. Its `id` is a urn string (not numeric), so we key off `urn`/
+/// `permalink`; `tracks` are `{id}` stubs hydrated by the client.
+#[derive(Deserialize, Clone, Default)]
+pub(crate) struct WireSystemPlaylist {
+    #[serde(default)]
+    pub urn: String,
+    #[serde(default)]
+    pub permalink: String,
+    #[serde(default)]
+    pub title: String,
+    #[serde(default)]
+    pub short_title: String,
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default)]
+    pub calculated_artwork_url: Option<String>,
+    #[serde(default)]
+    pub artwork_url: Option<String>,
+    #[serde(default)]
+    pub track_count: Option<u64>,
+    #[serde(default)]
+    pub tracks: Vec<WireTrack>,
+}
+
 // ---------------------------------------------------------------------------
 // Mapping (wire -> public)
 // ---------------------------------------------------------------------------
@@ -357,5 +394,23 @@ pub(crate) fn map_playlist(w: &WirePlaylist) -> Playlist {
         track_count: w.track_count,
         release_date: nonempty(w.release_date.clone()),
         duration_ms: w.duration,
+    }
+}
+
+pub(crate) fn map_system_playlist(w: &WireSystemPlaylist) -> SystemPlaylist {
+    let urn = if w.urn.is_empty() {
+        format!("soundcloud:system-playlists:{}", w.permalink)
+    } else {
+        w.urn.clone()
+    };
+    SystemPlaylist {
+        permalink: w.permalink.clone(),
+        urn,
+        title: w.title.clone(),
+        short_title: w.short_title.clone(),
+        description: nonempty(w.description.clone()),
+        artwork: nonempty(w.calculated_artwork_url.clone().or_else(|| w.artwork_url.clone()))
+            .map(|u| upscale_artwork(&u)),
+        track_count: w.track_count.unwrap_or(w.tracks.len() as u64),
     }
 }
