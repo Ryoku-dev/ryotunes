@@ -27,6 +27,12 @@ Singleton {
     property var auth: ({ signedIn: false })
     property var settings: ({})
     property var lt: ({ role: "none" })
+    // The Sound dialog's effects, mirrored from the daemon (the `audio-fx` event and the subscribe
+    // snapshot). `bass` is dB, reverb/width are 0..1, speed is the tempo multiplier.
+    property var audioFx: ({ speed: 1, semitones: 0, reverb: 0, bass: 0, width: 0 })
+    // The active music provider ("youtube" | "spotify"), mirrored from the daemon (the subscribe
+    // snapshot's `provider` and a `provider-changed` event). The title bar's switch reads it.
+    property string provider: "youtube"
 
     // --- optimistic drag state ---------------------------------------------------------------
     // NaN when the seek thumb is not held; a number pins the shown position and suppresses the
@@ -41,6 +47,8 @@ Singleton {
     signal toast(string message, string kind)
     // A page asking the App to open the Now Playing overlay on a tab ("queue" | "lyrics").
     signal nowPlayingRequested(string tab)
+    // A surface (player-bar tools, track menu) asking the App to open the Sound dialog.
+    signal soundRequested()
 
     // --- events + opening snapshot -----------------------------------------------------------
     Connections {
@@ -71,6 +79,8 @@ Singleton {
         }
         if (snap.settings) root.settings = snap.settings;
         if (snap.auth) root.auth = { signedIn: !!snap.auth.signedIn, name: snap.auth.name, avatar: snap.auth.avatar };
+        if (snap.audioFx) root.audioFx = snap.audioFx;
+        if (snap.provider) root.provider = snap.provider;
     }
 
     // --- methods (each a daemon call) --------------------------------------------------------
@@ -81,6 +91,16 @@ Singleton {
     function prev() { return Daemon.call("prev_track"); }
     function seek(secs) { return Daemon.call("seek", { position: secs }); }
     function setVolume(v) { return Daemon.call("set_volume", { volume: v }); }
+    // Send the Sound dialog's effects to the daemon; its audio-fx echo updates root.audioFx.
+    function setAudioFx(fx) {
+        return Daemon.call("set_audio_fx", { speed: fx.speed, semitones: fx.semitones, reverb: fx.reverb, bass: fx.bass, width: fx.width });
+    }
+    // Optimistic: the switch flips the local mirror at once and asks the daemon. The daemon method
+    // lands later, so a failure is swallowed rather than surfaced.
+    function setProvider(p) {
+        root.provider = p;
+        return Daemon.call("set_provider", { provider: p }).catch(() => {});
+    }
     function toggleShuffle() { return Daemon.call("toggle_shuffle"); }
     // off -> all -> one -> off, matching player.svelte.ts cycleRepeat.
     function cycleRepeat() {

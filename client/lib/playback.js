@@ -85,6 +85,14 @@ function applyEvent(s, name, data) {
         // Not while the volume slider drags: the echo is a value the pointer moved past already.
         if (!s.volDrag) s.volume = data;
         return null;
+    case "audio-fx":
+        // The daemon's authoritative effects, echoed after every apply and on subscribe.
+        s.audioFx = data;
+        return null;
+    case "provider-changed":
+        // The active provider, echoed when it switches; shape is { provider }.
+        s.provider = data.provider;
+        return null;
     case "playback-error":
         s.lastError = (data && data.message !== undefined) ? data.message : String(data);
         s.pendingVideoId = null;
