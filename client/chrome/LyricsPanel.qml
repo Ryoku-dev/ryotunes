@@ -225,6 +225,7 @@ Item {
     // --- layout -----------------------------------------------------------------------------
     ColumnLayout {
         anchors.fill: parent
+        anchors.margins: root.compact ? Style.sp(4) : 0
         spacing: 0
 
         // Synced / plain lines -----------------------------------------------------------
@@ -249,7 +250,7 @@ Item {
                 required property var modelData
                 required property int index
                 width: view.width
-                implicitHeight: lineCol.implicitHeight + Style.sp(root.compact ? 1 : 2.5)
+                implicitHeight: lineCol.implicitHeight + Style.sp(2)
 
                 readonly property bool isActive: root.synced && lineWrap.index === root.activeIndex
                 readonly property bool isPast: root.synced && lineWrap.index < root.activeIndex
@@ -257,10 +258,12 @@ Item {
                 readonly property int lineFs: root.compact
                     ? (lineWrap.isActive ? Style.fs.lg : Style.fs.md)
                     : (lineWrap.isActive ? Style.fs.xl : Style.fs.lg)
-                // Sung lines settle to 0.4, upcoming to 0.6, the active line full; the viewport haze
-                // then fades every line by its distance from the reading centre.
-                readonly property real baseOpacity: !root.synced ? 0.85
-                    : lineWrap.isActive ? 1 : lineWrap.isPast ? 0.4 : 0.6
+                // The active line reads in ink and slightly larger, upcoming lines in inkMuted and
+                // past lines in inkFaint; opacity stays full so colour carries the state, and the
+                // viewport haze then fades every line by its distance from the reading centre.
+                readonly property color lineColor: (!root.synced || lineWrap.isActive) ? Tokens.ink
+                    : lineWrap.isPast ? Tokens.inkFaint : Tokens.inkMuted
+                readonly property real baseOpacity: root.synced ? 1 : 0.85
                 // The active word is the last one whose start has passed: earlier words are sung ink,
                 // it lights in the accent, later words wait muted.
                 readonly property int activeWord: {
@@ -298,7 +301,7 @@ Item {
                         Layout.fillWidth: true
                         visible: !lineWrap.wordMode
                         text: lineWrap.modelData.text ? lineWrap.modelData.text : "♪"
-                        color: Tokens.ink
+                        color: lineWrap.lineColor
                         font.family: Style.fontDisplay
                         font.pixelSize: lineWrap.lineFs
                         font.weight: Font.Medium
@@ -424,9 +427,37 @@ Item {
             Layout.fillHeight: true
             visible: !root.loading && (root.instrumental || !root.lyrics || !root.lyrics.lines || root.lyrics.lines.length === 0)
             Item { Layout.fillHeight: true }
+            // Compact (mini): a centred mono eyebrow + one muted line — never blank.
+            ColumnLayout {
+                Layout.alignment: Qt.AlignHCenter
+                Layout.maximumWidth: Math.max(Style.sp(20), root.width - Style.sp(8))
+                visible: root.compact
+                spacing: Style.sp(1)
+                Text {
+                    Layout.alignment: Qt.AlignHCenter
+                    text: root.instrumental ? "INSTRUMENTAL" : "NO LYRICS"
+                    color: Tokens.inkFaint
+                    font.family: Style.fontMono
+                    font.pixelSize: Style.fs.micro
+                    font.letterSpacing: Style.trackMicro
+                }
+                Text {
+                    Layout.alignment: Qt.AlignHCenter
+                    Layout.fillWidth: true
+                    horizontalAlignment: Text.AlignHCenter
+                    text: root.instrumental ? "No vocal lines to follow." : "Nothing found for this track."
+                    color: Tokens.inkMuted
+                    font.family: Style.fontUi
+                    font.pixelSize: Style.fs.sm
+                    wrapMode: Text.WordWrap
+                }
+            }
+
+            // Full stage: icon, headline, meta line and a retry affordance.
             ColumnLayout {
                 Layout.alignment: Qt.AlignHCenter
                 Layout.maximumWidth: Style.sp(120)
+                visible: !root.compact
                 spacing: Style.sp(1.5)
                 Icon {
                     Layout.alignment: Qt.AlignHCenter
@@ -487,15 +518,16 @@ Item {
             Item { Layout.fillHeight: true }
         }
 
-        // Footer: attribution + timing offset (synced only, non-compact) -----------------
-        Hairline { Layout.fillWidth: true; visible: lyricsFooter.visible }
+        // Footer: a single mono-micro attribution eyebrow + the timing offset (synced only,
+        // non-compact), set 16 px below the lyric column.
+        Hairline { Layout.fillWidth: true; Layout.topMargin: Style.sp(4); visible: lyricsFooter.visible }
         RowLayout {
             id: lyricsFooter
             Layout.fillWidth: true
             Layout.leftMargin: Style.sp(3)
             Layout.rightMargin: Style.sp(3)
-            Layout.topMargin: Style.sp(1.5)
-            Layout.bottomMargin: Style.sp(1.5)
+            Layout.topMargin: Style.sp(2)
+            Layout.bottomMargin: Style.sp(2)
             spacing: Style.sp(2)
             visible: !root.compact && !!root.lyrics && !root.loading
             Text {
@@ -504,11 +536,12 @@ Item {
                     var s = (root.lyrics && root.lyrics.source) ? root.lyrics.source : "";
                     if (!s)
                         return "";
-                    return s.indexOf("Source:") === 0 ? s : ("Lyrics from " + s);
+                    return (s.indexOf("Source:") === 0 ? s : ("Lyrics from " + s)).toUpperCase();
                 }
-                color: Tokens.inkMuted
-                font.family: Style.fontUi
-                font.pixelSize: Style.fs.xs
+                color: Tokens.inkFaint
+                font.family: Style.fontMono
+                font.pixelSize: Style.fs.micro
+                font.letterSpacing: Style.trackMicro
                 elide: Text.ElideRight
             }
             RowLayout {
@@ -518,7 +551,7 @@ Item {
                     text: "Timing " + root.fmtOffset(root.offsetMs)
                     color: Tokens.inkFaint
                     font.family: Style.fontMono
-                    font.pixelSize: Style.fs.xs
+                    font.pixelSize: Style.fs.micro
                 }
                 Repeater {
                     model: [{ label: "−0.5", d: -500 }, { label: "Reset", d: 0 }, { label: "+0.5", d: 500 }]

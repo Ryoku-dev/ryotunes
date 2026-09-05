@@ -27,7 +27,14 @@ Item {
 
     readonly property bool open: root.nowPlayingOpen || root.queueOpen || root.lyricsOpen
 
-    visible: root.open && !!Playback.now
+    // The stage is present while open with a track; it fades in/out (opacity only) so collapsing
+    // reads as a soft dismissal — 200 ms enter, faster 150 ms exit, both OutCubic.
+    readonly property bool shown: root.open && !!Playback.now
+    visible: opacity > 0
+    opacity: root.shown ? 1 : 0
+    Behavior on opacity {
+        NumberAnimation { duration: root.shown ? 200 : 150; easing.type: Easing.OutCubic }
+    }
 
     // The current queue item, for the album meta the now-playing snapshot does not carry.
     readonly property var nowItem: {
@@ -66,19 +73,19 @@ Item {
 
     ColumnLayout {
         anchors.fill: parent
-        anchors.margins: Style.sp(6)
+        anchors.margins: Style.sp(12)
         spacing: Style.sp(4)
 
         RowLayout {
             Layout.fillWidth: true
             Layout.fillHeight: true
-            spacing: Style.sp(8)
+            spacing: Style.sp(12)
 
             // ── artwork + track (left) ──────────────────────────────────────────────────
             ColumnLayout {
                 Layout.fillHeight: true
                 Layout.fillWidth: false
-                Layout.preferredWidth: Math.min(Style.sp(120), root.width * 0.42)
+                Layout.preferredWidth: Math.min(Style.sp(120), root.width * 0.38)
                 spacing: Style.sp(4)
 
                 Item {
@@ -202,7 +209,7 @@ Item {
         // ── spectrum ribbon (foot) ──────────────────────────────────────────────────────
         Item {
             Layout.fillWidth: true
-            Layout.preferredHeight: Style.sp(20)
+            Layout.preferredHeight: Style.sp(14)
             RU.SpectrumField {
                 anchors.fill: parent
                 levels: Spectrum.levels
@@ -214,20 +221,47 @@ Item {
                 boxW: 1
                 boxH: 1
                 grow: "center"
-                opacity: Spectrum.analysing ? 1 : 0.35
+                opacity: Spectrum.analysing ? 0.6 : 0.25
                 Behavior on opacity { NumberAnimation { duration: Style.motion.swap } }
             }
         }
     }
 
-    // Close: collapse the stage back to the player bar.
-    IconButton {
+    // Close: a labelled Collapse pill, 24 px in from the top-right edges. Paper-lift fill, hairline
+    // border, a subtle tint on hover; clicking collapses the stage back to the player bar.
+    Rectangle {
+        id: collapsePill
         anchors.top: parent.top
         anchors.right: parent.right
-        anchors.margins: Style.sp(4)
-        icon: "chevron-down"
-        iconSize: Style.fs.lg
-        diameter: Style.sp(9)
-        onClicked: root.closeRequested()
+        anchors.margins: Style.sp(6)
+        implicitWidth: collapseRow.implicitWidth + Style.sp(6)
+        implicitHeight: Style.sp(9)
+        radius: height / 2
+        color: collapseHover.hovered ? Tokens.tint5 : Tokens.paperLift
+        border.width: 1
+        border.color: collapseHover.hovered ? Tokens.lineStrong : Tokens.line
+        Behavior on color { ColorAnimation { duration: Style.motion.snap } }
+        Behavior on border.color { ColorAnimation { duration: Style.motion.snap } }
+
+        RowLayout {
+            id: collapseRow
+            anchors.centerIn: parent
+            spacing: Style.sp(1.5)
+            Text {
+                text: "Collapse"
+                color: Tokens.inkDim
+                font.family: Style.fontUi
+                font.pixelSize: Style.fs.sm
+                font.weight: Font.Medium
+            }
+            Icon { name: "chevron-down"; size: Style.fs.md; color: Tokens.inkDim }
+        }
+
+        HoverHandler { id: collapseHover }
+        MouseArea {
+            anchors.fill: parent
+            cursorShape: Qt.PointingHandCursor
+            onClicked: root.closeRequested()
+        }
     }
 }
