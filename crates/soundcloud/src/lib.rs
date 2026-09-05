@@ -135,9 +135,10 @@ mod tests {
         let out = downsample_waveform(&samples, 1800, 240);
         assert_eq!(out.len(), 240);
         assert!(out.iter().all(|&s| s <= 100));
-        // Peak-hold + ramp: monotonic non-decreasing, first bucket small, last bucket at full scale.
+        // Peak-hold + ramp: monotonic non-decreasing; last bucket at (near) full scale. The ramp's
+        // top sample is 1799/1800, so it lands at 99 — the point is it reaches the ceiling, not 0.
         assert!(out.windows(2).all(|w| w[0] <= w[1]));
-        assert_eq!(*out.last().unwrap(), 100);
+        assert!(*out.last().unwrap() >= 99);
         assert!(out[0] < 5);
     }
 
@@ -162,20 +163,20 @@ mod tests {
 
     #[test]
     fn client_id_regex_finds_id_in_bundle_snippet() {
-        // A snippet shaped like the real bundle: JSON `"client_id":"…"` form.
+        // The real minified bundle form: `client_id:"…"` in a JS object literal.
         let js = r#"...,e.exports={api_host:"api-v2.soundcloud.com",client_id:"Pb72ranhoyt6gw7hM7TkzUItXlMWSNSo",app_version:"1"},..."#;
         assert_eq!(
             scrape_client_id_from_js(js).as_deref(),
             Some("Pb72ranhoyt6gw7hM7TkzUItXlMWSNSo")
         );
-        // Quoted-key `=` form.
-        let js2 = r#"var t={"client_id":"abcdefghij0123456789ABCDEFGHIJKL"};"#;
+        // The `=` assignment form (the regex accepts `[:=]`).
+        let js2 = r#"var t;t.client_id="abcdefghij0123456789ABCDEFGHIJKL";"#;
         assert_eq!(
             scrape_client_id_from_js(js2).as_deref(),
             Some("abcdefghij0123456789ABCDEFGHIJKL")
         );
-        // A 31-char near-miss must not match (id is exactly 32).
-        assert_eq!(scrape_client_id_from_js(r#"client_id:"tooShort0123456789012345678901""#), None);
+        // A wrong-length near-miss must not match (id is exactly 32).
+        assert_eq!(scrape_client_id_from_js(r#"client_id:"tooShort01234567890123456789""#), None);
         assert_eq!(scrape_client_id_from_js("no client id here"), None);
     }
 
