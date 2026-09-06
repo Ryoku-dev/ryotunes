@@ -11,8 +11,21 @@ import "../"
 Item {
     id: root
 
-    readonly property string songsId: "FEmusic_liked_videos"
-    readonly property string sourceName: "Your songs"
+    // Signed in to YouTube Music: its liked videos. Otherwise the device's own Liked Songs,
+    // the local playlist the heart writes to (the daemon's LIKED_SONGS_ID).
+    readonly property bool youtubeLibrary: !!(Playback.auth && Playback.auth.signedIn)
+    readonly property string songsId: root.youtubeLibrary ? "FEmusic_liked_videos" : "RYOTUNES_LOCAL_PLAYLIST:liked"
+    readonly property string sourceName: root.youtubeLibrary ? "Your songs" : "Liked Songs"
+    onSongsIdChanged: root.load()
+
+    // The heart changed the device list (or another client did): re-read it in place.
+    Connections {
+        target: Daemon
+        function onEvent(name: string, data: var): void {
+            if (name === "library-changed" && data && data.id === root.songsId)
+                root.load();
+        }
+    }
 
     property var pl: null
     property bool loading: true
@@ -213,7 +226,9 @@ Item {
                 Text {
                     Layout.alignment: Qt.AlignHCenter
                     visible: !root.loading && !root.shown.length
-                    text: root.query.trim() ? "No songs match." : "No songs in your library yet."
+                    text: root.query.trim() ? "No songs match."
+                        : (root.youtubeLibrary ? "No songs in your library yet."
+                        : "Nothing liked yet. The heart on a playing track saves it here, on this device.")
                     color: Tokens.inkMuted
                     font.family: Style.fontUi
                     font.pixelSize: Style.fs.sm

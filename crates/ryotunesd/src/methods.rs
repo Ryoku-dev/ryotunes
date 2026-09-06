@@ -12,14 +12,14 @@ use innertube::{BrowseItem, PlaylistPage, PlaylistSort, Rating, SongItem, YouTub
 use ryotunes_core::db::LocalPlaylist;
 use ryotunes_core::soundcloud_bridge;
 use ryotunes_core::spotify::{
-    sc_playlist_id, sc_system_id, sc_track_id, sc_user_id, spotify_track_id, Provider,
+    is_sc_id, sc_playlist_id, sc_system_id, sc_track_id, sc_user_id, spotify_track_id, Provider,
 };
 use ryotunes_core::spotify_bridge;
 use ryotunes_core::state::{
     is_local_playlist_id, is_smart_playlist_id, song_to_track, AppState, RepeatMode,
-    LOCAL_PLAYLIST_PREFIX, ON_REPEAT_ID, ON_REPEAT_LIMIT, ON_REPEAT_WINDOW_SECS,
-    RECENTLY_PLAYED_ID, RECENTLY_PLAYED_WINDOW_SECS, REDISCOVER_ID, REDISCOVER_OLDER_THAN_SECS,
-    SMART_PLAYLIST_LIMIT, UI_SETTINGS,
+    LIKED_SONGS_ID, LIKED_SONGS_TITLE, LOCAL_PLAYLIST_PREFIX, ON_REPEAT_ID, ON_REPEAT_LIMIT,
+    ON_REPEAT_WINDOW_SECS, RECENTLY_PLAYED_ID, RECENTLY_PLAYED_WINDOW_SECS, REDISCOVER_ID,
+    REDISCOVER_OLDER_THAN_SECS, SMART_PLAYLIST_LIMIT, UI_SETTINGS,
 };
 use ryotunes_core::{local, radio};
 use ryotunes_protocol::{ErrorBody, PROTOCOL_VERSION};
@@ -543,8 +543,17 @@ impl Dispatch for Methods {
                         .map_err(spotify_err)?;
                     return null();
                 }
-                if radio::is_radio_id(&video_id) || local::is_local_song(&video_id) {
-                    return Err(err("This track does not have a YouTube Music rating."));
+                // No YouTube rating to set (a guest, a SoundCloud or local track): the heart
+                // lands in the device's Liked Songs instead, which the library lists.
+                let no_youtube = radio::is_radio_id(&video_id)
+                    || local::is_local_song(&video_id)
+                    || is_sc_id(&video_id)
+                    || !st.it.is_logged_in();
+                if no_youtube {
+                    st.rate_locally(&video_id, matches!(rating, Rating::Like))
+                        .await
+                        .map_err(err)?;
+                    return null();
                 }
                 let client = require_login(st).map_err(err)?;
                 st.rate_epoch.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
@@ -1112,6 +1121,13 @@ async fn get_playlist(st: &Arc<AppState>, params: &Value) -> Result<Value, Error
     let sort = arg::<Option<PlaylistSort>>(params, "sort")?;
     let desc = arg::<Option<bool>>(params, "desc")?;
     if is_local_playlist_id(&id) {
+        // Liked Songs exists from the first read, so the library's Songs tab renders empty
+        // rather than erroring before the first heart.
+        if id == LIKED_SONGS_ID && st.db.local_playlist(&id).is_none() {
+            st.db
+                .create_local_playlist(LIKED_SONGS_ID, LIKED_SONGS_TITLE)
+                .map_err(|e| err(format!("device playlist: {e}")))?;
+        }
         return ok(local_playlist_page(st, &id)
             .ok_or_else(|| err("That device playlist no longer exists."))?);
     }

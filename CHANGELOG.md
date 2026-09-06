@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **The heart saves without an account.** Liking a track when there is no YouTube Music session (or on a SoundCloud/local track) lands it in a device-local **Liked Songs** playlist that Library › Songs shows and the library lists; unliking removes it, the heart and the now-playing snapshot reflect it at once. Signed in, YouTube's own rating is used as before.
+
 ## v2.5.0 - 2026-09-06
 
 - Releases are one command: `scripts/release.sh patch|minor|major --push` bumps every manifest, rolls this changelog, tags; the `Release` workflow verifies the tagged tree builds (binaries, web UI, skins, tests), publishes the GitHub release with a reproducible source tarball + sha256, and tells Ryoku Arch, whose own workflow bumps the `[ryoku]` package and publishes it. The package enables `ryotunesd.socket` for every user (preset + install hook), which is what made a fresh install open the old Tauri app before.

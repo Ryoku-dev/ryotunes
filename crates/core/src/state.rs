@@ -42,6 +42,11 @@ pub const RECENTLY_PLAYED_WINDOW_SECS: i64 = 7 * 24 * 60 * 60;
 pub const REDISCOVER_OLDER_THAN_SECS: i64 = 14 * 24 * 60 * 60;
 pub const SMART_PLAYLIST_LIMIT: usize = 40;
 pub const LOCAL_PLAYLIST_PREFIX: &str = "RYOTUNES_LOCAL_PLAYLIST:";
+/// The device's own Liked Songs: where the heart lands whenever YouTube's rating is not on the
+/// table (no Google account, a SoundCloud or local track). A plain local playlist with a fixed
+/// id, created on the first like, so it pages, plays and edits like any other.
+pub const LIKED_SONGS_ID: &str = "RYOTUNES_LOCAL_PLAYLIST:liked";
+pub const LIKED_SONGS_TITLE: &str = "Liked Songs";
 
 /// Settings the UI is allowed to read *and write*. Session/auth material (`session_cookie`,
 /// `selected_identity_json`, `data_sync_id`, `account_json`, `account_selection_pending`,
@@ -1974,7 +1979,11 @@ impl AppState {
             "thumbnail": item.thumbnail,
             "duration": item.duration,
             "streamClient": stream_client,
-            "rating": item.rating,
+            "rating": if item.rating.is_none() || !self.it.is_logged_in() || crate::spotify::is_sc_id(&item.video_id) {
+                if self.liked_locally(&item.video_id) { Some(innertube::Rating::Like) } else { item.rating }
+            } else {
+                item.rating
+            },
         });
         // SoundCloud tracks carry a "plays · likes · genre" meta line the player bar and Now
         // Playing card render; splice in whatever `resolve` remembered for this id.
@@ -2081,6 +2090,55 @@ impl AppState {
             }
             me.emit("rating", serde_json::json!({ "videoId": video_id, "rating": rating }));
         });
+    }
+
+    /// The queue's copy of a track (the heart rates what is playing or queued).
+    pub async fn queue_item(&self, video_id: &str) -> Option<SongItem> {
+        let q = self.queue.lock().await;
+        q.items.iter().find(|i| i.video_id == video_id).cloned()
+    }
+
+    /// Whether the device's Liked Songs holds a track.
+    pub fn liked_locally(&self, video_id: &str) -> bool {
+        self.db
+            .local_playlist_track_json(LIKED_SONGS_ID)
+            .iter()
+            .filter_map(|j| serde_json::from_str::<SongItem>(j).ok())
+            .any(|s| s.video_id == video_id)
+    }
+
+    /// Like or unlike into the device's Liked Songs and reflect it on every queue row, so the
+    /// heart, the now-playing snapshot and the library agree without a network round trip.
+    pub async fn rate_locally(&self, video_id: &str, like: bool) -> Result<(), String> {
+        if like {
+            let item = self
+                .queue_item(video_id)
+                .await
+                .ok_or_else(|| "This track is not in the queue.".to_string())?;
+            if self.db.local_playlist(LIKED_SONGS_ID).is_none() {
+                self.db
+                    .create_local_playlist(LIKED_SONGS_ID, LIKED_SONGS_TITLE)
+                    .map_err(|e| format!("device playlist: {e}"))?;
+            }
+            let json = serde_json::to_string(&item).map_err(|e| e.to_string())?;
+            self.db
+                .add_local_playlist_track(LIKED_SONGS_ID, video_id, &json)
+                .map_err(|e| format!("device playlist: {e}"))?;
+        } else if self.db.local_playlist(LIKED_SONGS_ID).is_some() {
+            self.db
+                .remove_local_playlist_track(LIKED_SONGS_ID, video_id)
+                .map_err(|e| format!("device playlist: {e}"))?;
+        }
+        let rating = if like { innertube::Rating::Like } else { innertube::Rating::Indifferent };
+        {
+            let mut q = self.queue.lock().await;
+            for item in q.items.iter_mut().filter(|i| i.video_id == video_id) {
+                item.rating = Some(rating);
+            }
+        }
+        self.emit("rating", serde_json::json!({ "videoId": video_id, "rating": rating }));
+        self.emit("library-changed", serde_json::json!({ "id": LIKED_SONGS_ID }));
+        Ok(())
     }
 
     fn emit_now_playing(&self, item: &SongItem, stream_client: &str) {
