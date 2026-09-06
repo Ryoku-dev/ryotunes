@@ -317,7 +317,7 @@ Item {
                             Layout.fillWidth: true
                             text: (root.now && root.now.title) ? root.now.title : "Nothing playing"
                             color: Tokens.ink
-                            font.family: Tokens.display
+                            font.family: Style.fontDisplay
                             font.pixelSize: 29
                             font.weight: Font.Normal
                             font.letterSpacing: -0.8

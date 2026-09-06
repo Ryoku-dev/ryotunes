@@ -85,7 +85,9 @@ Singleton {
     // --- mode --------------------------------------------------------------------------------
     // Prefs.themeMode "light"/"dark" pins a mode; "system" means the skin's own default, or, for
     // the system skin, whatever the desktop is (no pin at all).
-    readonly property string wantMode: Prefs.themeMode || "system"
+    // RYOTUNES_SKIN_MODE pins the mode for a preview run (so a light-first skin renders light
+    // whatever the user's own pin is); Prefs otherwise.
+    readonly property string wantMode: Quickshell.env("RYOTUNES_SKIN_MODE") || Prefs.themeMode || "system"
     readonly property string mode: root.wantMode !== "system" ? root.wantMode
         : (root.followSystem ? "system" : (root.manifest["default"] || "dark"))
     readonly property bool unpinned: root.followSystem && root.mode === "system"

@@ -1,0 +1,47 @@
+{
+  "$schema": "../skin.schema.json",
+  "format": 1,
+  "id": "arcade",
+  "name": "Arcade",
+  "author": "Ryoku",
+  "version": "1.0.0",
+  "license": "CC0-1.0",
+  "homepage": "https://github.com/neur0map/ryotunes",
+  "description": "8-bit cabinet: indigo paper, coin-yellow bone, a pink sun, Silkscreen titles and Press Start readouts, no corners, the provider's colour as the light.",
+  "default": "dark",
+  "modes": {
+    "dark": {
+      "paper": "#170e33",
+      "paperLift": "#251852",
+      "ink": "#fff5c2",
+      "inkDim": "#d6c78c",
+      "bone": "#ffd23f",
+      "inkOnBone": "#1a1036",
+      "sun": "#ff3d7f",
+      "alert": "#ff3d3d"
+    }
+  },
+  "type": {
+    "display": "Silkscreen",
+    "ui": "Outfit",
+    "mono": "Press Start 2P"
+  },
+  "shape": {
+    "radius": 0,
+    "radiusCard": 0
+  },
+  "motion": {
+    "snap": 50,
+    "move": 100,
+    "swap": 130,
+    "slow": 120
+  },
+  "decor": "rich",
+  "accent": "provider",
+  "wash": 1.2,
+  "fonts": [
+    "fonts/PressStart2P.ttf",
+    "fonts/Outfit.ttf",
+    "fonts/Silkscreen.ttf"
+  ]
+}

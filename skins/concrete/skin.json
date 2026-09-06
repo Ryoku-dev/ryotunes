@@ -1,0 +1,57 @@
+{
+  "$schema": "../skin.schema.json",
+  "format": 1,
+  "id": "concrete",
+  "name": "Concrete",
+  "author": "Ryoku",
+  "version": "1.0.0",
+  "license": "CC0-1.0",
+  "homepage": "https://github.com/neur0map/ryotunes",
+  "description": "Brutalist: grey slab, black ink, safety-orange everything that matters, Bebas Neue titles, zero radius, zero wash, motion cut to the bone.",
+  "default": "light",
+  "modes": {
+    "light": {
+      "paper": "#e4e4e4",
+      "paperLift": "#f1f1f1",
+      "ink": "#0a0a0a",
+      "inkDim": "#3a3a3a",
+      "bone": "#0a0a0a",
+      "inkOnBone": "#ffffff",
+      "sun": "#e63200",
+      "alert": "#e63200"
+    },
+    "dark": {
+      "paper": "#111111",
+      "paperLift": "#1c1c1c",
+      "ink": "#f0f0f0",
+      "inkDim": "#b5b5b5",
+      "bone": "#f0f0f0",
+      "inkOnBone": "#111111",
+      "sun": "#ff3b00",
+      "alert": "#ff3b00"
+    }
+  },
+  "type": {
+    "display": "Bebas Neue",
+    "ui": "Manrope",
+    "mono": "Space Mono"
+  },
+  "shape": {
+    "radius": 0,
+    "radiusCard": 0
+  },
+  "motion": {
+    "snap": 40,
+    "move": 80,
+    "swap": 100,
+    "slow": 80
+  },
+  "decor": "calm",
+  "accent": "#ff3b00",
+  "wash": 0.0,
+  "fonts": [
+    "fonts/BebasNeue.ttf",
+    "fonts/Manrope.ttf",
+    "fonts/SpaceMono.ttf"
+  ]
+}

@@ -128,7 +128,7 @@ Item {
                     Item { Layout.fillWidth: true }
                     IconButton { icon: "close"; iconSize: Style.fs.md; diameter: Style.sp(7); onClicked: root.open = false }
                 }
-                Text { text: "Listen Together"; color: Tokens.ink; font.family: Tokens.display; font.pixelSize: Style.fs.lg }
+                Text { text: "Listen Together"; color: Tokens.ink; font.family: Style.fontDisplay; font.pixelSize: Style.fs.lg }
             }
             Hairline { anchors { left: parent.left; right: parent.right; bottom: parent.bottom } }
         }

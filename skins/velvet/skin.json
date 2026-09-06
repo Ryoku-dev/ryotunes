@@ -1,0 +1,47 @@
+{
+  "$schema": "../skin.schema.json",
+  "format": 1,
+  "id": "velvet",
+  "name": "Velvet",
+  "author": "Ryoku",
+  "version": "1.0.0",
+  "license": "CC0-1.0",
+  "homepage": "https://github.com/neur0map/ryotunes",
+  "description": "A lounge at closing time: wine-dark paper, gilt bone and sun, Cormorant titles over DM Sans, soft corners, slow motion, the cover glowing through.",
+  "default": "dark",
+  "modes": {
+    "dark": {
+      "paper": "#1a0a11",
+      "paperLift": "#29121f",
+      "ink": "#f5dcc7",
+      "inkDim": "#cfa993",
+      "bone": "#d9b64a",
+      "inkOnBone": "#1f0c14",
+      "sun": "#d9b64a",
+      "alert": "#ff6f61"
+    }
+  },
+  "type": {
+    "display": "Cormorant Garamond",
+    "ui": "DM Sans",
+    "mono": "Space Mono"
+  },
+  "shape": {
+    "radius": 12,
+    "radiusCard": 20
+  },
+  "motion": {
+    "snap": 120,
+    "move": 240,
+    "swap": 300,
+    "slow": 360
+  },
+  "decor": "rich",
+  "accent": "sun",
+  "wash": 1.4,
+  "fonts": [
+    "fonts/CormorantGaramond.ttf",
+    "fonts/DMSans.ttf",
+    "fonts/SpaceMono.ttf"
+  ]
+}

@@ -1,0 +1,47 @@
+{
+  "$schema": "../skin.schema.json",
+  "format": 1,
+  "id": "neon",
+  "name": "Neon",
+  "author": "Ryoku",
+  "version": "1.0.0",
+  "license": "CC0-1.0",
+  "homepage": "https://github.com/neur0map/ryotunes",
+  "description": "Tokyo after midnight: ink-blue paper, hot magenta bone, a cyan sun. Unbounded titles, sharp corners, fast motion, the cover wash turned up.",
+  "default": "dark",
+  "modes": {
+    "dark": {
+      "paper": "#07060f",
+      "paperLift": "#120f2a",
+      "ink": "#e8e6ff",
+      "inkDim": "#aaa6dc",
+      "bone": "#ff2bd6",
+      "inkOnBone": "#12041a",
+      "sun": "#19f0ff",
+      "alert": "#ff4d6d"
+    }
+  },
+  "type": {
+    "display": "Unbounded",
+    "ui": "Outfit",
+    "mono": "Share Tech Mono"
+  },
+  "shape": {
+    "radius": 2,
+    "radiusCard": 4
+  },
+  "motion": {
+    "snap": 60,
+    "move": 120,
+    "swap": 160,
+    "slow": 150
+  },
+  "decor": "rich",
+  "accent": "sun",
+  "wash": 1.6,
+  "fonts": [
+    "fonts/Unbounded.ttf",
+    "fonts/Outfit.ttf",
+    "fonts/ShareTechMono.ttf"
+  ]
+}

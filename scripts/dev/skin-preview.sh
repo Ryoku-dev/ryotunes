@@ -37,7 +37,7 @@ mypid=""
 cleanup() { [ -n "$mypid" ] && kill "$mypid" 2>/dev/null || true; rm -f "$raw"; }
 trap cleanup EXIT
 
-export RYOTUNES_SKIN="$id"
+export RYOTUNES_SKIN="$id" RYOTUNES_SKIN_MODE=system   # the skin renders in its own default mode
 "$ryotest" up >/dev/null
 # Start one client and identify exactly the qs process we spawned, so we leave any sibling rig
 # clients (another agent's) untouched and never shoot two windows into one frame.

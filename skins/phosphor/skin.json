@@ -1,0 +1,47 @@
+{
+  "$schema": "../skin.schema.json",
+  "format": 1,
+  "id": "phosphor",
+  "name": "Phosphor",
+  "author": "Ryoku",
+  "version": "1.0.0",
+  "license": "CC0-1.0",
+  "homepage": "https://github.com/neur0map/ryotunes",
+  "description": "A green-phosphor terminal: black glass, P1 green ink, an amber sun, Major Mono titles, square corners, instant motion, no wash.",
+  "default": "dark",
+  "modes": {
+    "dark": {
+      "paper": "#040704",
+      "paperLift": "#0a120a",
+      "ink": "#9dff9d",
+      "inkDim": "#62c062",
+      "bone": "#9dff9d",
+      "inkOnBone": "#031003",
+      "sun": "#ffbf00",
+      "alert": "#ff5a3c"
+    }
+  },
+  "type": {
+    "display": "Major Mono Display",
+    "ui": "Share Tech Mono",
+    "mono": "VT323"
+  },
+  "shape": {
+    "radius": 0,
+    "radiusCard": 0
+  },
+  "motion": {
+    "snap": 40,
+    "move": 90,
+    "swap": 120,
+    "slow": 100
+  },
+  "decor": "calm",
+  "accent": "sun",
+  "wash": 0.0,
+  "fonts": [
+    "fonts/MajorMonoDisplay.ttf",
+    "fonts/ShareTechMono.ttf",
+    "fonts/VT323.ttf"
+  ]
+}

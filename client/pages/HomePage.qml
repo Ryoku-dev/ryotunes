@@ -263,7 +263,7 @@ Item {
                             Layout.fillWidth: true
                             text: page.greeting() + ((Playback.auth && Playback.auth.signedIn && Playback.auth.name) ? (", " + Playback.auth.name) : "")
                             color: Tokens.ink
-                            font.family: Tokens.display
+                            font.family: Style.fontDisplay
                             font.pixelSize: Style.fs.hero
                             elide: Text.ElideRight
                         }

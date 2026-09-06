@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Seven expressive shipped skins beside Paper/Ember/Mist - **Neon**, **Vapor**, **Phosphor**, **Arcade**, **Broadsheet**, **Concrete**, **Velvet** - each with its own bundled OFL faces (Unbounded, Playfair, Major Mono, Press Start, Bebas Neue, Cormorant…), radii, motion and wash. Every display title now takes the skin's face (three surfaces still read Ryoku's). `RYOTUNES_SKIN_MODE` pins a mode for previews so light-first skins render light.
+
 - Skins are RyoStore products: the store's new `ryotunes-skins` category installs into `~/.local/share/ryoku/ryotunes-skins/<id>/`, which Ryotunes reads as the STORE source (after user skins, before shipped) and watches, so an install shows up in the picker without a reload; *Settings › Appearance › Get more skins* opens the store on the category; `ryotunes-cli skin use <id|system>` selects a skin from a shell. The catalogue ships 20 skins derived from Ryoku's colour schemes.
 
 - **Skins.** One source for every colour, face, radius and duration: `system` (the Ryoku desktop, live), `matugen` (a skin written by a matugen template from the wallpaper; on Ryoku one of the Theme apps), or any `skin.json` folder under `~/.config/ryotunes/skins/` or `/usr/share/ryotunes/skins/` (shipped: paper, ember, mist). Live reload while editing, a picker + fork + folder buttons in Settings › Appearance, `ryotunes-cli skin check|list|show`, a JSON schema, `docs/SKINS.md` and `skins/README.md` for contributors, `scripts/dev/skin-preview.sh` for the 800x500 previews. Decor gains a "Skin default" level.

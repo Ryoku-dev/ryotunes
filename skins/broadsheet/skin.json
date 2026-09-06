@@ -1,0 +1,57 @@
+{
+  "$schema": "../skin.schema.json",
+  "format": 1,
+  "id": "broadsheet",
+  "name": "Broadsheet",
+  "author": "Ryoku",
+  "version": "1.0.0",
+  "license": "CC0-1.0",
+  "homepage": "https://github.com/neur0map/ryotunes",
+  "description": "Newsprint: warm off-white paper, black ink, one deep-red sun, Playfair titles over IBM Plex, hairline corners, almost no wash. Dark edition inside.",
+  "default": "light",
+  "modes": {
+    "light": {
+      "paper": "#f3efe6",
+      "paperLift": "#e8e2d4",
+      "ink": "#14110d",
+      "inkDim": "#4a443c",
+      "bone": "#14110d",
+      "inkOnBone": "#f3efe6",
+      "sun": "#b3261e",
+      "alert": "#b3261e"
+    },
+    "dark": {
+      "paper": "#17140f",
+      "paperLift": "#221e18",
+      "ink": "#efe8da",
+      "inkDim": "#b8b0a2",
+      "bone": "#efe8da",
+      "inkOnBone": "#17140f",
+      "sun": "#e0553f",
+      "alert": "#e0553f"
+    }
+  },
+  "type": {
+    "display": "Playfair Display",
+    "ui": "IBM Plex Sans",
+    "mono": "Space Mono"
+  },
+  "shape": {
+    "radius": 0,
+    "radiusCard": 2
+  },
+  "motion": {
+    "snap": 90,
+    "move": 170,
+    "swap": 210,
+    "slow": 200
+  },
+  "decor": "rich",
+  "accent": "sun",
+  "wash": 0.3,
+  "fonts": [
+    "fonts/PlayfairDisplay.ttf",
+    "fonts/IBMPlexSans.ttf",
+    "fonts/SpaceMono.ttf"
+  ]
+}

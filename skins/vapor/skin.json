@@ -1,0 +1,47 @@
+{
+  "$schema": "../skin.schema.json",
+  "format": 1,
+  "id": "vapor",
+  "name": "Vapor",
+  "author": "Ryoku",
+  "version": "1.0.0",
+  "license": "CC0-1.0",
+  "homepage": "https://github.com/neur0map/ryotunes",
+  "description": "Vaporwave: violet paper, pink bone, a teal sun, Playfair titles and VT323 readouts, round corners, slow motion, the cover melting over everything.",
+  "default": "dark",
+  "modes": {
+    "dark": {
+      "paper": "#241542",
+      "paperLift": "#33225c",
+      "ink": "#ffe9f7",
+      "inkDim": "#d9bce8",
+      "bone": "#ff9ad5",
+      "inkOnBone": "#2a1146",
+      "sun": "#7cf3e0",
+      "alert": "#ff6b9d"
+    }
+  },
+  "type": {
+    "display": "Playfair Display",
+    "ui": "Montserrat",
+    "mono": "VT323"
+  },
+  "shape": {
+    "radius": 16,
+    "radiusCard": 24
+  },
+  "motion": {
+    "snap": 140,
+    "move": 260,
+    "swap": 320,
+    "slow": 400
+  },
+  "decor": "rich",
+  "accent": "artwork",
+  "wash": 1.8,
+  "fonts": [
+    "fonts/PlayfairDisplay.ttf",
+    "fonts/Montserrat.ttf",
+    "fonts/VT323.ttf"
+  ]
+}
