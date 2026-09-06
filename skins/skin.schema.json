@@ -1,0 +1,115 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/neur0map/ryotunes/main/skins/skin.schema.json",
+  "title": "Ryotunes skin manifest",
+  "description": "A format-1 Ryotunes skin: the colours, type, shape, motion, decor, accent and wash the chrome reads. See docs/SKINS.md. Everything is optional except a `modes` object with at least one mode carrying both `paper` and `ink`; missing keys fall back to the Paper skin.",
+  "type": "object",
+  "required": ["format", "modes"],
+  "properties": {
+    "$schema": { "type": "string" },
+    "format": { "const": 1, "description": "Manifest format version. Always 1." },
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$",
+      "description": "Lowercase kebab-case, and equal to the skin's folder name."
+    },
+    "name": { "type": "string", "description": "Display name shown in Settings." },
+    "author": { "type": "string" },
+    "version": { "type": "string" },
+    "license": { "type": "string", "description": "SPDX id; CC0-1.0 or MIT recommended." },
+    "homepage": { "type": "string" },
+    "description": { "type": "string" },
+    "default": {
+      "enum": ["dark", "light"],
+      "description": "Which mode Light/Dark = System pins to."
+    },
+    "modes": {
+      "type": "object",
+      "description": "At least one of dark/light, each carrying at least paper and ink.",
+      "minProperties": 1,
+      "properties": {
+        "dark": { "$ref": "#/$defs/mode" },
+        "light": { "$ref": "#/$defs/mode" }
+      },
+      "additionalProperties": { "$ref": "#/$defs/mode" }
+    },
+    "type": {
+      "type": "object",
+      "description": "Font families. Never the desktop's bar font.",
+      "properties": {
+        "display": { "type": "string", "description": "Titles and headings." },
+        "ui": { "type": "string", "description": "Body and controls." },
+        "mono": { "type": "string", "description": "Numbers, timers, code." }
+      },
+      "additionalProperties": false
+    },
+    "shape": {
+      "type": "object",
+      "description": "Corner radii in px at scale 1.",
+      "properties": {
+        "radius": { "type": "number", "minimum": 0 },
+        "radiusCard": { "type": "number", "minimum": 0 }
+      },
+      "additionalProperties": false
+    },
+    "motion": {
+      "type": "object",
+      "description": "Durations in ms; all pass Ryoku's reduce-motion gate.",
+      "properties": {
+        "snap": { "type": "number", "minimum": 0 },
+        "move": { "type": "number", "minimum": 0 },
+        "swap": { "type": "number", "minimum": 0 },
+        "slow": { "type": "number", "minimum": 0 }
+      },
+      "additionalProperties": false
+    },
+    "decor": {
+      "enum": ["rich", "calm"],
+      "description": "rich = full grain/texture; calm = flatter, quieter."
+    },
+    "accent": {
+      "description": "Where the accent colour comes from.",
+      "anyOf": [
+        { "enum": ["artwork", "provider", "sun"] },
+        { "type": "string", "pattern": "^#[0-9a-fA-F]{6}$" }
+      ]
+    },
+    "wash": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 2,
+      "description": "Multiplier on the cover wash behind pages and the stage. 0 keeps paper flat."
+    },
+    "fonts": {
+      "type": "array",
+      "description": "Bundled faces, paths relative to the skin folder, loaded with FontLoader.",
+      "items": { "type": "string" }
+    },
+    "generated": {
+      "type": "string",
+      "description": "Set by a generator (e.g. \"matugen\"); the UI marks it regenerated, fork to edit."
+    }
+  },
+  "$defs": {
+    "colour": {
+      "type": "string",
+      "pattern": "^#[0-9a-fA-F]{6}$",
+      "description": "An #rrggbb colour."
+    },
+    "mode": {
+      "type": "object",
+      "description": "A colour palette. paper+ink are the minimum; the rest fall back to Paper.",
+      "properties": {
+        "paper": { "$ref": "#/$defs/colour", "description": "The base surface." },
+        "paperLift": { "$ref": "#/$defs/colour", "description": "A slightly lifted surface." },
+        "ink": { "$ref": "#/$defs/colour", "description": "Primary text on paper (>= 4.5:1)." },
+        "inkDim": { "$ref": "#/$defs/colour", "description": "Secondary text on paper (>= 3:1)." },
+        "bone": { "$ref": "#/$defs/colour", "description": "The inverse surface." },
+        "inkOnBone": { "$ref": "#/$defs/colour", "description": "Text on bone (>= 4.5:1)." },
+        "sun": { "$ref": "#/$defs/colour", "description": "The primary/accent colour." },
+        "alert": { "$ref": "#/$defs/colour", "description": "Error/destructive colour." }
+      },
+      "additionalProperties": false
+    }
+  }
+}

@@ -83,6 +83,13 @@ package() {
   rm -rf "$pkgdir/usr/share/ryotunes/client/tests"
   find "$pkgdir/usr/share/ryotunes/client" -type d -exec chmod 755 {} +
   find "$pkgdir/usr/share/ryotunes/client" -type f -exec chmod 644 {} +
+  # Shipped skins (skin.json + preview.png + the schema/README) and the matugen template, so the
+  # client's shipped skin dir (<shellDir>/../skins) and `/usr/share/ryotunes/matugen` resolve.
+  install -dm755 "$pkgdir/usr/share/ryotunes/skins"
+  cp -r skins/. "$pkgdir/usr/share/ryotunes/skins/"
+  find "$pkgdir/usr/share/ryotunes/skins" -type d -exec chmod 755 {} +
+  find "$pkgdir/usr/share/ryotunes/skins" -type f -exec chmod 644 {} +
+  install -Dm644 matugen/ryotunes.json "$pkgdir/usr/share/ryotunes/matugen/ryotunes.json"
   install -Dm644 packaging/linux/ryotunesd.socket "$pkgdir/usr/lib/systemd/user/ryotunesd.socket"
   install -Dm644 packaging/linux/ryotunesd.service "$pkgdir/usr/lib/systemd/user/ryotunesd.service"
   install -Dm644 packaging/linux/ryotunes.desktop "$pkgdir/usr/share/applications/ryotunes.desktop"

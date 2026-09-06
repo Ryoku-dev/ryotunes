@@ -1,9 +1,12 @@
-//! `ryotunes-cli <method> [json-params]` or `ryotunes-cli events [names...]`.
+//! `ryotunes-cli <method> [json-params]`, `ryotunes-cli events [names...]`, or the local,
+//! socket-free `ryotunes-cli skin <check|list|show ...>` (see skin.rs).
 
 use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::UnixStream;
 
 use ryotunes_protocol::{Outgoing, Request};
+
+mod skin;
 
 fn parse(args: &[String]) -> Result<(Option<std::path::PathBuf>, Request, bool), String> {
     let mut socket = None;
@@ -35,6 +38,10 @@ fn parse(args: &[String]) -> Result<(Option<std::path::PathBuf>, Request, bool),
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
+    // `skin` is a local toolbox: it never touches the daemon socket.
+    if args.first().map(String::as_str) == Some("skin") {
+        std::process::exit(skin::run(&args[1..]));
+    }
     let (socket, req, follow) = match parse(&args) {
         Ok(v) => v,
         Err(e) => {

@@ -52,6 +52,18 @@ for p in root.rglob('*.toml'):
 print('JSON/TOML: OK')
 PY
 
+say check 'every shipped skin passes ryotunes-cli skin check'
+if command -v cargo >/dev/null 2>&1; then
+  cargo build -q -p ryotunes-cli
+  for d in skins/*/; do
+    [ -f "${d}skin.json" ] || continue
+    ./target/debug/ryotunes-cli skin check "$d" >/dev/null \
+      || { say FAIL "skin ${d} fails validation"; fail=1; }
+  done
+else
+  say skip 'cargo unavailable; skin validation not run'
+fi
+
 if command -v node >/dev/null 2>&1; then
   say check 'TypeScript syntax'
   node scripts/check-ts-syntax.mjs

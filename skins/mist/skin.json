@@ -1,0 +1,40 @@
+{
+  "$schema": "../skin.schema.json",
+  "format": 1,
+  "id": "mist",
+  "name": "Mist",
+  "author": "Ryoku",
+  "version": "1.0.0",
+  "license": "CC0-1.0",
+  "homepage": "https://github.com/neur0map/ryotunes",
+  "description": "Light-first: fog paper, slate-navy ink, a quiet teal sun. Calm and flat, with a matching dark mode.",
+  "default": "light",
+  "modes": {
+    "light": {
+      "paper": "#e7ecef",
+      "paperLift": "#f1f4f6",
+      "ink": "#24333f",
+      "inkDim": "#516470",
+      "bone": "#24333f",
+      "inkOnBone": "#eef3f5",
+      "sun": "#0d6e6e",
+      "alert": "#c2402f"
+    },
+    "dark": {
+      "paper": "#161d22",
+      "paperLift": "#1f272d",
+      "ink": "#d5dee4",
+      "inkDim": "#93a4ae",
+      "bone": "#d5dee4",
+      "inkOnBone": "#141b20",
+      "sun": "#3fb6b0",
+      "alert": "#e4695a"
+    }
+  },
+  "type": { "display": "Fraunces", "ui": "Space Grotesk", "mono": "SpaceMono Nerd Font" },
+  "shape": { "radius": 10, "radiusCard": 14 },
+  "motion": { "snap": 100, "move": 180, "swap": 220, "slow": 220 },
+  "decor": "calm",
+  "accent": "sun",
+  "wash": 0.6
+}

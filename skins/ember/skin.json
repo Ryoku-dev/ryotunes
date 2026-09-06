@@ -1,0 +1,40 @@
+{
+  "$schema": "../skin.schema.json",
+  "format": 1,
+  "id": "ember",
+  "name": "Ember",
+  "author": "Ryoku",
+  "version": "1.0.0",
+  "license": "CC0-1.0",
+  "homepage": "https://github.com/neur0map/ryotunes",
+  "description": "Warm dark: deep-umber paper, warm bone ink, one amber sun. Firelit and rich; the accent follows the sun.",
+  "default": "dark",
+  "modes": {
+    "dark": {
+      "paper": "#17110d",
+      "paperLift": "#221812",
+      "ink": "#ecdfce",
+      "inkDim": "#c3ad93",
+      "bone": "#ecdcc4",
+      "inkOnBone": "#1c130a",
+      "sun": "#f0a12a",
+      "alert": "#e5533b"
+    },
+    "light": {
+      "paper": "#e9ddca",
+      "paperLift": "#f0e6d6",
+      "ink": "#3a2b1c",
+      "inkDim": "#6b5540",
+      "bone": "#3a2b1c",
+      "inkOnBone": "#f3e9d8",
+      "sun": "#b26410",
+      "alert": "#c23b28"
+    }
+  },
+  "type": { "display": "Fraunces", "ui": "Space Grotesk", "mono": "SpaceMono Nerd Font" },
+  "shape": { "radius": 8, "radiusCard": 12 },
+  "motion": { "snap": 90, "move": 170, "swap": 210, "slow": 200 },
+  "decor": "rich",
+  "accent": "sun",
+  "wash": 1.15
+}

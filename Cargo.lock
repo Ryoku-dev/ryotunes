@@ -4736,6 +4736,7 @@ name = "ryotunes-cli"
 version = "2.4.1"
 dependencies = [
  "ryotunes-protocol",
+ "serde",
  "serde_json",
 ]
 
