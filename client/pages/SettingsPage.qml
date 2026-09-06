@@ -1,6 +1,7 @@
 pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Layouts
+import Quickshell
 import Quickshell.Io
 import Ryoku.Ui.Singletons
 import "../"
@@ -36,6 +37,8 @@ Item {
     // Editable-field mirrors, seeded on load so typing never fights the settings binding.
     property string proxyInput: ""
     property string discordNameInput: "Ryotunes"
+    property bool forkOpen: false
+    property string forkName: ""
 
     readonly property var qualities: [
         { id: "LOW", l: "Low" },
@@ -75,6 +78,28 @@ Item {
         if (k === "local" && !page.foldersLoaded) page.scanFolders();
         if (k === "account") page.loadIdentities();
         if (k === "general") page.loadDiscord();
+    }
+
+    // --- appearance (skin) -----------------------------------------------------------------
+    function chooseSkin(id) { Prefs.skin = id; Prefs.save(); }
+    function skinMode(m) { return (m && m["default"] === "light") ? "light" : "dark"; }
+    function skinSwatches(entry) {
+        var mode = page.skinMode(entry.manifest);
+        var p = Object.assign({}, Skin.fallback.modes[mode], Skin.palette(mode, entry.manifest));
+        return [p.paper, p.paperLift, p.ink, p.sun, p.bone];
+    }
+    function skinBadge(entry) { return entry.generated ? "GENERATED" : entry.source.toUpperCase(); }
+    function kebab(s) {
+        return (s || "").toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+    }
+    function createSkin() {
+        var id = page.kebab(page.forkName);
+        if (!id) { Playback.toast("Name the new skin first", "error"); return; }
+        var path = Skin.forkCurrent(id);
+        Prefs.skin = id; Prefs.save();
+        Quickshell.execDetached(["xdg-open", path]);
+        page.forkOpen = false; page.forkName = "";
+        Playback.toast("Created skin “" + id + "” — opening it to edit", "success");
     }
 
     function applyLocal(key, value) {
@@ -425,9 +450,114 @@ Item {
                     // Appearance ------------------------------------------------------------
                     SectionHeading { Layout.fillWidth: true; title: "Appearance"; mark: "表示" }
 
-                    // Theme → Prefs.themeMode (+ save); Style mirrors Prefs, so the chrome re-themes.
+                    // Skin — Prefs.skin picks the palette source (see Skin.qml); clicking a card
+                    // writes it and saves, and Skin re-applies through Tokens so the chrome repaints.
+                    ColumnLayout {
+                        Layout.fillWidth: true
+                        spacing: Style.sp(1)
+                        Text { Layout.fillWidth: true; text: "Skin"; color: Tokens.ink; font.family: Style.fontUi; font.pixelSize: Style.fs.md; font.weight: Font.Medium; wrapMode: Text.WordWrap }
+                        Text {
+                            Layout.fillWidth: true
+                            text: "The palette, type, motion and decor Ryotunes wears. System follows your Ryoku desktop; drop a folder in ~/.config/ryotunes/skins to add your own."
+                            color: Tokens.inkMuted; font.family: Style.fontUi; font.pixelSize: Style.fs.sm; wrapMode: Text.WordWrap
+                        }
+
+                        Flow {
+                            Layout.fillWidth: true
+                            Layout.topMargin: Style.sp(2)
+                            spacing: Style.sp(3)
+
+                            SkinCard {
+                                title: "System"
+                                author: "Follow the Ryoku desktop"
+                                swatches: [Tokens.paper, Tokens.paperLift, Tokens.ink, Tokens.sun, Tokens.bone]
+                                active: Skin.followSystem
+                                onClicked: page.chooseSkin("system")
+                            }
+                            Repeater {
+                                model: Skin.all
+                                delegate: SkinCard {
+                                    required property var modelData
+                                    title: modelData.name
+                                    author: modelData.author !== "" ? modelData.author : "unknown"
+                                    swatches: page.skinSwatches(modelData)
+                                    badge: page.skinBadge(modelData)
+                                    active: !Skin.followSystem && Skin.id === modelData.id
+                                    onClicked: page.chooseSkin(modelData.id)
+                                }
+                            }
+                        }
+
+                        // Status: the last load/parse problem in the accent, or the fell-back mode note.
+                        Text {
+                            Layout.fillWidth: true
+                            Layout.topMargin: Style.sp(1)
+                            visible: Skin.error !== ""
+                            text: Skin.error
+                            color: Style.accent; font.family: Style.fontUi; font.pixelSize: Style.fs.sm; wrapMode: Text.WordWrap
+                        }
+                        Text {
+                            Layout.fillWidth: true
+                            Layout.topMargin: Style.sp(1)
+                            visible: Skin.error === "" && Skin.modeMissing
+                            text: "This skin has no " + Skin.mode + " mode; showing its " + (Skin.mode === "dark" ? "light" : "dark") + "."
+                            color: Tokens.inkMuted; font.family: Style.fontUi; font.pixelSize: Style.fs.sm; wrapMode: Text.WordWrap
+                        }
+
+                        Flow {
+                            Layout.fillWidth: true
+                            Layout.topMargin: Style.sp(2)
+                            spacing: Style.sp(2)
+                            Btn { text: "Open skins folder"; icon: "library"; onClicked: Quickshell.execDetached(["xdg-open", Skin.userDir]) }
+                            Btn { text: "New skin from current"; icon: "add"; onClicked: page.forkOpen = !page.forkOpen }
+                            Btn { text: "Reload"; icon: "repeat"; onClicked: Skin.reload() }
+                            Btn { text: "Skins guide"; icon: "link"; onClicked: Quickshell.execDetached(["xdg-open", "https://github.com/neur0map/ryotunes/blob/main/docs/SKINS.md"]) }
+                        }
+
+                        // Fork the painted palette into a new user skin — kebab-cased id, opened to edit.
+                        RowLayout {
+                            Layout.fillWidth: true
+                            Layout.topMargin: Style.sp(1)
+                            visible: page.forkOpen
+                            spacing: Style.sp(2)
+                            Rectangle {
+                                Layout.fillWidth: true
+                                Layout.maximumWidth: Style.sp(80)
+                                implicitHeight: Style.sp(9)
+                                radius: Style.radius
+                                color: Tokens.paperLift
+                                border.width: 1
+                                border.color: forkField.activeFocus ? Tokens.lineStrong : Tokens.line
+                                TextInput {
+                                    id: forkField
+                                    anchors.fill: parent
+                                    anchors.leftMargin: Style.sp(2)
+                                    anchors.rightMargin: Style.sp(2)
+                                    verticalAlignment: TextInput.AlignVCenter
+                                    clip: true
+                                    color: Tokens.ink
+                                    font.family: Style.fontUi
+                                    font.pixelSize: Style.fs.md
+                                    text: page.forkName
+                                    onTextChanged: page.forkName = text
+                                    onAccepted: page.createSkin()
+                                    Text {
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        visible: forkField.text.length === 0
+                                        text: "my-skin-name"
+                                        color: Tokens.inkFaint
+                                        font: forkField.font
+                                    }
+                                }
+                            }
+                            Btn { text: "Create"; primary: true; onClicked: page.createSkin() }
+                        }
+                    }
+
+                    // Theme → Prefs.themeMode (+ save); Skin pins Tokens to the mode, so the chrome re-themes.
                     RowLayout {
                         Layout.fillWidth: true
+                        Layout.topMargin: Style.sp(2)
                         spacing: Style.sp(4)
                         ColumnLayout {
                             Layout.fillWidth: true
@@ -435,7 +565,7 @@ Item {
                             Text { Layout.fillWidth: true; text: "Theme"; color: Tokens.ink; font.family: Style.fontUi; font.pixelSize: Style.fs.md; font.weight: Font.Medium; wrapMode: Text.WordWrap }
                             Text {
                                 Layout.fillWidth: true
-                                text: "Follow the desktop automatically, or pin Ryotunes to its light or dark palette."
+                                text: "Follow the desktop automatically, or pin Ryotunes to the skin's light or dark mode."
                                 color: Tokens.inkMuted; font.family: Style.fontUi; font.pixelSize: Style.fs.sm; wrapMode: Text.WordWrap
                             }
                         }
@@ -454,7 +584,7 @@ Item {
                         }
                     }
 
-                    // Decor → Prefs.decor (+ save); Style.decorRich reads Prefs.decor.
+                    // Decor → Prefs.decor (+ save). "skin" follows the skin's own level; rich/calm override it.
                     RowLayout {
                         Layout.fillWidth: true
                         spacing: Style.sp(4)
@@ -464,7 +594,7 @@ Item {
                             Text { Layout.fillWidth: true; text: "Decor"; color: Tokens.ink; font.family: Style.fontUi; font.pixelSize: Style.fs.md; font.weight: Font.Medium; wrapMode: Text.WordWrap }
                             Text {
                                 Layout.fillWidth: true
-                                text: "Rich layers grain, register crosses and kana seals over the paper; calm keeps it plain."
+                                text: "Skin default keeps the skin's own level; Rich layers grain, register crosses and kana seals over the paper; Calm keeps it plain."
                                 color: Tokens.inkMuted; font.family: Style.fontUi; font.pixelSize: Style.fs.sm; wrapMode: Text.WordWrap
                             }
                         }
@@ -472,7 +602,7 @@ Item {
                             Layout.alignment: Qt.AlignVCenter
                             spacing: Style.sp(2)
                             Repeater {
-                                model: [ { m: "rich", l: "Rich" }, { m: "calm", l: "Calm" } ]
+                                model: [ { m: "skin", l: "Skin default" }, { m: "rich", l: "Rich" }, { m: "calm", l: "Calm" } ]
                                 delegate: Chip {
                                     required property var modelData
                                     text: modelData.l
