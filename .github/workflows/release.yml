@@ -69,12 +69,13 @@ jobs:
         with:
           node-version: 22
           cache: pnpm
-          cache-dependency-path: pnpm-lock.yaml
+          cache-dependency-path: ui/pnpm-lock.yaml
 
       - name: Release invariants
         run: python3 scripts/check-release-invariants.py
 
       - name: Build the web UI
+        working-directory: ui
         run: |
           pnpm install --frozen-lockfile
           pnpm build
