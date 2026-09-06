@@ -2,7 +2,7 @@
 # Run from packaging/arch with: makepkg -si
 
 pkgname=ryotunes
-pkgver=2.4.1
+pkgver=2.5.0
 pkgrel=1
 pkgdesc='Ryotunes v2.4 - resource-conscious Linux desktop music client'
 arch=('x86_64')
