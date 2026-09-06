@@ -100,19 +100,32 @@ A skin may ship both `dark` and `light`, or just one. In Settings, **Light / Dar
 
 1. `$RYOTUNES_SKIN_DIRS` — colon-separated, dev/preview only.
 2. `~/.config/ryotunes/skins/<id>/skin.json` — **user** skins; the `matugen` skin lives here.
-3. `<shellDir>/../skins/<id>/skin.json` — **shipped**: `/usr/share/ryotunes/skins` when installed,
+3. `~/.local/share/ryoku/ryotunes-skins/<id>/skin.json` — **store** skins, what RyoStore installs
+   (its `ryotunes-skins` category; each folder carries the store's receipt).
+4. `<shellDir>/../skins/<id>/skin.json` — **shipped**: `/usr/share/ryotunes/skins` when installed,
    `./skins` in a checkout.
 
-So a user skin shadows a shipped one of the same id. `RYOTUNES_SKIN=<id>` pins a skin for one run
-(previews use this).
+So a user skin shadows a store install, which shadows a shipped skin of the same id. The user and
+store directories are watched: an install, a remove, or a folder dropped in shows up without a
+reload. `RYOTUNES_SKIN=<id>` pins a skin for one run (previews use this); `ryotunes-cli skin use
+<id|system>` selects one from a shell (it writes `client.json`, and the running app repaints).
 
 ```
-/usr/share/ryotunes/skins/<id>/     shipped skins (skin.json, preview.png)
-/usr/share/ryotunes/matugen/ryotunes.json   the matugen template
-~/.config/ryotunes/skins/<id>/      user skins
-~/.config/ryotunes/skins/matugen/   the matugen-generated skin
-~/.config/ryotunes/client.json      prefs (skin, decor, themeMode, mini position)
+/usr/share/ryotunes/skins/<id>/            shipped skins (skin.json, preview.png)
+/usr/share/ryotunes/matugen/ryotunes.json  the matugen template
+~/.local/share/ryoku/ryotunes-skins/<id>/  RyoStore installs (skin.json, preview, receipt)
+~/.config/ryotunes/skins/<id>/             user skins
+~/.config/ryotunes/skins/matugen/          the matugen-generated skin
+~/.config/ryotunes/client.json             prefs (skin, decor, themeMode, mini position)
 ```
+
+## Installing skins from RyoStore
+
+On Ryoku, **Settings › Appearance › Get more skins** opens RyoStore on its *Ryotunes skins*
+category (`ryostore open ryotunes-skins`). Install there; the skin appears in the picker with a
+STORE badge, and the store shows it as ACTIVE while Ryotunes wears it. Removing it in the store
+takes it out of the picker (Ryotunes falls back to Paper if it was active). Nothing in Ryotunes
+needs a restart for any of this.
 
 ## Live reload
 
@@ -174,12 +187,24 @@ Ryotunes on every change.
 
 ## Submitting a skin
 
-Open a PR that adds `skins/<id>/`. Checklist:
+Community skins are **RyoStore products**: Ryotunes is a binary package, and the store is how a
+skin reaches every Ryoku desktop without a Ryotunes release. Open a PR against
+[neur0map/ryostore](https://github.com/neur0map/ryostore) that adds `ryotunes-skins/<id>/` and its
+entry in `ryotunes-skins/registry.json` — the layout, the packing tool and the checklist are in
+that repo's [`ryotunes-skins/AUTHORING.md`](https://github.com/neur0map/ryostore/blob/main/ryotunes-skins/AUTHORING.md).
+In short:
 
-- [ ] `skin.json` with `"$schema": "../skin.schema.json"`, `format: 1`, `id` = the folder name.
-- [ ] `ryotunes-cli skin check skins/<id>` passes with **no errors**.
-- [ ] `license` is `CC0-1.0` or `MIT`.
-- [ ] `preview.png`, 800×500, produced by `scripts/dev/skin-preview.sh`.
+- [ ] `skin.json` with `format: 1`, `id` = the folder name, `ryotunes-cli skin check` with **no errors**.
+- [ ] `license` is `CC0-1.0` or `MIT`; `LICENSE` and `PROVENANCE.txt` beside it.
+- [ ] `preview.png`, 800×500, from `scripts/dev/skin-preview.sh <dir> <dir>/preview.png`.
 - [ ] Any bundled `fonts/` are freely redistributable — **no proprietary fonts**. Prefer naming a
       common family in `type` over bundling.
-- [ ] Add a row to the gallery in [`skins/README.md`](../skins/README.md).
+- [ ] `tools/pack-product.py ryotunes-skins/<id>` run last (it writes `manifest.json` and the
+      registry hash); `python3 tests/validate-store.py` passes.
+
+Test it live before submitting: `echo "file://$HOME/Work/ryostore" > ~/.config/ryoku/ryostore-base`
+points the store at your checkout (see ryostore's `DEVELOP.md`), so Install/Remove run against your
+folder exactly as they will for users.
+
+The three built-ins (`paper`, `ember`, `mist`) live in this repo under `skins/` and ship with the
+package; that set is deliberately small.

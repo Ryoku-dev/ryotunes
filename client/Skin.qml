@@ -24,11 +24,23 @@ Singleton {
 
     // --- paths -------------------------------------------------------------------------------
     readonly property string configHome: Quickshell.env("XDG_CONFIG_HOME") || (Quickshell.env("HOME") + "/.config")
+    readonly property string dataHome: Quickshell.env("XDG_DATA_HOME") || (Quickshell.env("HOME") + "/.local/share")
     readonly property string userDir: configHome + "/ryotunes/skins"
+    // What RyoStore installs (category `ryotunes-skins`, one folder per product with a receipt).
+    readonly property string storeDir: dataHome + "/ryoku/ryotunes-skins"
     readonly property string shippedDir: Quickshell.shellDir + "/../skins"
     readonly property var devDirs: (Quickshell.env("RYOTUNES_SKIN_DIRS") || "").split(":").filter((d) => d.length > 0)
-    // Search order; first hit per id wins.
-    readonly property var dirs: root.devDirs.concat([root.userDir, root.shippedDir])
+    // Search order; first hit per id wins: a user's own copy shadows a store install, which
+    // shadows a shipped skin of the same id.
+    readonly property var dirs: root.devDirs.concat([root.userDir, root.storeDir, root.shippedDir])
+
+    // RyoStore on this box (Ryoku): Settings offers "Get more skins" only then.
+    property bool storeAvailable: false
+    Process {
+        command: ["sh", "-c", "command -v ryostore >/dev/null 2>&1 && echo yes || echo no"]
+        running: true
+        stdout: StdioCollector { onStreamFinished: root.storeAvailable = this.text.trim() === "yes" }
+    }
 
     // --- selection ---------------------------------------------------------------------------
     // RYOTUNES_SKIN pins a skin for a preview run (scripts/dev/skin-preview.sh); Prefs otherwise.
@@ -37,7 +49,7 @@ Singleton {
     readonly property bool followSystem: root.id === "system"
 
     // --- catalogue ---------------------------------------------------------------------------
-    // [{ id, name, author, description, version, source: "shipped"|"user"|"dev", generated,
+    // [{ id, name, author, description, version, source: "shipped"|"store"|"user"|"dev", generated,
     //    dir, path, manifest }] in search order, one entry per id.
     property var all: []
     property string error: ""     // last load/parse problem, for Settings
@@ -187,7 +199,8 @@ Singleton {
             if (seen[id]) continue;   // an earlier (higher-precedence) dir already provided it
             seen[id] = true;
             var source = root.devDirs.some((d) => path.indexOf(d + "/") === 0) ? "dev"
-                : (path.indexOf(root.userDir + "/") === 0 ? "user" : "shipped");
+                : (path.indexOf(root.userDir + "/") === 0 ? "user"
+                : (path.indexOf(root.storeDir + "/") === 0 ? "store" : "shipped"));
             out.push({
                 id: id, name: m.name || id, author: m.author || "", description: m.description || "",
                 version: m.version || "", source: source, generated: m.generated || "",
@@ -236,6 +249,14 @@ Singleton {
             source: "file://" + root.entry.dir + "/" + face.modelData
         }
     }
+
+    // The store's library and the user dir are watched as directories: a RyoStore install or
+    // remove, or a folder dropped in by hand, rescans without a manual Reload. FileView on a
+    // directory reports changes to its entry list; the debounce folds a multi-file install into
+    // one scan.
+    FileView { path: root.storeDir; watchChanges: true; printErrors: false; onFileChanged: rescan.restart() }
+    FileView { path: root.userDir; watchChanges: true; printErrors: false; onFileChanged: rescan.restart() }
+    Timer { id: rescan; interval: 400; onTriggered: root.reload() }
 
     // ~/.config/ryotunes/skins exists from the first run, so "Open skins folder" and a matugen
     // template have somewhere to land.

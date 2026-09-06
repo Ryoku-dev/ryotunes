@@ -458,7 +458,7 @@ Item {
                         Text { Layout.fillWidth: true; text: "Skin"; color: Tokens.ink; font.family: Style.fontUi; font.pixelSize: Style.fs.md; font.weight: Font.Medium; wrapMode: Text.WordWrap }
                         Text {
                             Layout.fillWidth: true
-                            text: "The palette, type, motion and decor Ryotunes wears. System follows your Ryoku desktop; drop a folder in ~/.config/ryotunes/skins to add your own."
+                            text: "The palette, type, motion and decor Ryotunes wears. System follows your Ryoku desktop; install more from RyoStore, or drop a folder in ~/.config/ryotunes/skins to add your own."
                             color: Tokens.inkMuted; font.family: Style.fontUi; font.pixelSize: Style.fs.sm; wrapMode: Text.WordWrap
                         }
 
@@ -508,6 +508,8 @@ Item {
                             Layout.fillWidth: true
                             Layout.topMargin: Style.sp(2)
                             spacing: Style.sp(2)
+                            // RyoStore's `ryotunes-skins` category, when the store is on this box.
+                            Btn { text: "Get more skins"; icon: "download"; primary: true; visible: Skin.storeAvailable; onClicked: Quickshell.execDetached(["ryostore", "open", "ryotunes-skins"]) }
                             Btn { text: "Open skins folder"; icon: "library"; onClicked: Quickshell.execDetached(["xdg-open", Skin.userDir]) }
                             Btn { text: "New skin from current"; icon: "add"; onClicked: page.forkOpen = !page.forkOpen }
                             Btn { text: "Reload"; icon: "repeat"; onClicked: Skin.reload() }

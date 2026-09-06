@@ -404,6 +404,7 @@ fn print_swatches(m: &Manifest, tty: bool) {
 enum Origin {
     Dev,
     User,
+    Store,
     Shipped,
 }
 impl Origin {
@@ -411,13 +412,29 @@ impl Origin {
         match self {
             Origin::Dev => "dev",
             Origin::User => "user",
+            Origin::Store => "store",
             Origin::Shipped => "shipped",
         }
     }
 }
 
-/// The same search order the client uses (Skin.qml): dev dirs, the user dir, then the shipped dir
-/// (`/usr/share/ryotunes/skins` when installed, `./skins` in a checkout). First hit per id wins.
+fn config_home() -> String {
+    std::env::var("XDG_CONFIG_HOME")
+        .ok()
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| format!("{}/.config", std::env::var("HOME").unwrap_or_default()))
+}
+
+fn data_home() -> String {
+    std::env::var("XDG_DATA_HOME")
+        .ok()
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| format!("{}/.local/share", std::env::var("HOME").unwrap_or_default()))
+}
+
+/// The same search order the client uses (Skin.qml): dev dirs, the user dir, the store's
+/// library (`~/.local/share/ryoku/ryotunes-skins`, what RyoStore installs into), then the shipped
+/// dir (`/usr/share/ryotunes/skins` when installed, `./skins` in a checkout). First hit per id wins.
 fn skin_dirs() -> Vec<(Origin, PathBuf)> {
     let mut dirs = Vec::new();
     if let Ok(v) = std::env::var("RYOTUNES_SKIN_DIRS") {
@@ -425,11 +442,8 @@ fn skin_dirs() -> Vec<(Origin, PathBuf)> {
             dirs.push((Origin::Dev, PathBuf::from(d)));
         }
     }
-    let cfg = std::env::var("XDG_CONFIG_HOME")
-        .ok()
-        .filter(|s| !s.is_empty())
-        .unwrap_or_else(|| format!("{}/.config", std::env::var("HOME").unwrap_or_default()));
-    dirs.push((Origin::User, PathBuf::from(format!("{cfg}/ryotunes/skins"))));
+    dirs.push((Origin::User, PathBuf::from(format!("{}/ryotunes/skins", config_home()))));
+    dirs.push((Origin::Store, PathBuf::from(format!("{}/ryoku/ryotunes-skins", data_home()))));
     let ship = PathBuf::from("/usr/share/ryotunes/skins");
     if ship.is_dir() {
         dirs.push((Origin::Shipped, ship));
@@ -631,18 +645,67 @@ fn cmd_show(id: Option<&str>) -> i32 {
     0
 }
 
+/// `skin use <id|system>`: select a skin by merging `"skin"` into the client's prefs file
+/// (`~/.config/ryotunes/client.json`). The running client watches that file and repaints; no
+/// daemon involved. Every other key in the file is kept.
+fn cmd_use(id: Option<&str>) -> i32 {
+    let Some(id) = id else {
+        eprintln!("usage: ryotunes-cli skin use <id|system>");
+        return 2;
+    };
+    if id != "system" {
+        if !is_kebab(id) {
+            eprintln!("\"{id}\" is not a skin id (lowercase kebab-case)");
+            return 2;
+        }
+        if !catalogue().iter().any(|c| c.id == id) {
+            eprintln!("skin \"{id}\" is not installed (see `ryotunes-cli skin list`)");
+            return 1;
+        }
+    }
+    let path = PathBuf::from(format!("{}/ryotunes/client.json", config_home()));
+    let mut prefs: serde_json::Map<String, serde_json::Value> = match fs::read_to_string(&path) {
+        Ok(t) => serde_json::from_str::<serde_json::Value>(&t)
+            .ok()
+            .and_then(|v| v.as_object().cloned())
+            .unwrap_or_default(),
+        Err(_) => Default::default(),
+    };
+    prefs.insert("skin".into(), serde_json::Value::String(id.to_owned()));
+    let body = match serde_json::to_string_pretty(&serde_json::Value::Object(prefs)) {
+        Ok(b) => b + "\n",
+        Err(e) => {
+            eprintln!("cannot encode {}: {e}", path.display());
+            return 1;
+        }
+    };
+    if let Some(dir) = path.parent() {
+        let _ = fs::create_dir_all(dir);
+    }
+    // Atomic: the client re-reads on change and must never see a half-written file.
+    let tmp = path.with_extension("json.tmp");
+    if let Err(e) = fs::write(&tmp, body).and_then(|_| fs::rename(&tmp, &path)) {
+        eprintln!("cannot write {}: {e}", path.display());
+        return 1;
+    }
+    println!("skin: {id}");
+    0
+}
+
 pub fn run(args: &[String]) -> i32 {
+    const USAGE: &str = "usage: ryotunes-cli skin <check DIR...|list|show ID|use ID|system>";
     match args.first().map(String::as_str) {
         Some("check") => cmd_check(&args[1..]),
         Some("list") => cmd_list(),
         Some("show") => cmd_show(args.get(1).map(String::as_str)),
+        Some("use") => cmd_use(args.get(1).map(String::as_str)),
         Some(other) => {
             eprintln!("unknown skin command \"{other}\"");
-            eprintln!("usage: ryotunes-cli skin <check DIR...|list|show ID>");
+            eprintln!("{USAGE}");
             2
         }
         None => {
-            eprintln!("usage: ryotunes-cli skin <check DIR...|list|show ID>");
+            eprintln!("{USAGE}");
             2
         }
     }
