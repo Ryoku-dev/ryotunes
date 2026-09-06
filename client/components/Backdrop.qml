@@ -7,7 +7,7 @@ import "../"
 // The playing cover as the room's light: a 64 px thumbnail stretched over this item, blurred once
 // (one MultiEffect pass per track change; static between), cross-faded A/B on track change, and
 // faded toward paper at the edges so it reads as a bloom rather than a poster. `strength` is the
-// wash's opacity. Under Style.ambient the bloom drifts (scale 1.0-1.06 over 12 s), stepped by a
+// wash's opacity. The bloom is static (scale 1.03) - see driftScale; `drift` is kept as a
 // 10 fps timer so an idle window never renders per vsync; paused, hidden or power-saver: still.
 Item {
     id: root
@@ -88,16 +88,11 @@ Item {
         Connections { target: Tokens; function onPaperChanged() { fade.requestPaint(); } }
     }
 
-    // Ambient drift: a 12 s sine on the wash's scale, sampled at 10 fps.
+    // The wash is static between track changes. A continuous drift (a 6 % scale sine over 12 s)
+    // was invisible on a blurred field but forced the scene graph to re-render every frame while
+    // playing - measured at 35 % of a core in the client. One blur pass per track, then nothing.
     QtObject {
         id: driftScale
-        property real phase: 0
-        readonly property real value: 1.03 + 0.03 * Math.sin(phase)
-    }
-    Timer {
-        interval: 100
-        repeat: true
-        running: root.drift && root.visible && Style.ambient
-        onTriggered: driftScale.phase = (driftScale.phase + (2 * Math.PI) / 120) % (2 * Math.PI)
+        readonly property real value: 1.03
     }
 }

@@ -94,6 +94,24 @@ Singleton {
     function touchPick(id) { return root.mutate(function (b) { return P.touchPick(b, id, Date.now()); }); }
     function seedPick(item) { return root.mutate(function (b) { return P.seedPick(b, item, Date.now()); }); }
     function noteRecent(item) { return root.mutate(function (b) { P.noteRecent(b, item, Date.now()); return true; }); }
+    // Signing out of the account drops the recents that belong to it: Liked Music (LM), the
+    // library playlists and anything else that only resolves with that session. Home's "Jump
+    // back in" must not keep offering a library the daemon can no longer fetch.
+    function forgetAccountRecents() {
+        return root.mutate(function (b) {
+            var n = 0;
+            for (var id in b.recent) {
+                var r = b.recent[id];
+                if (id === "LM" || id.indexOf("spotify:") === 0 || (r && r.kind === "playlist")) { delete b.recent[id]; n++; }
+            }
+            return n > 0;
+        });
+    }
+    Connections {
+        target: Playback
+        function onAuthChanged(): void { if (!(Playback.auth && Playback.auth.signedIn)) root.forgetAccountRecents(); }
+        function onSpotifyChanged(): void { if (!(Playback.spotify && Playback.spotify.signedIn)) root.forgetAccountRecents(); }
+    }
 
     // pin / unpin, returning "pinned" | "unpinned" | "full" like personal.ts togglePin.
     function togglePin(id) {

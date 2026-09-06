@@ -130,6 +130,18 @@ ShellRoot {
         }
     }
 
+    // Pause-to-quit: a minute into a pause with no window on screen (closed to tray, or the
+    // mini alone), this client exits; the daemon's own idle grace then takes it out too, so a
+    // paused Ryotunes leaves nothing running. A visible main window keeps it alive - that is the
+    // user's attention, not idleness - and play, or presenting the window, cancels the timer.
+    readonly property bool parked: !!Playback.now && Playback.paused && !win.visible
+    Timer {
+        id: pauseQuit
+        interval: 60000
+        running: shellRoot.parked
+        onTriggered: Qt.quit()
+    }
+
     Connections {
         target: appRoot
         function onMiniOpenChanged(): void {

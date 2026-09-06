@@ -14,9 +14,12 @@ use std::time::{Duration, Instant};
 
 use tokio::sync::mpsc::UnboundedSender;
 
-/// Idle grace before a tray-only daemon exits. Five minutes matches the Tauri build; the
+/// Idle grace before a tray-only daemon exits: one minute after the last client is gone with
+/// nothing playing (the client quits itself a minute into a pause when its window is off screen,
+/// so a paused, closed Ryotunes is fully out of memory ~2 minutes after the pause). Socket
+/// activation brings the daemon back on the next `ryotunes`, media key or MPRIS call. The
 /// `RYOTUNESD_IDLE_EXIT_SECS` environment variable overrides it (manual verification uses 10).
-const DEFAULT_IDLE_EXIT_SECS: u64 = 300;
+const DEFAULT_IDLE_EXIT_SECS: u64 = 60;
 
 fn idle_exit_grace() -> Duration {
     let secs = std::env::var("RYOTUNESD_IDLE_EXIT_SECS")

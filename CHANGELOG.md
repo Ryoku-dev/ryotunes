@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Power: the cover wash no longer drifts every frame (the client sat at ~35 % of a core while playing; now ~1.6 %). Pause-to-quit: a minute into a pause with the main window off screen the client exits, and the daemon's idle grace is now 60 s (was 5 min), so a paused, closed Ryotunes is fully out of memory about two minutes after the pause; socket activation brings it back on the next launch, media key or MPRIS call. Signing out drops the account's recents (Liked Music, library playlists) from Home's Jump back in.
+
 - Seven expressive shipped skins beside Paper/Ember/Mist - **Neon**, **Vapor**, **Phosphor**, **Arcade**, **Broadsheet**, **Concrete**, **Velvet** - each with its own bundled OFL faces (Unbounded, Playfair, Major Mono, Press Start, Bebas Neue, Cormorant…), radii, motion and wash. Every display title now takes the skin's face (three surfaces still read Ryoku's). `RYOTUNES_SKIN_MODE` pins a mode for previews so light-first skins render light.
 
 - Skins are RyoStore products: the store's new `ryotunes-skins` category installs into `~/.local/share/ryoku/ryotunes-skins/<id>/`, which Ryotunes reads as the STORE source (after user skins, before shipped) and watches, so an install shows up in the picker without a reload; *Settings › Appearance › Get more skins* opens the store on the category; `ryotunes-cli skin use <id|system>` selects a skin from a shell. The catalogue ships 20 skins derived from Ryoku's colour schemes.
