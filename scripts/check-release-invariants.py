@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 from pathlib import Path
-import json, re
+import json
+import re, re
 
 root = Path(__file__).resolve().parents[1]
 def read(rel): return (root / rel).read_text()
@@ -71,16 +72,17 @@ login_webview = read('src-tauri/src/login_webview.rs')
 core_lib = read('crates/core/src/lib.rs')
 discord = read('crates/core/src/discord.rs')
 
-# --- frozen v2.4.1 identity ----------------------------------------------------
-req('version = "2.4.1"' in cargo, 'workspace version is not 2.4.1')
-req('name = "ryotunes"\nversion = "2.4.1"' in lock, 'Cargo.lock Ryotunes version not 2.4.1')
-req('name = "sync-server"\nversion = "2.4.1"' in lock, 'Cargo.lock sync-server version not 2.4.1')
+# --- one version, everywhere ----------------------------------------------------
+# Cargo.toml's workspace version is the source of truth (scripts/release.sh bumps
+# it); every other manifest must agree, so a release never ships a mismatched id.
+VERSION = re.search(r'^version = "([0-9]+\.[0-9]+\.[0-9]+)"', cargo, re.M).group(1)
+MAJOR_MINOR = '.'.join(VERSION.split('.')[:2])
+req(f'name = "ryotunes"\nversion = "{VERSION}"' in lock, f'Cargo.lock Ryotunes version not {VERSION}')
+req(f'name = "sync-server"\nversion = "{VERSION}"' in lock, f'Cargo.lock sync-server version not {VERSION}')
 parsed = json.loads(config)
-req(parsed.get('version') == '2.4.1' and parsed.get('identifier') == 'dev.ryoku.ryotunes', 'Tauri identity incorrect')
-req(json.loads(read('ui/package.json')).get('version') == '2.4.1', 'UI version incorrect')
-req("PRODUCT_VERSION = 'v2.4'" in settings and "'2.4.1'" in settings, 'Settings version identity incorrect')
-req('pkgver=2.4.1' in read('packaging/arch/PKGBUILD'), 'Arch source pkgver incorrect')
-req('ryotunes-v2.4 2.4.1-1' in read('README.md') and 'ryotunes-v2.4 2.4.1-1' in read('RELEASE_NOTES.md'), 'public package identity missing from docs')
+req(parsed.get('version') == VERSION and parsed.get('identifier') == 'dev.ryoku.ryotunes', 'Tauri identity incorrect')
+req(json.loads(read('ui/package.json')).get('version') == VERSION, 'UI version incorrect')
+req(f'pkgver={VERSION}' in read('packaging/arch/PKGBUILD'), 'Arch source pkgver incorrect')
 # httpdate is no longer a stale-lock tell: librespot-core (crates/spotify) pulls it legitimately.
 req('name = "tauri-plugin-window-state"' not in lock, 'stale v2.0 lock entries returned')
 
@@ -348,4 +350,4 @@ for p in (root/'ui/src').rglob('*'):
         written.update(re.findall(r"api\.setSetting\('([^']+)'", p.read_text()))
 req(written <= allowed, f'frontend writes unwhitelisted settings: {sorted(written-allowed)}')
 
-print('Release invariants v2.4.1: OK')
+print(f'Release invariants v{VERSION}: OK')

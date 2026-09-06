@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Releases are one command: `scripts/release.sh patch|minor|major --push` bumps every manifest, rolls this changelog, tags; the `Release` workflow verifies the tagged tree builds (binaries, web UI, skins, tests), publishes the GitHub release with a reproducible source tarball + sha256, and tells Ryoku Arch, whose own workflow bumps the `[ryoku]` package and publishes it. The package enables `ryotunesd.socket` for every user (preset + install hook), which is what made a fresh install open the old Tauri app before.
+
 - Power: the cover wash no longer drifts every frame (the client sat at ~35 % of a core while playing; now ~1.6 %). Pause-to-quit: a minute into a pause with the main window off screen the client exits, and the daemon's idle grace is now 60 s (was 5 min), so a paused, closed Ryotunes is fully out of memory about two minutes after the pause; socket activation brings it back on the next launch, media key or MPRIS call. Signing out drops the account's recents (Liked Music, library playlists) from Home's Jump back in.
 
 - Seven expressive shipped skins beside Paper/Ember/Mist - **Neon**, **Vapor**, **Phosphor**, **Arcade**, **Broadsheet**, **Concrete**, **Velvet** - each with its own bundled OFL faces (Unbounded, Playfair, Major Mono, Press Start, Bebas Neue, Cormorant…), radii, motion and wash. Every display title now takes the skin's face (three surfaces still read Ryoku's). `RYOTUNES_SKIN_MODE` pins a mode for previews so light-first skins render light.

@@ -1,0 +1,156 @@
+name: Release
+
+# One pipeline, keyed on a `v*` tag (cut with `scripts/release.sh patch --push`):
+#   1. verify: the tag's tree builds (every binary + the web UI) and the release
+#      invariants hold, on a stock Ubuntu runner, so a release never fails
+#      downstream in Ryoku's package build;
+#   2. publish: a GitHub release carrying a reproducible source tarball and its
+#      sha256, with the changelog section as the notes;
+#   3. announce: tell Ryoku Arch (`repository_dispatch: ryotunes-release`) so
+#      its own workflow bumps the [ryoku] package and publishes it to users.
+#      Needs the RYOKU_ARCH_TOKEN secret (a fine-grained PAT with contents:write
+#      on neur0map/ryoku-arch); without it, Ryoku's daily poll picks the
+#      release up instead.
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing tag to (re)publish, e.g. v2.5.0
+        required: true
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    name: Build the tagged tree
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.meta.outputs.version }}
+      tag: ${{ steps.meta.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+          fetch-depth: 0
+
+      - name: Resolve the version
+        id: meta
+        run: |
+          set -euo pipefail
+          tag="${{ inputs.tag || github.ref_name }}"
+          ver="$(sed -n 's/^version = "\([0-9.]*\)"/\1/p' Cargo.toml | head -1)"
+          if [[ "$tag" != "v$ver" ]]; then
+            echo "::error::tag $tag does not match Cargo.toml version $ver (cut releases with scripts/release.sh)"
+            exit 1
+          fi
+          echo "version=$ver" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+      - name: Install Linux dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev libmpv-dev
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - uses: Swatinem/rust-cache@v2
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+
+      - name: Release invariants
+        run: python3 scripts/check-release-invariants.py
+
+      - name: Build the web UI
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm build
+
+      - name: Build every binary
+        run: cargo build --release --locked --package ryotunes --package ryotunesd --package ryotunes-cli
+
+      - name: Skins validate
+        run: |
+          for d in skins/*/; do target/release/ryotunes-cli skin check "$d"; done
+
+      - name: Unit tests
+        run: cargo test --workspace --locked --exclude ryotunes
+
+  publish:
+    name: Publish the GitHub release
+    needs: verify
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.verify.outputs.tag }}
+          fetch-depth: 0
+
+      - name: Source tarball
+        id: tarball
+        env:
+          TAG: ${{ needs.verify.outputs.tag }}
+          VERSION: ${{ needs.verify.outputs.version }}
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          name="ryotunes-$VERSION"
+          # git archive is reproducible for a tag: same tree, same bytes.
+          git archive --format=tar --prefix="$name/" "$TAG" | gzip -n > "dist/$name.tar.gz"
+          ( cd dist && sha256sum "$name.tar.gz" > "$name.tar.gz.sha256" )
+          echo "sha256=$(cut -d' ' -f1 "dist/$name.tar.gz.sha256")" >> "$GITHUB_OUTPUT"
+          echo "asset=dist/$name.tar.gz" >> "$GITHUB_OUTPUT"
+
+      - name: Release notes from the changelog
+        env:
+          VERSION: ${{ needs.verify.outputs.version }}
+        run: |
+          python3 - <<'PY' > dist/NOTES.md
+          import os, re
+          v = os.environ["VERSION"]
+          s = open("CHANGELOG.md").read()
+          m = re.search(rf"^## v{re.escape(v)}[^\n]*\n(.*?)(?=^## |\Z)", s, re.S | re.M)
+          print((m.group(1).strip() if m else f"Ryotunes v{v}.") + "\n")
+          PY
+          cat dist/NOTES.md
+
+      - name: Create or update the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.verify.outputs.tag }}
+        run: |
+          set -euo pipefail
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" dist/*.tar.gz dist/*.sha256 --clobber
+            gh release edit "$TAG" --notes-file dist/NOTES.md
+          else
+            gh release create "$TAG" dist/*.tar.gz dist/*.sha256 --title "Ryotunes $TAG" --notes-file dist/NOTES.md
+          fi
+
+      - name: Tell Ryoku Arch
+        if: ${{ env.RYOKU_ARCH_TOKEN != '' }}
+        env:
+          RYOKU_ARCH_TOKEN: ${{ secrets.RYOKU_ARCH_TOKEN }}
+          TAG: ${{ needs.verify.outputs.tag }}
+          VERSION: ${{ needs.verify.outputs.version }}
+          SHA256: ${{ steps.tarball.outputs.sha256 }}
+        run: |
+          curl -sSf -X POST \
+            -H "Authorization: Bearer $RYOKU_ARCH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            https://api.github.com/repos/neur0map/ryoku-arch/dispatches \
+            -d "{\"event_type\":\"ryotunes-release\",\"client_payload\":{\"tag\":\"$TAG\",\"version\":\"$VERSION\",\"sha256\":\"$SHA256\"}}"
+          echo "dispatched ryotunes-release $TAG to neur0map/ryoku-arch"
