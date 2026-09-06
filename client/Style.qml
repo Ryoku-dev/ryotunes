@@ -61,6 +61,10 @@ Singleton {
     // powerprofilesctl every 30 s; a missing tool reads as "not saving".
     property bool powerSaver: false
     readonly property bool ambient: !!Playback.now && !Playback.paused && !Tokens.reduceMotion && !root.powerSaver
+    // The spectrum is content the user asked to see (a visualizer on a card, the stage's ribbon),
+    // not decoration: it runs whenever something plays and a surface claims it, power profile
+    // aside. It still stops the moment nothing is playing or nothing shows it.
+    readonly property bool live: !!Playback.now && !Playback.paused
     Process {
         id: profileProbe
         command: ["sh", "-c", "command -v powerprofilesctl >/dev/null 2>&1 && powerprofilesctl get || echo balanced"]

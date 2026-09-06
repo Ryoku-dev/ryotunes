@@ -60,7 +60,7 @@ Rectangle {
     }
 
     // The card claims the spectrum feed only while it is on screen (Spectrum runs cava only when a
-    // claim is live AND Style.ambient holds — playing, motion on, not power-saver).
+    // claim is live AND Style.live holds — something is playing).
     function claim(on) { Spectrum.claim("npcard", on); }
     Component.onCompleted: root.claim(root.visible)
     Component.onDestruction: root.claim(false)

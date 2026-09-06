@@ -172,5 +172,11 @@ ShellRoot {
         target: "window"
         function show(): void { shellRoot.present(); }
         function mini(): void { appRoot.miniOpen = !appRoot.miniOpen; }
+        // `qs -p … ipc call window ctl "<cmd> [arg]"`: the same verbs as the dev control socket
+        // (nav, np, panel, sidebar, decor, theme, provider), for scripts and the desktop.
+        function ctl(line: string): void {
+            var parts = String(line).trim().split(" ");
+            shellRoot.ctl(parts[0], parts[1] || "", parts.slice(2).join(" "));
+        }
     }
 }

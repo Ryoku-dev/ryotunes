@@ -57,7 +57,12 @@ Singleton {
     }
 
     // Replace the mirror from a daemon blob (a get_personal result or a personal-changed payload).
-    function apply(b) { root.blob = P.hydrate(b); }
+    function apply(b) {
+        root.blob = P.hydrate(b);
+        // The blob can land after the auth snapshot: sweep it too when the session is signed out.
+        if (!(Playback.auth && Playback.auth.signedIn))
+            root.forgetAccountRecents();
+    }
 
     // A track started: refresh its shortcut's recency and count its artist, exactly as
     // player.svelte.ts does on `now-playing`. Radio stations carry no shortcut or artist page.
@@ -102,7 +107,10 @@ Singleton {
             var n = 0;
             for (var id in b.recent) {
                 var r = b.recent[id];
-                if (id === "LM" || id.indexOf("spotify:") === 0 || (r && r.kind === "playlist")) { delete b.recent[id]; n++; }
+                // Liked Music (LM / VLLM), Spotify items, and any library playlist: only a signed-in
+                // session can open them. Public playlists (a shared link, a chart) stay.
+                if (id === "LM" || id === "VLLM" || id.indexOf("spotify:") === 0
+                    || (r && r.kind === "playlist" && String(r.subtitle || "").indexOf("Your") === 0)) { delete b.recent[id]; n++; }
             }
             return n > 0;
         });

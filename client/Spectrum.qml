@@ -6,7 +6,8 @@ import Quickshell.Io
 // The playback spectrum: cava on the PipeWire monitor, 40 bands at 30 fps, the Ryoku shell's
 // AudioBars pattern. A surface that draws it claims the feed with claim(id, true) while it is
 // visible and releases with claim(id, false); the analyser runs only while at least one surface
-// claims it AND Style.ambient holds (something is playing, motion not reduced, not power-saver).
+// claims it AND Style.live holds (something is playing). Power-saver no longer gates it: a
+// visualizer the user is looking at is content, not decoration.
 // levels settle flat when frames stop (silence, a restart gap, the gate closing).
 Singleton {
     id: root
@@ -19,7 +20,7 @@ Singleton {
         owners = next;
     }
 
-    readonly property bool analysing: root.claimed && Style.ambient
+    readonly property bool analysing: root.claimed && Style.live
     readonly property int bands: 40
     readonly property int fps: 30
 
