@@ -7,9 +7,11 @@ fail=0
 say() { printf '[%s] %s\n' "$1" "$2"; }
 
 say check 'release identity'
-grep -q 'version = "2.4.1"' Cargo.toml || { say FAIL 'workspace version is not 2.4.1'; fail=1; }
-grep -q '"version": "2.4.1"' src-tauri/tauri.conf.json || { say FAIL 'Tauri version is not 2.4.1'; fail=1; }
-grep -q '"version": "2.4.1"' ui/package.json || { say FAIL 'UI version is not 2.4.1'; fail=1; }
+# One version everywhere: Cargo.toml is the source (scripts/release.sh bumps it).
+ver="$(sed -n 's/^version = "\([0-9.]*\)"/\1/p' Cargo.toml | head -1)"
+[[ -n "$ver" ]] || { say FAIL 'workspace version missing from Cargo.toml'; fail=1; }
+grep -q "\"version\": \"$ver\"" src-tauri/tauri.conf.json || { say FAIL "Tauri version is not $ver"; fail=1; }
+grep -q "\"version\": \"$ver\"" ui/package.json || { say FAIL "UI version is not $ver"; fail=1; }
 grep -q '"identifier": "dev.ryoku.ryotunes"' src-tauri/tauri.conf.json || { say FAIL 'unexpected application identifier'; fail=1; }
 
 say check 'private-machine and secret patterns'

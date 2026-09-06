@@ -1,13 +1,14 @@
 #!/usr/bin/env bash
 set -euo pipefail
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-out="${1:-$root/ryotunes-v2.4.1-final-source.tar.gz}"
+ver="$(sed -n 's/^version = "\([0-9.]*\)"/\1/p' "$root/Cargo.toml" | head -1)"
+out="${1:-$root/ryotunes-v$ver-final-source.tar.gz}"
 
 "$root/scripts/release-check.sh"
 
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
-stage="$tmp/ryotunes-v2.4.1"
+stage="$tmp/ryotunes-v$ver"
 mkdir -p "$stage"
 
 tar \
