@@ -92,6 +92,7 @@ package() {
   install -Dm644 matugen/ryotunes.json "$pkgdir/usr/share/ryotunes/matugen/ryotunes.json"
   install -Dm644 packaging/linux/ryotunesd.socket "$pkgdir/usr/lib/systemd/user/ryotunesd.socket"
   install -Dm644 packaging/linux/ryotunesd.service "$pkgdir/usr/lib/systemd/user/ryotunesd.service"
+  install -Dm644 packaging/linux/90-ryotunes.preset "$pkgdir/usr/lib/systemd/user-preset/90-ryotunes.preset"
   install -Dm644 packaging/linux/ryotunes.desktop "$pkgdir/usr/share/applications/ryotunes.desktop"
   install -Dm644 packaging/linux/dev.ryoku.ryotunes.metainfo.xml "$pkgdir/usr/share/metainfo/dev.ryoku.ryotunes.metainfo.xml"
   install -Dm644 src-tauri/icons/32x32.png "$pkgdir/usr/share/icons/hicolor/32x32/apps/ryotunes.png"
