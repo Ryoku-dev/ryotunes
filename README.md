@@ -93,6 +93,18 @@ Ryotunes does not implement a disconnected theme layer and then approximate Ryok
 - **MPRIS continuity** — Ryoku media controls remain available when the visible main UI is closed.
 - **Rollback-safe replacement packaging** — custom Ryotunes replaces only the stock Ryotunes entry points, never `ryoku-desktop`.
 
+### Skins
+
+Every colour, type face, radius and duration the chrome reads comes from one **skin**. The default, `system`, follows the Ryoku desktop live (wallpaper palette, named scheme, motion scale, decor). The `matugen` skin is the same manifest written by a matugen template from your wallpaper — on Ryoku it is one of the *Theme apps*, regenerated on every palette change. Any folder with a `skin.json` is a skin, and editing it re-paints the running app:
+
+```
+/usr/share/ryotunes/skins/<id>/        shipped: paper, ember, mist
+~/.config/ryotunes/skins/<id>/         yours (shadows a shipped id); skins/matugen is the generated one
+/usr/share/ryotunes/matugen/ryotunes.json   the matugen template
+```
+
+Pick one in *Settings › Appearance*, fork the painted palette with **New skin from current**, validate with `ryotunes-cli skin check <dir>`, and submit it as `skins/<id>/` — the format and the checklist are in **[docs/SKINS.md](docs/SKINS.md)**.
+
 For the shell itself:
 
 **[Ryoku Arch](https://github.com/neur0map/ryoku-arch)** · **[Ryoku Discord](https://discord.gg/8KjBmUEyKA)**

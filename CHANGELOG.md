@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **Skins.** One source for every colour, face, radius and duration: `system` (the Ryoku desktop, live), `matugen` (a skin written by a matugen template from the wallpaper; on Ryoku one of the Theme apps), or any `skin.json` folder under `~/.config/ryotunes/skins/` or `/usr/share/ryotunes/skins/` (shipped: paper, ember, mist). Live reload while editing, a picker + fork + folder buttons in Settings › Appearance, `ryotunes-cli skin check|list|show`, a JSON schema, `docs/SKINS.md` and `skins/README.md` for contributors, `scripts/dev/skin-preview.sh` for the 800x500 previews. Decor gains a "Skin default" level.
+
 - **SoundCloud** is the third provider, no account needed (`crates/soundcloud`, api-v2 with a scraped `client_id`, HLS AAC 160k straight into mpv). Search, artists, albums/playlists, Discover Home (Trending by genre, Curated, Artists to watch), related-track autoplay, and SoundCloud's own per-track **waveform** as the seek bar in the player bar, the Home card and the Now Playing stage. SoundCloud artist pages take the Orange/SoundCloud shape: banner, avatar, followers, tracks left, "Albums from this user" right.
 - Now Playing stage re-laid: header row with the Collapse pill, top-aligned art + title column, one foot band (waveform or spectrum); the glow box is gone.
 - Spotify stays Premium-only (librespot); the sign-in gate now says why a sign-in failed.
