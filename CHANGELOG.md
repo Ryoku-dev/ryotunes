@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## v2.5.1 - 2026-09-06
+
 - **The heart saves without an account.** Liking a track when there is no YouTube Music session (or on a SoundCloud/local track) lands it in a device-local **Liked Songs** playlist that Library › Songs shows and the library lists; unliking removes it, the heart and the now-playing snapshot reflect it at once. Signed in, YouTube's own rating is used as before.
 
 ## v2.5.0 - 2026-09-06
