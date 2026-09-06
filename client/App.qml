@@ -400,12 +400,12 @@ Item {
                     Icon {
                         name: ytAction.signedIn ? "close" : "account"
                         size: Style.fs.md
-                        color: ytAction.signedIn ? Tokens.alert : Tokens.ink
+                        color: ytAction.signedIn ? Style.alert : Tokens.ink
                     }
                     Text {
                         Layout.fillWidth: true
                         text: ytAction.signedIn ? "Sign out" : "Sign in with Google"
-                        color: ytAction.signedIn ? Tokens.alert : Tokens.ink
+                        color: ytAction.signedIn ? Style.alert : Tokens.ink
                         font.family: Style.fontUi
                         font.pixelSize: Style.fs.md
                     }
@@ -472,12 +472,12 @@ Item {
                     Icon {
                         name: spAction.signedIn ? "close" : "spotify"
                         size: Style.fs.md
-                        color: spAction.signedIn ? Tokens.alert : Tokens.ink
+                        color: spAction.signedIn ? Style.alert : Tokens.ink
                     }
                     Text {
                         Layout.fillWidth: true
                         text: spAction.signedIn ? "Sign out" : "Sign in to Spotify"
-                        color: spAction.signedIn ? Tokens.alert : Tokens.ink
+                        color: spAction.signedIn ? Style.alert : Tokens.ink
                         font.family: Style.fontUi
                         font.pixelSize: Style.fs.md
                     }

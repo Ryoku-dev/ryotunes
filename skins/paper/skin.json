@@ -1,0 +1,40 @@
+{
+  "$schema": "../skin.schema.json",
+  "format": 1,
+  "id": "paper",
+  "name": "Paper",
+  "author": "Ryoku",
+  "version": "1.0.0",
+  "license": "CC0-1.0",
+  "homepage": "https://github.com/neur0map/ryotunes",
+  "description": "Ryotunes' own: pure-black paper, warm bone ink, one red sun. The palette every other skin falls back to.",
+  "default": "dark",
+  "modes": {
+    "dark": {
+      "paper": "#050505",
+      "paperLift": "#0d0d0c",
+      "ink": "#d7cfc6",
+      "inkDim": "#b6aea5",
+      "bone": "#d7cfc6",
+      "inkOnBone": "#090807",
+      "sun": "#e2342a",
+      "alert": "#d33b32"
+    },
+    "light": {
+      "paper": "#c8c4bc",
+      "paperLift": "#d5d0c7",
+      "ink": "#211f1c",
+      "inkDim": "#403b35",
+      "bone": "#292620",
+      "inkOnBone": "#eee8de",
+      "sun": "#e2342a",
+      "alert": "#d33b32"
+    }
+  },
+  "type": { "display": "Fraunces", "ui": "Space Grotesk", "mono": "SpaceMono Nerd Font" },
+  "shape": { "radius": 8, "radiusCard": 12 },
+  "motion": { "snap": 90, "move": 170, "swap": 210, "slow": 200 },
+  "decor": "rich",
+  "accent": "artwork",
+  "wash": 1.0
+}

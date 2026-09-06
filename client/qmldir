@@ -2,6 +2,7 @@ singleton Daemon 1.0 Daemon.qml
 singleton Playback 1.0 Playback.qml
 singleton Router 1.0 Router.qml
 singleton Style 1.0 Style.qml
+singleton Skin 1.0 Skin.qml
 singleton Personal 1.0 Personal.qml
 singleton Prefs 1.0 Prefs.qml
 singleton Spectrum 1.0 Spectrum.qml

@@ -150,12 +150,12 @@ Item {
                         Icon {
                             name: item.modelData.icon
                             size: Style.fs.md
-                            color: item.modelData.danger ? Tokens.alert : Tokens.inkDim
+                            color: item.modelData.danger ? Style.alert : Tokens.inkDim
                         }
                         Text {
                             Layout.fillWidth: true
                             text: item.modelData.label
-                            color: item.modelData.danger ? Tokens.alert : Tokens.ink
+                            color: item.modelData.danger ? Style.alert : Tokens.ink
                             font.family: Style.fontUi
                             font.pixelSize: Style.fs.md
                             elide: Text.ElideRight

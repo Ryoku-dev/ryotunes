@@ -273,7 +273,7 @@ Item {
                 anchors.topMargin: Style.sp(2)
                 visible: page.errorMsg !== ""
                 text: page.errorMsg
-                color: Tokens.alert
+                color: Style.alert
                 font.family: Style.fontUi
                 font.pixelSize: Style.fs.md
             }

@@ -34,7 +34,7 @@ Item {
         property string src: ""
         property bool shown: false
         readonly property bool ready: img.status === Image.Ready
-        opacity: shown ? root.strength : 0
+        opacity: shown ? root.strength * Style.wash : 0
         Behavior on opacity { NumberAnimation { duration: Tokens.durSlowEffects; easing.type: Easing.OutCubic } }
         Image {
             id: img

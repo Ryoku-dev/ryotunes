@@ -9,7 +9,8 @@ import Quickshell.Io
 Singleton {
     id: root
 
-    property alias decor: adapter.decor           // "rich" | "calm": Ryoku's decor level for this client
+    property alias skin: adapter.skin             // "system" | a skin id (see Skin.qml, docs/SKINS.md)
+    property alias decor: adapter.decor           // "skin" | "rich" | "calm": the decor level, or the skin's own
     property alias themeMode: adapter.themeMode   // "system" | "light" | "dark"
     // The mini widget's offset from the screen's bottom-right corner, logical px.
     property alias miniRight: adapter.miniRight
@@ -27,7 +28,8 @@ Singleton {
         onFileChanged: reload()
         JsonAdapter {
             id: adapter
-            property string decor: "rich"
+            property string skin: "system"
+            property string decor: "skin"
             property string themeMode: "system"
             property int miniRight: 24
             property int miniBottom: 24

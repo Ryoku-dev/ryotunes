@@ -50,7 +50,7 @@ Item {
                 anchors.verticalCenter: parent.verticalCenter
                 size: Style.fs.md
                 name: root.kind === "error" ? "alert" : root.kind === "success" ? "check-circle" : "info"
-                color: root.kind === "error" ? Tokens.alert : root.kind === "success" ? Tokens.sun : Tokens.inkMuted
+                color: root.kind === "error" ? Style.alert : root.kind === "success" ? Tokens.sun : Tokens.inkMuted
             }
             Text {
                 anchors.verticalCenter: parent.verticalCenter

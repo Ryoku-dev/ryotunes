@@ -5,11 +5,11 @@ import Quickshell.Io
 import Ryoku.Ui.Singletons
 import "lib/style.js" as Fns
 
-// The app's own scale, radii, type and motion, on top of Ryoku's Tokens (which supply the Follow
-// System colours). Colours come from Tokens for the live theme; `light`/`dark` are the two local
-// palettes ported from ui/src/lib/ryotunes.css --ryo-* variables, used when the theme mode pins a
-// fixed palette (Task 7). thumb()/fmtTime() are re-exposed from lib/style.js so a QtTest process,
-// which cannot load Quickshell, can test the same code.
+// The app's own scale plus everything the active Skin decides: radii, type, motion, the accent
+// policy and the cover wash. Colours reach every surface through Ryoku's Tokens (Skin pins its
+// palette there, or leaves Tokens to the desktop for the system skin). thumb()/fmtTime() are
+// re-exposed from lib/style.js so a QtTest process, which cannot load Quickshell, can test the
+// same code.
 Singleton {
     id: root
 
@@ -19,8 +19,8 @@ Singleton {
     function sp(n) { return Math.round(n * 4 * root.uiScale); }
 
     // Geometry (docs/superpowers/specs/2026-09-05-native-client-visual-design.md, section 2).
-    readonly property int radius: Math.round(8 * root.uiScale)        // controls
-    readonly property int radiusCard: Math.round(12 * root.uiScale)   // cards, hero art
+    readonly property int radius: Math.round(Skin.shape.radius * root.uiScale)        // controls
+    readonly property int radiusCard: Math.round(Skin.shape.radiusCard * root.uiScale)   // cards, hero art
     readonly property int rowH: Math.round(52 * root.uiScale)         // table rows
     readonly property int ctlH: Math.round(36 * root.uiScale)         // buttons, fields
     readonly property int heroArt: Math.round(168 * root.uiScale)     // page hero art, card
@@ -31,10 +31,10 @@ Singleton {
     readonly property int playerBarH: Math.round(88 * root.uiScale)
     readonly property int pagePad: Math.round(32 * root.uiScale)
 
-    readonly property string fontUi: "Space Grotesk"
-    readonly property string fontMono: "SpaceMono Nerd Font"
+    readonly property string fontUi: Skin.type.ui
+    readonly property string fontMono: Skin.type.mono
     readonly property string fontCjk: "Noto Sans CJK JP"
-    readonly property string fontDisplay: Tokens.display
+    readonly property string fontDisplay: Skin.type.display
 
     // Type roles (px at uiScale 1). At most four per screen. micro is the tracked mono label
     // (letterSpacing 1.4); xl/title/hero are Fraunces.
@@ -50,15 +50,10 @@ Singleton {
     })
     readonly property real trackMicro: 1.4
 
-    // Durations (ms), from Ryoku's motion tokens so reduce-motion and the motion scale reach every
-    // animation. snap: hover/press; move: a selector travelling; swap: content exchanging;
+    // Durations (ms) from the skin, already through Ryoku's motion gate (reduce motion, the
+    // motion scale). snap: hover/press; move: a selector travelling; swap: content exchanging;
     // slow: a panel or page.
-    readonly property var motion: ({
-        snap: Tokens.snap,
-        move: Tokens.move,
-        swap: Tokens.swap,
-        slow: Tokens.durDefaultEffects
-    })
+    readonly property var motion: Skin.motion
 
     // --- ambient motion and the power gate -----------------------------------------------------
     // Passive animation (bloom drift, LIVE breath, the spectrum) runs only while something plays,
@@ -73,36 +68,17 @@ Singleton {
     }
     Timer { interval: 30000; running: true; repeat: true; triggeredOnStart: true; onTriggered: profileProbe.running = true }
 
-    // The two local palettes, --ryo-* from ryotunes.css. Selected by the theme mode in Task 7; the
-    // live Follow System palette is read straight from Tokens.
-    readonly property var dark: ({
-        paper: "#050505", paperLift: "#0d0d0c", panel: "#090908", card: "#0d0d0c",
-        sidebar: "#070706", player: "#080807",
-        ink: "#d7cfc6", inkDim: "#b6aea5", inkMuted: "#999188", inkFaint: "#817a72",
-        bone: "#d7cfc6", inkOnBone: "#090807", sun: "#e2342a", alert: "#d33b32"
-    })
-    readonly property var light: ({
-        paper: "#c8c4bc", paperLift: "#d5d0c7", panel: "#beb9b0", card: "#d0cbc2",
-        sidebar: "#bbb6ad", player: "#c3beb5",
-        ink: "#211f1c", inkDim: "#403b35", inkMuted: "#625c53", inkFaint: "#786f65",
-        bone: "#292620", inkOnBone: "#eee8de", sun: "#e2342a", alert: "#d33b32"
-    })
-
     // The one MultiEffect blur the Now Playing wash spends. shell.services Perf (Perf.blurDisabled)
     // is not importable under `qs -p client`, so this is the plan's fallback gate: a bool defaulting
     // true that a surface checks before enabling its blur.
     readonly property bool blurEnabled: true
 
     // --- theme mode -------------------------------------------------------------------------
-    // "system": colours follow Tokens (Follow System / named scheme / wallpaper). "light"/"dark":
-    // pin Tokens' Material roles to the matching local palette so the whole chrome — every surface
-    // that reads Tokens — re-renders at once, with no per-file colour plumbing. scheme() maps the
-    // app palette (paper/ink/bone/…) onto the role names Tokens.role() resolves. applyTheme runs on
-    // every switch: a fixed palette overwrites namedScheme; "system" re-reads Tokens' file-driven
-    // scheme so the chrome returns to the live theme (deterministic both ways — a Binding's
-    // restore-on-deactivate did not reliably revert the Quickshell singleton property). Client-local:
-    // the daemon has no UI_SETTINGS key for the theme, so the mode is session state.
-    property string themeMode: "system"   // "system" | "light" | "dark"
+    // Owned by Skin: Prefs.skin picks the palette source, Prefs.themeMode pins light/dark.
+    // The warning/error colour is the skin's (Tokens.alert is a constant).
+    readonly property color alert: Skin.colors.alert
+    // The cover wash multiplier a Backdrop applies to its strength.
+    readonly property real wash: Skin.wash
 
     // --- artwork accent -----------------------------------------------------------------------
     // The one saturated colour the chrome borrows: the playing cover's accent (sampled by
@@ -117,7 +93,16 @@ Singleton {
     // changes the mood of the whole window at once.
     readonly property var providerColors: ({ spotify: "#1db954", soundcloud: "#ff5500", youtube: "#ff2d2d" })
     readonly property color providerColor: root.providerColors[Playback.provider] || root.providerColors.youtube
+    // The skin's accent policy: "artwork" (the cover, provider colour when nothing plays),
+    // "provider", "sun" (the skin's own primary) or a fixed "#rrggbb".
     readonly property color accent: {
+        var policy = Skin.accent;
+        if (policy === "provider")
+            return root.providerColor;
+        if (policy === "sun")
+            return Tokens.sun;
+        if (typeof policy === "string" && policy.charAt(0) === "#")
+            return policy;
         var c = Playback.artAccent;
         if (!Playback.now || c.a <= 0)
             return root.providerColor;
@@ -130,15 +115,16 @@ Singleton {
     // Ryoku's calm / rich switch, owned by this client (Prefs.decor) rather than the desktop's
     // hubDecor: Tokens re-reads shell.json on every change and would revert it, so the level is
     // re-applied whenever Tokens moves.
-    readonly property bool decorRich: Prefs.decor === "rich"
+    // Prefs.decor "skin" follows the skin's own level; "rich"/"calm" override it.
+    readonly property bool decorRich: (Prefs.decor === "skin" ? Skin.decor : Prefs.decor) === "rich"
     function applyDecor() {
         var want = root.decorRich ? "rich" : "calm";
         if (Tokens.decor !== want)
             Tokens.decor = want;
     }
     function applyPrefs() {
-        root.themeMode = Prefs.themeMode;
         root.applyDecor();
+        Skin.apply();
     }
     Connections {
         target: Tokens
@@ -147,33 +133,10 @@ Singleton {
     Connections {
         target: Prefs
         function onDecorChanged(): void { root.applyDecor(); }
-        function onThemeModeChanged(): void { root.themeMode = Prefs.themeMode; }
     }
-
-    function scheme(p) {
-        return {
-            surface: p.paper,
-            surfaceContainerLow: p.paperLift,
-            onSurface: p.ink,
-            onSurfaceVariant: p.inkDim,
-            inverseSurface: p.bone,
-            inverseOnSurface: p.inkOnBone,
-            primary: p.sun
-        };
-    }
-
-    function applyTheme() {
-        if (root.themeMode === "system")
-            Tokens.refreshNamed();
-        else
-            Tokens.namedScheme = root.scheme(root.themeMode === "light" ? root.light : root.dark);
-    }
-    onThemeModeChanged: {
-        root.applyTheme();
-        if (Prefs.themeMode !== root.themeMode) {
-            Prefs.themeMode = root.themeMode;
-            Prefs.save();
-        }
+    Connections {
+        target: Skin
+        function onDecorChanged(): void { root.applyDecor(); }
     }
 
     function thumb(url, px) { return Fns.thumb(url, px); }
