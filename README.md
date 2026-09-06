@@ -103,7 +103,7 @@ Every colour, type face, radius and duration the chrome reads comes from one **s
 /usr/share/ryotunes/matugen/ryotunes.json   the matugen template
 ```
 
-Pick one in *Settings › Appearance*, fork the painted palette with **New skin from current**, validate with `ryotunes-cli skin check <dir>`, and submit it as `skins/<id>/` — the format and the checklist are in **[docs/SKINS.md](docs/SKINS.md)**.
+Pick one in *Settings › Appearance*, or **Get more skins** there — that opens [RyoStore](https://github.com/neur0map/ryostore) on its *Ryotunes skins* category, and an install lands in `~/.local/share/ryoku/ryotunes-skins/<id>/`. To make your own: fork the painted palette with **New skin from current**, validate with `ryotunes-cli skin check <dir>`, and submit it to the store catalogue as `ryotunes-skins/<id>/` — the format and the checklist are in **[docs/SKINS.md](docs/SKINS.md)**.
 
 For the shell itself:
 
