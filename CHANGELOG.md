@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## v1.0.1 - 2026-09-08
+
 ## v1.0.0 - 2026-09-08
 
 - **Fresh v1 releases on every default-branch push.** The app, daemon, CLI, native client and package start at `1.0.0`. CI queues pushes, builds each exact source, and advances `1.0.9 → 1.1.0` (major fixed at 1). Releases include generated notes, binary/source archives and SHA-256 sidecars. A permanent pacman `epoch=1` makes v1 packages an upgrade from legacy v2 installations without changing the release asset filenames. Package hooks no longer restart the daemon during the transaction.
