@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## v1.0.5 - 2026-09-08
+
 - Fixed Home snapping back to the top when a continuation page arrived: new shelves now append to a persistent Qt list model instead of replacing the model.
 - Made the Linux launcher native-QML-only, including cold starts and missing sockets. Removed the legacy Tauri overrides and duplicate desktop entry; Quickshell is now a required package dependency.
 
