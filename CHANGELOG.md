@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## v1.0.0 - 2026-09-08
+
 - **Fresh v1 releases on every default-branch push.** The app, daemon, CLI, native client and package start at `1.0.0`. CI queues pushes, builds each exact source, and advances `1.0.9 → 1.1.0` (major fixed at 1). Releases include generated notes, binary/source archives and SHA-256 sidecars. A permanent pacman `epoch=1` makes v1 packages an upgrade from legacy v2 installations without changing the release asset filenames. Package hooks no longer restart the daemon during the transaction.
 - **About credits and standalone updates.** Both clients credit ashmitvoid and neur0map and link LiMusic upstream. About shows current/available versions, checks GitHub on request, opens the changelog and installs verified official Arch packages with administrator approval, independently of a full Ryoku update. After installation, fully Quit and reopen Ryotunes to reload the client and daemon.
 - **Releases ship a prebuilt Arch package.** Each release builds `ryotunes-<version>-1-x86_64.pkg.tar.zst` (and its `.sha256`) with an unprivileged `makepkg` in an Arch container from that release's exact source and attaches it to the GitHub release beside the reproducible source tarball, so `pacman -U` — and Ryoku's `update`/`doctor`, which read GitHub releases directly — no longer wait on a downstream rebuild. `scripts/build-arch-package.sh` reproduces the asset locally (`docker run --rm -v "$PWD:/src" -w /src archlinux:latest scripts/build-arch-package.sh`). The old `ryotunes-release` repository_dispatch into Ryoku Arch is removed.
