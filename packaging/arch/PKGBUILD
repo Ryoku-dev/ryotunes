@@ -2,7 +2,7 @@
 # Run from packaging/arch with: makepkg -si
 
 pkgname=ryotunes
-pkgver=1.0.3
+pkgver=1.0.4
 pkgrel=1
 # epoch=1 is permanent: the v1 reset publishes 1:X.Y.Z, which pacman ranks above
 # the legacy 2.x line an existing machine may carry, so `pacman -U` still upgrades.
