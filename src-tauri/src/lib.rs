@@ -569,6 +569,8 @@ pub fn run() {
             commands::get_playback,
             commands::frontend_ready,
             commands::get_settings,
+            commands::check_for_updates,
+            commands::install_update,
             commands::discord_status,
             commands::ryoku_theme_tokens,
             commands::set_setting,

@@ -385,6 +385,39 @@ export const clearCaches = () => invoke<void>('clear_caches');
 /** Open an http(s) link in the real browser, never in the webview itself. */
 export const openExternal = (url: string) => invoke<void>('open_external', { url });
 
+// --- updates (self-update; shared Rust updater) --------------------------------------------
+/**
+ * A version check against the project's GitHub releases. `latestVersion` is a bare semver
+ * (e.g. "1.0.1"), or null when no eligible release is published yet — that is not an error, only a
+ * network failure is. `available` is true when a newer eligible release exists; `canInstall` is
+ * true only where an in-app install is supported (a managed Arch/x86_64 package), with
+ * `unsupportedReason` explaining why not otherwise. `notes` is plain release text; `releaseUrl` is
+ * the changelog page.
+ */
+export interface UpdateInfo {
+	currentVersion: string;
+	latestVersion: string | null;
+	available: boolean;
+	releaseUrl: string;
+	notes: string;
+	canInstall: boolean;
+	unsupportedReason: string | null;
+}
+export const checkForUpdates = () => invoke<UpdateInfo>('check_for_updates');
+/**
+ * Download, verify and install the requested release. The backend rechecks it against the exact
+ * latest eligible version before fetching anything, installs only known release assets after a hash
+ * check, and needs administrator approval (pkexec). `restartRequired` is true when the whole app
+ * must be quit and reopened to reload the daemon and client. A network, hash or privilege failure
+ * is a real error.
+ */
+export interface UpdateInstallResult {
+	version: string;
+	restartRequired: boolean;
+}
+export const installUpdate = (version: string) =>
+	invoke<UpdateInstallResult>('install_update', { version });
+
 // --- personal store (Home Shortcuts, sidebar pins, play recency; see personal.ts) -------------
 /** The stored blob, wrapped as `{ personal }`; `personal` is `{}` when nothing is saved yet. */
 export const getPersonal = () => invoke<{ personal: unknown }>('get_personal');

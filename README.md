@@ -5,8 +5,8 @@
 
 <br />
 
-<a href="https://github.com/ashmitvoid/ryotunes/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/ashmitvoid/ryotunes?style=flat-square&label=release&color=9a604b"></a>
-<a href="LICENSE"><img alt="GPL-3.0-or-later" src="https://img.shields.io/github/license/ashmitvoid/ryotunes?style=flat-square&color=7f9b8d"></a>
+<a href="https://github.com/neur0map/ryotunes/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/neur0map/ryotunes?style=flat-square&label=release&color=9a604b"></a>
+<a href="LICENSE"><img alt="GPL-3.0-or-later" src="https://img.shields.io/github/license/neur0map/ryotunes?style=flat-square&color=7f9b8d"></a>
 <img alt="Linux x86_64" src="https://img.shields.io/badge/Linux-x86__64-8996a8?style=flat-square&logo=linux&logoColor=white">
 <img alt="Ryoku native" src="https://img.shields.io/badge/Ryoku-native-6f7f76?style=flat-square">
 <img alt="Audio only" src="https://img.shields.io/badge/playback-audio%20only-a86d58?style=flat-square">
@@ -20,7 +20,7 @@
 
 **A Ryoku-native desktop music player with native audio playback, live shell theming, and a UI that knows when to disappear.**
 
-[Download](https://github.com/ashmitvoid/ryotunes/releases/latest) · [Architecture](docs/ARCHITECTURE.md) · [Install](docs/INSTALL-ARCH.md) · [Troubleshooting](docs/TROUBLESHOOTING.md) · [Ryoku](https://github.com/neur0map/ryoku-arch)
+[Download](https://github.com/neur0map/ryotunes/releases/latest) · [Architecture](docs/ARCHITECTURE.md) · [Install](docs/INSTALL-ARCH.md) · [Troubleshooting](docs/TROUBLESHOOTING.md) · [Ryoku](https://github.com/neur0map/ryoku-arch)
 
 </div>
 
@@ -185,28 +185,22 @@ The design rules behind the interface are documented in **[docs/DESIGN.md](docs/
 
 ## Install
 
-Ryotunes v2 targets **x86_64 Ryoku, CachyOS and Arch-based systems**.
+Ryotunes targets **x86_64 Ryoku, CachyOS and Arch-based systems**.
 
-The published upstream package is **`ryotunes-v2.4 2.4.1-1`**; the current source build reports **2.5.1**.
+The published package is **`ryotunes 1:<version>-1`**. The permanent `epoch=1` lets it upgrade a machine still on the legacy 2.x line; the downloaded file name stays epochless.
 
 The normal user path is a **prebuilt package**. End users do not need Node, pnpm, Rust, Cargo or a local Tauri build.
 
-1. Open **[GitHub Releases](https://github.com/ashmitvoid/ryotunes/releases/latest)**.
-2. Download `ryotunes-v2.4-2.4.1-1-x86_64.pkg.tar.zst`.
-3. Install:
+1. Open **[GitHub Releases](https://github.com/neur0map/ryotunes/releases/latest)**.
+2. Download `ryotunes-<version>-1-x86_64.pkg.tar.zst` and its `.sha256`.
+3. Verify and install:
 
 ```bash
-sudo pacman -U ./ryotunes-v2.4-2.4.1-1-x86_64.pkg.tar.zst
+sha256sum -c ryotunes-<version>-1-x86_64.pkg.tar.zst.sha256
+sudo pacman -U ./ryotunes-<version>-1-x86_64.pkg.tar.zst
 ```
 
-The active route is:
-
-```text
-/usr/bin/ryotunes
-  -> /usr/lib/ryotunes-v2.4/ryotunes
-```
-
-The replacement package preserves genuine stock Ryotunes entry points for rollback and restores them when the custom package is removed.
+The package installs a normal `/usr/bin/ryotunes` alongside `ryotunesd`, `ryotunes-cli` and the native client under `/usr/share/ryotunes`. After updating, **quit and reopen Ryotunes** (closing the window is not enough) so the daemon and client load the new build.
 
 > [!TIP]
 > An AUR `-bin` recipe lives in [`aur/`](aur/). Public AUR publication is pending; the repository does not pretend the package is available there before it actually is.

@@ -2,9 +2,15 @@
 # Run from packaging/arch with: makepkg -si
 
 pkgname=ryotunes
-pkgver=2.5.1
+pkgver=1.0.0
 pkgrel=1
-pkgdesc='Ryotunes v2 - resource-conscious Linux desktop music client'
+# epoch=1 is permanent: the v1 reset publishes 1:X.Y.Z, which pacman ranks above
+# the legacy 2.x line an existing machine may carry, so `pacman -U` still upgrades.
+# The published asset name stays epochless (scripts/build-arch-package.sh renames
+# makepkg's epoch-tagged output back to the ryotunes-<pkgver>-1-x86_64 contract).
+epoch=1
+pkgdesc='Ryotunes - resource-conscious Linux desktop music client'
+url='https://github.com/neur0map/ryotunes'
 arch=('x86_64')
 license=('GPL-3.0-or-later')
 depends=(
@@ -18,6 +24,7 @@ depends=(
   'desktop-file-utils'
   'hicolor-icon-theme'
   'xdg-utils'
+  'polkit'
 )
 optdepends=(
   'quickshell: native QML client (ryotunes-qml), opened by ryotunes whenever ryotunesd is running'
@@ -74,10 +81,11 @@ check() {
 
 package() {
   cd "$srcdir/ryotunes"
-  install -Dm755 target/release/ryotunes "$pkgdir/usr/bin/ryotunes"
-  install -Dm755 target/release/ryotunes-sync "$pkgdir/usr/bin/ryotunes-sync"
-  install -Dm755 target/release/ryotunesd "$pkgdir/usr/bin/ryotunesd"
-  install -Dm755 target/release/ryotunes-cli "$pkgdir/usr/bin/ryotunes-cli"
+  local binaries="${CARGO_TARGET_DIR:-target}/release"
+  install -Dm755 "$binaries/ryotunes" "$pkgdir/usr/bin/ryotunes"
+  install -Dm755 "$binaries/ryotunes-sync" "$pkgdir/usr/bin/ryotunes-sync"
+  install -Dm755 "$binaries/ryotunesd" "$pkgdir/usr/bin/ryotunesd"
+  install -Dm755 "$binaries/ryotunes-cli" "$pkgdir/usr/bin/ryotunes-cli"
   install -Dm755 packaging/linux/ryotunes-qml "$pkgdir/usr/bin/ryotunes-qml"
   install -Dm644 packaging/linux/ryotunes-qml.desktop "$pkgdir/usr/share/applications/ryotunes-qml.desktop"
   # Native QML client, run by Quickshell via `qs -p /usr/share/ryotunes/client` (the ryotunes-qml

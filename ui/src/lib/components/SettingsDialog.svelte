@@ -36,13 +36,25 @@
 	const metaFor = (id: TabId) => TAB_META[id];
 	const activeMeta = $derived(metaFor(tab));
 	const activeLabel = $derived(TABS.find((t) => t.id === tab)?.label ?? 'General');
-	const PRODUCT_VERSION = 'v2';
-	let buildVersion = $state('2.5.1');
+	let buildVersion = $state('');
 	getVersion().then((v) => (buildVersion = v)).catch(() => {});
+	// Software updates (About). Never polled: a check runs only when the button is pressed, and the
+	// long install RPC has no client-side timeout, so the promise simply resolves when it is done.
+	let update = $state<api.UpdateInfo | null>(null);
+	let updateStatus = $state<'idle' | 'checking' | 'installing' | 'installed' | 'error'>('idle');
+	let updateError = $state('');
+	let installedVersion = $state('');
+	let showReleaseNotes = $state(false);
+	const appVersion = $derived(update?.currentVersion || buildVersion);
+	const updateBusy = $derived(updateStatus === 'checking' || updateStatus === 'installing');
+	const updateAvailable = $derived(!!update?.available && !!update?.latestVersion);
+	const canInstallUpdate = $derived(updateAvailable && !!update?.canInstall && updateStatus !== 'installed');
+	// Always-available changelog target: the release the check found, else the project's releases page.
+	const RELEASES_URL = 'https://github.com/neur0map/ryotunes/releases';
 	let settings = $state<Record<string, string>>({});
 	let clients = $state<string[]>([]);
 	let proxyInput = $state('');
-	let discordNameInput = $state('Ryotunes v2');
+	let discordNameInput = $state('Ryotunes');
 	let savingDiscordName = $state(false);
 	let loaded = $state(false);
 	let clearing = $state(false);
@@ -65,7 +77,7 @@
 		}
 		if (tab === 'data') return 'Tape, cache and transport — the local path that keeps playback immediate.';
 		if (tab === 'keybinds') return 'Keyboard flow is part of the instrument: searchable, grouped and always in sync with the live bindings.';
-		return `Ryotunes ${PRODUCT_VERSION} — a Ryoku-native music instrument built around Rust, mpv and WebKitGTK.`;
+		return `Ryotunes${appVersion ? ` ${appVersion}` : ''} — a Ryoku-native music instrument built around Rust, mpv and WebKitGTK.`;
 	});
 	const settingsReadout = $derived.by(() => {
 		if (tab === 'general') {
@@ -94,7 +106,7 @@
 		}
 		if (tab === 'keybinds') return [`BINDINGS|${KEYBIND_GROUPS.reduce((n, g) => n + g.rows.length, 0)}`, `GROUPS|${KEYBIND_GROUPS.length}`, `ESCAPE|PEEL`, `SEARCH|GLOBAL`];
 		return [
-			`VERSION|${PRODUCT_VERSION}`,
+			`VERSION|${appVersion || '—'}`,
 			`SHELL|RYOKU`,
 			`ENGINE|RUST + MPV`,
 			`UI|WEBKITGTK`
@@ -124,7 +136,7 @@
 			settings = s;
 			clients = c;
 			proxyInput = s.proxy ?? '';
-			discordNameInput = s.discord_presence_name?.trim() || 'Ryotunes v2';
+			discordNameInput = s.discord_presence_name?.trim() || 'Ryotunes';
 			if (s.low_resource_mode === 'true' && !appearance.lowResourceMode) setAppearance({ lowResourceMode: true });
 			if (s.low_resource_mode !== 'true' && appearance.lowResourceMode) {
 				settings.low_resource_mode = 'true';
@@ -206,7 +218,7 @@
 
 	async function saveDiscordName() {
 		if (savingDiscordName) return;
-		const value = discordNameInput.trim() || 'Ryotunes v2';
+		const value = discordNameInput.trim() || 'Ryotunes';
 		const length = [...value].length;
 		if (length < 2 || length > 128) {
 			toast.error('Discord presence title must be between 2 and 128 characters');
@@ -226,7 +238,7 @@
 	}
 
 	async function resetDiscordName() {
-		discordNameInput = 'Ryotunes v2';
+		discordNameInput = 'Ryotunes';
 		await saveDiscordName();
 	}
 
@@ -291,6 +303,36 @@
 			toast.success('Caches cleared');
 		} finally {
 			clearing = false;
+		}
+	}
+
+	async function checkForUpdates() {
+		if (updateStatus === 'checking' || updateStatus === 'installing') return;
+		updateStatus = 'checking';
+		updateError = '';
+		showReleaseNotes = false;
+		try {
+			update = await api.checkForUpdates();
+			updateStatus = 'idle';
+		} catch (e) {
+			updateError = String(e);
+			updateStatus = 'error';
+		}
+	}
+
+	async function installUpdate() {
+		if (updateBusy) return;
+		const version = update?.latestVersion;
+		if (!version || !update?.available || !update?.canInstall) return;
+		updateStatus = 'installing';
+		updateError = '';
+		try {
+			const result = await api.installUpdate(version);
+			installedVersion = result.version;
+			updateStatus = 'installed';
+		} catch (e) {
+			updateError = String(e);
+			updateStatus = 'error';
 		}
 	}
 </script>
@@ -400,7 +442,7 @@
 							<Input
 								bind:value={discordNameInput}
 								maxlength={128}
-								placeholder="Ryotunes v2"
+								placeholder="Ryotunes"
 								aria-label="Discord presence title"
 							/>
 							<Button
@@ -414,14 +456,14 @@
 							<Button
 								variant="ghost"
 								size="sm"
-								disabled={savingDiscordName || discordNameInput === 'Ryotunes v2'}
+								disabled={savingDiscordName || discordNameInput === 'Ryotunes'}
 								onclick={resetDiscordName}
 							>
 								Reset
 							</Button>
 						</div>
 						<p class="mt-2 text-xs text-muted-foreground">
-							Preview: Listening to {discordNameInput.trim() || 'Ryotunes v2'}
+							Preview: Listening to {discordNameInput.trim() || 'Ryotunes'}
 						</p>
 					</div>
 					<div class="flex items-start justify-between gap-4 border-b py-3">
@@ -587,9 +629,72 @@
 							A focused Ryoku desktop music instrument: your YouTube Music library, local media
 							controls, queue, lyrics and playback engine in one paper-and-ink surface.
 						</p>
-						<div class="ryo-about-build"><span>RELEASE</span><strong>{PRODUCT_VERSION}</strong><span>BUILD</span><strong>{buildVersion}</strong><span>ENGINE</span><strong>RUST + MPV</strong><span>UI</span><strong>TAURI / WEBKITGTK</strong></div>
+						<div class="ryo-about-build"><span>VERSION</span><strong>{appVersion || '—'}</strong><span>ENGINE</span><strong>RUST + MPV</strong><span>UI</span><strong>TAURI / WEBKITGTK</strong></div>
 					</div>
-					
+					<div class="border-b py-3">
+						<div class="font-medium">Software updates</div>
+						<p class="mt-0.5 text-sm text-muted-foreground">
+							You're on {appVersion || 'this build'}. Ryotunes checks GitHub only when you ask — nothing runs in the background.
+						</p>
+						<div class="mt-3 flex flex-wrap items-center gap-2">
+							<Button variant="outline" size="sm" onclick={checkForUpdates} disabled={updateBusy || updateStatus === 'installed'}>
+								{updateStatus === 'checking' ? 'Checking…' : 'Check for new version'}
+							</Button>
+							<Button variant="ghost" size="sm" onclick={() => api.openExternal(update?.releaseUrl || RELEASES_URL)}>View changelog</Button>
+							{#if canInstallUpdate}
+								<Button variant="default" size="sm" onclick={installUpdate} disabled={updateBusy}>
+									{updateStatus === 'installing' ? 'Installing…' : `Update to ${update?.latestVersion}`}
+								</Button>
+							{/if}
+						</div>
+						<p class="mt-2 text-xs" role="status" aria-live="polite" data-ryo-update-state={updateStatus}>
+							{#if updateStatus === 'checking'}
+								Checking for a new version…
+							{:else if updateStatus === 'installing'}
+								Downloading and verifying the update, then asking for administrator approval. Keep Ryotunes open until it finishes.
+							{:else if updateStatus === 'installed'}
+								Ryotunes {installedVersion} is installed. Quit Ryotunes and open it again to finish — closing the window isn't enough; the background service reloads only on a full restart.
+							{:else if updateStatus === 'error'}
+								Update failed: {updateError}
+							{:else if update}
+								{#if update.latestVersion === null}
+									No release has been published yet.
+								{:else if update.available}
+									Version {update.latestVersion} is available.{#if !update.canInstall && update.unsupportedReason} {update.unsupportedReason}{/if}
+								{:else}
+									You're on the latest version.
+								{/if}
+							{/if}
+						</p>
+						{#if update?.notes}
+							<div class="mt-2">
+								<Button variant="ghost" size="sm" aria-expanded={showReleaseNotes} onclick={() => (showReleaseNotes = !showReleaseNotes)}>
+									{showReleaseNotes ? 'Hide release notes' : 'Show release notes'}
+								</Button>
+								{#if showReleaseNotes}
+									<pre class="mt-2 max-h-48 overflow-auto whitespace-pre-wrap rounded border p-2 font-mono text-xs text-muted-foreground">{update.notes}</pre>
+								{/if}
+							</div>
+						{/if}
+					</div>
+					<div class="border-b py-3">
+						<div class="font-medium">Made by</div>
+						<p class="mt-0.5 text-sm text-muted-foreground">Ryotunes is built by two developers. Open their GitHub profiles:</p>
+						<div class="mt-2 flex flex-wrap gap-2">
+							<Button variant="outline" size="sm" onclick={() => api.openExternal('https://github.com/ashmitvoid')}>ashmitvoid</Button>
+							<Button variant="outline" size="sm" onclick={() => api.openExternal('https://github.com/neur0map')}>neur0map</Button>
+						</div>
+					</div>
+					<div class="py-3">
+						<div class="font-medium">Open source</div>
+						<p class="mt-0.5 text-sm text-muted-foreground">
+							Ryotunes is a fork of LiMusic, released under the GNU General Public License v3.0 or later.
+						</p>
+						<div class="mt-2 flex flex-wrap gap-2">
+							<Button variant="ghost" size="sm" onclick={() => api.openExternal('https://github.com/SimoHypers/limusic')}>LiMusic upstream</Button>
+							<Button variant="ghost" size="sm" onclick={() => api.openExternal('https://www.gnu.org/licenses/gpl-3.0.html')}>GPL-3.0-or-later</Button>
+						</div>
+					</div>
 				{/if}
 							</div>
 						</div>

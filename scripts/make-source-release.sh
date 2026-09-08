@@ -1,32 +1,23 @@
 #!/usr/bin/env bash
+# Build the reproducible source tarball a release attaches, locally. This is the
+# same artifact the release workflow publishes: ryotunes-<version>.tar.gz with a
+# ryotunes-<version>/ prefix, produced by `git archive` so a tag yields identical
+# bytes every time. Run from a committed checkout (uncommitted changes are not
+# included, by design).
 set -euo pipefail
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-ver="$(sed -n 's/^version = "\([0-9.]*\)"/\1/p' "$root/Cargo.toml" | head -1)"
-out="${1:-$root/ryotunes-v$ver-final-source.tar.gz}"
+cd "$root"
+
+if [[ -n "$(git status --porcelain --untracked-files=normal)" ]]; then
+  echo "source release: commit the source first; refusing to label an older HEAD with the working-tree version" >&2
+  exit 1
+fi
+
+ver="$(sed -n 's/^version = "\([0-9.]*\)"/\1/p' Cargo.toml | head -1)"
+out="${1:-$root/ryotunes-$ver.tar.gz}"
 
 "$root/scripts/release-check.sh"
 
-tmp="$(mktemp -d)"
-trap 'rm -rf "$tmp"' EXIT
-stage="$tmp/ryotunes-v$ver"
-mkdir -p "$stage"
-
-tar \
-  --exclude='.git' \
-  --exclude='target' \
-  --exclude='ui/node_modules' \
-  --exclude='.pnpm-store' \
-  --exclude='ui/build' \
-  --exclude='ui/.svelte-kit' \
-  --exclude='__pycache__' \
-  --exclude='*.pyc' \
-  --exclude='*.sqlite' \
-  --exclude='*.sqlite-shm' \
-  --exclude='*.sqlite-wal' \
-  --exclude='*.log' \
-  --exclude='src-tauri/lastfm.keys' \
-  --exclude='ryotunes-v2.4.1-final-source.tar.gz' \
-  -C "$root" -cf - . | tar -C "$stage" -xf -
-
-tar -C "$tmp" -czf "$out" ryotunes-v2.4.1
-printf 'Created %s\n' "$out"
+git archive --format=tar --prefix="ryotunes-$ver/" HEAD | gzip -n > "$out"
+( cd "$(dirname "$out")" && sha256sum "$(basename "$out")" > "$(basename "$out").sha256" )
+printf 'Created %s (+ .sha256)\n' "$out"

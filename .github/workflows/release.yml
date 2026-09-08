@@ -1,98 +1,215 @@
 name: Release
 
-# One pipeline, keyed on a `v*` tag (cut with `scripts/release.sh patch --push`):
-#   1. verify:  the tag's tree builds (every binary + the web UI) and the release
-#      invariants hold, on a stock Ubuntu runner, so a release never ships broken;
-#   2. package: an unprivileged `makepkg` in an Arch container builds the tag's
-#      exact source into the prebuilt pacman package
-#      `ryotunes-<version>-1-x86_64.pkg.tar.zst` (+ its sha256);
-#   3. publish: a normal (non-draft, non-prerelease) GitHub release carrying that
-#      package + sha256 and a reproducible source tarball + sha256, with the
-#      changelog section as the notes. External clients (Ryoku's `update` and
-#      `doctor`) read this release directly from GitHub; there is no downstream
-#      repository_dispatch.
+# Ryotunes releases itself on every push to the default branch. One pipeline:
+#   1. release:  work out the next v1 version from the published tags (the
+#      version ledger, scripts/next-version.sh), sync every manifest to it,
+#      verify the tree builds and the release invariants hold, then tag that
+#      exact pushed source. A later source push never invalidates an earlier
+#      run; manifests are fast-forwarded back to the default branch only when
+#      it has not moved in the meantime.
+#   2. package:  an unprivileged makepkg in an Arch container builds the reserved
+#      tag's exact source into ryotunes-<version>-1-x86_64.pkg.tar.zst (+ .sha256).
+#   3. publish:  a normal (latest, non-draft) GitHub release carrying the package,
+#      its sha256, a reproducible source tarball + sha256, and notes built from
+#      the changelog plus install instructions. Ryoku's update/doctor read this
+#      release directly; there is no downstream repository_dispatch.
+#
+# The version bump is pushed with GITHUB_TOKEN, and a GITHUB_TOKEN push never
+# retriggers a workflow, so there is no bot loop and nothing relies on a
+# token-pushed tag firing a second workflow (the historic tag-trigger trap).
+# A failed package/publish leaves a reserved tag. Re-run the failed workflow or
+# dispatch that tag to finish publishing without minting another version.
 on:
   push:
-    tags: ['v*']
+    branches: ['**']
   workflow_dispatch:
     inputs:
       tag:
-        description: Existing tag to (re)publish, e.g. v2.5.0
+        description: Existing tag to rebuild and re-publish, e.g. v1.0.2
         required: true
 
 permissions:
   contents: write
 
+# Queue pushes instead of replacing the one pending run (GitHub's default).
+# queue:max retains up to GitHub's 100-run limit; never cancel an active release.
 concurrency:
-  group: release-${{ github.ref }}
+  group: release
   cancel-in-progress: false
+  queue: max
 
 jobs:
-  verify:
-    name: Build the tagged tree
+  release:
+    name: Verify and reserve the version
+    if: github.event_name == 'workflow_dispatch' || github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
     runs-on: ubuntu-24.04
     outputs:
-      version: ${{ steps.meta.outputs.version }}
-      tag: ${{ steps.meta.outputs.tag }}
+      action: ${{ steps.plan.outputs.action }}
+      version: ${{ steps.plan.outputs.version }}
+      tag: ${{ steps.plan.outputs.tag }}
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.tag || github.ref }}
+          ref: ${{ inputs.tag || github.sha }}
           fetch-depth: 0
 
-      - name: Resolve the version
-        id: meta
+      # Decide what this run does:
+      #   release   - a fresh push: compute + reserve the next version.
+      #   republish - an existing tag: rebuild and re-upload (manual dispatch, or
+      #               automatic resume when a reserved tag has no complete release).
+      #   skip      - this exact source is already fully released.
+      - name: Plan
+        id: plan
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT_NAME: ${{ github.event_name }}
+          INPUT_TAG: ${{ inputs.tag }}
         run: |
           set -euo pipefail
-          tag="${{ inputs.tag || github.ref_name }}"
-          ver="$(sed -n 's/^version = "\([0-9.]*\)"/\1/p' Cargo.toml | head -1)"
-          if [[ "$tag" != "v$ver" ]]; then
-            echo "::error::tag $tag does not match Cargo.toml version $ver (cut releases with scripts/release.sh)"
-            exit 1
+          if [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
+            tag="$INPUT_TAG"
+            [[ "$tag" =~ ^v1\.(0|[1-9][0-9]*)\.[0-9]$ ]] \
+              || { echo "::error::expected a canonical v1 release tag"; exit 1; }
+            git rev-parse -q --verify "refs/tags/$tag" >/dev/null \
+              || { echo "::error::tag $tag does not exist"; exit 1; }
+            ver="${tag#v}"
+            cv="$(sed -n 's/^version = "\([0-9.]*\)"/\1/p' Cargo.toml | head -1)"
+            [[ "$cv" == "$ver" ]] \
+              || { echo "::error::tag $tag tree is version $cv, not $ver"; exit 1; }
+            {
+              echo "action=republish"
+              echo "version=$ver"
+              echo "tag=$tag"
+            } >> "$GITHUB_OUTPUT"
+            exit 0
           fi
-          echo "version=$ver" >> "$GITHUB_OUTPUT"
-          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+          # Idempotency by source SHA: was this pushed commit already reserved as a
+          # v1 tag (the tag sits on it, or on the release commit made on top of it)?
+          src="$(git rev-parse HEAD)"
+          reserved=""
+          for t in $(git tag -l 'v1.*'); do
+            [[ "$t" =~ ^v1\.(0|[1-9][0-9]*)\.[0-9]$ ]] || continue
+            tc="$(git rev-parse "$t^{commit}")"
+            tp="$(git rev-parse "$t^{commit}^1" 2>/dev/null || echo none)"
+            if [[ "$tc" == "$src" || "$tp" == "$src" ]]; then reserved="$t"; break; fi
+          done
+          if [[ -n "$reserved" ]]; then
+            ver="${reserved#v}"
+            complete="$(gh release view "$reserved" --json isDraft,isPrerelease,assets 2>/dev/null || true)"
+            if RELEASE_JSON="$complete" VERSION="$ver" python3 - <<'PY'
+          import json, os, sys
+          try:
+              r = json.loads(os.environ["RELEASE_JSON"])
+              v = os.environ["VERSION"]
+              package, source = f"ryotunes-{v}-1-x86_64.pkg.tar.zst", f"ryotunes-{v}.tar.gz"
+              required = {package, package + ".sha256", source, source + ".sha256"}
+              complete = not r["isDraft"] and not r["isPrerelease"] and required <= {a["name"] for a in r["assets"]}
+          except (ValueError, KeyError):
+              complete = False
+          sys.exit(0 if complete else 1)
+          PY
+            then
+              echo "action=skip" >> "$GITHUB_OUTPUT"
+              echo "$reserved is already published; nothing to do"
+            else
+              echo "action=republish" >> "$GITHUB_OUTPUT"
+              echo "$reserved is reserved but its release is incomplete; resuming"
+            fi
+            echo "version=$ver" >> "$GITHUB_OUTPUT"
+            echo "tag=$reserved" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          ver="$(scripts/next-version.sh)"
+          {
+            echo "action=release"
+            echo "version=$ver"
+            echo "tag=v$ver"
+          } >> "$GITHUB_OUTPUT"
+          echo "reserving v$ver from $src"
+
+      - name: Check out the tag to re-publish
+        if: steps.plan.outputs.action == 'republish'
+        run: git checkout --force --detach "${{ steps.plan.outputs.tag }}"
+
+      - name: Sync every manifest to the new version
+        if: steps.plan.outputs.action == 'release'
+        run: scripts/sync-version.sh "${{ steps.plan.outputs.version }}" --release
 
       - name: Install Linux dependencies
+        if: steps.plan.outputs.action != 'skip'
         run: |
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev libmpv-dev
 
       - uses: dtolnay/rust-toolchain@stable
+        if: steps.plan.outputs.action != 'skip'
         with:
           components: rustfmt
       - uses: Swatinem/rust-cache@v2
+        if: steps.plan.outputs.action != 'skip'
       - uses: pnpm/action-setup@v4
+        if: steps.plan.outputs.action != 'skip'
         with:
           version: 11
       - uses: actions/setup-node@v4
+        if: steps.plan.outputs.action != 'skip'
         with:
           node-version: 22
           cache: pnpm
           cache-dependency-path: ui/pnpm-lock.yaml
 
       - name: Release invariants
+        if: steps.plan.outputs.action != 'skip'
         run: python3 scripts/check-release-invariants.py
 
       - name: Build the web UI
+        if: steps.plan.outputs.action != 'skip'
         working-directory: ui
         run: |
           pnpm install --frozen-lockfile
           pnpm build
 
       - name: Build every binary
+        if: steps.plan.outputs.action != 'skip'
         run: cargo build --release --locked --package ryotunes --package ryotunesd --package ryotunes-cli
 
       - name: Skins validate
+        if: steps.plan.outputs.action != 'skip'
         run: |
           for d in skins/*/; do target/release/ryotunes-cli skin check "$d"; done
 
       - name: Unit tests
+        if: steps.plan.outputs.action != 'skip'
         run: cargo test --workspace --locked --exclude ryotunes
+
+      # Reserve the exact pushed source, even if a later push has moved the
+      # default branch while this build ran. Never force-push a user's history.
+      - name: Reserve the version
+        if: steps.plan.outputs.action == 'release'
+        env:
+          TAG: ${{ steps.plan.outputs.tag }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          SOURCE_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Cargo.toml Cargo.lock src-tauri/tauri.conf.json ui/package.json client/version packaging/arch/PKGBUILD packaging/linux/dev.ryoku.ryotunes.metainfo.xml CHANGELOG.md
+          git commit --allow-empty -m "release: $TAG"
+          git tag -a "$TAG" -m "Ryotunes $TAG" -m "Source-Commit: $SOURCE_SHA"
+          git push origin "refs/tags/$TAG"
+          remote_head="$(git ls-remote origin "refs/heads/$DEFAULT_BRANCH" | cut -f1)"
+          if [[ "$remote_head" == "$SOURCE_SHA" ]]; then
+            git push origin "HEAD:refs/heads/$DEFAULT_BRANCH" \
+              || echo "::notice::Branch moved or is protected; the release tag is complete, branch versions will sync on a later push."
+          fi
 
   package:
     name: Build the Arch package
-    needs: verify
+    needs: release
+    if: needs.release.outputs.action != 'skip'
     runs-on: ubuntu-24.04
     container:
       image: archlinux:base-devel
@@ -103,12 +220,12 @@ jobs:
 
       - uses: actions/checkout@v4
         with:
-          ref: ${{ needs.verify.outputs.tag }}
+          ref: ${{ needs.release.outputs.tag }}
 
-      # The shared script is what a maintainer runs locally too
-      # (docker run ... archlinux:latest scripts/build-arch-package.sh); here it
-      # runs as root, sets up an unprivileged builder, and re-execs itself. It
-      # builds this checked-out tag's exact source, pins pkgrel to 1, and writes
+      # The shared script a maintainer runs locally too
+      # (docker run ... archlinux:latest scripts/build-arch-package.sh). It runs as
+      # root, sets up an unprivileged builder, re-execs itself, builds the reserved
+      # tag's exact source, and writes the epochless contract asset
       # ryotunes-<version>-1-x86_64.pkg.tar.zst (+ .sha256) into dist/.
       - name: Build the package
         run: scripts/build-arch-package.sh "$GITHUB_WORKSPACE/dist"
@@ -122,12 +239,13 @@ jobs:
 
   publish:
     name: Publish the GitHub release
-    needs: [verify, package]
+    needs: [release, package]
+    if: needs.release.outputs.action != 'skip'
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ needs.verify.outputs.tag }}
+          ref: ${{ needs.release.outputs.tag }}
           fetch-depth: 0
 
       - name: Fetch the Arch package
@@ -138,8 +256,8 @@ jobs:
 
       - name: Source tarball
         env:
-          TAG: ${{ needs.verify.outputs.tag }}
-          VERSION: ${{ needs.verify.outputs.version }}
+          TAG: ${{ needs.release.outputs.tag }}
+          VERSION: ${{ needs.release.outputs.version }}
         run: |
           set -euo pipefail
           mkdir -p dist
@@ -148,31 +266,33 @@ jobs:
           git archive --format=tar --prefix="$name/" "$TAG" | gzip -n > "dist/$name.tar.gz"
           ( cd dist && sha256sum "$name.tar.gz" > "$name.tar.gz.sha256" )
 
-      - name: Release notes from the changelog
+      - name: Release notes
         env:
-          VERSION: ${{ needs.verify.outputs.version }}
-        run: |
-          python3 - <<'PY' > dist/NOTES.md
-          import os, re
-          v = os.environ["VERSION"]
-          s = open("CHANGELOG.md").read()
-          m = re.search(rf"^## v{re.escape(v)}[^\n]*\n(.*?)(?=^## |\Z)", s, re.S | re.M)
-          print((m.group(1).strip() if m else f"Ryotunes v{v}.") + "\n")
-          PY
-          cat dist/NOTES.md
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.release.outputs.tag }}
+        run: python3 scripts/release-notes.py "$TAG" > dist/NOTES.md
 
       - name: Create or update the release
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: ${{ needs.verify.outputs.tag }}
+          TAG: ${{ needs.release.outputs.tag }}
         run: |
           set -euo pipefail
           # A normal published (non-draft, non-prerelease, latest) release is what
           # /repos/neur0map/ryotunes/releases/latest returns to Ryoku's clients.
           assets=(dist/*.tar.gz dist/*.pkg.tar.zst dist/*.sha256)
+          latest="$(gh release list --limit 1000 --json isLatest,tagName --jq '.[] | select(.isLatest) | .tagName')"
+          # A manual repair of an older tag must not downgrade releases/latest.
+          promote="$(python3 - "$TAG" "$latest" <<'PY'
+          import re, sys
+          def version(tag):
+              return tuple(map(int, tag[1:].split("."))) if re.fullmatch(r"v1\.(0|[1-9][0-9]*)\.[0-9]", tag) else (0, 0, 0)
+          print("true" if version(sys.argv[1]) >= version(sys.argv[2]) else "false")
+          PY
+          )"
           if gh release view "$TAG" >/dev/null 2>&1; then
             gh release upload "$TAG" "${assets[@]}" --clobber
-            gh release edit "$TAG" --draft=false --prerelease=false --latest --notes-file dist/NOTES.md
+            gh release edit "$TAG" --draft=false --prerelease=false --latest="$promote" --notes-file dist/NOTES.md
           else
-            gh release create "$TAG" "${assets[@]}" --latest --title "Ryotunes $TAG" --notes-file dist/NOTES.md
+            gh release create "$TAG" "${assets[@]}" --latest="$promote" --title "Ryotunes $TAG" --notes-file dist/NOTES.md
           fi

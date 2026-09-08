@@ -2438,7 +2438,7 @@ dependencies = [
 
 [[package]]
 name = "innertube"
-version = "2.5.1"
+version = "1.0.0"
 dependencies = [
  "hex",
  "reqwest 0.12.28",
@@ -2943,7 +2943,7 @@ checksum = "32a66949e030da00e8c7d4434b251670a91556f4144941d37452769c25d58a53"
 
 [[package]]
 name = "listen-protocol"
-version = "2.5.1"
+version = "1.0.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -3788,7 +3788,7 @@ checksum = "f6b464fbc74e149a392436b17d523f769e057cb6877f6a5c4618bc6f11800548"
 
 [[package]]
 name = "player"
-version = "2.5.1"
+version = "1.0.0"
 dependencies = [
  "libc",
  "libmpv2",
@@ -4703,7 +4703,7 @@ dependencies = [
 
 [[package]]
 name = "ryotunes"
-version = "2.5.1"
+version = "1.0.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -4733,7 +4733,7 @@ dependencies = [
 
 [[package]]
 name = "ryotunes-cli"
-version = "2.5.1"
+version = "1.0.0"
 dependencies = [
  "ryotunes-protocol",
  "serde",
@@ -4742,7 +4742,7 @@ dependencies = [
 
 [[package]]
 name = "ryotunes-core"
-version = "2.5.1"
+version = "1.0.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -4765,7 +4765,9 @@ dependencies = [
  "ryotunes-spotify",
  "serde",
  "serde_json",
+ "sha2",
  "souvlaki",
+ "tempfile",
  "thiserror 2.0.20",
  "tokio",
  "tokio-tungstenite 0.24.0",
@@ -4776,7 +4778,7 @@ dependencies = [
 
 [[package]]
 name = "ryotunes-protocol"
-version = "2.5.1"
+version = "1.0.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -4784,7 +4786,7 @@ dependencies = [
 
 [[package]]
 name = "ryotunes-soundcloud"
-version = "2.5.1"
+version = "1.0.0"
 dependencies = [
  "regex",
  "reqwest 0.12.28",
@@ -4797,7 +4799,7 @@ dependencies = [
 
 [[package]]
 name = "ryotunes-spotify"
-version = "2.5.1"
+version = "1.0.0"
 dependencies = [
  "anyhow",
  "bytes",
@@ -4820,7 +4822,7 @@ dependencies = [
 
 [[package]]
 name = "ryotunesd"
-version = "2.5.1"
+version = "1.0.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -5583,7 +5585,7 @@ dependencies = [
 
 [[package]]
 name = "sync-server"
-version = "2.5.1"
+version = "1.0.0"
 dependencies = [
  "futures-util",
  "listen-protocol",

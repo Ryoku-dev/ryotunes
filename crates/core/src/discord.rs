@@ -61,7 +61,7 @@ const SONG_URL: &str = "https://music.youtube.com/watch?v=";
 /// application's portal icon (the upstream lemon). Verified reachable, `200 image/png` (512×512).
 const BRAND_IMAGE: &str =
     "https://raw.githubusercontent.com/neur0map/ryotunes/main/src-tauri/icons/icon.png";
-const BRAND_BADGE_TEXT: &str = "Ryotunes v2";
+const BRAND_BADGE_TEXT: &str = "Ryotunes";
 
 /// Reconnect backoff while enabled but unconnected (Discord not running, or it quit). Starts short
 /// — Discord may simply be slower to start than we are — and eases off so a permanently-absent
@@ -83,7 +83,7 @@ const DURATION_GRACE: Duration = Duration::from_millis(800);
 const MIN_WAIT: Duration = Duration::from_millis(10);
 /// Discord rejects `details`/`state`/`large_text` outside 2–128 characters.
 const MAX_FIELD: usize = 128;
-pub const DEFAULT_PRESENCE_NAME: &str = "Ryotunes v2";
+pub const DEFAULT_PRESENCE_NAME: &str = "Ryotunes";
 
 /// Vanity text used by Discord's "Listening to …" activity label. Empty resets to the default;
 /// every non-empty value must satisfy Discord's 2–128 character field contract.
@@ -517,7 +517,7 @@ impl Presence {
         // none to show, the Ryotunes mark stands in — never the application's lemon icon.
         let mut assets = activity::Assets::new();
         match track.thumbnail.clone() {
-            // Real art up top: the small badge is the Ryotunes mark ("Ryotunes v2" on hover).
+            // Real art up top: the small badge is the Ryotunes mark.
             Some(url) => {
                 assets =
                     assets.large_image(url).small_image(BRAND_IMAGE).small_text(BRAND_BADGE_TEXT);

@@ -201,6 +201,12 @@
           "markdownDescription": "Enables the add_to_queue command without any pre-configured scope."
         },
         {
+          "description": "Enables the check_for_updates command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-check-for-updates",
+          "markdownDescription": "Enables the check_for_updates command without any pre-configured scope."
+        },
+        {
           "description": "Enables the clear_caches command without any pre-configured scope.",
           "type": "string",
           "const": "allow-clear-caches",
@@ -373,6 +379,12 @@
           "type": "string",
           "const": "allow-import-playlist-file",
           "markdownDescription": "Enables the import_playlist_file command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the install_update command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-install-update",
+          "markdownDescription": "Enables the install_update command without any pre-configured scope."
         },
         {
           "description": "Enables the lastfm_connect command without any pre-configured scope.",
@@ -777,6 +789,12 @@
           "markdownDescription": "Denies the add_to_queue command without any pre-configured scope."
         },
         {
+          "description": "Denies the check_for_updates command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-check-for-updates",
+          "markdownDescription": "Denies the check_for_updates command without any pre-configured scope."
+        },
+        {
           "description": "Denies the clear_caches command without any pre-configured scope.",
           "type": "string",
           "const": "deny-clear-caches",
@@ -949,6 +967,12 @@
           "type": "string",
           "const": "deny-import-playlist-file",
           "markdownDescription": "Denies the import_playlist_file command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the install_update command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-install-update",
+          "markdownDescription": "Denies the install_update command without any pre-configured scope."
         },
         {
           "description": "Denies the lastfm_connect command without any pre-configured scope.",

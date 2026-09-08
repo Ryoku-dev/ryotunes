@@ -1,13 +1,13 @@
-# Ryotunes v2.4.1 release checklist
+# Ryotunes release checklist
 
-## Build/package gates
-1. Verify frozen source checksum and extract into a disposable clean tree.
-2. Install exact frontend dependencies with the frozen lockfile and run `pnpm check`.
-3. Run `cargo fmt --all -- --check`, workspace tests, locked/offline Linux graph verification, native Tauri release build and sync-server release build.
-4. Use an isolated final `CARGO_TARGET_DIR`; never package a pre-existing release binary.
-5. `makepkg` produces `ryotunes-v2.4-2.4.1-1-x86_64.pkg.tar.zst`; package content/ownership checks pass.
-6. `/usr/bin/ryotunes` resolves to `/usr/lib/ryotunes-v2.4/ryotunes`; exactly one normal Ryotunes desktop launcher is visible.
-7. `ryoku-desktop` remains installed. Removing `ryotunes-v2.4` restores the backed-up real stock Ryoku entry points.
+## Release pipeline
+1. Releases are automatic: each default-branch push checks out its exact event SHA, stamps the next `v1.x.x` version, verifies, tags and publishes it. GitHub's `queue: max` retains pending runs (up to its 100-run platform limit); plain `cancel-in-progress: false` alone would still discard pending pushes. Do not remove `queue` merely because actionlint 1.7.12 predates that documented option.
+2. Confirm the published assets are `ryotunes-<version>-1-x86_64.pkg.tar.zst`, its `.sha256`, `ryotunes-<version>.tar.gz` and its `.sha256`. New releases become latest; repairing an older release must not demote a newer v1 release. Notes combine authored changelog content, GitHub-generated notes and the actual commit range.
+3. `scripts/build-arch-package.sh` reproduces the package locally (`docker run --rm -v "$PWD:/src" -w /src archlinux:latest scripts/build-arch-package.sh`); the file name is epochless, but `pacman -Qp` on it reports `ryotunes 1:<version>-1`.
+4. The package upgrades cleanly over a machine still on the legacy 2.x line (`sudo pacman -U ./ryotunes-<version>-1-x86_64.pkg.tar.zst`); `pacman -Q ryotunes` then reports `1:<version>-1`.
+5. `/usr/bin/ryotunes`, `ryotunesd`, `ryotunes-cli` and the native client at `/usr/share/ryotunes/client` (including its `version` file) are installed; exactly one normal Ryotunes desktop launcher is visible.
+6. A package upgrade never restarts the app or daemon inside the pacman transaction; after updating, quitting and reopening Ryotunes loads the new build.
+7. Re-run a failed workflow (or Actions → Release → Run workflow with its existing tag) to repair publication without allocating a second version. Version commits are fast-forwarded to the default branch only if it still points to that run's source SHA; protected or newer branch history is never overwritten. About must handle an unpublished release, a failed check, a newer release, checksum/authentication failure and the final Quit-and-reopen state.
 
 ## Window/startup
 8. A genuine cold start shows the main UI on the **first invocation** (never tray-only until a second launch) and maps directly as a centered floating Ryotunes window at about 89% × 84% of usable work area, without a tiled/fullscreen flash.
@@ -46,7 +46,7 @@
 - **Device playlists signed out:** create from Library, sidebar and Add to playlist → **Create + add**. Restart Ryotunes and verify the playlist and tracks persist.
 - Sign in, verify device playlists remain present and editable, then sign out and verify they remain. No device playlist may be cleared by the account playlist-index reset.
 - Add/remove tracks, rename, set/remove local artwork and delete a device playlist. Confirm no operation sends a device playlist id as a YouTube radio/autoplay seed.
-- **Discord presence title:** save a custom 2–128 character title, verify the active card updates without restarting playback, restart Ryotunes and verify persistence, then Reset to **Ryotunes v2**.
+- **Discord presence title:** save a custom 2–128 character title, verify the active card updates without restarting playback, restart Ryotunes and verify persistence, then Reset to **Ryotunes**.
 - Verify album artwork carries the Ryotunes badge, missing/invalid artwork uses the Ryotunes mark, and local filesystem paths never reach Discord. YouTube and Spotify buttons must open the correct service; SoundCloud numeric IDs and local/radio tracks must not produce fabricated YouTube links.
 - Discord disabled/unavailable behaviour must remain parked/backed-off. The inherited application ID `1525891596804161727` is registered as **Limusic**; changing the activity artwork/name does not change its portal-owned lemon icon. A Ryotunes-owned Discord application ID is required before claiming the registered identity has been replaced.
 

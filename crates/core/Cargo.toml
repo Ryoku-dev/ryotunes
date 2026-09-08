@@ -8,7 +8,7 @@ description = "Ryotunes playback core: state, orchestration, integrations. No UI
 [dependencies]
 serde = { workspace = true }
 serde_json = { workspace = true }
-tokio = { workspace = true, features = ["net", "io-util"] }
+tokio = { workspace = true, features = ["net", "io-util", "fs", "process"] }
 tracing = { workspace = true }
 anyhow = { workspace = true }
 thiserror = { workspace = true }
@@ -33,6 +33,8 @@ discord-rich-presence = "1.1.0"
 md-5 = "0.10"
 lofty = "0.22.2"
 url = "2"
+sha2 = "0.10"
+tempfile = "3"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 libc = "0.2"

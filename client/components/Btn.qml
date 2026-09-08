@@ -17,13 +17,17 @@ Item {
     implicitWidth: row.implicitWidth + Style.sp(4) * 2
     implicitHeight: Style.ctlH
     opacity: enabled ? 1 : 0.45
+    activeFocusOnTab: true
+    Keys.onReturnPressed: event => { if (root.enabled) root.clicked(); event.accepted = true; }
+    Keys.onSpacePressed: event => { if (root.enabled) root.clicked(); event.accepted = true; }
 
     Rectangle {
         anchors.fill: parent
         radius: Style.radius
         color: root.primary ? Tokens.bone : (press.pressed ? Tokens.tint16 : hover.hovered ? Tokens.tint10 : "transparent")
-        border.width: root.primary ? 0 : 1
-        border.color: hover.hovered ? Tokens.lineStrong : Tokens.line
+        border.width: root.activeFocus ? 2 : root.primary ? 0 : 1
+        border.color: root.primary && root.activeFocus ? Tokens.inkOnBone
+            : root.activeFocus || hover.hovered ? Tokens.lineStrong : Tokens.line
         scale: press.pressed ? 0.97 : 1
         Behavior on scale { NumberAnimation { duration: Style.motion.snap; easing.type: Easing.OutCubic } }
         Behavior on color { ColorAnimation { duration: Style.motion.snap } }
@@ -52,4 +56,5 @@ Item {
     TapHandler { id: press; onTapped: root.clicked() }
     Accessible.role: Accessible.Button
     Accessible.name: root.text
+    Accessible.onPressAction: { if (root.enabled) root.clicked(); }
 }

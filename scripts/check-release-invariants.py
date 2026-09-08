@@ -8,6 +8,7 @@ from pathlib import Path
 import json
 import re
 import tomllib
+import xml.etree.ElementTree as ET
 
 root = Path(__file__).resolve().parents[1]
 
@@ -24,7 +25,8 @@ def req(ok, msg):
 cargo = tomllib.loads(read('Cargo.toml'))
 lock = tomllib.loads(read('Cargo.lock'))
 version = cargo['workspace']['package']['version']
-req(re.fullmatch(r'[0-9]+\.[0-9]+\.[0-9]+', version), 'workspace version is not X.Y.Z')
+req(re.fullmatch(r'1\.(0|[1-9][0-9]*)\.[0-9]', version),
+    'workspace version is not a v1 release (1.<minor>.<single-digit patch>)')
 locked = {package['name']: package['version'] for package in lock['package']}
 for member in cargo['workspace']['members']:
     manifest = tomllib.loads(read(f'{member}/Cargo.toml'))['package']
@@ -38,10 +40,17 @@ req(config.get('version') == version, 'Tauri version does not match workspace')
 req(config.get('identifier') == 'dev.ryoku.ryotunes', 'Tauri application identity changed')
 req(json.loads(read('ui/package.json')).get('version') == version,
     'UI version does not match workspace')
+req(read('client/version').strip() == version,
+    'native QML client version file does not match workspace')
+appstream = ET.fromstring(read('packaging/linux/dev.ryoku.ryotunes.metainfo.xml'))
+req(appstream.find('releases/release').get('version') == version,
+    'AppStream release version does not match workspace')
 arch = read('packaging/arch/PKGBUILD')
 req(re.search(rf'^pkgver={re.escape(version)}$', arch, re.M),
     'Arch package version does not match workspace')
 req(re.search(r'^pkgrel=1$', arch, re.M), 'release asset contract requires pkgrel=1')
+req(re.search(r'^epoch=1$', arch, re.M),
+    'release asset contract requires epoch=1 so pacman upgrades off the legacy 2.x line')
 
 tauri_version = tuple(map(int, locked['tauri'].split('.')[:3]))
 req(tauri_version >= (2, 11, 1),

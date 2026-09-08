@@ -31,6 +31,8 @@ const APP_COMMANDS: &[&str] = &[
     "get_playback",
     "frontend_ready",
     "get_settings",
+    "check_for_updates",
+    "install_update",
     "discord_status",
     "ryoku_theme_tokens",
     "set_setting",

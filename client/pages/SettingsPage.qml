@@ -36,9 +36,21 @@ Item {
 
     // Editable-field mirrors, seeded on load so typing never fights the settings binding.
     property string proxyInput: ""
-    property string discordNameInput: "Ryotunes v2"
+    property string discordNameInput: "Ryotunes"
     property bool forkOpen: false
     property string forkName: ""
+
+    // Software updates (About). Never polled — a check runs only on the button. The daemon dispatches
+    // requests concurrently and imposes no RPC timeout, so the long install call simply resolves when
+    // it is done; no background job protocol is needed.
+    property var updateInfo: null
+    property string updateStatus: "idle" // idle | checking | installing | installed | error
+    property string updateError: ""
+    property string installedVersion: ""
+    property bool showReleaseNotes: false
+    // The client (APP) version ships as a plain-text file in the QML package, stamped per release.
+    // Kept separate from the daemon handshake version so a stale daemon stays visible after an update.
+    property string appVersion: ""
 
     readonly property var qualities: [
         { id: "LOW", l: "Low" },
@@ -72,7 +84,7 @@ Item {
             page.settings = res[0] || ({});
             page.clients = res[1] || [];
             page.proxyInput = page.settings.proxy || "";
-            page.discordNameInput = (page.settings.discord_presence_name || "").trim() || "Ryotunes v2";
+            page.discordNameInput = (page.settings.discord_presence_name || "").trim() || "Ryotunes";
             page.loaded = true;
             page.loadDiscord();
         }).catch((e) => { page.loaded = true; Playback.toast((e && e.message) ? e.message : String(e), "error"); });
@@ -134,7 +146,7 @@ Item {
         page.setSetting("discord_rpc", on ? "true" : "false").then(() => page.loadDiscord());
     }
     function saveDiscordName() {
-        var value = page.discordNameInput.trim() || "Ryotunes v2";
+        var value = page.discordNameInput.trim() || "Ryotunes";
         var n = value.length;
         if (n < 2 || n > 128) {
             Playback.toast("Discord presence title must be between 2 and 128 characters", "error");
@@ -166,6 +178,44 @@ Item {
             .then(() => { page.clearing = false; Playback.toast("Caches cleared", "success"); })
             .catch((e) => { page.clearing = false; Playback.toast((e && e.message) ? e.message : String(e), "error"); });
     }
+
+    // --- software updates ------------------------------------------------------------------
+    function checkUpdates() {
+        if (page.updateStatus === "checking" || page.updateStatus === "installing") return;
+        page.updateStatus = "checking";
+        page.updateError = "";
+        page.showReleaseNotes = false;
+        Daemon.call("check_for_updates")
+            .then((info) => { page.updateInfo = info || null; page.updateStatus = "idle"; })
+            .catch((e) => { page.updateError = (e && e.message) ? e.message : String(e); page.updateStatus = "error"; });
+    }
+    function installUpdate() {
+        if (page.updateStatus === "installing") return;
+        var info = page.updateInfo;
+        if (!info || !info.latestVersion || !info.available || !info.canInstall) return;
+        var version = info.latestVersion;
+        page.updateStatus = "installing";
+        page.updateError = "";
+        Daemon.call("install_update", { version: version })
+            .then((res) => { page.installedVersion = (res && res.version) ? res.version : version; page.updateStatus = "installed"; })
+            .catch((e) => { page.updateError = (e && e.message) ? e.message : String(e); page.updateStatus = "error"; });
+    }
+    function updateMessage() {
+        if (page.updateStatus === "checking") return "Checking for a new version…";
+        if (page.updateStatus === "installing") return "Downloading and verifying the update, then asking for administrator approval. Keep Ryotunes open until it finishes.";
+        if (page.updateStatus === "installed") return "Ryotunes " + page.installedVersion + " is installed. Quit Ryotunes and open it again to finish — closing the window isn't enough; the background service reloads only on a full restart.";
+        if (page.updateStatus === "error") return "Update failed: " + page.updateError;
+        var info = page.updateInfo;
+        if (!info) return "";
+        if (info.latestVersion === null || info.latestVersion === undefined) return "No release has been published yet.";
+        if (info.available) {
+            var msg = "Version " + info.latestVersion + " is available.";
+            if (!info.canInstall && info.unsupportedReason) msg += " " + info.unsupportedReason;
+            return msg;
+        }
+        return "You're on the latest version.";
+    }
+    function openUrl(url) { Quickshell.execDetached(["xdg-open", url]); }
 
     function clientDisabled(name) {
         return (page.settings.disabled_stream_clients || "").split(",").map((s) => s.trim()).filter(Boolean).indexOf(name) >= 0;
@@ -251,6 +301,19 @@ Item {
             : s === "connecting" ? "Connecting…"
             : s === "unavailable" ? "Discord not running / unavailable"
             : "Disabled";
+    }
+
+    // The client version file shipped beside the QML. blockLoading makes it ready on open; watching it
+    // means a package upgrade updates the APP row live while the daemon row stays on its handshake
+    // version until Ryotunes is fully restarted.
+    FileView {
+        id: versionFile
+        path: Quickshell.shellDir + "/version"
+        blockLoading: true
+        watchChanges: true
+        printErrors: false
+        onLoaded: page.appVersion = (versionFile.text() || "").trim()
+        onFileChanged: reload()
     }
 
     // --- pickers (zenity; the daemon expects an explicit path) ------------------------------
@@ -733,17 +796,17 @@ Item {
                                     Text {
                                         anchors.verticalCenter: parent.verticalCenter
                                         visible: discordField.text.length === 0
-                                        text: "Ryotunes v2"
+                                        text: "Ryotunes"
                                         color: Tokens.inkFaint
                                         font: discordField.font
                                     }
                                 }
                             }
                             Pill { label: "Save"; enabled: page.discordNameInput.trim().length > 0; onClicked: page.saveDiscordName() }
-                            Pill { label: "Reset"; enabled: page.discordNameInput !== "Ryotunes v2"; onClicked: { page.discordNameInput = "Ryotunes v2"; page.saveDiscordName(); } }
+                            Pill { label: "Reset"; enabled: page.discordNameInput !== "Ryotunes"; onClicked: { page.discordNameInput = "Ryotunes"; page.saveDiscordName(); } }
                         }
                         Text {
-                            text: "Preview: Listening to " + (page.discordNameInput.trim() || "Ryotunes v2")
+                            text: "Preview: Listening to " + (page.discordNameInput.trim() || "Ryotunes")
                             color: Tokens.inkFaint; font.family: Style.fontUi; font.pixelSize: Style.fs.xs
                         }
                     }
@@ -1257,14 +1320,115 @@ Item {
                         columns: 2
                         columnSpacing: Style.sp(6)
                         rowSpacing: Style.sp(1)
-                        Text { text: "RELEASE"; color: Tokens.inkFaint; font.family: Style.fontMono; font.pixelSize: Style.fs.xs }
-                        Text { text: "v2"; color: Tokens.inkDim; font.family: Style.fontUi; font.pixelSize: Style.fs.sm; font.weight: Font.Medium }
+                        Text { text: "APP"; color: Tokens.inkFaint; font.family: Style.fontMono; font.pixelSize: Style.fs.xs }
+                        Text { text: page.appVersion || "—"; color: Tokens.inkDim; font.family: Style.fontUi; font.pixelSize: Style.fs.sm; font.weight: Font.Medium }
                         Text { text: "DAEMON"; color: Tokens.inkFaint; font.family: Style.fontMono; font.pixelSize: Style.fs.xs }
                         Text { text: Daemon.daemonVersion || "—"; color: Tokens.inkDim; font.family: Style.fontUi; font.pixelSize: Style.fs.sm; font.weight: Font.Medium }
                         Text { text: "ENGINE"; color: Tokens.inkFaint; font.family: Style.fontMono; font.pixelSize: Style.fs.xs }
                         Text { text: "RUST + MPV"; color: Tokens.inkDim; font.family: Style.fontUi; font.pixelSize: Style.fs.sm; font.weight: Font.Medium }
                         Text { text: "CLIENT"; color: Tokens.inkFaint; font.family: Style.fontMono; font.pixelSize: Style.fs.xs }
                         Text { text: "QUICKSHELL / QML"; color: Tokens.inkDim; font.family: Style.fontUi; font.pixelSize: Style.fs.sm; font.weight: Font.Medium }
+                    }
+
+                    // --- software updates ---
+                    SectionHeading { Layout.fillWidth: true; Layout.topMargin: Style.sp(3); title: "Software updates"; mark: "新" }
+                    Text {
+                        Layout.fillWidth: true
+                        text: "You're on " + (page.appVersion || Daemon.daemonVersion || "this build") + ". Ryotunes checks GitHub only when you ask — nothing runs in the background."
+                        color: Tokens.inkMuted; font.family: Style.fontUi; font.pixelSize: Style.fs.sm; wrapMode: Text.WordWrap
+                    }
+                    RowLayout {
+                        Layout.topMargin: Style.sp(1)
+                        spacing: Style.sp(2)
+                        Btn {
+                            text: page.updateStatus === "checking" ? "Checking…" : "Check for new version"
+                            icon: "repeat"
+                            enabled: page.updateStatus !== "checking" && page.updateStatus !== "installing" && page.updateStatus !== "installed"
+                            onClicked: page.checkUpdates()
+                        }
+                        Btn {
+                            text: "View changelog"
+                            icon: "link"
+                            onClicked: page.openUrl((page.updateInfo && page.updateInfo.releaseUrl) ? page.updateInfo.releaseUrl : "https://github.com/neur0map/ryotunes/releases")
+                        }
+                        Btn {
+                            visible: !!(page.updateInfo && page.updateInfo.available && page.updateInfo.latestVersion && page.updateInfo.canInstall) && page.updateStatus !== "installed"
+                            primary: true
+                            text: page.updateStatus === "installing" ? "Installing…" : ("Update to " + (page.updateInfo ? page.updateInfo.latestVersion : ""))
+                            icon: "download"
+                            enabled: page.updateStatus !== "installing" && page.updateStatus !== "checking"
+                            onClicked: page.installUpdate()
+                        }
+                    }
+                    Text {
+                        Layout.fillWidth: true
+                        Layout.topMargin: Style.sp(1)
+                        visible: text.length > 0
+                        text: page.updateMessage()
+                        color: page.updateStatus === "error" ? Tokens.alert
+                            : (page.updateStatus === "idle" && page.updateInfo && page.updateInfo.available) ? Tokens.sun
+                            : Tokens.inkMuted
+                        font.family: Style.fontUi; font.pixelSize: Style.fs.sm; wrapMode: Text.WordWrap
+                        textFormat: Text.PlainText
+                        Accessible.role: Accessible.StaticText
+                        Accessible.name: text
+                    }
+                    Btn {
+                        visible: !!(page.updateInfo && page.updateInfo.notes)
+                        Layout.topMargin: Style.sp(1)
+                        text: page.showReleaseNotes ? "Hide release notes" : "Show release notes"
+                        onClicked: page.showReleaseNotes = !page.showReleaseNotes
+                    }
+                    Rectangle {
+                        visible: page.showReleaseNotes && !!(page.updateInfo && page.updateInfo.notes)
+                        Layout.fillWidth: true
+                        Layout.topMargin: Style.sp(1)
+                        Layout.preferredHeight: Math.min(notesText.implicitHeight + Style.sp(4), Style.sp(60))
+                        color: "transparent"
+                        border.width: 1
+                        border.color: Tokens.line
+                        radius: Style.radius
+                        Flickable {
+                            anchors.fill: parent
+                            anchors.margins: Style.sp(2)
+                            clip: true
+                            contentWidth: width
+                            contentHeight: notesText.implicitHeight
+                            Text {
+                                id: notesText
+                                width: parent.width
+                                text: (page.updateInfo && page.updateInfo.notes) ? page.updateInfo.notes : ""
+                                color: Tokens.inkMuted; font.family: Style.fontMono; font.pixelSize: Style.fs.xs; wrapMode: Text.WordWrap; textFormat: Text.PlainText
+                            }
+                        }
+                    }
+
+                    // --- made by ---
+                    SectionHeading { Layout.fillWidth: true; Layout.topMargin: Style.sp(3); title: "Made by"; mark: "人" }
+                    Text {
+                        Layout.fillWidth: true
+                        text: "Ryotunes is built by two developers. Open their GitHub profiles:"
+                        color: Tokens.inkMuted; font.family: Style.fontUi; font.pixelSize: Style.fs.sm; wrapMode: Text.WordWrap
+                    }
+                    RowLayout {
+                        Layout.topMargin: Style.sp(1)
+                        spacing: Style.sp(2)
+                        Btn { text: "ashmitvoid"; icon: "link"; onClicked: page.openUrl("https://github.com/ashmitvoid") }
+                        Btn { text: "neur0map"; icon: "link"; onClicked: page.openUrl("https://github.com/neur0map") }
+                    }
+
+                    // --- open source ---
+                    SectionHeading { Layout.fillWidth: true; Layout.topMargin: Style.sp(3); title: "Open source"; mark: "源" }
+                    Text {
+                        Layout.fillWidth: true
+                        text: "Ryotunes is a fork of LiMusic, released under the GNU General Public License v3.0 or later."
+                        color: Tokens.inkMuted; font.family: Style.fontUi; font.pixelSize: Style.fs.sm; wrapMode: Text.WordWrap
+                    }
+                    RowLayout {
+                        Layout.topMargin: Style.sp(1)
+                        spacing: Style.sp(2)
+                        Btn { text: "LiMusic upstream"; icon: "link"; onClicked: page.openUrl("https://github.com/SimoHypers/limusic") }
+                        Btn { text: "GPL-3.0-or-later"; icon: "link"; onClicked: page.openUrl("https://www.gnu.org/licenses/gpl-3.0.html") }
                     }
                 }
             }

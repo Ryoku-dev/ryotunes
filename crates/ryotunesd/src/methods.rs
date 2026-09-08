@@ -101,6 +101,13 @@ impl Dispatch for Methods {
             "hello" => {
                 ok(json!({ "protocol": PROTOCOL_VERSION, "daemon": env!("CARGO_PKG_VERSION") }))
             }
+            "check_for_updates" => {
+                ok(ryotunes_core::update::check_for_updates().await.map_err(err)?)
+            }
+            "install_update" => {
+                let version = arg(&params, "version")?;
+                ok(ryotunes_core::update::install_update(version).await.map_err(err)?)
+            }
             "subscribe" => {
                 conn.subscribe();
                 let provider = st.spotify.selected().as_str();

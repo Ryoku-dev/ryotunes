@@ -330,6 +330,18 @@ pub async fn get_queue(state: St<'_>) -> Result<serde_json::Value, String> {
 }
 
 #[tauri::command]
+pub async fn check_for_updates() -> Result<ryotunes_core::update::UpdateInfo, String> {
+    ryotunes_core::update::check_for_updates().await
+}
+
+#[tauri::command]
+pub async fn install_update(
+    version: String,
+) -> Result<ryotunes_core::update::InstalledUpdate, String> {
+    ryotunes_core::update::install_update(version).await
+}
+
+#[tauri::command]
 pub async fn get_settings(
     app: tauri::AppHandle,
     state: St<'_>,
