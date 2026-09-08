@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-set-playback-params"
+description = "Enables the set_playback_params command without any pre-configured scope."
+commands.allow = ["set_playback_params"]
+
+[[permission]]
+identifier = "deny-set-playback-params"
+description = "Denies the set_playback_params command without any pre-configured scope."
+commands.deny = ["set_playback_params"]

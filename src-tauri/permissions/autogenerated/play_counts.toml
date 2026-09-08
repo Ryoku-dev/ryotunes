@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-play-counts"
+description = "Enables the play_counts command without any pre-configured scope."
+commands.allow = ["play_counts"]
+
+[[permission]]
+identifier = "deny-play-counts"
+description = "Denies the play_counts command without any pre-configured scope."
+commands.deny = ["play_counts"]

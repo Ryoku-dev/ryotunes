@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-clear-queued"
+description = "Enables the clear_queued command without any pre-configured scope."
+commands.allow = ["clear_queued"]
+
+[[permission]]
+identifier = "deny-clear-queued"
+description = "Denies the clear_queued command without any pre-configured scope."
+commands.deny = ["clear_queued"]

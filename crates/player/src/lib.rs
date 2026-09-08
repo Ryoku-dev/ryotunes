@@ -97,10 +97,22 @@ pub struct Player {
     /// Event-driven mirror of mpv `idle-active`. Lifecycle code must not synchronously query mpv
     /// from the async event pump: that can race/stall during pause and gapless transitions.
     idle_active: Arc<AtomicBool>,
+    event_stop: Arc<AtomicBool>,
+    event_thread: Option<std::thread::JoinHandle<()>>,
     /// `(loudness gain dB, audio-fx)`. mpv's `af` is one global chain, so everything that writes
     /// to it — the loudness gain and every effect in [`AudioFx`] — has to be re-applied together:
     /// a bare `set_property("af", ...)` from any one of them would drop the others' filters.
     af: parking_lot::Mutex<(Option<f64>, AudioFx)>,
+}
+
+impl Drop for Player {
+    fn drop(&mut self) {
+        // EventContext borrows mpv's raw handle. Stop its reader before destroying that handle.
+        self.event_stop.store(true, Ordering::Release);
+        if let Some(thread) = self.event_thread.take() {
+            let _ = thread.join();
+        }
+    }
 }
 
 impl Player {
@@ -136,15 +148,19 @@ impl Player {
         ev.observe_property("idle-active", Format::Flag, 3)?;
 
         let event_idle_active = idle_active.clone();
-        std::thread::Builder::new()
+        let event_stop = Arc::new(AtomicBool::new(false));
+        let stop = event_stop.clone();
+        let event_thread = std::thread::Builder::new()
             .name("mpv-events".into())
-            .spawn(move || event_loop(ev, tx, event_idle_active))
+            .spawn(move || event_loop(ev, tx, event_idle_active, stop))
             .expect("spawn mpv event thread");
 
         Ok(Player {
             mpv,
             events: Some(rx),
             idle_active,
+            event_stop,
+            event_thread: Some(event_thread),
             af: parking_lot::Mutex::new((None, AudioFx::default())),
         })
     }
@@ -390,6 +406,7 @@ fn event_loop(
     mut ev: EventContext,
     tx: tokio::sync::mpsc::UnboundedSender<PlayerEvent>,
     idle_active: Arc<AtomicBool>,
+    stop: Arc<AtomicBool>,
 ) {
     // Playback state is derived from two properties, never polled: mpv answers `mpv_get_property`
     // synchronously on its core lock, so asking it from the app's async event pump can stall that
@@ -402,7 +419,7 @@ fn event_loop(
     let mut paused = false;
     let mut idle = true;
     let mut playing = false;
-    loop {
+    while !stop.load(Ordering::Acquire) {
         match ev.wait_event(1.0) {
             Some(Ok(event)) => {
                 let out = match event {

@@ -11,6 +11,8 @@ depends=(
   'webkit2gtk-4.1'
   'libappindicator-gtk3'
   'mpv'
+  'yt-dlp'
+  'ffmpeg'
   'openssl'
   'librsvg'
   'desktop-file-utils'

@@ -335,6 +335,9 @@ Item {
         var out = [];
         out.push({ icon: "arrow-up", label: "Play next", danger: false, act: () => page.queueAlbum(true) });
         out.push({ icon: "queue", label: "Add to queue", danger: false, act: () => page.queueAlbum(false) });
+        if (!page.isLocal && page.album && page.album.items && page.album.items.length)
+            out.push({ icon: "download", label: Downloads.addingAlbum ? "Adding album…" : "Download album",
+                danger: false, act: () => Downloads.enqueueAlbum(page.album) });
         if (!page.isLocal && page.album && page.album.playlistId)
             out.push({ icon: "radio", label: "Start radio", danger: false, act: () => page.radio() });
         if (page.album && page.album.artistId)

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-set-playlist-sort"
+description = "Enables the set_playlist_sort command without any pre-configured scope."
+commands.allow = ["set_playlist_sort"]
+
+[[permission]]
+identifier = "deny-set-playlist-sort"
+description = "Denies the set_playlist_sort command without any pre-configured scope."
+commands.deny = ["set_playlist_sort"]

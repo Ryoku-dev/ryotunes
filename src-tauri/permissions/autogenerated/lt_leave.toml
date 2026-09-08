@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-lt-leave"
+description = "Enables the lt_leave command without any pre-configured scope."
+commands.allow = ["lt_leave"]
+
+[[permission]]
+identifier = "deny-lt-leave"
+description = "Denies the lt_leave command without any pre-configured scope."
+commands.deny = ["lt_leave"]

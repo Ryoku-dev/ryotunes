@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-move-in-queue"
+description = "Enables the move_in_queue command without any pre-configured scope."
+commands.allow = ["move_in_queue"]
+
+[[permission]]
+identifier = "deny-move-in-queue"
+description = "Denies the move_in_queue command without any pre-configured scope."
+commands.deny = ["move_in_queue"]

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-set-stop-after-current"
+description = "Enables the set_stop_after_current command without any pre-configured scope."
+commands.allow = ["set_stop_after_current"]
+
+[[permission]]
+identifier = "deny-set-stop-after-current"
+description = "Denies the set_stop_after_current command without any pre-configured scope."
+commands.deny = ["set_stop_after_current"]

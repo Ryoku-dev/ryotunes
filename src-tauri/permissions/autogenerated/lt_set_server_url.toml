@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-lt-set-server-url"
+description = "Enables the lt_set_server_url command without any pre-configured scope."
+commands.allow = ["lt_set_server_url"]
+
+[[permission]]
+identifier = "deny-lt-set-server-url"
+description = "Denies the lt_set_server_url command without any pre-configured scope."
+commands.deny = ["lt_set_server_url"]

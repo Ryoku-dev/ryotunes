@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Added **Download album** to the native album menu: queues the complete album rather than filtered rows, follows continuation pages, reuses download preferences and bounded workers, and reports unavailable tracks or partial admission errors.
+- **One-click music downloads in the native client.** A download control beside the heart saves the current track immediately; Downloads in the sidebar shows progress, waiting tracks and persistent history with cancel, retry and open-folder actions. Settings › Downloads adds the destination, Original/MP3/Opus formats, artist folders, embedded cover art & lyrics, and a safe 1–4 worker limit (default 1). Workers survive window closure, never overwrite existing files, and are terminated/reaped on quit; interrupted jobs remain retryable. YouTube and public SoundCloud use their source links; Spotify uses a clearly labelled YouTube search match. Downloads embed available cover art and plain lyrics where supported and save matching image and synced `.lrc` or plain `.txt` companion files. Local lyrics take precedence over network lookups for offline playback. Metadata lookups send track details to external providers; missing matches produce non-fatal history notes.
+- **Device playlists get automatic artwork.** A local playlist's card and page now build a cover from its own songs: four distinct song covers become a 2x2 collage, one to three collapse to the first cover, an empty playlist shows none. A custom cover you pick still wins everywhere, and removing it (Reset) drops straight back to the automatic art without a round-trip to YouTube Music. Cards, the page header and the sidebar refresh the instant tracks are added or removed or a cover changes.
+- Fixed native-client reconnection when the daemon was absent on the initial connection attempt, so download state and playback resynchronize without reopening the client.
+- Join the mpv event reader before destroying its native handle, preventing a shutdown race exposed by download metadata enrichment.
+
 ## v2.5.1 - 2026-09-06
 
 - **The heart saves without an account.** Liking a track when there is no YouTube Music session (or on a SoundCloud/local track) lands it in a device-local **Liked Songs** playlist that Library › Songs shows and the library lists; unliking removes it, the heart and the now-playing snapshot reflect it at once. Signed in, YouTube's own rating is used as before.

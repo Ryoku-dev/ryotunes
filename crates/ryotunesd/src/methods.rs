@@ -31,6 +31,7 @@ use crate::server::{Connection, Dispatch};
 pub struct Methods {
     pub state: Arc<AppState>,
     pub quit: tokio::sync::mpsc::UnboundedSender<()>,
+    pub downloads: Arc<crate::downloads::Downloads>,
 }
 
 fn arg<T: DeserializeOwned>(params: &Value, key: &str) -> Result<T, ErrorBody> {
@@ -112,6 +113,7 @@ impl Dispatch for Methods {
                     "audioFx": st.audio_fx(),
                     "provider": provider,
                     "spotify": spotify,
+                    "downloads": self.downloads.snapshot(),
                 }))
             }
             "quit" => {
@@ -606,10 +608,14 @@ impl Dispatch for Methods {
                 }
                 let item = shed_queue_context(item);
                 let json = serde_json::to_string(&item).map_err(err)?;
-                ok(st
+                let added = st
                     .db
                     .add_local_playlist_track(&playlist_id, &item.video_id, &json)
-                    .map_err(|e| err(format!("device playlist: {e}")))?)
+                    .map_err(|e| err(format!("device playlist: {e}")))?;
+                if added {
+                    st.emit("library-changed", json!({ "id": playlist_id }));
+                }
+                ok(added)
             }
             "remove_from_playlist" => {
                 let playlist_id = arg::<String>(&params, "playlistId")?;
@@ -630,6 +636,7 @@ impl Dispatch for Methods {
                     st.db
                         .remove_local_playlist_track(&playlist_id, &video_id)
                         .map_err(|e| err(format!("device playlist: {e}")))?;
+                    st.emit("library-changed", json!({ "id": playlist_id }));
                     return null();
                 }
                 let client = editable_playlist(st, &playlist_id).map_err(err)?;
@@ -804,6 +811,39 @@ impl Dispatch for Methods {
                 null()
             }
             "lastfm_status" => ok(ryotunes_core::lastfm::status(st)),
+
+            // --- downloads -------------------------------------------------------------------
+            "get_download_settings" => ok(self.downloads.settings()),
+            "set_download_settings" => {
+                ok(self.downloads.set_settings(arg(&params, "settings")?).map_err(err)?)
+            }
+            "get_downloads" => Ok(self.downloads.snapshot()),
+            "enqueue_download" => {
+                let video_id = arg::<String>(&params, "videoId")?;
+                let title = arg::<String>(&params, "title")?;
+                let artists = arg::<Option<String>>(&params, "artists")?.unwrap_or_default();
+                let thumbnail = arg::<Option<String>>(&params, "thumbnail")?.unwrap_or_default();
+                ok(self.downloads.enqueue(video_id, title, artists, thumbnail).map_err(err)?)
+            }
+            "cancel_download" => {
+                self.downloads.cancel(&arg::<String>(&params, "id")?).map_err(err)?;
+                null()
+            }
+            "retry_download" => {
+                ok(self.downloads.retry(&arg::<String>(&params, "id")?).map_err(err)?)
+            }
+            "clear_download_history" => {
+                self.downloads.clear_history().map_err(err)?;
+                null()
+            }
+            "open_download" => {
+                self.downloads.open(&arg::<String>(&params, "id")?).map_err(err)?;
+                null()
+            }
+            "open_download_folder" => {
+                self.downloads.open_folder().map_err(err)?;
+                null()
+            }
 
             // --- client-side / not ported ----------------------------------------------------
             "frontend_ready" | "open_mini" | "close_mini" | "login_webview" => Err(ErrorBody {
@@ -1094,7 +1134,7 @@ async fn get_library(st: &Arc<AppState>) -> Result<Value, ErrorBody> {
         items.insert(at, smart_playlist_card(REDISCOVER_ID, "Rediscover", &rediscover));
     }
     let device: Vec<BrowseItem> =
-        st.db.local_playlists().into_iter().map(local_playlist_card).collect();
+        st.db.local_playlists().into_iter().map(|row| local_playlist_card(st, row)).collect();
     let smart_count = usize::from(!songs.is_empty())
         + usize::from(!recent.is_empty())
         + usize::from(!rediscover.is_empty());
@@ -1335,6 +1375,14 @@ async fn set_playlist_cover(st: &Arc<AppState>, params: &Value) -> Result<Value,
         if let Some(old) = stored {
             let _ = std::fs::remove_file(old);
         }
+        // Device playlists never had a YouTube copy to fall back on; hand back the automatic
+        // collage/first-cover so the UI redraws the default the instant the override is removed.
+        let thumbnail = if is_local_playlist_id(&playlist_id) {
+            thumbnail.or_else(|| local_playlist_artwork(st, &playlist_id))
+        } else {
+            thumbnail
+        };
+        st.emit("library-changed", json!({ "id": playlist_id }));
         return ok(CoverResult { cover: None, thumbnail });
     }
 
@@ -1372,6 +1420,7 @@ async fn set_playlist_cover(st: &Arc<AppState>, params: &Value) -> Result<Value,
     let dest = dest.to_string_lossy().to_string();
     st.db.set_setting(&key, &dest);
     sync_cover(st, &playlist_id, dest.clone());
+    st.emit("library-changed", json!({ "id": playlist_id }));
     ok(CoverResult { cover: Some(dest), thumbnail: None })
 }
 
@@ -1558,7 +1607,46 @@ fn smart_playlist_page(title: &str, subtitle: String, items: Vec<SongItem>) -> P
     }
 }
 
-fn local_playlist_card(row: LocalPlaylist) -> BrowseItem {
+/// The client-only marker that packs a device playlist's four-cover mosaic into one thumbnail
+/// string. The shared native `Artwork.qml` splits on this prefix and renders the JSON array as a
+/// 2x2 grid; it is never a real URL, never sent to a provider, and never fetched over the network.
+const COLLAGE_PREFIX: &str = "ryotunes-collage:";
+
+/// Automatic artwork for a device playlist from its songs' thumbnails, taken in playlist order.
+/// Exactly four distinct non-empty covers become a 2x2 collage marker; one to three collapse to
+/// the first cover; none yields nothing. This is the single selection rule shared by the library
+/// card and the playlist page.
+fn auto_playlist_artwork<I, S>(thumbnails: I) -> Option<String>
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<str>,
+{
+    let mut covers: Vec<String> = Vec::new();
+    for thumb in thumbnails {
+        let thumb = thumb.as_ref().trim();
+        if thumb.is_empty() || covers.iter().any(|c| c == thumb) {
+            continue;
+        }
+        covers.push(thumb.to_owned());
+        if covers.len() == 4 {
+            break;
+        }
+    }
+    match covers.len() {
+        0 => None,
+        4 => Some(format!("{COLLAGE_PREFIX}{}", serde_json::to_string(&covers).ok()?)),
+        _ => covers.into_iter().next(),
+    }
+}
+
+/// [`auto_playlist_artwork`] for a stored device playlist, read straight from the database so a
+/// card or a cover reset reflects the current tracks without deserializing every song.
+fn local_playlist_artwork(state: &Arc<AppState>, id: &str) -> Option<String> {
+    auto_playlist_artwork(state.db.local_playlist_track_thumbnails(id))
+}
+
+fn local_playlist_card(state: &Arc<AppState>, row: LocalPlaylist) -> BrowseItem {
+    let thumbnail = local_playlist_artwork(state, &row.id);
     BrowseItem {
         kind: "playlist",
         id: row.id,
@@ -1568,7 +1656,7 @@ fn local_playlist_card(row: LocalPlaylist) -> BrowseItem {
             row.track_count,
             if row.track_count == 1 { "" } else { "s" }
         )),
-        thumbnail: None,
+        thumbnail,
         duration: None,
         artist_runs: Vec::new(),
         play_count: None,
@@ -1598,7 +1686,7 @@ fn local_playlist_page(state: &Arc<AppState>, id: &str) -> Option<PlaylistPage> 
             items.len(),
             if items.len() == 1 { "" } else { "s" }
         )),
-        thumbnail: items.iter().find_map(|song| song.thumbnail.clone()),
+        thumbnail: auto_playlist_artwork(items.iter().filter_map(|song| song.thumbnail.as_deref())),
         description: None,
         privacy: None,
         cover: custom_cover(state, id),
@@ -1855,5 +1943,24 @@ mod tests {
     fn listen_together_url_must_be_a_websocket() {
         assert!(normalize_lt_server_url("wss://example.com/room").is_ok());
         assert!(normalize_lt_server_url("https://example.com").is_err());
+    }
+
+    #[test]
+    fn playlist_artwork_collages_four_distinct_covers_else_first_or_none() {
+        // Nothing usable -> no artwork at all.
+        assert_eq!(auto_playlist_artwork(Vec::<String>::new()), None);
+        assert_eq!(auto_playlist_artwork(vec!["", "   "]), None);
+        // One to three distinct covers collapse to the first, in playlist order, trimmed & deduped.
+        assert_eq!(
+            auto_playlist_artwork(vec![" a ", "a", "", "b", "c"]),
+            Some("a".to_string()),
+            "fewer than four distinct covers use the first"
+        );
+        // Exactly four distinct covers become the collage marker; order preserved, extras dropped.
+        assert_eq!(
+            auto_playlist_artwork(vec!["a", "a", "b", "c", "d", "e"]),
+            Some(r#"ryotunes-collage:["a","b","c","d"]"#.to_string()),
+            "four distinct covers form the 2x2 collage; duplicates and extras are ignored"
+        );
     }
 }

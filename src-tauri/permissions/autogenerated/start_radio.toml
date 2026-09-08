@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-start-radio"
+description = "Enables the start_radio command without any pre-configured scope."
+commands.allow = ["start_radio"]
+
+[[permission]]
+identifier = "deny-start-radio"
+description = "Denies the start_radio command without any pre-configured scope."
+commands.deny = ["start_radio"]

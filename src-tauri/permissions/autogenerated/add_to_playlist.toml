@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-add-to-playlist"
+description = "Enables the add_to_playlist command without any pre-configured scope."
+commands.allow = ["add_to_playlist"]
+
+[[permission]]
+identifier = "deny-add-to-playlist"
+description = "Denies the add_to_playlist command without any pre-configured scope."
+commands.deny = ["add_to_playlist"]

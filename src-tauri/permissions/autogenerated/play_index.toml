@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-play-index"
+description = "Enables the play_index command without any pre-configured scope."
+commands.allow = ["play_index"]
+
+[[permission]]
+identifier = "deny-play-index"
+description = "Denies the play_index command without any pre-configured scope."
+commands.deny = ["play_index"]

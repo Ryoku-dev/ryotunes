@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-import-playlist-file"
+description = "Enables the import_playlist_file command without any pre-configured scope."
+commands.allow = ["import_playlist_file"]
+
+[[permission]]
+identifier = "deny-import-playlist-file"
+description = "Denies the import_playlist_file command without any pre-configured scope."
+commands.deny = ["import_playlist_file"]

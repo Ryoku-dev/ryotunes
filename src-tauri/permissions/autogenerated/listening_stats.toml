@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-listening-stats"
+description = "Enables the listening_stats command without any pre-configured scope."
+commands.allow = ["listening_stats"]
+
+[[permission]]
+identifier = "deny-listening-stats"
+description = "Denies the listening_stats command without any pre-configured scope."
+commands.deny = ["listening_stats"]

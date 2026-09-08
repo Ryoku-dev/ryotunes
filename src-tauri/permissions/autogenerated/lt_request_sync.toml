@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-lt-request-sync"
+description = "Enables the lt_request_sync command without any pre-configured scope."
+commands.allow = ["lt_request_sync"]
+
+[[permission]]
+identifier = "deny-lt-request-sync"
+description = "Denies the lt_request_sync command without any pre-configured scope."
+commands.deny = ["lt_request_sync"]

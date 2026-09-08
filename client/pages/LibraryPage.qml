@@ -78,6 +78,17 @@ Item {
         function onProviderChanged(): void { page.load(); }
     }
 
+    // A device-playlist mutation can change a playlist's auto cover: silently re-read the playlist
+    // collection (only playlists carry auto collages; albums/artists have provider art) so the cards
+    // follow without the loading overlay flashing over the grid.
+    Connections {
+        target: Daemon
+        function onEvent(name: string, data: var): void {
+            if (name === "library-changed")
+                page.refreshPlaylists();
+        }
+    }
+
     function selectTab(k) {
         page.tab = k;
         if (page.opened.indexOf(k) < 0)
@@ -110,6 +121,14 @@ Item {
             page.errorMsg = (e && e.message) ? e.message : String(e);
             page.loading = false;
         });
+    }
+
+    function refreshPlaylists() {
+        if (page.spotifyGate)
+            return;
+        Daemon.call("get_library")
+            .then((r) => { page.playlists = r || []; })
+            .catch(() => {});
     }
 
     function createPlaylist() {

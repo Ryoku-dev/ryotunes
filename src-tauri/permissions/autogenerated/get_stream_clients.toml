@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-get-stream-clients"
+description = "Enables the get_stream_clients command without any pre-configured scope."
+commands.allow = ["get_stream_clients"]
+
+[[permission]]
+identifier = "deny-get-stream-clients"
+description = "Denies the get_stream_clients command without any pre-configured scope."
+commands.deny = ["get_stream_clients"]

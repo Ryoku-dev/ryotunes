@@ -48,6 +48,18 @@ The workspace separates the playback core from whoever renders it. Phase 1 of th
 
 The Tauri app and the daemon share the same data directory (`$XDG_DATA_HOME/dev.ryoku.ryotunes`); run one at a time until the cutover.
 
+### Native downloads
+
+`crates/ryotunesd/src/downloads.rs` owns a persistent download queue independently of the client. `client/Downloads.qml` mirrors the `downloads` subscription snapshot and `downloads-changed` events; the player button, queue/history page and settings use dedicated `enqueue_download`, `get_downloads`, `cancel_download`, `retry_download`, `clear_download_history`, `open_download`, `open_download_folder`, `get_download_settings` and `set_download_settings` socket methods.
+
+- Settings and the latest 200 terminal records live in `downloads.json` under the daemon's data directory. Writes are serialized with queue mutations and use a synced temporary file plus atomic rename. Each job captures its file preferences at enqueue time.
+- Worker admission is bounded to 1–4 jobs (default 1), with at most 200 active/queued tracks. A reserved slot is held through cancellation until the subprocess is reaped; retries get a fresh attempt identity so an older task cannot complete a newer attempt.
+- yt-dlp runs via direct argv in a separate, lower-priority process group, with one fragment downloader and constrained FFmpeg threading. Config/plugin execution is disabled, output/error buffers are bounded, and a job has a finite timeout. Quit and SIGTERM stop admission, terminate whole process groups and await teardown. Queued/active downloads inhibit daemon idle exit even without a client.
+- Downloads go to private staging directories beneath the destination. A successful exit and a nonempty completed audio file are required before a same-filesystem hard link atomically publishes the final file without replacing an existing file. Generated artist directories cannot resolve outside the chosen folder. Clearing history never removes music files.
+- With metadata embedding on, `crates/ryotunesd/src/download_media.rs` enriches staged audio via `lofty` and saves image and lyric companions before publication. Artwork uses a trusted thumbnail or a strictly matched iTunes fallback; lyrics reuse the core cache/providers with a bounded lookup. Providers receive track details including title, artist, duration and provider identifiers. For local playback, core lyrics checks `.lrc`, embedded lyrics, then `.txt` before network/cache, enabling offline lyrics. The worker retains its slot throughout enrichment; cancelled jobs never publish. Audio and companions share the final filename stem and collision suffix, using no-overwrite hard links and validated regular staging files. Missing metadata produces non-fatal per-job warnings.
+- Restart recovers interrupted jobs as retryable failures, not automatic new network activity. Spotify downloads are explicitly labelled YouTube search matches; they do not export the Spotify stream or promise the same recording. SoundCloud links come from the existing provider client; protected/unavailable content produces a visible job error.
+- `client/Daemon.qml` recreates its socket while disconnected: Quickshell retains a failed initial native socket, so setting `connected = true` repeatedly on that object is insufficient. The reconnect timer stops entirely while connected.
+
 ## Background playback
 
 Closing the main window is not the same operation as quitting the application.
@@ -67,6 +79,8 @@ Search loads results incrementally in bounded pages, deduplicates them and prese
 ## Artwork
 
 Large artwork paths reuse already available thumbnails, prepare higher-resolution images before swapping them into view, reject stale track requests, and keep the cache bounded. The goal is to avoid blank artwork and decode spikes during queue/Now Playing changes.
+
+Device playlists carry no provider thumbnail, so the daemon derives one from their songs (`crates/ryotunesd/src/methods.rs`): the first four *distinct* non-empty song covers in playlist order. Four distinct covers become one thumbnail string — the literal `ryotunes-collage:` prefix followed by a JSON array of exactly four URLs; one to three collapse to the first cover; an empty playlist carries none. That marker is rendered only by the shared native `Artwork.qml` as a 2x2 grid — it is never a real URL, never sent to a provider, and download artwork resolution rejects it as an untrusted host. A user's custom cover overrides the automatic art, and clearing it returns the automatic art without contacting YouTube Music. The art is recomputed on every fetch, so add/remove/reorder shows up on the next `get_library`/`get_playlist`; a `library-changed` event refreshes cards, the page header and the sidebar live.
 
 ## Linux / Ryoku lifecycle
 

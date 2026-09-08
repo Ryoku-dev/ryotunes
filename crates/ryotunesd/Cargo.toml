@@ -12,7 +12,7 @@ path = "src/main.rs"
 [dependencies]
 serde = { workspace = true }
 serde_json = { workspace = true }
-tokio = { workspace = true, features = ["net", "io-util", "signal", "fs"] }
+tokio = { workspace = true, features = ["net", "io-util", "signal", "fs", "process"] }
 tracing = { workspace = true }
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 anyhow = { workspace = true }
@@ -24,6 +24,7 @@ ryotunes-protocol = { workspace = true }
 innertube = { path = "../innertube" }
 player = { path = "../player" }
 libc = "0.2"
+parking_lot = "0.12"
 gtk = "0.18"
 glib = "0.18"
 webkit2gtk = { version = "2.0", features = ["v2_40"] }
@@ -38,3 +39,7 @@ url = "2"
 # System tray via StatusNotifierItem. `ksni` speaks the protocol directly (left-click `Activate`
 # works, unlike libappindicator), the same reason `src-tauri/src/tray.rs` uses it on Linux.
 ksni = "0.3"
+# Download enrichment (`download_media`) embeds cover art + lyrics into the finished audio and reads
+# its real duration. Same version core pins so the workspace resolves one `lofty` (in the lock
+# already via core, so `--locked` is unaffected).
+lofty = "0.22.2"

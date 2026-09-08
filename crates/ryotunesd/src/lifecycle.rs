@@ -38,15 +38,20 @@ struct IdleTimer {
     deadline: Option<Instant>,
     playing: bool,
     clients: usize,
+    /// A queued or active download holds the daemon open exactly like playback or a subscriber:
+    /// closing the UI must never abandon a download in flight. Driven by [`Lifecycle::
+    /// downloads_busy_changed`] off the downloads manager's own active/queued count, so it never
+    /// borrows the subscriber count for this.
+    downloading: bool,
 }
 
 impl IdleTimer {
     fn new(grace: Duration) -> Self {
-        IdleTimer { grace, deadline: None, playing: false, clients: 0 }
+        IdleTimer { grace, deadline: None, playing: false, clients: 0, downloading: false }
     }
 
     fn eligible(&self) -> bool {
-        self.clients == 0 && !self.playing
+        self.clients == 0 && !self.playing && !self.downloading
     }
 
     /// Arm the deadline when newly idle (keeping an already-running deadline so the grace is not
@@ -63,6 +68,11 @@ impl IdleTimer {
 
     fn set_playing(&mut self, now: Instant, playing: bool) {
         self.playing = playing;
+        self.refresh(now);
+    }
+
+    fn set_downloading(&mut self, now: Instant, downloading: bool) {
+        self.downloading = downloading;
         self.refresh(now);
     }
 
@@ -118,6 +128,13 @@ impl Lifecycle {
     /// A subscribed client's connection ended.
     pub fn client_gone(self: &Arc<Self>) {
         self.apply(IdleTimer::client_gone);
+    }
+
+    /// The downloads manager has queued/active work, or has just drained to none. A busy manager
+    /// pins the daemon open across a UI close (a download that outlives its window), and clearing
+    /// it re-arms the idle grace like any other transition back to idle.
+    pub fn downloads_busy_changed(self: &Arc<Self>, busy: bool) {
+        self.apply(|t, now| t.set_downloading(now, busy));
     }
 
     /// Apply a transition under the lock and reconcile the timer: on a fresh arm (no deadline ->
@@ -197,6 +214,27 @@ mod tests {
         assert!(!t.expired(d1 - Duration::from_secs(1)));
         assert!(t.expired(d1));
         assert!(t.expired(d1 + Duration::from_secs(5)));
+    }
+
+    #[test]
+    fn a_download_in_flight_holds_the_daemon_open() {
+        let grace = Duration::from_secs(300);
+        let t0 = Instant::now();
+        let mut t = IdleTimer::new(grace);
+
+        // Idle at startup with a deadline armed, then a download is enqueued: the daemon must not
+        // idle-exit while it runs, even with no subscriber and nothing playing (closing the UI
+        // must never abandon a download).
+        t.refresh(t0);
+        assert!(t.deadline.is_some());
+        t.set_downloading(t0 + Duration::from_secs(5), true);
+        assert!(t.deadline.is_none(), "an active download cancels the idle deadline");
+        assert!(!t.expired(t0 + grace * 2), "no elapsed time expires it while downloading");
+
+        // The queue drains: idle again, so the grace re-arms from that instant.
+        let t1 = t0 + Duration::from_secs(30);
+        t.set_downloading(t1, false);
+        assert_eq!(t.deadline.expect("re-armed once downloads drain"), t1 + grace);
     }
 
     #[test]

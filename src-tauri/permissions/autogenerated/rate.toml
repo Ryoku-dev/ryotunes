@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-rate"
+description = "Enables the rate command without any pre-configured scope."
+commands.allow = ["rate"]
+
+[[permission]]
+identifier = "deny-rate"
+description = "Denies the rate command without any pre-configured scope."
+commands.deny = ["rate"]

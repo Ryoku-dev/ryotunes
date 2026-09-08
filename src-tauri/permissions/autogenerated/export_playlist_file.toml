@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-export-playlist-file"
+description = "Enables the export_playlist_file command without any pre-configured scope."
+commands.allow = ["export_playlist_file"]
+
+[[permission]]
+identifier = "deny-export-playlist-file"
+description = "Denies the export_playlist_file command without any pre-configured scope."
+commands.deny = ["export_playlist_file"]

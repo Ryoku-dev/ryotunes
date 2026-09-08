@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-lt-approve-join"
+description = "Enables the lt_approve_join command without any pre-configured scope."
+commands.allow = ["lt_approve_join"]
+
+[[permission]]
+identifier = "deny-lt-approve-join"
+description = "Denies the lt_approve_join command without any pre-configured scope."
+commands.deny = ["lt_approve_join"]

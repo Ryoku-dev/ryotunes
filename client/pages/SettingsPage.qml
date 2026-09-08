@@ -49,6 +49,7 @@ Item {
     readonly property var sections: [
         { k: "general", l: "General", jp: "全般" },
         { k: "playback", l: "Playback", jp: "再生" },
+        { k: "downloads", l: "Downloads", jp: "保存" },
         { k: "data", l: "Data & storage", jp: "保存" },
         { k: "account", l: "Account", jp: "鍵" },
         { k: "local", l: "Local music", jp: "音源" },
@@ -56,7 +57,11 @@ Item {
         { k: "about", l: "About", jp: "力" }
     ]
 
-    Component.onCompleted: page.load()
+    Component.onCompleted: {
+        page.load();
+        var requested = Router.current && Router.current.params ? Router.current.params.section : "";
+        if (page.sections.some((s) => s.k === requested)) page.selectSection(requested);
+    }
 
     // --- data ------------------------------------------------------------------------------
     function load() {
@@ -75,6 +80,7 @@ Item {
 
     function selectSection(k) {
         page.section = k;
+        scroll.contentY = 0;
         if (k === "local" && !page.foldersLoaded) page.scanFolders();
         if (k === "account") page.loadIdentities();
         if (k === "general") page.loadDiscord();
@@ -373,6 +379,14 @@ Item {
                         radius: Style.radius
                         color: railItem.current ? Tokens.bone : railHover.hovered ? Tokens.tint10 : "transparent"
 
+                        activeFocusOnTab: true
+                        Accessible.role: Accessible.Button
+                        Accessible.name: railItem.modelData.l + " settings"
+                        Accessible.onPressAction: page.selectSection(railItem.modelData.k)
+                        Keys.onReturnPressed: page.selectSection(railItem.modelData.k)
+                        Keys.onSpacePressed: page.selectSection(railItem.modelData.k)
+                        border.width: activeFocus ? 2 : 0
+                        border.color: Tokens.ink
                         RowLayout {
                             anchors.fill: parent
                             anchors.leftMargin: Style.sp(2.5)
@@ -433,6 +447,7 @@ Item {
                     if (page.section === "general") h = generalCol.implicitHeight;
                     else if (page.section === "playback") h = playbackCol.implicitHeight;
                     else if (page.section === "data") h = dataCol.implicitHeight;
+                    else if (page.section === "downloads") h = downloadSettingsLoader.item ? downloadSettingsLoader.item.implicitHeight : 0;
                     else if (page.section === "account") h = accountCol.implicitHeight;
                     else if (page.section === "local") h = localCol.implicitHeight;
                     else if (page.section === "playlists") h = playlistsCol.implicitHeight;
@@ -844,6 +859,14 @@ Item {
                             }
                         }
                     }
+                }
+
+                Loader {
+                    id: downloadSettingsLoader
+                    active: page.section === "downloads"
+                    visible: active
+                    anchors { left: parent.left; right: parent.right; top: parent.top; leftMargin: Style.sp(6); rightMargin: Style.sp(6); topMargin: Style.sp(4) }
+                    source: "DownloadSettings.qml"
                 }
 
                 // ─────────────────────────── DATA ───────────────────────────

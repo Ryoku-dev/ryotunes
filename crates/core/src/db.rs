@@ -716,6 +716,26 @@ impl Db {
         out
     }
 
+    /// The first four distinct, nonempty artwork URLs in playlist order. Extract only the
+    /// thumbnail field and bound the result in SQL so library cards never allocate every
+    /// song's artwork just to draw one cover.
+    pub fn local_playlist_track_thumbnails(&self, playlist_id: &str) -> Vec<String> {
+        let conn = self.0.lock().unwrap();
+        let mut out = Vec::new();
+        if let Ok(mut stmt) = conn.prepare(
+            "SELECT trim(json_extract(song_json, '$.thumbnail')) AS thumbnail
+             FROM local_playlist_tracks
+             WHERE playlist_id = ?1 AND json_type(song_json, '$.thumbnail') = 'text'
+               AND length(trim(json_extract(song_json, '$.thumbnail'))) > 0
+             GROUP BY thumbnail ORDER BY MIN(position) ASC LIMIT 4",
+        ) {
+            if let Ok(rows) = stmt.query_map([playlist_id], |r| r.get::<_, Option<String>>(0)) {
+                out.extend(rows.flatten().flatten());
+            }
+        }
+        out
+    }
+
     fn local_playlist_memberships(&self) -> std::collections::HashMap<String, Vec<String>> {
         let conn = self.0.lock().unwrap();
         let mut out: std::collections::HashMap<String, Vec<String>> =
@@ -989,6 +1009,24 @@ mod tests {
         d.delete_local_playlist(id).unwrap();
         assert!(d.local_playlist(id).is_none());
         assert!(!d.playlist_memberships().contains_key("b"));
+    }
+
+    #[test]
+    fn device_playlist_thumbnails_extract_in_order_and_skip_missing() {
+        let d = db();
+        let id = "RYOTUNES_LOCAL_PLAYLIST:art";
+        d.create_local_playlist(id, "Art mix").unwrap();
+        d.add_local_playlist_track(id, "a", r#"{"video_id":"a","thumbnail":"https://img/a"}"#)
+            .unwrap();
+        // A track whose SongItem carried no thumbnail is skipped, never surfaced as an empty slot.
+        d.add_local_playlist_track(id, "b", r#"{"video_id":"b"}"#).unwrap();
+        d.add_local_playlist_track(id, "c", r#"{"video_id":"c","thumbnail":"https://img/c"}"#)
+            .unwrap();
+        assert_eq!(
+            d.local_playlist_track_thumbnails(id),
+            vec!["https://img/a".to_string(), "https://img/c".to_string()],
+            "json_extract pulls thumbnails in playlist order and drops tracks without one"
+        );
     }
 
     #[test]

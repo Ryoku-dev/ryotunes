@@ -1,4 +1,6 @@
 mod app;
+mod download_media;
+mod downloads;
 mod gtk_thread;
 mod js;
 mod lifecycle;
@@ -41,8 +43,10 @@ fn main() -> anyhow::Result<()> {
         // and nothing playing must not linger past the grace.
         let lifecycle = lifecycle::Lifecycle::new(quit_tx.clone());
 
+        let paths = app::paths();
+        let data_dir = paths.data_dir.clone();
         let (state, events, media_rx, lt_rx) =
-            app::build(app::paths(), sink.clone(), js, login, &tokio::runtime::Handle::current())?;
+            app::build(paths, sink.clone(), js, login, &tokio::runtime::Handle::current())?;
         app::spawn_pumps(state.clone(), events, media_rx, lt_rx, sink.clone(), lifecycle.clone());
         tray::spawn(state.clone(), quit_tx.clone(), sink.clone());
 
@@ -59,16 +63,39 @@ fn main() -> anyhow::Result<()> {
             });
         }
 
+        // The downloads subsystem shares the app data dir for its durable queue/history, reuses the
+        // core SoundCloud client to resolve `sc:track:` permalinks, and reports queued/active work
+        // to the lifecycle so closing the UI never abandons a download in flight.
+        let downloads = downloads::Downloads::new(
+            sink.clone(),
+            state.soundcloud.clone(),
+            data_dir,
+            lifecycle.clone(),
+            Some(state.clone()),
+        )?;
+
         let server = server::Server::bind(&path, sink.clone(), lifecycle)?;
-        let methods = Arc::new(methods::Methods { state: state.clone(), quit: quit_tx });
+        let methods = Arc::new(methods::Methods {
+            state: state.clone(),
+            quit: quit_tx,
+            downloads: downloads.clone(),
+        });
+        // A `systemctl stop` (or any `kill`) sends SIGTERM: handle it exactly like ctrl_c / an
+        // explicit quit so the awaited teardown below runs — cancelling and reaping every download
+        // process group — rather than leaving that to the runtime `Drop`.
+        let mut sigterm = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+            .expect("install SIGTERM handler");
         tokio::select! {
             _ = server.run(methods) => {}
             _ = quit_rx.recv() => {}
             _ = tokio::signal::ctrl_c() => {}
+            _ = sigterm.recv() => {}
         }
         // Explicit teardown: stop mpv, flush the resume position, unregister MPRIS, drop Discord and
         // leave any Listen Together room — exactly what `main_window::request_quit` runs today.
-        state.shutdown_for_quit().await;
+        // Reap downloads alongside playback teardown; neither subsystem waits for the other before
+        // it stops accepting work.
+        tokio::join!(downloads.shutdown(), state.shutdown_for_quit());
         Ok::<(), anyhow::Error>(())
     })?;
 

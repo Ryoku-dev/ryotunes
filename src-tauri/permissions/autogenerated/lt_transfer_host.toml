@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-lt-transfer-host"
+description = "Enables the lt_transfer_host command without any pre-configured scope."
+commands.allow = ["lt_transfer_host"]
+
+[[permission]]
+identifier = "deny-lt-transfer-host"
+description = "Denies the lt_transfer_host command without any pre-configured scope."
+commands.deny = ["lt_transfer_host"]

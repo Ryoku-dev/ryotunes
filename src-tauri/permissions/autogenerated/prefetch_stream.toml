@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-prefetch-stream"
+description = "Enables the prefetch_stream command without any pre-configured scope."
+commands.allow = ["prefetch_stream"]
+
+[[permission]]
+identifier = "deny-prefetch-stream"
+description = "Denies the prefetch_stream command without any pre-configured scope."
+commands.deny = ["prefetch_stream"]

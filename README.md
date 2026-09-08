@@ -77,10 +77,25 @@ During background playback, the expensive visible WebKit surface can be **destro
 | **Now Playing** | Artwork-first playback surface with queue, metadata and lyrics access |
 | **Lyrics** | Synced lyrics with click-to-seek and mini-player follow mode |
 | **Queue** | Manual queue control plus radio / continuation behaviour |
+| **Downloads (native client)** | One-click audio downloads beside the heart, a bounded background queue, persistent history and configurable file preferences |
 | **Mini-player** | A separate compact Ryoku surface with its own exact Hyprland title and independent geometry |
 | **Integrations** | MPRIS, hardware media keys, tray, Last.fm, configurable Discord Rich Presence and optional Listen Together |
 
 ---
+## Download music in the native client
+
+Click the **download arrow beside the heart** in the player to start saving the current track immediately. The icon shows progress, then a check mark when the file is saved. Clicking an active or completed download opens **Downloads** in the sidebar; failed and cancelled downloads can be retried.
+
+To save an entire album, open its **⋯ menu → Download album**. This queues all downloadable tracks in album order, including any additional pages, regardless of the track filter. It uses the same saved preferences and worker limit as single-track downloads. The confirmation reports how many tracks are in Downloads and any unavailable tracks; a queue or connection error reports partial progress rather than claiming the whole album was added. Spotify albums still use labelled YouTube matches, not Spotify audio exports.
+
+**Settings › Downloads** controls the destination folder, Original / MP3 / Opus format, artist subfolders, embedded cover art & lyrics, and simultaneous workers. The default destination is your XDG Music folder's `Ryotunes/` directory (usually `~/Music/Ryotunes`), with original audio and **one worker**. You can choose up to four workers; additional tracks wait in a queue capped at 200. Save preferences explicitly. File preferences are captured when a track is queued; changing the worker limit changes admission immediately without interrupting running jobs.
+
+The Downloads page separates the live queue from the latest 200 history records, with cancel, retry and open-folder actions. Closing the window leaves downloads running. Quitting Ryotunes terminates and reaps its downloader workers; interrupted jobs remain in history for an explicit retry after restart. Clearing history never deletes music, and existing files are never overwritten.
+
+With **Embed cover art & lyrics** on (the default), downloads embed available artwork and plain lyrics where the audio format supports them, and save matching `.jpg`/`.png` artwork plus synced `.lrc` or plain `.txt` lyrics alongside the song. Ryotunes reads local `.lrc`, embedded lyrics, then `.txt` before consulting its network cache/providers, so saved lyrics work offline. Artwork uses the track thumbnail with a name-and-artist iTunes lookup fallback; lyrics reuse the existing providers, including LRCLIB. These services receive track metadata such as title, artist, duration and provider identifiers. Missing matches produce a non-fatal history note rather than failing the audio download. Existing songs are not backfilled or overwritten; download them again to add metadata.
+
+Downloads require **yt-dlp and FFmpeg** (included in the native source package's dependencies). YouTube and public SoundCloud tracks use their source links. **Spotify uses a labelled YouTube search match**, not an export of the Spotify stream, and the matched recording may differ. Local files, live radio, DRM-protected and unavailable tracks are not downloadable. Only download music you have permission to save.
+
 
 ## Ryoku integration
 

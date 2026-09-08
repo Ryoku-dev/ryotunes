@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-lt-suggest"
+description = "Enables the lt_suggest command without any pre-configured scope."
+commands.allow = ["lt_suggest"]
+
+[[permission]]
+identifier = "deny-lt-suggest"
+description = "Denies the lt_suggest command without any pre-configured scope."
+commands.deny = ["lt_suggest"]

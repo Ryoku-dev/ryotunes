@@ -186,7 +186,7 @@ Item {
                             source: {
                                 var m = { home: "HomePage", search: "SearchPage", library: "LibraryPage",
                                     playlist: "PlaylistPage", album: "AlbumPage", artist: "ArtistPage", list: "ListPage",
-                                    radio: "RadioPage", settings: "SettingsPage" };
+                                    radio: "RadioPage", downloads: "DownloadsPage", settings: "SettingsPage" };
                                 return m[pageStack.page] ? Qt.resolvedUrl("pages/" + m[pageStack.page] + ".qml") : "";
                             }
                         }

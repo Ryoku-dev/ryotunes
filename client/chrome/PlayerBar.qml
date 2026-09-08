@@ -166,6 +166,12 @@ Rectangle {
                 iconColor: Playback.rating === "like" ? Style.accent : Tokens.inkMuted
                 onClicked: root.toggleLike()
             }
+            DownloadButton {
+                visible: !!root.now
+                diameter: Style.sp(8)
+                iconSize: Style.fs.md
+                track: root.now
+            }
         }
 
         // the gap the centred transport floats over

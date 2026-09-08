@@ -85,6 +85,13 @@ fn forced_provider() -> Option<String> {
 
 /// Cache-through entry point for the `get_lyrics` command.
 pub async fn get_lyrics(state: &AppState, req: LyricsRequest) -> Option<Lyrics> {
+    // Local companions/tags take precedence over remote cache entries, including cached misses.
+    if let Some(path) = crate::local::song_path(&req.video_id) {
+        let path = std::path::PathBuf::from(path);
+        if let Ok(Some(lyrics)) = tokio::task::spawn_blocking(move || local_lyrics(&path)).await {
+            return Some(lyrics);
+        }
+    }
     let now = now_secs();
     let video_id = req.video_id.clone();
     let forced = forced_provider();
@@ -99,6 +106,41 @@ pub async fn get_lyrics(state: &AppState, req: LyricsRequest) -> Option<Lyrics> 
         state.db.put_lyrics(&video_id, json.as_deref(), now);
     }
     lyrics
+}
+
+/// Read downloaded companions before querying providers. No network is needed for local lyrics.
+fn local_lyrics(audio: &std::path::Path) -> Option<Lyrics> {
+    use lofty::file::TaggedFileExt;
+    use lofty::tag::ItemKey;
+    use std::io::Read;
+
+    fn companion(path: &std::path::Path) -> Option<String> {
+        const LIMIT: u64 = 512 * 1024;
+        let metadata = std::fs::symlink_metadata(path).ok()?;
+        if !metadata.is_file() || metadata.len() > LIMIT {
+            return None;
+        }
+        let mut text = String::new();
+        std::fs::File::open(path).ok()?.take(LIMIT + 1).read_to_string(&mut text).ok()?;
+        (text.len() as u64 <= LIMIT).then_some(text)
+    }
+
+    if let Some(text) = companion(&audio.with_extension("lrc")) {
+        if let Some(lyrics) = from_parsed("Local LRC", parse_lrc(&text)) {
+            return Some(lyrics);
+        }
+    }
+    if let Ok(tagged) = lofty::probe::Probe::open(audio).and_then(|probe| probe.read()) {
+        for tag in tagged.tags() {
+            if let Some(lyrics) =
+                plain_from_text(tag.get_string(&ItemKey::Lyrics), "Embedded lyrics")
+            {
+                return Some(lyrics);
+            }
+        }
+    }
+    companion(&audio.with_extension("txt"))
+        .and_then(|text| plain_from_text(Some(&text), "Local lyrics"))
 }
 
 /// Run the provider chain. Second value: cache the outcome — true only when the track's duration
@@ -1127,6 +1169,37 @@ fn strip_xml_tags(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn local_companions_preserve_timing_and_reject_oversized_text() {
+        struct Temp(std::path::PathBuf);
+        impl Drop for Temp {
+            fn drop(&mut self) {
+                let _ = std::fs::remove_dir_all(&self.0);
+            }
+        }
+        let nonce =
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+        let directory = Temp(
+            std::env::temp_dir()
+                .join(format!("ryotunes-local-lyrics-{}-{nonce}", std::process::id())),
+        );
+        std::fs::create_dir(&directory.0).unwrap();
+        let audio = directory.0.join("Song (1).mp3");
+        std::fs::write(audio.with_extension("txt"), "Plain fallback").unwrap();
+        std::fs::write(audio.with_extension("lrc"), "[00:12.34] Synced words").unwrap();
+        let lyrics = local_lyrics(&audio).unwrap();
+        assert!(lyrics.synced);
+        assert_eq!(lyrics.lines[0].time_ms, Some(12340));
+        assert_eq!(lyrics.lines[0].text, "Synced words");
+        std::fs::write(audio.with_extension("lrc"), "invalid timing").unwrap();
+        assert_eq!(local_lyrics(&audio).unwrap().lines[0].text, "Plain fallback");
+        std::fs::File::create(audio.with_extension("txt"))
+            .unwrap()
+            .set_len(512 * 1024 + 1)
+            .unwrap();
+        assert!(local_lyrics(&audio).is_none());
+    }
 
     #[test]
     fn parses_basic_lrc() {

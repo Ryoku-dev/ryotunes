@@ -11,7 +11,7 @@ Singleton {
     id: root
 
     readonly property string socketPath: (Quickshell.env("XDG_RUNTIME_DIR") || "/tmp") + "/ryotunes/ryotunesd.sock"
-    readonly property bool connected: sock.connected
+    readonly property bool connected: !!root.sock && root.sock.connected
     property int protocol: 0
     property string daemonVersion: ""
 
@@ -25,10 +25,21 @@ Singleton {
     property var pending: ({})
     // Whether a subscription has been asked for; drives the re-subscribe on reconnect.
     property bool wantSubscribe: false
+    property var sock: null
+
+    function reconnect() {
+        if (root.connected) return;
+        // Quickshell retains the native socket after an initial connection error; assigning
+        // connected=true again does not reconnect it. A fresh Socket also clears stale framing.
+        if (root.sock) root.sock.destroy();
+        root.sock = socketComponent.createObject(root);
+        root.sock.connected = true;
+    }
+    Component.onCompleted: root.reconnect()
 
     function call(method, params) {
         return new Promise((resolve, reject) => {
-            if (!sock.connected) {
+            if (!root.connected) {
                 reject({ code: "disconnected", message: "ryotunesd is not connected" });
                 return;
             }
@@ -48,7 +59,7 @@ Singleton {
     }
 
     function _subscribe() {
-        if (!sock.connected)
+        if (!root.connected)
             return Promise.reject({ code: "disconnected", message: "ryotunesd is not connected" });
         root.call("hello").then(h => { root.protocol = h.protocol; root.daemonVersion = h.daemon; });
         const p = root.call("subscribe", { events: ["*"] });
@@ -69,20 +80,28 @@ Singleton {
         if (msg.error) p.reject(msg.error); else p.resolve(msg.result);
     }
 
-    Socket {
-        id: sock
-        path: root.socketPath
-        parser: SplitParser { onRead: line => root.handleLine(line) }
-        Component.onCompleted: connected = true
-        onConnectionStateChanged: {
-            if (connected) {
-                if (root.wantSubscribe) root._subscribe();
-            } else {
-                for (const id in root.pending) root.pending[id].reject({ code: "disconnected", message: "connection lost" });
-                root.pending = {};
-                retry.restart();
+    Component {
+        id: socketComponent
+        Socket {
+            id: connection
+            path: root.socketPath
+            parser: SplitParser { onRead: line => root.handleLine(line) }
+            onConnectionStateChanged: {
+                if (root.sock !== connection) return;
+                if (connection.connected) {
+                    if (root.wantSubscribe) root._subscribe();
+                } else {
+                    for (const id in root.pending) root.pending[id].reject({ code: "disconnected", message: "connection lost" });
+                    root.pending = {};
+                }
             }
         }
     }
-    Timer { id: retry; interval: 2000; onTriggered: if (!sock.connected) sock.connected = true }
+    Timer {
+        id: retry
+        interval: 2000
+        running: !root.connected
+        repeat: true
+        onTriggered: root.reconnect()
+    }
 }

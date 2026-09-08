@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-set-personal"
+description = "Enables the set_personal command without any pre-configured scope."
+commands.allow = ["set_personal"]
+
+[[permission]]
+identifier = "deny-set-personal"
+description = "Denies the set_personal command without any pre-configured scope."
+commands.deny = ["set_personal"]

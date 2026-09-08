@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-prev-track"
+description = "Enables the prev_track command without any pre-configured scope."
+commands.allow = ["prev_track"]
+
+[[permission]]
+identifier = "deny-prev-track"
+description = "Denies the prev_track command without any pre-configured scope."
+commands.deny = ["prev_track"]

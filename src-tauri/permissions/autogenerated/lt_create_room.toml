@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-lt-create-room"
+description = "Enables the lt_create_room command without any pre-configured scope."
+commands.allow = ["lt_create_room"]
+
+[[permission]]
+identifier = "deny-lt-create-room"
+description = "Denies the lt_create_room command without any pre-configured scope."
+commands.deny = ["lt_create_room"]

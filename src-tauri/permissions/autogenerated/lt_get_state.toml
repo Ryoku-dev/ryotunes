@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-lt-get-state"
+description = "Enables the lt_get_state command without any pre-configured scope."
+commands.allow = ["lt_get_state"]
+
+[[permission]]
+identifier = "deny-lt-get-state"
+description = "Denies the lt_get_state command without any pre-configured scope."
+commands.deny = ["lt_get_state"]

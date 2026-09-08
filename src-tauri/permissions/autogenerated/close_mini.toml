@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-close-mini"
+description = "Enables the close_mini command without any pre-configured scope."
+commands.allow = ["close_mini"]
+
+[[permission]]
+identifier = "deny-close-mini"
+description = "Denies the close_mini command without any pre-configured scope."
+commands.deny = ["close_mini"]

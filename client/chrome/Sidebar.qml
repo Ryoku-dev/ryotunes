@@ -64,6 +64,12 @@ Rectangle {
     Connections {
         target: Daemon
         function onSnapshot(snap): void { root.loadPlaylists(); }
+        // A device-playlist mutation (a track added or removed, the cover set or reset) can change a
+        // playlist's auto cover; re-read the rail so its tiles follow.
+        function onEvent(name: string, data: var): void {
+            if (name === "library-changed")
+                root.loadPlaylists();
+        }
     }
 
     color: "transparent"
@@ -78,8 +84,17 @@ Rectangle {
         property string label: ""
         property string icon: ""
         property string kana: ""
+        property int badge: 0
         property bool current: false
         signal activated()
+        activeFocusOnTab: enabled && visible
+        Accessible.role: Accessible.Button
+        Accessible.name: nr.label
+        Accessible.onPressAction: nr.activated()
+        Keys.onReturnPressed: nr.activated()
+        Keys.onSpacePressed: nr.activated()
+        border.width: activeFocus ? 2 : 0
+        border.color: Tokens.ink
 
         Layout.fillWidth: true
         implicitHeight: Style.sp(10)
@@ -117,6 +132,23 @@ Rectangle {
                 font.pixelSize: Style.fs.md
                 font.weight: nr.current ? Font.Medium : Font.Normal
                 elide: Text.ElideRight
+            }
+            Rectangle {
+                visible: nr.badge > 0
+                Layout.alignment: Qt.AlignVCenter
+                implicitHeight: Style.sp(4.5)
+                implicitWidth: Math.max(Style.sp(4.5), badgeText.implicitWidth + Style.sp(2))
+                radius: height / 2
+                color: Style.accentSoft
+                Text {
+                    id: badgeText
+                    anchors.centerIn: parent
+                    text: nr.badge > 99 ? "99+" : String(nr.badge)
+                    color: Style.accent
+                    font.family: Style.fontMono
+                    font.pixelSize: Style.fs.micro
+                    font.weight: Font.DemiBold
+                }
             }
             Text {
                 visible: Style.decorRich && nr.kana !== ""
@@ -389,6 +421,12 @@ Rectangle {
                         SubRow { label: "Artists"; tab: "artists"; current: root.activeTab === "artists"; onActivated: Router.replace("library", { tab: "artists" }) }
                         SubRow { label: "Playlists"; tab: "playlists"; current: root.activeTab === "playlists"; onActivated: Router.replace("library", { tab: "playlists" }) }
                         SubRow { label: "Local"; tab: "local"; current: root.activeTab === "local"; onActivated: Router.replace("library", { tab: "local" }) }
+                    }
+                    NavRow {
+                        label: "Downloads"; icon: "download"; kana: "保"
+                        badge: Downloads.activeCount + Downloads.queuedCount
+                        current: root.activePage === "downloads"
+                        onActivated: if (root.activePage !== "downloads") Router.push("downloads")
                     }
 
                     // SYSTEM

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-set-repeat"
+description = "Enables the set_repeat command without any pre-configured scope."
+commands.allow = ["set_repeat"]
+
+[[permission]]
+identifier = "deny-set-repeat"
+description = "Denies the set_repeat command without any pre-configured scope."
+commands.deny = ["set_repeat"]

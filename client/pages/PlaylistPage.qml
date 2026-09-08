@@ -66,6 +66,17 @@ Item {
         else filterTimer.restart();
     }
 
+    // A device-playlist mutation to THIS playlist (a track added or removed, the cover set or reset)
+    // refreshes the header art in place. A full reload would yank the list to the top and out of edit
+    // mode, and remove() already keeps the rows in step with its optimistic splice.
+    Connections {
+        target: Daemon
+        function onEvent(name: string, data: var): void {
+            if (name === "library-changed" && data && data.id === page.playlistId)
+                page.refreshMeta();
+        }
+    }
+
     function fetchSort(k) { return k === "plays" ? "default" : k; }
     function sortLabel() {
         for (var i = 0; i < page.sorts.length; i++)
@@ -122,6 +133,27 @@ Item {
                 page.errorMsg = (e && e.message) ? e.message : String(e);
                 page.loading = false;
             });
+    }
+
+    // Re-read only the head fields (cover override, auto thumbnail, title, meta) after a mutation,
+    // leaving items/continuation/scroll/sort/filter/edit state untouched. cover serialises as null
+    // once reset, so the hero falls through to the auto collage.
+    function refreshMeta() {
+        if (!page.playlistId)
+            return;
+        var reqId = page.playlistId;
+        Daemon.call("get_playlist", { id: page.playlistId })
+            .then((p) => {
+                if (!page.pl || page.playlistId !== reqId)
+                    return;
+                page.pl = Object.assign({}, page.pl, {
+                    cover: p.cover,
+                    thumbnail: p.thumbnail,
+                    subtitle: p.subtitle,
+                    title: p.title
+                });
+            })
+            .catch(() => {});
     }
 
     function scrollTop() {

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-ryoku-theme-tokens"
+description = "Enables the ryoku_theme_tokens command without any pre-configured scope."
+commands.allow = ["ryoku_theme_tokens"]
+
+[[permission]]
+identifier = "deny-ryoku-theme-tokens"
+description = "Denies the ryoku_theme_tokens command without any pre-configured scope."
+commands.deny = ["ryoku_theme_tokens"]

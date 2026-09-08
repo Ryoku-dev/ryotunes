@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-edit-playlist-details"
+description = "Enables the edit_playlist_details command without any pre-configured scope."
+commands.allow = ["edit_playlist_details"]
+
+[[permission]]
+identifier = "deny-edit-playlist-details"
+description = "Denies the edit_playlist_details command without any pre-configured scope."
+commands.deny = ["edit_playlist_details"]

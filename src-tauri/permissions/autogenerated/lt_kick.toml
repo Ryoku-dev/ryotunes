@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-lt-kick"
+description = "Enables the lt_kick command without any pre-configured scope."
+commands.allow = ["lt_kick"]
+
+[[permission]]
+identifier = "deny-lt-kick"
+description = "Denies the lt_kick command without any pre-configured scope."
+commands.deny = ["lt_kick"]

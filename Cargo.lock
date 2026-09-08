@@ -4830,6 +4830,8 @@ dependencies = [
  "javascriptcore-rs",
  "ksni",
  "libc",
+ "lofty",
+ "parking_lot",
  "player",
  "ryotunes-core",
  "ryotunes-protocol",

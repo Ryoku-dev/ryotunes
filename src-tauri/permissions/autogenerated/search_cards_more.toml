@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-search-cards-more"
+description = "Enables the search_cards_more command without any pre-configured scope."
+commands.allow = ["search_cards_more"]
+
+[[permission]]
+identifier = "deny-search-cards-more"
+description = "Denies the search_cards_more command without any pre-configured scope."
+commands.deny = ["search_cards_more"]
