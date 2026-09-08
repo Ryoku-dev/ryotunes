@@ -2,11 +2,12 @@
 <component type="desktop-application">
   <id>dev.ryoku.ryotunes</id>
   <name>Ryotunes</name>
-  <summary>A Ryoku-oriented desktop music client</summary>
+  <summary>Ryoku's main music app</summary>
   <metadata_license>CC0-1.0</metadata_license>
   <project_license>GPL-3.0-or-later</project_license>
   <description>
-    <p>Ryotunes combines YouTube Music browsing, local music, mpv playback, queue management, lyrics, MPRIS, Discord rich presence, Last.fm, and Ryoku palette integration in one desktop application.</p>
+    <p>Discover, stream, and enjoy your music collection with Ryotunes, Ryoku's main music app. Browse YouTube Music, play local tracks, build playlists, and pick up where you left off with personal recommendations and listening history.</p>
+    <p>A native interface brings together lyrics, downloads, queue management, desktop media controls, and Ryoku's colours in one place.</p>
   </description>
   <launchable type="desktop-id">ryotunes.desktop</launchable>
   <provides><binary>ryotunes</binary></provides>

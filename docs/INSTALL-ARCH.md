@@ -23,6 +23,11 @@ window is not enough — so the daemon and client load the new build.
 On Ryoku this is automated: `ryoku update` installs a newer published Ryotunes
 package, and `ryoku doctor --check` reports its availability without installing.
 
+Removing the package stops its user daemon and activation socket without deleting
+your music, personal library, or configuration. Reinstalling through `ryoku update`
+repairs stale activation state left by older packages; the app launcher and Super+J
+work immediately, without a relogin. Ordinary upgrades do not restart playback.
+
 ## Update inside Ryotunes
 
 Open **Settings → About → Check for new version** in either client. About shows the

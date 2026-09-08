@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Fixed app-launcher activation after removing and reinstalling Ryotunes: removal now stops the user units before deleting them, and a fresh install repairs stale socket state left by older packages. Ordinary upgrades still leave playback and self-update RPCs running.
+- Presented Ryotunes consistently as Ryoku's main music app in pacman, the app launcher, and software catalogues.
+
 ## v1.0.5 - 2026-09-08
 
 - Fixed Home snapping back to the top when a continuation page arrived: new shelves now append to a persistent Qt list model instead of replacing the model.

@@ -9,7 +9,7 @@ pkgrel=1
 # The published asset name stays epochless (scripts/build-arch-package.sh renames
 # makepkg's epoch-tagged output back to the ryotunes-<pkgver>-1-x86_64 contract).
 epoch=1
-pkgdesc='Ryotunes - resource-conscious Linux desktop music client'
+pkgdesc="Ryoku's main music app — discover, stream, and enjoy your music collection"
 url='https://github.com/ryoku-dev/ryotunes'
 arch=('x86_64')
 license=('GPL-3.0-or-later')

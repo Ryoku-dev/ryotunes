@@ -2,7 +2,7 @@
 Type=Application
 Name=Ryotunes
 GenericName=Music Player
-Comment=Ryoku-oriented desktop music client
+Comment=Ryoku's main music app — discover, stream, and enjoy your music collection
 Exec=ryotunes
 Icon=ryotunes
 Terminal=false
