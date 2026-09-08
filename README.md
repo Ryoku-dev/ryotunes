@@ -12,8 +12,7 @@
 <img alt="Audio only" src="https://img.shields.io/badge/playback-audio%20only-a86d58?style=flat-square">
 <br />
 <img alt="Rust" src="https://img.shields.io/badge/Rust-native%20core-2d3136?style=flat-square&logo=rust&logoColor=white">
-<img alt="Tauri 2" src="https://img.shields.io/badge/Tauri-2-2d3136?style=flat-square&logo=tauri&logoColor=white">
-<img alt="Svelte 5" src="https://img.shields.io/badge/Svelte-5-2d3136?style=flat-square&logo=svelte&logoColor=white">
+<img alt="Quickshell / QML" src="https://img.shields.io/badge/UI-Quickshell%20%2F%20QML-2d3136?style=flat-square">
 <img alt="libmpv" src="https://img.shields.io/badge/audio-libmpv-2d3136?style=flat-square">
 
 <br /><br />
@@ -30,44 +29,56 @@
 
 <p align="center"><sub>Repository artwork based on the live v2 Home layout and Ryoku visual language.</sub></p>
 
-### Replace an older Ryoku-packaged Ryotunes
+### The primary client: Quickshell / QML
 
-Quit Ryotunes completely (closing its window can leave playback running).
-Download the Arch `.pkg.tar.zst` and matching `.sha256` from
-[the latest release](https://github.com/ryoku-dev/ryotunes/releases/latest).
-Before removing anything, verify the download in its directory:
+**The QML client is the primary Ryotunes application.** It includes the YouTube,
+Spotify and SoundCloud provider selector, downloads, and Settings → About
+software-update controls. The Tauri/WebKitGTK interface is the legacy client,
+not its replacement. Package version numbers alone do not identify the client:
+the release package currently contains both.
+
+To update an existing installation, download the Arch package and matching
+checksum from [the latest release](https://github.com/ryoku-dev/ryotunes/releases/latest).
+Verify it before changing the installed application:
 
 ```bash
 sha256sum -c ryotunes-1.0.1-1-x86_64.pkg.tar.zst.sha256
 ```
 
-Use the filenames for the release you downloaded, and continue only if the
-checksum reports `OK`. To remove the old application:
+Use the filenames for your downloaded release and continue only on `OK`.
+Quit Ryotunes completely, then replace the package in one transaction; there is
+no need to uninstall the primary QML application first:
 
 ```bash
-sudo pacman -R ryotunes
-pacman -Q ryotunes
-```
-
-The second command should report that the package was not found. Removal does
-not delete your personal configuration or music. If pacman reports a dependency
-conflict, stop and resolve it; do not bypass dependency checks with `-Rdd`.
-
-To install the standalone replacement:
-
-```bash
+systemctl --user stop ryotunesd.service ryotunesd.socket
 sudo pacman -U ./ryotunes-1.0.1-1-x86_64.pkg.tar.zst
-pacman -Q ryotunes
+systemctl --user daemon-reload
+systemctl --user enable --now ryotunesd.socket
+ryotunes
 ```
 
-The v1.0.1 package reports `1:1.0.1-1`: the `1:` is a pacman epoch, which orders
-the standalone package above older distribution-numbered builds such as
-`2.5.1-1`. To uninstall without replacing it, stop after the removal commands.
+The package's `1:` pacman epoch orders `1:1.0.1-1` above distribution-numbered
+builds such as `2.5.1-1`; it does not mean QML is obsolete. Personal configuration
+and music are preserved. If pacman reports file conflicts, check ownership with
+`pacman -Qo /path/to/file` and back up unowned files before retrying. Do not use
+blanket `--overwrite` or bypass dependency checks with `-Rdd`.
 
-If installation reports files that already exist, do not use a blanket
-`--overwrite`. Check each path with `pacman -Qo /path/to/file`. Preserve unowned
-files in a backup outside `/usr/share/ryotunes`, then retry installation. If
-another package owns a conflicting file, resolve that package conflict first.
+**If the legacy interface opens:** quit it, then restart socket activation:
+
+```bash
+systemctl --user restart ryotunesd.socket
+systemctl --user start ryotunesd.service
+ryotunes-cli show
+```
+
+The launcher can fall back to Tauri when the daemon socket is missing or refuses
+connections. Verify **Settings → About → Client: QUICKSHELL / QML**, the provider
+selector and Downloads sidebar rather than judging the client by its version.
+Check for updates from that QML About page.
+
+To remove Ryotunes entirely instead of updating it, quit the app and run
+`sudo pacman -R ryotunes`. This removes both packaged clients, not just Tauri;
+do not use it to remove the legacy interface while keeping QML.
 
 
 ---
@@ -76,7 +87,7 @@ another package owns a conflicting file, resolve that package conflict first.
 
 Ryotunes is a Linux-first desktop music application shaped around the way **Ryoku + Hyprland** actually behave.
 
-The visible interface is Svelte/WebKitGTK. Playback is not. Rust and libmpv own the audio session, desktop integration, lifecycle, and media state. That separation lets Ryotunes stay visually rich while open and become dramatically quieter when the main interface is no longer needed.
+The primary interface is Quickshell / QML, connected to the Rust `ryotunesd` daemon. Rust and libmpv own playback, media state and provider integrations independently of the visible client. The older Svelte/WebKitGTK interface remains a separate legacy launch mode.
 
 <table>
 <tr>
@@ -95,7 +106,7 @@ Audio stays in **libmpv**, outside the frontend renderer. MPRIS, media keys, tra
 <td width="33%" valign="top">
 
 ### Quiet in the background
-During background playback, the expensive visible WebKit surface can be **destroyed / hibernated** while the native playback session continues.
+The QML window can close while the daemon continues playback or active downloads.
 
 </td>
 </tr>
@@ -170,10 +181,10 @@ For the shell itself:
 
 | Situation | Behaviour |
 |---|---|
-| Main window open | Full Svelte/WebKit UI is active |
-| Close while music is playing | Main WebKit can hibernate; native playback + MPRIS + tray remain alive |
-| Tray-only, nothing playing | Application exits after the bounded 5-minute idle period |
-| Reopen | Main WebView is reconstructed and resynchronized from native state |
+| Main window open | The primary Quickshell / QML client is connected to the daemon |
+| Close while music or downloads are active | The daemon continues the active work |
+| Idle with no client | The daemon exits after its idle grace period |
+| Reopen | The QML client reconnects to daemon-owned state |
 | Explicit **Quit** | Playback stops, MPRIS unregisters, media state clears and backend integrations shut down |
 
 This is why the UI is a **client of playback state**, not the transport clock that owns it.
@@ -187,20 +198,19 @@ flowchart LR
     R["Ryoku / Hyprland"] --> M["MPRIS · media keys · tray"]
     R --> T["live palette + window policy"]
 
-    M --> N["Tauri / Rust host"]
+    M --> N["ryotunesd / Rust daemon"]
     T --> N
 
     N --> P["native player crate"]
     P --> MPV["libmpv · audio only"]
 
-    N --> I["Innertube · library · integrations"]
-    N --> W["Svelte 5 / WebKitGTK"]
+    N --> I["YouTube · Spotify · SoundCloud · downloads"]
+    N <-->|"Unix socket RPC + events"| W["Quickshell / QML"]
 
     W --> U["Home · Search · Library"]
     W --> Q["Queue · Lyrics · Now Playing"]
     W --> MINI["Ryotunes Mini"]
 
-    W -. "hibernate while background playback continues" .-> N
 ```
 
 More detail: **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)**
@@ -212,9 +222,7 @@ More detail: **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)**
 Ryotunes treats background efficiency as an architectural requirement, not a cleanup pass.
 
 - event-driven playback state instead of a permanent 100 ms global frontend transport timer;
-- no always-on FFT / requestAnimationFrame loop for ordinary idle playback;
-- main WebKit hibernation during background playback;
-- stable Home DOM — physical Home virtualization is deliberately avoided;
+- daemon-owned playback and downloads independent of the visible QML window;
 - bounded artwork decode/cache paths;
 - native playback state remains authoritative across close, tray, mini-player and reopen transitions;
 - Internet Radio discovery is demand-driven — no startup fetch or permanent station polling loop.
@@ -227,9 +235,9 @@ The design rules behind the interface are documented in **[docs/DESIGN.md](docs/
 
 Ryotunes targets **x86_64 Ryoku, CachyOS and Arch-based systems**.
 
-The published package is **`ryotunes 1:<version>-1`**. The permanent `epoch=1` lets it upgrade a machine still on the legacy 2.x line; the downloaded file name stays epochless.
+The published package is **`ryotunes 1:<version>-1`**. Its permanent `epoch=1` orders it above distribution-numbered 2.x packages; filenames stay epochless. This numbering transition is not a switch from QML to Tauri.
 
-The normal user path is a **prebuilt package**. End users do not need Node, pnpm, Rust, Cargo or a local Tauri build.
+The normal user path is a **prebuilt package**. End users do not need Node, pnpm, Rust or Cargo.
 
 1. Open **[GitHub Releases](https://github.com/ryoku-dev/ryotunes/releases/latest)**.
 2. Download `ryotunes-<version>-1-x86_64.pkg.tar.zst` and its `.sha256`.
@@ -240,7 +248,7 @@ sha256sum -c ryotunes-<version>-1-x86_64.pkg.tar.zst.sha256
 sudo pacman -U ./ryotunes-<version>-1-x86_64.pkg.tar.zst
 ```
 
-The package installs a normal `/usr/bin/ryotunes` alongside `ryotunesd`, `ryotunes-cli` and the native client under `/usr/share/ryotunes`. After updating, **quit and reopen Ryotunes** (closing the window is not enough) so the daemon and client load the new build.
+The package installs `/usr/bin/ryotunes`, `ryotunesd`, `ryotunes-cli` and the primary QML client under `/usr/share/ryotunes`. Follow the update and socket-activation instructions above when replacing an existing installation.
 
 > [!TIP]
 > An AUR `-bin` recipe lives in [`aur/`](aur/). Public AUR publication is pending; the repository does not pretend the package is available there before it actually is.
@@ -259,8 +267,10 @@ crates/
   listen-protocol/    shared Listen Together protocol
   sync-server/        optional room relay
 
-src-tauri/             Tauri host, lifecycle, MPRIS, tray, integrations
-ui/                    SvelteKit / Svelte 5 interface
+client/                primary Quickshell / QML interface
+crates/ryotunesd/       playback daemon, provider RPC and downloads
+src-tauri/             legacy Tauri host
+ui/                    legacy Svelte / WebKitGTK interface
 integrations/          Ryoku / shell integration assets
 packaging/             Arch / Ryoku replacement packaging
 scripts/               diagnostics, release gates and packaging tools
@@ -334,6 +344,6 @@ Distributed under **[GPL-3.0-or-later](LICENSE)**.
 
 ### Music, shaped for the Ryoku desktop.
 
-<sub>Rust · Tauri 2 · Svelte 5 · WebKitGTK · libmpv · Hyprland</sub>
+<sub>Rust · Quickshell / QML · libmpv · Hyprland</sub>
 
 </div>
