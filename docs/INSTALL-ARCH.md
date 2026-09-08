@@ -4,13 +4,19 @@ Ryotunes is primarily distributed as a precompiled x86_64 pacman package. Normal
 
 ## Precompiled package
 
-After downloading the package from the matching GitHub release:
+The tag release pipeline publishes a prebuilt x86_64 package and its checksum,
+`ryotunes-X.Y.Z-1-x86_64.pkg.tar.zst` and the same filename with `.sha256` appended.
+Verify the checksum, then install with pacman (which preserves ownership and pacman's
+signature policy):
 
 ```bash
-sudo pacman -U ./ryotunes-v2.4-2.4.0-1-x86_64.pkg.tar.zst
+package=ryotunes-X.Y.Z-1-x86_64.pkg.tar.zst # Use the filename you downloaded.
+sha256sum -c "$package.sha256"
+sudo pacman -U "./$package"
 ```
 
-The Ryoku distribution bundle also carries the managed migration/rollback helper used when replacing the stock Ryoku entry point. Use that bundle on systems where Ryotunes is already provided by `ryoku-desktop`.
+On Ryoku this is automated: `ryoku update` installs a newer published Ryotunes
+package, and `ryoku doctor --check` reports its availability without installing.
 
 ## AUR binary package
 

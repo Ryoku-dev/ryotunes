@@ -33,7 +33,9 @@ makedepends=(
 install=ryotunes.install
 # makepkg's lto option feeds -flto to the C sources cc builds for the vendored sqlite and ring;
 # rustc links with lld, which cannot read GCC LTO objects (undefined sqlite3_* / ring_core_*).
-options=(!lto)
+# !debug: the release ships exactly the one contracted asset (ryotunes-<ver>-1-x86_64.pkg.tar.zst),
+# never a second ryotunes-debug-* package, regardless of the builder's makepkg.conf.
+options=(!lto !debug)
 source=()
 sha256sums=()
 

@@ -45,9 +45,6 @@ sed -i "0,/^version = \"$cur\"/s//version = \"$next\"/" Cargo.toml
 sed -i "s/\"version\": \"$cur\"/\"version\": \"$next\"/" src-tauri/tauri.conf.json ui/package.json
 cargo update --workspace --offline >/dev/null 2>&1 || cargo update --workspace >/dev/null
 sed -i "s/^pkgver=$cur$/pkgver=$next/; s/^pkgrel=[0-9]*$/pkgrel=1/" packaging/arch/PKGBUILD
-if grep -q "release invariants v$cur" scripts/check-release-invariants.py 2>/dev/null; then
-  sed -i "s/v$cur/v$next/g" scripts/check-release-invariants.py
-fi
 
 # Changelog: the Unreleased section becomes this release's, dated.
 python3 - "$next" <<'EOF'
@@ -62,7 +59,7 @@ s = s.replace("## Unreleased", f"## Unreleased\n\n## v{next_} - {today}", 1)
 open(p, "w").write(s)
 EOF
 
-git add Cargo.toml Cargo.lock src-tauri/tauri.conf.json ui/package.json packaging/arch/PKGBUILD CHANGELOG.md scripts/check-release-invariants.py 2>/dev/null || true
+git add Cargo.toml Cargo.lock src-tauri/tauri.conf.json ui/package.json packaging/arch/PKGBUILD CHANGELOG.md
 git commit -q -m "release: v$next"
 git tag -a "v$next" -m "Ryotunes v$next"
 echo "release: committed and tagged v$next"

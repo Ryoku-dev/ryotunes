@@ -1,16 +1,16 @@
 name: Release
 
 # One pipeline, keyed on a `v*` tag (cut with `scripts/release.sh patch --push`):
-#   1. verify: the tag's tree builds (every binary + the web UI) and the release
-#      invariants hold, on a stock Ubuntu runner, so a release never fails
-#      downstream in Ryoku's package build;
-#   2. publish: a GitHub release carrying a reproducible source tarball and its
-#      sha256, with the changelog section as the notes;
-#   3. announce: tell Ryoku Arch (`repository_dispatch: ryotunes-release`) so
-#      its own workflow bumps the [ryoku] package and publishes it to users.
-#      Needs the RYOKU_ARCH_TOKEN secret (a fine-grained PAT with contents:write
-#      on neur0map/ryoku-arch); without it, Ryoku's daily poll picks the
-#      release up instead.
+#   1. verify:  the tag's tree builds (every binary + the web UI) and the release
+#      invariants hold, on a stock Ubuntu runner, so a release never ships broken;
+#   2. package: an unprivileged `makepkg` in an Arch container builds the tag's
+#      exact source into the prebuilt pacman package
+#      `ryotunes-<version>-1-x86_64.pkg.tar.zst` (+ its sha256);
+#   3. publish: a normal (non-draft, non-prerelease) GitHub release carrying that
+#      package + sha256 and a reproducible source tarball + sha256, with the
+#      changelog section as the notes. External clients (Ryoku's `update` and
+#      `doctor`) read this release directly from GitHub; there is no downstream
+#      repository_dispatch.
 on:
   push:
     tags: ['v*']
@@ -90,9 +90,39 @@ jobs:
       - name: Unit tests
         run: cargo test --workspace --locked --exclude ryotunes
 
+  package:
+    name: Build the Arch package
+    needs: verify
+    runs-on: ubuntu-24.04
+    container:
+      image: archlinux:base-devel
+    steps:
+      # actions/checkout needs git present in the container before it can run.
+      - name: Install git for checkout
+        run: pacman -Syu --noconfirm --needed git
+
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.verify.outputs.tag }}
+
+      # The shared script is what a maintainer runs locally too
+      # (docker run ... archlinux:latest scripts/build-arch-package.sh); here it
+      # runs as root, sets up an unprivileged builder, and re-execs itself. It
+      # builds this checked-out tag's exact source, pins pkgrel to 1, and writes
+      # ryotunes-<version>-1-x86_64.pkg.tar.zst (+ .sha256) into dist/.
+      - name: Build the package
+        run: scripts/build-arch-package.sh "$GITHUB_WORKSPACE/dist"
+
+      - name: Upload the package
+        uses: actions/upload-artifact@v4
+        with:
+          name: arch-package
+          path: dist/ryotunes-*-x86_64.pkg.tar.zst*
+          if-no-files-found: error
+
   publish:
     name: Publish the GitHub release
-    needs: verify
+    needs: [verify, package]
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
@@ -100,8 +130,13 @@ jobs:
           ref: ${{ needs.verify.outputs.tag }}
           fetch-depth: 0
 
+      - name: Fetch the Arch package
+        uses: actions/download-artifact@v4
+        with:
+          name: arch-package
+          path: dist
+
       - name: Source tarball
-        id: tarball
         env:
           TAG: ${{ needs.verify.outputs.tag }}
           VERSION: ${{ needs.verify.outputs.version }}
@@ -112,8 +147,6 @@ jobs:
           # git archive is reproducible for a tag: same tree, same bytes.
           git archive --format=tar --prefix="$name/" "$TAG" | gzip -n > "dist/$name.tar.gz"
           ( cd dist && sha256sum "$name.tar.gz" > "$name.tar.gz.sha256" )
-          echo "sha256=$(cut -d' ' -f1 "dist/$name.tar.gz.sha256")" >> "$GITHUB_OUTPUT"
-          echo "asset=dist/$name.tar.gz" >> "$GITHUB_OUTPUT"
 
       - name: Release notes from the changelog
         env:
@@ -134,24 +167,12 @@ jobs:
           TAG: ${{ needs.verify.outputs.tag }}
         run: |
           set -euo pipefail
+          # A normal published (non-draft, non-prerelease, latest) release is what
+          # /repos/neur0map/ryotunes/releases/latest returns to Ryoku's clients.
+          assets=(dist/*.tar.gz dist/*.pkg.tar.zst dist/*.sha256)
           if gh release view "$TAG" >/dev/null 2>&1; then
-            gh release upload "$TAG" dist/*.tar.gz dist/*.sha256 --clobber
-            gh release edit "$TAG" --notes-file dist/NOTES.md
+            gh release upload "$TAG" "${assets[@]}" --clobber
+            gh release edit "$TAG" --draft=false --prerelease=false --latest --notes-file dist/NOTES.md
           else
-            gh release create "$TAG" dist/*.tar.gz dist/*.sha256 --title "Ryotunes $TAG" --notes-file dist/NOTES.md
+            gh release create "$TAG" "${assets[@]}" --latest --title "Ryotunes $TAG" --notes-file dist/NOTES.md
           fi
-
-      - name: Tell Ryoku Arch
-        if: ${{ env.RYOKU_ARCH_TOKEN != '' }}
-        env:
-          RYOKU_ARCH_TOKEN: ${{ secrets.RYOKU_ARCH_TOKEN }}
-          TAG: ${{ needs.verify.outputs.tag }}
-          VERSION: ${{ needs.verify.outputs.version }}
-          SHA256: ${{ steps.tarball.outputs.sha256 }}
-        run: |
-          curl -sSf -X POST \
-            -H "Authorization: Bearer $RYOKU_ARCH_TOKEN" \
-            -H "Accept: application/vnd.github+json" \
-            https://api.github.com/repos/neur0map/ryoku-arch/dispatches \
-            -d "{\"event_type\":\"ryotunes-release\",\"client_payload\":{\"tag\":\"$TAG\",\"version\":\"$VERSION\",\"sha256\":\"$SHA256\"}}"
-          echo "dispatched ryotunes-release $TAG to neur0map/ryoku-arch"
