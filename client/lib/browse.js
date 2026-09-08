@@ -15,7 +15,7 @@ function asSong(i) {
         title: i.title,
         artists: i.subtitle || "",
         artist_runs: i.artistRuns,
-        artist_id: runId,
+        artist_id: runId || i.artistId,
         duration: i.duration,
         play_count: i.playCount,
         thumbnail: i.thumbnail,

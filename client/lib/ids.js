@@ -25,3 +25,19 @@ function isOnRepeatId(id) {
 function isSmartPlaylistId(id) {
     return id === ON_REPEAT || id === RECENTLY_PLAYED || id === REDISCOVER;
 }
+
+// The daemon's ids are namespaced across catalogues; keep Home history and
+// recommendations on the selected provider without mistaking SoundCloud for YouTube.
+function providerOf(id) {
+    if (typeof id !== "string" || !id)
+        return "";
+    if (isLocalId(id))
+        return "local";
+    if (isRadioId(id))
+        return "radio";
+    if (id.indexOf("spotify:") === 0)
+        return "spotify";
+    if (id.indexOf("sc:") === 0)
+        return "soundcloud";
+    return "youtube";
+}

@@ -11,6 +11,11 @@ TestCase {
     name: "Personal"
 
     function item(id) { return { kind: "playlist", id: id, title: id }; }
+    function song(id, artistId) {
+        var s = { kind: "song", id: id, title: id.toUpperCase(), subtitle: "Artist " + id, thumbnail: id + ".jpg" };
+        if (artistId) s.artistId = artistId;
+        return s;
+    }
     function ids(list) { return list.map(function (x) { return x.id; }).join(","); }
     function keys(list) { return list.map(function (x) { return x.key; }).join(","); }
     function secs() { return Array.prototype.slice.call(arguments).map(function (k) { return { key: k }; }); }
@@ -122,5 +127,107 @@ TestCase {
         compare(P.hydrate(JSON.parse(JSON.stringify(back))).home.order.join(","), back.home.order.join(","));
         compare(P.hydrate({}).home.order.length, 0);
         compare(P.hydrate({ home: { order: [1, "a"], hidden: "nope" } }).home.order.join(","), "a,@familiar");
+    }
+
+    // A played song is stored as a full navigable BrowseItem, keyed by video id, and shares the
+    // recent window with played-from playlists/albums without either shape clobbering the other.
+    function test_song_recents_shape_and_mix() {
+        var p = P.empty();
+        P.noteRecent(p, song("v1", "UCx"), 100);
+        P.noteRecent(p, item("PL1"), 200);      // a played-from playlist
+        P.noteRecent(p, song("v2"), 300);
+        compare(ids(P.recentItems(p)), "v2,PL1,v1"); // newest first, songs and playlists together
+        var v1 = p.recent["v1"];
+        compare(v1.kind, "song");
+        compare(v1.title, "V1");
+        compare(v1.subtitle, "Artist v1");
+        compare(v1.thumbnail, "v1.jpg");
+        compare(v1.artistId, "UCx");
+        verify(p.recent["v2"].artistId === undefined); // an unlinked-artist song omits it
+        compare(v1.at, 100);
+    }
+
+    // Replaying an id refreshes its recency in place (one entry, newest timestamp), never a
+    // duplicate row.
+    function test_song_recent_replay_refreshes() {
+        var p = P.empty();
+        P.noteRecent(p, song("v1"), 100);
+        P.noteRecent(p, song("v2"), 200);
+        P.noteRecent(p, song("v1"), 300);
+        compare(Object.keys(p.recent).length, 2);
+        compare(p.recent["v1"].at, 300);
+        compare(ids(P.recentItems(p)), "v1,v2");
+    }
+
+    // Bounded recents: at capacity the OLDEST entries are evicted, never the newest — losing
+    // recent listening to a flood of stale rows would be the regression.
+    function test_recent_evicts_oldest() {
+        var p = P.empty();
+        for (var i = 0; i < 105; i++)
+            P.noteRecent(p, song("v" + i), i + 1);   // strictly increasing timestamps
+        compare(Object.keys(p.recent).length, 100);
+        verify(p.recent["v104"] !== undefined);       // newest kept
+        verify(p.recent["v5"] !== undefined);         // the five oldest gone, nothing newer
+        verify(p.recent["v4"] === undefined);
+    }
+
+    // noteArtist stamps lastPlayedAt when a time is given (and refreshes it on later plays) while
+    // the count still climbs; called without one it stays backward-compatible and adds no field.
+    function test_note_artist_last_played() {
+        var p = P.empty();
+        P.noteArtist(p, "UCa", "A", 100);
+        compare(p.artists["UCa"].lastPlayedAt, 100);
+        P.noteArtist(p, "UCa", "A", 500);
+        compare(p.artists["UCa"].count, 2);
+        compare(p.artists["UCa"].lastPlayedAt, 500);
+        P.noteArtist(p, "UCb", "B");                   // legacy call: no timestamp, no field
+        verify(!("lastPlayedAt" in p.artists["UCb"]));
+    }
+
+    // Signing out of YouTube forgets only what that session can reopen — Liked Music and the
+    // account's own "Your …" library playlists — and leaves public playlists, songs and Spotify
+    // recents. The cross-provider boundary: a YouTube sign-out must not drop a Spotify recent.
+    function test_forget_youtube_recents() {
+        var p = P.empty();
+        P.noteRecent(p, { kind: "playlist", id: "VLLM", title: "Liked Music" }, 1);
+        P.noteRecent(p, { kind: "playlist", id: "LM", title: "LM" }, 2);
+        P.noteRecent(p, { kind: "playlist", id: "PLmine", title: "Mine", subtitle: "Your playlist \u00b7 12 songs" }, 3);
+        P.noteRecent(p, { kind: "playlist", id: "PLpublic", title: "Chart", subtitle: "YouTube Music \u00b7 50 songs" }, 4);
+        P.noteRecent(p, { kind: "playlist", id: "spotify:playlist:abc", title: "Mix", subtitle: "Your Mix" }, 5);
+        P.noteRecent(p, song("v1"), 6);
+        compare(P.forgetYouTubeRecents(p), 3);
+        verify(!p.recent["VLLM"] && !p.recent["LM"] && !p.recent["PLmine"]);
+        verify(!!p.recent["PLpublic"] && !!p.recent["v1"]);
+        verify(!!p.recent["spotify:playlist:abc"]);   // a Spotify item survives a YouTube sign-out
+        compare(P.forgetYouTubeRecents(P.empty()), 0);
+    }
+
+    // Signing out of Spotify forgets only provider-qualified spotify: recents and leaves everything
+    // else, including a YouTube "Your …" playlist and songs — the mirror image of the boundary above.
+    function test_forget_spotify_recents() {
+        var p = P.empty();
+        P.noteRecent(p, { kind: "playlist", id: "spotify:playlist:abc", title: "Mix", subtitle: "Your Mix" }, 1);
+        P.noteRecent(p, { kind: "album", id: "spotify:album:xyz", title: "Album" }, 2);
+        P.noteRecent(p, { kind: "playlist", id: "VLLM", title: "Liked Music" }, 3);
+        P.noteRecent(p, song("v1"), 4);
+        compare(P.forgetSpotifyRecents(p), 2);
+        verify(!p.recent["spotify:playlist:abc"] && !p.recent["spotify:album:xyz"]);
+        verify(!!p.recent["VLLM"] && !!p.recent["v1"]);
+    }
+
+    // deepEqual recognises a save's echo despite serde reordering keys at any depth (so the client
+    // drops it), and reports a genuine change as different (so another client's edit still applies)
+    // — what keeps a stale full-blob echo from reverting a mutation made while the save was in flight.
+    function test_deep_equal_echo_detection() {
+        var a = { picks: [], recent: { v1: { kind: "song", id: "v1", at: 100 } }, artists: { UCx: { name: "X", count: 1 } } };
+        var b = { artists: { UCx: { count: 1, name: "X" } }, recent: { v1: { at: 100, id: "v1", kind: "song" } }, picks: [] };
+        verify(P.deepEqual(a, b));                     // key order never matters, at any depth
+        var c = JSON.parse(JSON.stringify(a));
+        c.recent["v2"] = { kind: "song", id: "v2", at: 200 };
+        verify(!P.deepEqual(a, c));                    // a newer mutation makes the echo stale
+        verify(P.deepEqual([1, "a", true, null], [1, "a", true, null]));
+        verify(!P.deepEqual([1, 2], [1, 2, 3]));
+        verify(!P.deepEqual({ a: 1 }, { a: 1, b: 2 }));
+        verify(!P.deepEqual({ a: 1 }, null));
     }
 }

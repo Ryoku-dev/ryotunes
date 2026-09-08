@@ -121,7 +121,7 @@ The QML window can close while the daemon continues playback or active downloads
 
 | Surface | What Ryotunes does |
 |---|---|
-| **Home** | Stable, non-virtualized sections, listening console, recommendations and progressive loading without scroll-jitter regressions |
+| **Home** | Resume listening, remembered songs/albums/playlists, searchable shortcuts and local discovery ranking without the first-scroll jump |
 | **Search** | Songs, albums, artists and playlists with bounded incremental loading and preserved navigation state |
 | **Library** | Liked music, account playlists, persistent device playlists and local music in the same desktop flow |
 | **Radio** | Demand-driven Internet Radio directory with native libmpv live-stream playback |
@@ -131,6 +131,13 @@ The QML window can close while the daemon continues playback or active downloads
 | **Downloads (native client)** | One-click audio downloads beside the heart, a bounded background queue, persistent history and configurable file preferences |
 | **Mini-player** | A separate compact Ryoku surface with its own exact Hyprland title and independent geometry |
 | **Integrations** | MPRIS, hardware media keys, tray, Last.fm, configurable Discord Rich Presence and optional Listen Together |
+
+### Home in the primary QML client
+
+- **Continue listening** resumes the queue restored by the daemon; reopening does not start playback automatically.
+- **Recently played** remembers songs, albums and playlists across launches. Items already saved as shortcuts are not repeated in that row.
+- **Add shortcut** lets you filter recents and your library, search the selected provider, or paste a YouTube / YouTube Music playlist link. A link is previewed with its real title and artwork before you add it. Private or unavailable playlists show an error; duplicate shortcuts are not added.
+- **Picked for you** re-ranks the selected provider's existing Home feed using local listening history, recency and artist variety. With no relevant history, it uses the provider's discovery ordering instead of claiming learned preferences. This adds no recommendation API, paid service or background training: at most 300 candidates are considered for 12 picks, only when the feed or personal data changes. Displaying additional artwork still has a memory cost.
 
 ---
 ## Download music in the native client

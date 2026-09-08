@@ -8,6 +8,7 @@ import "../components"
 import "../chrome"
 import "../lib/browse.js" as Browse
 import "../lib/ids.js" as Ids
+import "../lib/recommendations.js" as Recommendations
 
 // Home (spec section 5), ported from ui/src/routes/+page.svelte and reset onto the visual system.
 // One vertical reused ListView of the feed's shelves; the header carries the greeting hero (with
@@ -31,13 +32,15 @@ Item {
     property bool loadingMore: false
     property bool moreError: false
     property var blocks: []
+    property int requestId: 0
+    property var recommendations: ({ items: [], explanation: "" })
 
     // Spotify is selected but not signed in: show the sign-in empty state instead of calling the
     // daemon (browsing is gated on a signed-in Spotify account).
     readonly property bool spotifyGate: Playback.provider === "spotify" && !(Playback.spotify && Playback.spotify.signedIn)
 
     // Personal shelves, live off the shared store.
-    readonly property var recents: Personal.recent(12)
+    readonly property var recents: Personal.recent(100).filter((item) => page.providerFor(item.id) === Playback.provider).slice(0, 6)
     readonly property var forgottenList: page.forgottenSongs()
 
     // Familiar artists: the most-played artists (topArtistIds) resolved to round cards. Loaded once.
@@ -52,6 +55,20 @@ Item {
     Connections {
         target: Playback
         function onProviderChanged(): void { page.load(page.selected); }
+    }
+
+    Connections {
+        target: Personal
+        function onBlobChanged(): void { Qt.callLater(page.refreshRecommendations); }
+    }
+
+    function providerFor(id) {
+        return Ids.providerOf(id);
+    }
+    function refreshRecommendations() {
+        page.recommendations = Recommendations.build(
+            page.home && page.home.sections ? page.home.sections : [],
+            Personal.blob, Playback.provider, Date.now());
     }
 
     function greeting() {
@@ -88,6 +105,7 @@ Item {
         page.forgotten = fg;
         page.listenAgain = la;
         page.blocks = arr;
+        page.refreshRecommendations();
     }
 
     function forgottenSongs() {
@@ -106,6 +124,10 @@ Item {
 
     function load(params) {
         page.selected = params;
+        var request = ++page.requestId;
+        page.loadingMore = false;
+        list.cancelFlick();
+        list.stickTop = true;
         page.moreError = false;
         // Gated: no daemon call, the sign-in card carries the page.
         if (page.spotifyGate) {
@@ -113,6 +135,7 @@ Item {
             page.blocks = [];
             page.forgotten = null;
             page.chips = [];
+            page.recommendations = ({ items: [], explanation: "" });
             page.errorMsg = "";
             page.loading = false;
             return;
@@ -121,17 +144,16 @@ Item {
         page.errorMsg = "";
         Daemon.call("get_home", { params: params ? params : null })
             .then((h) => {
-                if (page.selected !== params)
+                if (page.requestId !== request)
                     return;
                 page.home = h;
                 if (h.chips && h.chips.length)
                     page.chips = h.chips.filter((c) => c.title !== "Podcasts");
                 page.rebuild();
                 page.loading = false;
-                list.stickTop = true;
             })
             .catch((e) => {
-                if (page.selected !== params)
+                if (page.requestId !== request)
                     return;
                 page.errorMsg = (e && e.message) ? e.message : String(e);
                 page.loading = false;
@@ -143,10 +165,10 @@ Item {
             return;
         page.loadingMore = true;
         var token = page.home.continuation;
-        var params = page.selected;
+        var request = page.requestId;
         Daemon.call("get_home_more", { token: token })
             .then((more) => {
-                if (page.selected !== params || !page.home || page.home.continuation !== token)
+                if (page.requestId !== request || !page.home || page.home.continuation !== token)
                     return;
                 page.home = {
                     chips: page.home.chips,
@@ -157,6 +179,8 @@ Item {
                 page.loadingMore = false;
             })
             .catch(() => {
+                if (page.requestId !== request)
+                    return;
                 page.moreError = true;
                 page.loadingMore = false;
                 Playback.toast("Could not load more", "error");
@@ -164,15 +188,15 @@ Item {
     }
 
     function maybeLoadMore() {
-        if (!page.home || !page.home.continuation || page.loadingMore || page.moreError)
+        if (page.loading || !page.home || !page.home.continuation || page.loadingMore || page.moreError)
             return;
         if (list.contentHeight <= 0)
             return;
-        if (list.contentY + list.height > list.contentHeight - 400)
+        if (!list.stickTop && list.contentY - list.originY + list.height > list.contentHeight - 400)
             page.loadMore();
     }
 
-    ListView {
+    HomeFeed {
         id: list
         anchors.fill: parent
         visible: !page.spotifyGate
@@ -183,13 +207,7 @@ Item {
         model: page.blocks
         spacing: Style.sp(10)
 
-        // The header (hero + chips + pinned + personal shelves) is taller than the viewport and
-        // grows as the recents / familiar / feed shelves resolve. While the user has not scrolled,
-        // keep it pinned to the very top so a late-arriving shelf never nudges the greeting off the
-        // edge; the first drag or wheel releases the pin. A chip switch re-arms it (load()).
-        property bool stickTop: true
-        onMovementStarted: list.stickTop = false
-        Binding { target: list; property: "contentY"; value: list.originY; when: list.stickTop }
+        // HomeFeed releases its top pin without restoring a stale pre-layout offset.
         onContentYChanged: page.maybeLoadMore()
         onContentHeightChanged: page.maybeLoadMore()
 
@@ -332,7 +350,6 @@ Item {
                     }
 
                     Item { Layout.fillWidth: true; Layout.minimumWidth: hero.wide ? Style.sp(10) : 0 }
-
                     NowPlayingCard {
                         visible: hero.wide && !!Playback.now
                         Layout.preferredWidth: Style.sp(138)
@@ -340,6 +357,56 @@ Item {
                         Layout.alignment: Qt.AlignTop
                         onOpenQueue: Playback.nowPlayingRequested("queue")
                     }
+                }
+
+                // The restored listening session must remain reachable on a narrow Home too.
+                RowLayout {
+                    Layout.fillWidth: true
+                    visible: !!Playback.now
+                    spacing: Style.sp(3)
+                    Artwork {
+                        visible: !hero.wide
+                        url: Playback.now && Playback.now.thumbnail ? Playback.now.thumbnail : ""
+                        px: Style.sp(14)
+                    }
+                    ColumnLayout {
+                        Layout.fillWidth: true
+                        spacing: Style.sp(1)
+                        Text {
+                            Layout.fillWidth: true
+                            text: Playback.paused ? "Continue listening" : "Your listening session"
+                            color: Tokens.ink
+                            font.family: Style.fontUi
+                            font.pixelSize: Style.fs.md
+                            font.weight: Font.Medium
+                        }
+                        Text {
+                            Layout.fillWidth: true
+                            text: Playback.now ? Playback.now.title + " — " + Playback.now.artists : ""
+                            color: Tokens.inkMuted
+                            font.family: Style.fontUi
+                            font.pixelSize: Style.fs.sm
+                            elide: Text.ElideRight
+                            textFormat: Text.PlainText
+                        }
+                    }
+                    Btn {
+                        text: Playback.paused ? "Resume" : "Pause"
+                        icon: Playback.paused ? "play" : "pause"
+                        primary: Playback.paused
+                        onClicked: Playback.togglePause().catch((e) => Playback.toast(String(e), "error"))
+                    }
+                    IconButton {
+                        icon: "queue"
+                        tip: "Open your queue"
+                        onClicked: Playback.nowPlayingRequested("queue")
+                    }
+                }
+
+                HomePersonal {
+                    Layout.fillWidth: true
+                    visible: page.selected === ""
+                    recents: page.recents
                 }
 
                 // chip rail — a horizontal Flickable whose right edge fades into the paper (never a
@@ -473,6 +540,7 @@ Item {
                                         else
                                             Router.push(pin.modelData.kind, { id: pin.modelData.id, title: pin.modelData.title });
                                     }
+                                    acceptedButtons: Qt.LeftButton
                                 }
                             }
                         }
@@ -519,23 +587,39 @@ Item {
                                 ColumnLayout {
                                     spacing: Style.sp(0.5)
                                     Text { text: "Add shortcut"; color: Tokens.inkMuted; font.family: Style.fontUi; font.pixelSize: Style.fs.md; font.weight: Font.Medium }
-                                    Text { text: "Library or any card"; color: Tokens.inkFaint; font.family: Style.fontUi; font.pixelSize: Style.fs.xs }
+                                    Text { text: "Recent, library or YouTube link"; color: Tokens.inkFaint; font.family: Style.fontUi; font.pixelSize: Style.fs.xs }
                                 }
                             }
                             HoverHandler { id: addHover }
-                            MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: Router.push("search") }
+                            MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: shortcutPicker.open() }
                         }
                     }
                 }
 
-                // the personal blocks (unfiltered only): Jump back in, the Familiar artists index and
-                // inspector, and the feed's Listen again as a numbered list
+                ColumnLayout {
+                    Layout.fillWidth: true
+                    visible: page.selected === "" && page.recommendations.items.length > 0
+                    spacing: Style.sp(2)
+                    Shelf {
+                        Layout.fillWidth: true
+                        title: "Picked for you"
+                        items: page.recommendations.items
+                    }
+                    Text {
+                        Layout.fillWidth: true
+                        text: page.recommendations.explanation
+                        color: Tokens.inkMuted
+                        font.family: Style.fontUi
+                        font.pixelSize: Style.fs.sm
+                        wrapMode: Text.WordWrap
+                    }
+                }
+
                 HomePersonal {
                     Layout.fillWidth: true
                     // The recents / familiar artists are YouTube Music history; under another
                     // catalogue the provider's own shelves lead instead.
                     visible: page.selected === "" && Playback.provider === "youtube"
-                    recents: page.recents
                     artists: page.famArtists
                     listenAgain: page.listenAgain
                 }
@@ -647,5 +731,11 @@ Item {
     SpotifyGate {
         anchors.centerIn: parent
         visible: page.spotifyGate
+    }
+
+    ShortcutPicker {
+        id: shortcutPicker
+        anchors.fill: parent
+        z: 100
     }
 }

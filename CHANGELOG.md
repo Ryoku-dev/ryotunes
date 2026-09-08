@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Prevented automatic QML reload during package upgrades, which could reload `shell.qml` while pacman temporarily removed it. Quit and reopen after installation to load the new client and daemon together.
+- Fixed the primary QML Home page jumping past its header on the first scroll. Asynchronous header growth stays pinned only until the user starts scrolling.
+- Home now puts a compact resume control and remembered listening context ahead of discovery. Played songs, albums and playlists persist across launches without counting a restored queue as a new listen.
+- Added searchable Home shortcuts from recents, the library and provider search, plus YouTube playlist-link previews. Duplicate/capacity feedback and a bounded scrolling list keep the controls usable in small windows.
+- Added a bounded, on-device Home discovery ranker using the existing provider feed, listening recency, artist affinity and diversity. No additional recommendation service, model training or idle polling is introduced.
+
 ## v1.0.3 - 2026-09-08
 
 ## v1.0.2 - 2026-09-08

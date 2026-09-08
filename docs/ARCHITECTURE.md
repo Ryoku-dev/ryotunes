@@ -72,7 +72,13 @@ A tray-only session with no playback has a bounded idle lifetime and exits autom
 
 Playback state is event-driven. Ryotunes avoids a permanent high-frequency frontend transport clock and avoids heavy requestAnimationFrame/FFT loops for ordinary idle playback.
 
-Home uses a stable DOM. Sections are not physically mounted/unmounted as the user scrolls; progressive loading, containment and session caching are preferred because physical virtualization previously caused visible jumps and extra renderer work.
+The primary QML Home uses a reusable `ListView` with an asynchronous header. `client/components/HomeFeed.qml` pins `contentY` to `originY` until interaction, with `Binding.RestoreNone`: restoring the old pre-layout value (usually zero) when the binding is released skips a tall header whose origin is negative. The QML regression exercises a real wheel event after header growth.
+
+Home's personal state is a mirror of the existing daemon `personal_json` store, not another database. `client/Personal.qml` hydrates before applying local mutations, serializes immediate saves, and ignores its own outstanding write echoes. Songs are recorded from genuine `now-playing` events; album/playlist controls capture their context before playback and record it after the command succeeds. Subscription snapshots restore the UI without recording another listen.
+
+`client/lib/recommendations.js` builds a provider-scoped candidate pool from the existing Home response. A lightweight relevance score combines provider order, artist affinity, recency, shortcut affinity and recent-play fatigue; a maximum-marginal-relevance pass adds variety. Candidate count is capped at 300 and output at 12. The diversity pass caches each candidate's maximum similarity as picks are added, so its work is O(candidates × picks), with no training, new network endpoint or timer. Header/feed and personal-data changes trigger recomputation; additional card artwork uses the existing image pipeline.
+
+We considered [implicit](https://github.com/benfred/implicit) (MIT) and [LightFM](https://github.com/lyst/lightfm) (Apache-2.0), but their trained models add machinery that one user's sparse local history does not justify. Neither is a dependency and no implementation was copied. The local diversity pass follows the standard [MMR relevance/diversity principle](https://www.elastic.co/search-labs/blog/maximum-marginal-relevance-diversify-results).
 
 Search loads results incrementally in bounded pages, deduplicates them and preserves query, selection and scroll state when navigating back.
 

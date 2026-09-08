@@ -187,26 +187,42 @@ Item {
             page.loadMore();
     }
 
+    // The played-from playlist as a navigable BrowseItem, for Personal recents. Cover overrides the
+    // auto thumbnail; a smart or local id is kept verbatim so it still resolves.
+    function asItem() {
+        return {
+            kind: "playlist",
+            id: page.playlistId,
+            title: page.pl ? page.pl.title : "Playlist",
+            subtitle: page.pl ? (page.pl.subtitle || "") : "",
+            thumbnail: page.pl ? (page.pl.cover || page.pl.thumbnail || "") : ""
+        };
+    }
+
     function play(start) {
         if (!page.pl)
             return;
         var at = start === null ? null : page.pl.items.indexOf(page.shown[start]);
+        var recent = page.asItem();
         Daemon.call("play_playlist", {
             items: page.pl.items,
             start: at === -1 ? null : at,
             sourceId: page.isSmart ? undefined : page.playlistId,
             sourceName: page.pl.title,
             continuation: page.pl.continuation
-        }).catch((e) => Playback.toast((e && e.message) ? e.message : "Could not play", "error"));
+        }).then(() => Personal.noteRecent(recent))
+            .catch((e) => Playback.toast((e && e.message) ? e.message : "Could not play", "error"));
     }
     function shuffle() {
         if (!page.pl || !page.pl.items.length)
             return;
+        var recent = page.asItem();
         Daemon.call("play_playlist", {
             items: page.pl.items, start: null,
             sourceId: page.isSmart ? undefined : page.playlistId,
             sourceName: page.pl.title, shuffle: true, continuation: page.pl.continuation
-        }).catch((e) => Playback.toast((e && e.message) ? e.message : "Could not play", "error"));
+        }).then(() => Personal.noteRecent(recent))
+            .catch((e) => Playback.toast((e && e.message) ? e.message : "Could not play", "error"));
     }
 
     function chooseSort(k) {

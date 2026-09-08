@@ -190,7 +190,8 @@ function hiddenSections(p) {
 
 // --- Recency + artist counts --------------------------------------------------------------------
 
-// Record that a playlist/album/artist was played from.
+// Record that a song, playlist, album or artist was played (songs from a genuine now-playing,
+// the rest from a play-from-source). The entry is a BrowseItem clone stamped with `at`.
 function noteRecent(p, item, now) {
     var entry = {};
     for (var k in item) entry[k] = item[k];
@@ -205,7 +206,7 @@ function noteRecent(p, item, now) {
     }
 }
 
-// The most recently played-from playlists/albums/artists, newest first.
+// The most recently played songs and played-from playlists/albums/artists, newest first.
 function recentItems(p, n) {
     var recent = p.recent;
     var vals = Object.keys(recent).map(function (id) { return recent[id]; });
@@ -213,18 +214,57 @@ function recentItems(p, n) {
     return vals.slice(0, n === undefined ? 12 : n);
 }
 
+// --- account sign-out: forget only what that session can reopen ---------------------------------
+// Splitting the purge by provider is deliberate: signing out of YouTube must not drop a Spotify
+// recent (or the reverse), and neither touches songs — a public video/track still plays signed out.
+
+// Recents only a signed-in YouTube session can reopen: Liked Music (LM / VLLM) and the account's
+// own library playlists (their subtitle reads "Your …"). Public playlists (a shared link, a chart)
+// and everything from other providers stay. Returns how many entries were dropped.
+function forgetYouTubeRecents(p) {
+    var n = 0;
+    for (var id in p.recent) {
+        // A Spotify recent is never a YouTube one, even if its subtitle happens to read "Your …".
+        if (id.indexOf("spotify:") === 0)
+            continue;
+        var r = p.recent[id];
+        if (id === "LM" || id === "VLLM"
+            || (r && r.kind === "playlist" && String(r.subtitle || "").indexOf("Your") === 0)) {
+            delete p.recent[id];
+            n++;
+        }
+    }
+    return n;
+}
+
+// Recents only a signed-in Spotify session can reopen: every provider-qualified spotify: id.
+// Returns how many entries were dropped.
+function forgetSpotifyRecents(p) {
+    var n = 0;
+    for (var id in p.recent) {
+        if (id.indexOf("spotify:") === 0) {
+            delete p.recent[id];
+            n++;
+        }
+    }
+    return n;
+}
+
 // The lead artist out of a joined credit string — a usable search seed, unlike the whole list.
 function firstArtist(artists) {
     return artists.split(/[,&•]|\sfeat\.?\s|\sft\.?\s/i)[0].trim();
 }
 
-function noteArtist(p, key, name) {
+function noteArtist(p, key, name, now) {
     var cur = p.artists[key];
     if (cur) {
         cur.count++;
         if (name) cur.name = name;
+        if (now !== undefined) cur.lastPlayedAt = now;
     } else {
-        p.artists[key] = { name: name, count: 1 };
+        p.artists[key] = (now !== undefined)
+            ? { name: name, count: 1, lastPlayedAt: now }
+            : { name: name, count: 1 };
     }
     var keys = Object.keys(p.artists);
     if (keys.length > MAX_ARTISTS) {
@@ -254,4 +294,29 @@ function topArtists(p, n) {
         .sort(function (a, b) { return b.count - a.count; })
         .slice(0, n === undefined ? 3 : n)
         .map(function (a) { return a.name; });
+}
+
+// Structural equality, independent of object key order. The daemon round-trips a saved blob
+// through serde before echoing it back on `personal-changed`, and that can reorder keys, so a byte
+// comparison of the echo against the blob we sent would spuriously differ. Personal blobs hold only
+// JSON scalars, arrays and plain objects — no functions, dates or cycles — so a plain recursion is
+// enough. Used to recognise (and drop) our own save echo.
+function deepEqual(a, b) {
+    if (a === b) return true;
+    if (a === null || b === null || typeof a !== "object" || typeof b !== "object") return false;
+    var aArr = Array.isArray(a), bArr = Array.isArray(b);
+    if (aArr !== bArr) return false;
+    if (aArr) {
+        if (a.length !== b.length) return false;
+        for (var i = 0; i < a.length; i++)
+            if (!deepEqual(a[i], b[i])) return false;
+        return true;
+    }
+    var ak = Object.keys(a), bk = Object.keys(b);
+    if (ak.length !== bk.length) return false;
+    for (var j = 0; j < ak.length; j++) {
+        var k = ak[j];
+        if (!b.hasOwnProperty(k) || !deepEqual(a[k], b[k])) return false;
+    }
+    return true;
 }

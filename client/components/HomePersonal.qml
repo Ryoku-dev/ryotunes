@@ -29,7 +29,7 @@ ColumnLayout {
         if (!it)
             return;
         if (it.kind === "song")
-            Playback.play(Browse.asSong(it));
+            root.playRecent(it);
         else
             Router.push(it.kind, { id: it.id, title: it.title });
         Personal.touchPick(it.id);
@@ -37,21 +37,34 @@ ColumnLayout {
     function playRecent(it) {
         if (!it)
             return;
-        Personal.noteRecent(it);
-        if (it.kind === "album") {
-            Daemon.call("get_album", { id: it.id })
-                .then((a) => Daemon.call("play_playlist", { items: a.items, sourceId: a.playlistId, sourceName: it.title }))
-                .catch(() => Playback.toast("Could not play — try opening it", "error"));
-        } else {
-            Daemon.call("get_playlist", { id: it.id })
-                .then((p) => Daemon.call("play_playlist", {
-                    items: p.items,
-                    sourceId: Ids.isSmartPlaylistId(it.id) ? undefined : it.id,
-                    sourceName: it.title,
-                    continuation: p.continuation
-                }))
-                .catch(() => Playback.toast("Could not play — try opening it", "error"));
+        if (it.kind === "song") {
+            Playback.play(Browse.asSong(it))
+                .catch(() => Playback.toast("Could not play this song", "error"));
+            return;
         }
+        if (it.kind !== "album" && it.kind !== "playlist")
+            return;
+        Daemon.call(it.kind === "album" ? "get_album" : "get_playlist", { id: it.id })
+            .then((media) => Daemon.call("play_playlist", {
+                items: media.items,
+                sourceId: it.kind === "album" ? media.playlistId
+                    : (Ids.isSmartPlaylistId(it.id) ? undefined : it.id),
+                sourceName: it.title,
+                continuation: media.continuation
+            }).then(() => Personal.noteRecent(it)))
+            .catch(() => Playback.toast("Could not play — try opening it", "error"));
+    }
+
+    function recentMeta(it) {
+        if (!it)
+            return "";
+        var kind = it.kind === "song" ? "Song" : it.kind === "album" ? "Album"
+            : it.kind === "playlist" ? "Playlist" : "Artist";
+        var age = Math.max(0, Date.now() - Number(it.at || 0));
+        var when = !it.at ? "" : age < 3600000 ? "Recently"
+            : age < 86400000 ? "Today" : age < 172800000 ? "Yesterday"
+            : Math.floor(age / 86400000) + " days ago";
+        return [kind, it.subtitle || "", when].filter((part) => !!part).join(" · ");
     }
 
     ColumnLayout {
@@ -62,7 +75,7 @@ ColumnLayout {
             Layout.fillWidth: true
             spacing: Style.sp(2)
             Icon { Layout.alignment: Qt.AlignVCenter; name: "jump-back"; size: Style.fs.md; color: Tokens.inkMuted }
-            SectionHeading { Layout.fillWidth: true; title: "// Jump back in"; mark: Style.decorRich ? "戻" : "" }
+            SectionHeading { Layout.fillWidth: true; title: "Recently played"; mark: Style.decorRich ? "戻" : "" }
         }
         GridLayout {
             id: recGrid
@@ -113,8 +126,7 @@ ColumnLayout {
                             }
                             Text {
                                 Layout.fillWidth: true
-                                text: (recRow.modelData && recRow.modelData.subtitle) ? recRow.modelData.subtitle
-                                    : (recRow.modelData ? recRow.modelData.kind : "")
+                                text: root.recentMeta(recRow.modelData)
                                 color: Tokens.inkMuted
                                 font.family: Style.fontUi
                                 font.pixelSize: Style.fs.sm
@@ -128,6 +140,7 @@ ColumnLayout {
                             iconSize: Style.fs.sm
                             diameter: Style.sp(8)
                             onClicked: root.playRecent(recRow.modelData)
+                            tip: "Play " + (recRow.modelData ? recRow.modelData.title : "")
                         }
                     }
                     HoverHandler { id: recHover }

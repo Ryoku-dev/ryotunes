@@ -105,23 +105,27 @@ Item {
         if (!page.album)
             return;
         var at = start === null ? null : page.album.items.indexOf(page.shown[start]);
+        var recent = page.asItem();
         Daemon.call("play_playlist", {
             items: page.album.items,
             start: at === -1 ? null : at,
             sourceId: page.album.playlistId ? page.album.playlistId : undefined,
             sourceName: page.album.title
-        }).catch((e) => Playback.toast((e && e.message) ? e.message : "Could not play", "error"));
+        }).then(() => Personal.noteRecent(recent))
+            .catch((e) => Playback.toast((e && e.message) ? e.message : "Could not play", "error"));
     }
     function shuffle() {
         if (!page.album || !page.album.items.length)
             return;
+        var recent = page.asItem();
         Daemon.call("play_playlist", {
             items: page.album.items,
             start: null,
             sourceId: page.album.playlistId ? page.album.playlistId : undefined,
             sourceName: page.album.title,
             shuffle: true
-        }).catch((e) => Playback.toast((e && e.message) ? e.message : "Could not play", "error"));
+        }).then(() => Personal.noteRecent(recent))
+            .catch((e) => Playback.toast((e && e.message) ? e.message : "Could not play", "error"));
     }
     function queueAlbum(next) {
         if (!page.album || !page.album.items.length)

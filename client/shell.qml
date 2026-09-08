@@ -14,6 +14,9 @@ ShellRoot {
     // config is up. subscribeAll() is idempotent and re-subscribes on every reconnect, so a single
     // call here covers a daemon that is already up, one that starts later, and one that restarts.
     Component.onCompleted: {
+        // Package upgrades replace QML files non-atomically. Keep this running generation
+        // intact until the user quits and reopens, rather than reloading mid-transaction.
+        Quickshell.watchFiles = false;
         Daemon.subscribeAll();
         Style.applyPrefs();
     }
