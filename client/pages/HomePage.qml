@@ -31,7 +31,7 @@ Item {
     property string errorMsg: ""
     property bool loadingMore: false
     property bool moreError: false
-    property var blocks: []
+    ListModel { id: blocks }
     property int requestId: 0
     property var recommendations: ({ items: [], explanation: "" })
 
@@ -85,26 +85,19 @@ Item {
         return false;
     }
 
-    function rebuild() {
-        var arr = [];
-        var fg = null;
-        var secs = (page.home && page.home.sections) ? page.home.sections : [];
-        // The feed's "Listen again" is drawn by HomePersonal as the numbered list (the original
-        // Home's design); Forgotten favourites keeps its own block; everything else is a shelf.
-        var la = null;
+    function appendSections(secs) {
+        // Keep the model alive across continuation responses. Replacing a JS-array model
+        // resets ListView to the header, even after the user has started scrolling.
         for (var i = 0; i < secs.length; i++) {
             if (page.isForgotten(secs[i])) {
-                if (!fg)
-                    fg = secs[i];
-            } else if (!la && /listen again/i.test(secs[i].title)) {
-                la = secs[i];
+                if (!page.forgotten)
+                    page.forgotten = secs[i];
+            } else if (!page.listenAgain && /listen again/i.test(secs[i].title)) {
+                page.listenAgain = secs[i];
             } else {
-                arr.push(secs[i]);
+                blocks.append({ sectionData: secs[i] });
             }
         }
-        page.forgotten = fg;
-        page.listenAgain = la;
-        page.blocks = arr;
         page.refreshRecommendations();
     }
 
@@ -129,11 +122,12 @@ Item {
         list.cancelFlick();
         list.stickTop = true;
         page.moreError = false;
+        blocks.clear();
+        page.forgotten = null;
+        page.listenAgain = null;
         // Gated: no daemon call, the sign-in card carries the page.
         if (page.spotifyGate) {
             page.home = null;
-            page.blocks = [];
-            page.forgotten = null;
             page.chips = [];
             page.recommendations = ({ items: [], explanation: "" });
             page.errorMsg = "";
@@ -149,7 +143,7 @@ Item {
                 page.home = h;
                 if (h.chips && h.chips.length)
                     page.chips = h.chips.filter((c) => c.title !== "Podcasts");
-                page.rebuild();
+                page.appendSections(h.sections || []);
                 page.loading = false;
             })
             .catch((e) => {
@@ -175,7 +169,7 @@ Item {
                     sections: page.home.sections.concat(more.sections),
                     continuation: more.sections.length ? more.continuation : undefined
                 };
-                page.rebuild();
+                page.appendSections(more.sections);
                 page.loadingMore = false;
             })
             .catch(() => {
@@ -204,7 +198,7 @@ Item {
         reuseItems: true
         cacheBuffer: Math.max(0, Math.round(height * 1.5))
         boundsBehavior: Flickable.StopAtBounds
-        model: page.blocks
+        model: blocks
         spacing: Style.sp(10)
 
         // HomeFeed releases its top pin without restoring a stale pre-layout offset.
@@ -212,13 +206,13 @@ Item {
         onContentHeightChanged: page.maybeLoadMore()
 
         delegate: Item {
-            required property var modelData
+            required property var sectionData
             width: list.width
             implicitHeight: shelf.implicitHeight
             Shelf {
                 id: shelf
                 width: parent.width
-                section: parent.modelData
+                section: parent.sectionData
                 mark: Style.decorRich ? "章" : ""
             }
         }
@@ -690,7 +684,7 @@ Item {
                 ColumnLayout {
                     Layout.alignment: Qt.AlignHCenter
                     Layout.topMargin: Style.sp(16)
-                    visible: !page.loading && page.errorMsg === "" && page.blocks.length === 0 && !page.forgotten
+                    visible: !page.loading && page.errorMsg === "" && blocks.count === 0 && !page.forgotten
                     spacing: Style.sp(3)
                     Icon { Layout.alignment: Qt.AlignHCenter; name: "music"; size: Style.fs.hero; color: Tokens.inkFaint }
                     Text {

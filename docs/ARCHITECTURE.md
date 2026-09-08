@@ -64,7 +64,7 @@ The Tauri app and the daemon share the same data directory (`$XDG_DATA_HOME/dev.
 
 Closing the main window is not the same operation as quitting the application.
 
-When playback is active, Ryotunes can destroy/hibernate the expensive user-facing WebView while keeping the native backend alive. MPRIS, tray actions and Ryoku shell media controls therefore continue without retaining the full renderer. Reopening reconstructs the WebView and resynchronises it from native state.
+On Linux, the Quickshell client and `ryotunesd` are separate processes. Closing or hibernating the client does not stop active daemon playback, MPRIS or tray controls. Reopening subscribes to the daemon's current state rather than creating a second player.
 
 A tray-only session with no playback has a bounded idle lifetime and exits automatically. Explicit Quit stops the playback session, unregisters MPRIS and shuts integrations down immediately.
 
@@ -73,6 +73,8 @@ A tray-only session with no playback has a bounded idle lifetime and exits autom
 Playback state is event-driven. Ryotunes avoids a permanent high-frequency frontend transport clock and avoids heavy requestAnimationFrame/FFT loops for ordinary idle playback.
 
 The primary QML Home uses a reusable `ListView` with an asynchronous header. `client/components/HomeFeed.qml` pins `contentY` to `originY` until interaction, with `Binding.RestoreNone`: restoring the old pre-layout value (usually zero) when the binding is released skips a tall header whose origin is negative. The QML regression exercises a real wheel event after header growth.
+
+Continuation pages append shelves to a persistent `ListModel`; only an explicit feed reload clears it. Reassigning a JavaScript array as `ListView.model` resets the view to its header, so pagination must not rebuild the entire model or compensate by writing `contentY` afterward. This follows Qt's [incremental ListModel API](https://doc.qt.io/qt-6/qml-qtqml-models-listmodel.html).
 
 Home's personal state is a mirror of the existing daemon `personal_json` store, not another database. `client/Personal.qml` hydrates before applying local mutations, serializes immediate saves, and ignores its own outstanding write echoes. Songs are recorded from genuine `now-playing` events; album/playlist controls capture their context before playback and record it after the command succeeds. Subscription snapshots restore the UI without recording another listen.
 
@@ -90,9 +92,9 @@ Device playlists carry no provider thumbnail, so the daemon derives one from the
 
 ## Linux / Ryoku lifecycle
 
-The main window uses the stable application id `dev.ryoku.ryotunes`. On Ryoku, a compositor rule floats and centres the main surface before it becomes visible. Native geometry remains a fallback rather than the primary source of a tiled-to-floating transition.
+The Linux `ryotunes` executable is a native-only launcher. It requests `show` on the daemon socket, starting the user socket unit or the daemon directly for a cold launch. Connection or protocol failures never open the legacy Tauri player.
 
-Cold launch, second-instance launch, tray reopen and mini-player-to-main restoration all converge on the same native visibility lifecycle. The UI sends a mounted/ready signal, with a native failsafe so a hidden WebView cannot deadlock the application in a tray-only state.
+The primary window is a Quickshell surface (`org.quickshell`, title `Ryotunes`). Cold launch, second-instance launch, tray reopen and mini-player-to-main restoration converge on the daemon's show event and the client's visibility lifecycle. The package exposes one desktop entry and requires Quickshell.
 
 ## Packaging invariants
 

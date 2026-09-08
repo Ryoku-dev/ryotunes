@@ -2,8 +2,10 @@
 
 ## Unreleased
 
-## v1.0.4 - 2026-09-08
+- Fixed Home snapping back to the top when a continuation page arrived: new shelves now append to a persistent Qt list model instead of replacing the model.
+- Made the Linux launcher native-QML-only, including cold starts and missing sockets. Removed the legacy Tauri overrides and duplicate desktop entry; Quickshell is now a required package dependency.
 
+## v1.0.4 - 2026-09-08
 - Prevented automatic QML reload during package upgrades, which could reload `shell.qml` while pacman temporarily removed it. Quit and reopen after installation to load the new client and daemon together.
 - Fixed the primary QML Home page jumping past its header on the first scroll. Asynchronous header growth stays pinned only until the user starts scrolling.
 - Home now puts a compact resume control and remembered listening context ahead of discovery. Played songs, albums and playlists persist across launches without counting a restored queue as a new listen.

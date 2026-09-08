@@ -55,17 +55,17 @@ paru -S ryotunes-bin
 
 This command will become usable after the AUR package is published.
 
-## Native QML client (preview)
+## Primary QML client
 
-Alongside the Tauri application, the package ships a native [Quickshell](https://quickshell.org) client that talks to the same `ryotunesd` daemon. It installs to `/usr/share/ryotunes/client` and is launched by the `ryotunes-qml` wrapper (a `Ryotunes (QML)` desktop entry is also installed). Because Quickshell resolves `qs -c NAME` only from `$XDG_CONFIG_HOME/quickshell/NAME`, the wrapper runs the packaged tree by explicit path:
+On Linux, Ryotunes runs the native [Quickshell](https://quickshell.org) client with `ryotunesd`. The single desktop entry, dock and Super+J all use the same launcher:
 
 ```bash
-ryotunes-qml            # == qs -p /usr/share/ryotunes/client
+ryotunes
 ```
 
-It needs the optional `quickshell` dependency and the Ryoku QML runtime (`Ryoku.Ui.Singletons`).
+The package requires `quickshell`; the client also uses the Ryoku QML runtime (`Ryoku.Ui.Singletons`). The daemon starts the installed client through `ryotunes-qml`, which runs `qs -p /usr/share/ryotunes/client`.
 
-The native client is the default. `/usr/bin/ryotunes` (the desktop's launcher, keybind and dock) asks `ryotunesd` to `show`: the daemon raises the connected client or opens `ryotunes-qml`, and connecting to the socket is what starts the daemon after a boot (systemd socket activation), so a cold start lands in the native client too. The Tauri app, which carries its own player, runs only on `ryotunes --tauri` (or `RYOTUNES_TAURI=1`), or when the daemon's socket does not exist at all. Only one player ever runs.
+The launcher asks `ryotunesd` to show its existing client or open one. If the daemon is absent, it starts the user socket unit, or starts the daemon directly when systemd is unavailable. An unreachable daemon produces an error; Linux never falls back to Tauri and has no legacy launch flag or environment override.
 
 ## Build from source
 

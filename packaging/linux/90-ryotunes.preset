@@ -1,4 +1,3 @@
-# Enable the daemon's socket for every user: `ryotunes` defers to the native
-# client only while the socket exists, so without this a fresh install opens
-# the Tauri app. Socket activation means nothing runs until something connects.
+# Enable socket activation for every user. Nothing runs until a client connects;
+# the native-only launcher can also start this unit when it is not yet active.
 enable ryotunesd.socket

@@ -25,9 +25,9 @@ depends=(
   'hicolor-icon-theme'
   'xdg-utils'
   'polkit'
-)
-optdepends=(
-  'quickshell: native QML client (ryotunes-qml), opened by ryotunes whenever ryotunesd is running'
+  # Required: the native QML client (ryotunes-qml) that `ryotunes` opens on Linux; there is no
+  # Tauri fallback, so the client runtime is not optional.
+  'quickshell'
 )
 makedepends=(
   'base-devel'
@@ -87,7 +87,6 @@ package() {
   install -Dm755 "$binaries/ryotunesd" "$pkgdir/usr/bin/ryotunesd"
   install -Dm755 "$binaries/ryotunes-cli" "$pkgdir/usr/bin/ryotunes-cli"
   install -Dm755 packaging/linux/ryotunes-qml "$pkgdir/usr/bin/ryotunes-qml"
-  install -Dm644 packaging/linux/ryotunes-qml.desktop "$pkgdir/usr/share/applications/ryotunes-qml.desktop"
   # Native QML client, run by Quickshell via `qs -p /usr/share/ryotunes/client` (the ryotunes-qml
   # launcher); ship the whole config tree minus the QtTest sources, world-readable.
   install -dm755 "$pkgdir/usr/share/ryotunes"
