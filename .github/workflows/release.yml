@@ -279,7 +279,7 @@ jobs:
         run: |
           set -euo pipefail
           # A normal published (non-draft, non-prerelease, latest) release is what
-          # /repos/neur0map/ryotunes/releases/latest returns to Ryoku's clients.
+          # /repos/ryoku-dev/ryotunes/releases/latest returns to Ryoku's clients.
           assets=(dist/*.tar.gz dist/*.pkg.tar.zst dist/*.sha256)
           latest="$(gh release list --limit 1000 --json isLatest,tagName --jq '.[] | select(.isLatest) | .tagName')"
           # A manual repair of an older tag must not downgrade releases/latest.

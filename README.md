@@ -5,8 +5,8 @@
 
 <br />
 
-<a href="https://github.com/neur0map/ryotunes/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/neur0map/ryotunes?style=flat-square&label=release&color=9a604b"></a>
-<a href="LICENSE"><img alt="GPL-3.0-or-later" src="https://img.shields.io/github/license/neur0map/ryotunes?style=flat-square&color=7f9b8d"></a>
+<a href="https://github.com/ryoku-dev/ryotunes/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/ryoku-dev/ryotunes?style=flat-square&label=release&color=9a604b"></a>
+<a href="LICENSE"><img alt="GPL-3.0-or-later" src="https://img.shields.io/github/license/ryoku-dev/ryotunes?style=flat-square&color=7f9b8d"></a>
 <img alt="Linux x86_64" src="https://img.shields.io/badge/Linux-x86__64-8996a8?style=flat-square&logo=linux&logoColor=white">
 <img alt="Ryoku native" src="https://img.shields.io/badge/Ryoku-native-6f7f76?style=flat-square">
 <img alt="Audio only" src="https://img.shields.io/badge/playback-audio%20only-a86d58?style=flat-square">
@@ -20,7 +20,7 @@
 
 **A Ryoku-native desktop music player with native audio playback, live shell theming, and a UI that knows when to disappear.**
 
-[Download](https://github.com/neur0map/ryotunes/releases/latest) · [Architecture](docs/ARCHITECTURE.md) · [Install](docs/INSTALL-ARCH.md) · [Troubleshooting](docs/TROUBLESHOOTING.md) · [Ryoku](https://github.com/neur0map/ryoku-arch)
+[Download](https://github.com/ryoku-dev/ryotunes/releases/latest) · [Architecture](docs/ARCHITECTURE.md) · [Install](docs/INSTALL-ARCH.md) · [Troubleshooting](docs/TROUBLESHOOTING.md) · [Ryoku](https://github.com/ryoku-dev/ryoku-arch)
 
 </div>
 
@@ -118,11 +118,11 @@ Every colour, type face, radius and duration the chrome reads comes from one **s
 /usr/share/ryotunes/matugen/ryotunes.json   the matugen template
 ```
 
-Pick one in *Settings › Appearance*, or **Get more skins** there — that opens [RyoStore](https://github.com/neur0map/ryostore) on its *Ryotunes skins* category, and an install lands in `~/.local/share/ryoku/ryotunes-skins/<id>/`. To make your own: fork the painted palette with **New skin from current**, validate with `ryotunes-cli skin check <dir>`, and submit it to the store catalogue as `ryotunes-skins/<id>/` — the format and the checklist are in **[docs/SKINS.md](docs/SKINS.md)**.
+Pick one in *Settings › Appearance*, or **Get more skins** there — that opens [RyoStore](https://github.com/ryoku-dev/ryostore) on its *Ryotunes skins* category, and an install lands in `~/.local/share/ryoku/ryotunes-skins/<id>/`. To make your own: fork the painted palette with **New skin from current**, validate with `ryotunes-cli skin check <dir>`, and submit it to the store catalogue as `ryotunes-skins/<id>/` — the format and the checklist are in **[docs/SKINS.md](docs/SKINS.md)**.
 
 For the shell itself:
 
-**[Ryoku Arch](https://github.com/neur0map/ryoku-arch)** · **[Ryoku Discord](https://discord.gg/8KjBmUEyKA)**
+**[Ryoku Arch](https://github.com/ryoku-dev/ryoku-arch)** · **[Ryoku Discord](https://discord.gg/8KjBmUEyKA)**
 
 ---
 
@@ -191,7 +191,7 @@ The published package is **`ryotunes 1:<version>-1`**. The permanent `epoch=1` l
 
 The normal user path is a **prebuilt package**. End users do not need Node, pnpm, Rust, Cargo or a local Tauri build.
 
-1. Open **[GitHub Releases](https://github.com/neur0map/ryotunes/releases/latest)**.
+1. Open **[GitHub Releases](https://github.com/ryoku-dev/ryotunes/releases/latest)**.
 2. Download `ryotunes-<version>-1-x86_64.pkg.tar.zst` and its `.sha256`.
 3. Verify and install:
 

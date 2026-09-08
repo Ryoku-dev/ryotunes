@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://raw.githubusercontent.com/neur0map/ryotunes/main/skins/skin.schema.json",
+  "$id": "https://raw.githubusercontent.com/ryoku-dev/ryotunes/main/skins/skin.schema.json",
   "title": "Ryotunes skin manifest",
   "description": "A format-1 Ryotunes skin: the colours, type, shape, motion, decor, accent and wash the chrome reads. See docs/SKINS.md. Everything is optional except a `modes` object with at least one mode carrying both `paper` and `ink`; missing keys fall back to the Paper skin.",
   "type": "object",

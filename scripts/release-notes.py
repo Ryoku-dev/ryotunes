@@ -21,7 +21,7 @@ def release_notes(tag):
     # entire upstream history. Subsequent releases compare only against v1.
     legacy = [t for t in tags if re.fullmatch(r'v2\.[0-9]+\.[0-9]+', t)]
     previous = max(earlier or legacy, key=lambda t: tuple(map(int, t[1:].split('.'))), default=None)
-    repo = os.environ.get('GITHUB_REPOSITORY', 'neur0map/ryotunes')
+    repo = os.environ.get('GITHUB_REPOSITORY', 'ryoku-dev/ryotunes')
     command = ['gh', 'api', f'repos/{repo}/releases/generate-notes',
                '-f', f'tag_name={tag}', '--jq', '.body']
     if previous:

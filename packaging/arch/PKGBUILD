@@ -10,7 +10,7 @@ pkgrel=1
 # makepkg's epoch-tagged output back to the ryotunes-<pkgver>-1-x86_64 contract).
 epoch=1
 pkgdesc='Ryotunes - resource-conscious Linux desktop music client'
-url='https://github.com/neur0map/ryotunes'
+url='https://github.com/ryoku-dev/ryotunes'
 arch=('x86_64')
 license=('GPL-3.0-or-later')
 depends=(

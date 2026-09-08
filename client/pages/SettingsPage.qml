@@ -591,7 +591,7 @@ Item {
                             Btn { text: "Open skins folder"; icon: "library"; onClicked: Quickshell.execDetached(["xdg-open", Skin.userDir]) }
                             Btn { text: "New skin from current"; icon: "add"; onClicked: page.forkOpen = !page.forkOpen }
                             Btn { text: "Reload"; icon: "repeat"; onClicked: Skin.reload() }
-                            Btn { text: "Skins guide"; icon: "link"; onClicked: Quickshell.execDetached(["xdg-open", "https://github.com/neur0map/ryotunes/blob/main/docs/SKINS.md"]) }
+                            Btn { text: "Skins guide"; icon: "link"; onClicked: Quickshell.execDetached(["xdg-open", "https://github.com/ryoku-dev/ryotunes/blob/main/docs/SKINS.md"]) }
                         }
 
                         // Fork the painted palette into a new user skin — kebab-cased id, opened to edit.
@@ -1349,7 +1349,7 @@ Item {
                         Btn {
                             text: "View changelog"
                             icon: "link"
-                            onClicked: page.openUrl((page.updateInfo && page.updateInfo.releaseUrl) ? page.updateInfo.releaseUrl : "https://github.com/neur0map/ryotunes/releases")
+                            onClicked: page.openUrl((page.updateInfo && page.updateInfo.releaseUrl) ? page.updateInfo.releaseUrl : "https://github.com/ryoku-dev/ryotunes/releases")
                         }
                         Btn {
                             visible: !!(page.updateInfo && page.updateInfo.available && page.updateInfo.latestVersion && page.updateInfo.canInstall) && page.updateStatus !== "installed"

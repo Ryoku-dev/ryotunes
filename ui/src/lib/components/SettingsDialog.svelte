@@ -50,7 +50,7 @@
 	const updateAvailable = $derived(!!update?.available && !!update?.latestVersion);
 	const canInstallUpdate = $derived(updateAvailable && !!update?.canInstall && updateStatus !== 'installed');
 	// Always-available changelog target: the release the check found, else the project's releases page.
-	const RELEASES_URL = 'https://github.com/neur0map/ryotunes/releases';
+	const RELEASES_URL = 'https://github.com/ryoku-dev/ryotunes/releases';
 	let settings = $state<Record<string, string>>({});
 	let clients = $state<string[]>([]);
 	let proxyInput = $state('');

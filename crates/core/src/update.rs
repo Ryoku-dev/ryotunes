@@ -9,8 +9,8 @@ use sha2::{Digest, Sha256};
 use tokio::io::AsyncWriteExt;
 use tokio::process::Command;
 
-const REPOSITORY: &str = "https://github.com/neur0map/ryotunes";
-const LATEST: &str = "https://api.github.com/repos/neur0map/ryotunes/releases/latest";
+const REPOSITORY: &str = "https://github.com/ryoku-dev/ryotunes";
+const LATEST: &str = "https://api.github.com/repos/ryoku-dev/ryotunes/releases/latest";
 const MAX_PACKAGE: u64 = 1024 * 1024 * 1024;
 static INSTALL: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 

@@ -60,7 +60,7 @@ const SONG_URL: &str = "https://music.youtube.com/watch?v=";
 /// fetchable artwork, and the small badge on every art card — so the card never falls back to the
 /// application's portal icon (the upstream lemon). Verified reachable, `200 image/png` (512×512).
 const BRAND_IMAGE: &str =
-    "https://raw.githubusercontent.com/neur0map/ryotunes/main/src-tauri/icons/icon.png";
+    "https://raw.githubusercontent.com/ryoku-dev/ryotunes/main/src-tauri/icons/icon.png";
 const BRAND_BADGE_TEXT: &str = "Ryotunes";
 
 /// Reconnect backoff while enabled but unconnected (Discord not running, or it quit). Starts short

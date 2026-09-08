@@ -189,9 +189,9 @@ Ryotunes on every change.
 
 Community skins are **RyoStore products**: Ryotunes is a binary package, and the store is how a
 skin reaches every Ryoku desktop without a Ryotunes release. Open a PR against
-[neur0map/ryostore](https://github.com/neur0map/ryostore) that adds `ryotunes-skins/<id>/` and its
+[ryoku-dev/ryostore](https://github.com/ryoku-dev/ryostore) that adds `ryotunes-skins/<id>/` and its
 entry in `ryotunes-skins/registry.json` — the layout, the packing tool and the checklist are in
-that repo's [`ryotunes-skins/AUTHORING.md`](https://github.com/neur0map/ryostore/blob/main/ryotunes-skins/AUTHORING.md).
+that repo's [`ryotunes-skins/AUTHORING.md`](https://github.com/ryoku-dev/ryostore/blob/main/ryotunes-skins/AUTHORING.md).
 In short:
 
 - [ ] `skin.json` with `format: 1`, `id` = the folder name, `ryotunes-cli skin check` with **no errors**.
