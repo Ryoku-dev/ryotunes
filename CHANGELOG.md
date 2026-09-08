@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## v1.0.6 - 2026-09-08
+
 - Fixed app-launcher activation after removing and reinstalling Ryotunes: removal now stops the user units before deleting them, and a fresh install repairs stale socket state left by older packages. Ordinary upgrades still leave playback and self-update RPCs running.
 - Presented Ryotunes consistently as Ryoku's main music app in pacman, the app launcher, and software catalogues.
 
