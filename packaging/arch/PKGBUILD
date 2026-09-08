@@ -4,7 +4,7 @@
 pkgname=ryotunes
 pkgver=2.5.1
 pkgrel=1
-pkgdesc='Ryotunes v2.4 - resource-conscious Linux desktop music client'
+pkgdesc='Ryotunes v2 - resource-conscious Linux desktop music client'
 arch=('x86_64')
 license=('GPL-3.0-or-later')
 depends=(

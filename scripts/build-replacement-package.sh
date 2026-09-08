@@ -157,7 +157,7 @@ Target = usr/bin/ryotunes
 Target = usr/share/applications/ryotunes.desktop
 
 [Action]
-Description = Re-activating Ryotunes v2.4 after a Ryoku package update
+Description = Re-activating Ryotunes v2 after a Ryoku package update
 When = PostTransaction
 Exec = /usr/lib/ryotunes-v2.4/activate-replacement
 HOOK
@@ -182,7 +182,7 @@ cat > "$PKGWORK/PKGBUILD" <<'PKG'
 pkgname=ryotunes-v2.4
 pkgver=$VERSION
 pkgrel=1
-pkgdesc='Ryotunes v2.4 - Ryoku replacement Linux desktop music client'
+pkgdesc='Ryotunes v2 - Ryoku replacement Linux desktop music client'
 arch=('x86_64')
 url='https://github.com/ashmitvoid/RYOTUNES'
 license=('GPL-3.0-or-later')
@@ -248,7 +248,7 @@ cat > "$BUNDLE/install.sh" <<'BINSTALL'
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 PKG="$(find "$HERE" -maxdepth 1 -name 'ryotunes-v2.4-$VERSION-1-x86_64.pkg.tar.zst' -print -quit)"
-[[ -n "$PKG" ]] || { echo "Ryotunes v2.4 package not found beside install.sh" >&2; exit 1; }
+[[ -n "$PKG" ]] || { echo "Ryotunes v2 package not found beside install.sh" >&2; exit 1; }
 
 sudo pacman -U --needed "$PKG"
 for old in ryotunes-v2.3 ryotunes-v2.2 ryotunes-v2.1 ryotunes-v2.0 ryotunes-v20 ryotunes-v21 ryotunes-v22 ryotunes-v23 ryotunes-v24 ryotunes-v1.4 ryotunes-v1.5 ryotunes-v1.6 ryotunes-v1.7 ryotunes-v1.8 ryotunes-v1.9; do
@@ -259,7 +259,7 @@ done
 sudo /usr/lib/ryotunes-v2.4/activate-replacement
 "$HERE/ryoku-window-rule.sh" install
 command -v update-desktop-database >/dev/null 2>&1 && sudo update-desktop-database /usr/share/applications >/dev/null 2>&1 || true
-echo "Ryotunes v2.4 installed. Launch it with: ryotunes"
+echo "Ryotunes v2 installed. Launch it with: ryotunes"
 BINSTALL
 chmod 755 "$BUNDLE/install.sh" "$BUNDLE/ryoku-window-rule.sh"
 
@@ -273,7 +273,7 @@ BUNINSTALL
 chmod 755 "$BUNDLE/uninstall.sh"
 
 cat > "$BUNDLE/README.txt" <<'BREADME'
-Ryotunes v2.4 for Ryoku / CachyOS / Arch x86_64
+Ryotunes v2 for Ryoku / CachyOS / Arch x86_64
 
 Recommended:
   ./install.sh

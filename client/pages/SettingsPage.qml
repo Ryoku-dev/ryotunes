@@ -36,7 +36,7 @@ Item {
 
     // Editable-field mirrors, seeded on load so typing never fights the settings binding.
     property string proxyInput: ""
-    property string discordNameInput: "Ryotunes"
+    property string discordNameInput: "Ryotunes v2"
     property bool forkOpen: false
     property string forkName: ""
 
@@ -72,7 +72,7 @@ Item {
             page.settings = res[0] || ({});
             page.clients = res[1] || [];
             page.proxyInput = page.settings.proxy || "";
-            page.discordNameInput = (page.settings.discord_presence_name || "").trim() || "Ryotunes";
+            page.discordNameInput = (page.settings.discord_presence_name || "").trim() || "Ryotunes v2";
             page.loaded = true;
             page.loadDiscord();
         }).catch((e) => { page.loaded = true; Playback.toast((e && e.message) ? e.message : String(e), "error"); });
@@ -134,7 +134,7 @@ Item {
         page.setSetting("discord_rpc", on ? "true" : "false").then(() => page.loadDiscord());
     }
     function saveDiscordName() {
-        var value = page.discordNameInput.trim() || "Ryotunes";
+        var value = page.discordNameInput.trim() || "Ryotunes v2";
         var n = value.length;
         if (n < 2 || n > 128) {
             Playback.toast("Discord presence title must be between 2 and 128 characters", "error");
@@ -733,17 +733,17 @@ Item {
                                     Text {
                                         anchors.verticalCenter: parent.verticalCenter
                                         visible: discordField.text.length === 0
-                                        text: "Ryotunes"
+                                        text: "Ryotunes v2"
                                         color: Tokens.inkFaint
                                         font: discordField.font
                                     }
                                 }
                             }
                             Pill { label: "Save"; enabled: page.discordNameInput.trim().length > 0; onClicked: page.saveDiscordName() }
-                            Pill { label: "Reset"; enabled: page.discordNameInput !== "Ryotunes"; onClicked: { page.discordNameInput = "Ryotunes"; page.saveDiscordName(); } }
+                            Pill { label: "Reset"; enabled: page.discordNameInput !== "Ryotunes v2"; onClicked: { page.discordNameInput = "Ryotunes v2"; page.saveDiscordName(); } }
                         }
                         Text {
-                            text: "Preview: Listening to " + (page.discordNameInput.trim() || "Ryotunes")
+                            text: "Preview: Listening to " + (page.discordNameInput.trim() || "Ryotunes v2")
                             color: Tokens.inkFaint; font.family: Style.fontUi; font.pixelSize: Style.fs.xs
                         }
                     }
@@ -1258,7 +1258,7 @@ Item {
                         columnSpacing: Style.sp(6)
                         rowSpacing: Style.sp(1)
                         Text { text: "RELEASE"; color: Tokens.inkFaint; font.family: Style.fontMono; font.pixelSize: Style.fs.xs }
-                        Text { text: "v2.4"; color: Tokens.inkDim; font.family: Style.fontUi; font.pixelSize: Style.fs.sm; font.weight: Font.Medium }
+                        Text { text: "v2"; color: Tokens.inkDim; font.family: Style.fontUi; font.pixelSize: Style.fs.sm; font.weight: Font.Medium }
                         Text { text: "DAEMON"; color: Tokens.inkFaint; font.family: Style.fontMono; font.pixelSize: Style.fs.xs }
                         Text { text: Daemon.daemonVersion || "—"; color: Tokens.inkDim; font.family: Style.fontUi; font.pixelSize: Style.fs.sm; font.weight: Font.Medium }
                         Text { text: "ENGINE"; color: Tokens.inkFaint; font.family: Style.fontMono; font.pixelSize: Style.fs.xs }

@@ -46,8 +46,9 @@
 - **Device playlists signed out:** create from Library, sidebar and Add to playlist → **Create + add**. Restart Ryotunes and verify the playlist and tracks persist.
 - Sign in, verify device playlists remain present and editable, then sign out and verify they remain. No device playlist may be cleared by the account playlist-index reset.
 - Add/remove tracks, rename, set/remove local artwork and delete a device playlist. Confirm no operation sends a device playlist id as a YouTube radio/autoplay seed.
-- **Discord presence title:** save a custom 2–128 character title, verify the active card updates without restarting playback, restart Ryotunes and verify persistence, then Reset to **Music**.
-- Discord disabled/unavailable behaviour must remain parked/backed-off; custom presence text must not alter the fixed Ryotunes Discord application identity.
+- **Discord presence title:** save a custom 2–128 character title, verify the active card updates without restarting playback, restart Ryotunes and verify persistence, then Reset to **Ryotunes v2**.
+- Verify album artwork carries the Ryotunes badge, missing/invalid artwork uses the Ryotunes mark, and local filesystem paths never reach Discord. YouTube and Spotify buttons must open the correct service; SoundCloud numeric IDs and local/radio tracks must not produce fabricated YouTube links.
+- Discord disabled/unavailable behaviour must remain parked/backed-off. The inherited application ID `1525891596804161727` is registered as **Limusic**; changing the activity artwork/name does not change its portal-owned lemon icon. A Ryotunes-owned Discord application ID is required before claiming the registered identity has been replaced.
 
 ## Integrations/lifecycle
 29. MPRIS and Ryoku QS controls play/pause/seek/next correctly before and after main-WebKit hibernation/reopen.

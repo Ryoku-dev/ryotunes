@@ -36,13 +36,13 @@
 	const metaFor = (id: TabId) => TAB_META[id];
 	const activeMeta = $derived(metaFor(tab));
 	const activeLabel = $derived(TABS.find((t) => t.id === tab)?.label ?? 'General');
-	const PRODUCT_VERSION = 'v2.4';
-	let buildVersion = $state('2.4.1');
+	const PRODUCT_VERSION = 'v2';
+	let buildVersion = $state('2.5.1');
 	getVersion().then((v) => (buildVersion = v)).catch(() => {});
 	let settings = $state<Record<string, string>>({});
 	let clients = $state<string[]>([]);
 	let proxyInput = $state('');
-	let discordNameInput = $state('Ryotunes');
+	let discordNameInput = $state('Ryotunes v2');
 	let savingDiscordName = $state(false);
 	let loaded = $state(false);
 	let clearing = $state(false);
@@ -124,7 +124,7 @@
 			settings = s;
 			clients = c;
 			proxyInput = s.proxy ?? '';
-			discordNameInput = s.discord_presence_name?.trim() || 'Ryotunes';
+			discordNameInput = s.discord_presence_name?.trim() || 'Ryotunes v2';
 			if (s.low_resource_mode === 'true' && !appearance.lowResourceMode) setAppearance({ lowResourceMode: true });
 			if (s.low_resource_mode !== 'true' && appearance.lowResourceMode) {
 				settings.low_resource_mode = 'true';
@@ -206,7 +206,7 @@
 
 	async function saveDiscordName() {
 		if (savingDiscordName) return;
-		const value = discordNameInput.trim() || 'Ryotunes';
+		const value = discordNameInput.trim() || 'Ryotunes v2';
 		const length = [...value].length;
 		if (length < 2 || length > 128) {
 			toast.error('Discord presence title must be between 2 and 128 characters');
@@ -226,7 +226,7 @@
 	}
 
 	async function resetDiscordName() {
-		discordNameInput = 'Ryotunes';
+		discordNameInput = 'Ryotunes v2';
 		await saveDiscordName();
 	}
 
@@ -400,7 +400,7 @@
 							<Input
 								bind:value={discordNameInput}
 								maxlength={128}
-								placeholder="Ryotunes"
+								placeholder="Ryotunes v2"
 								aria-label="Discord presence title"
 							/>
 							<Button
@@ -414,14 +414,14 @@
 							<Button
 								variant="ghost"
 								size="sm"
-								disabled={savingDiscordName || discordNameInput === 'Ryotunes'}
+								disabled={savingDiscordName || discordNameInput === 'Ryotunes v2'}
 								onclick={resetDiscordName}
 							>
 								Reset
 							</Button>
 						</div>
 						<p class="mt-2 text-xs text-muted-foreground">
-							Preview: Listening to {discordNameInput.trim() || 'Ryotunes'}
+							Preview: Listening to {discordNameInput.trim() || 'Ryotunes v2'}
 						</p>
 					</div>
 					<div class="flex items-start justify-between gap-4 border-b py-3">

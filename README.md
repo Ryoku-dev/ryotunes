@@ -28,7 +28,7 @@
 
 <img width="3369" height="2017" alt="2026_08_27_02_44_21_screenshot" src="https://github.com/user-attachments/assets/44aaf6cc-f88e-4c1d-97ff-c44e45d4c72b" width="100%"/>
 
-<p align="center"><sub>Repository artwork based on the live v2.4 Home layout and Ryoku visual language.</sub></p>
+<p align="center"><sub>Repository artwork based on the live v2 Home layout and Ryoku visual language.</sub></p>
 
 ---
 
@@ -185,9 +185,9 @@ The design rules behind the interface are documented in **[docs/DESIGN.md](docs/
 
 ## Install
 
-Ryotunes v2.4 targets **x86_64 Ryoku, CachyOS and Arch-based systems**.
+Ryotunes v2 targets **x86_64 Ryoku, CachyOS and Arch-based systems**.
 
-Package identity: **`ryotunes-v2.4 2.4.1-1`**.
+The published upstream package is **`ryotunes-v2.4 2.4.1-1`**; the current source build reports **2.5.1**.
 
 The normal user path is a **prebuilt package**. End users do not need Node, pnpm, Rust, Cargo or a local Tauri build.
 

@@ -39,21 +39,29 @@
 
 use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::mpsc::{channel, Receiver, RecvTimeoutError, Sender, TryRecvError};
-use std::sync::{Arc, OnceLock};
+use std::sync::{Arc, LazyLock};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use discord_rich_presence::{activity, DiscordIpc, DiscordIpcClient};
 use innertube::SongItem;
 
-/// Discord application id (a snowflake — digits only). **Must be set before rich presence does
-/// anything.** Register an app named "Ryotunes" at <https://discord.com/developers/applications> and
-/// paste its Application ID here — the app's *name* is what renders after "Listening to", and its
-/// icon is the fallback artwork. Nothing else in the portal needs configuring: no bot user, no
-/// OAuth redirect, no client secret. (Metrolist needs all of that only because Android has no
-/// Discord client.)
+/// Discord application id (a snowflake — digits only). This id is inherited from upstream LiMusic:
+/// Discord's `oauth2/applications/<id>/rpc` still returns the name "Limusic" and its lemon icon.
+/// That portal identity is **not** Ryotunes-owned and can only be changed by whoever holds the app
+/// in Discord's developer portal, so a Ryotunes-owned Application ID is pending; until one exists
+/// this stays put rather than repointing at an unrelated app. The card no longer leans on it — it
+/// sets its own activity `name` ([`DEFAULT_PRESENCE_NAME`]) and artwork ([`BRAND_IMAGE`]). No bot
+/// user, OAuth redirect or client secret is needed.
 const APP_ID: &str = "1525891596804161727";
 
 const SONG_URL: &str = "https://music.youtube.com/watch?v=";
+
+/// Ryotunes' brand mark (public repo PNG). The card's large-image fallback when a track has no
+/// fetchable artwork, and the small badge on every art card — so the card never falls back to the
+/// application's portal icon (the upstream lemon). Verified reachable, `200 image/png` (512×512).
+const BRAND_IMAGE: &str =
+    "https://raw.githubusercontent.com/neur0map/ryotunes/main/src-tauri/icons/icon.png";
+const BRAND_BADGE_TEXT: &str = "Ryotunes v2";
 
 /// Reconnect backoff while enabled but unconnected (Discord not running, or it quit). Starts short
 /// — Discord may simply be slower to start than we are — and eases off so a permanently-absent
@@ -75,7 +83,7 @@ const DURATION_GRACE: Duration = Duration::from_millis(800);
 const MIN_WAIT: Duration = Duration::from_millis(10);
 /// Discord rejects `details`/`state`/`large_text` outside 2–128 characters.
 const MAX_FIELD: usize = 128;
-pub const DEFAULT_PRESENCE_NAME: &str = "Ryotunes";
+pub const DEFAULT_PRESENCE_NAME: &str = "Ryotunes v2";
 
 /// Vanity text used by Discord's "Listening to …" activity label. Empty resets to the default;
 /// every non-empty value must satisfy Discord's 2–128 character field contract.
@@ -497,33 +505,28 @@ impl Presence {
             .status_display_type(activity::StatusDisplayType::State)
             .details(field(&track.title))
             .timestamps(ts);
-        // A local file has no YouTube page to link, and its id is a path — never put it in a URL.
-        let mut buttons = Vec::new();
-        if !crate::local::is_local_song(&track.video_id)
-            && !crate::radio::is_radio_id(&track.video_id)
-        {
-            buttons.push(activity::Button::new(
-                "Listen on YouTube Music",
-                format!("{SONG_URL}{}", track.video_id),
-            ));
-        }
-        if !buttons.is_empty() {
-            act = act.buttons(buttons);
+        // Route by provider so a Spotify/SoundCloud id never ships as a YouTube URL. `None` = no
+        // verifiable page (local path, radio, numeric SoundCloud, or an unknown id) — no button.
+        if let Some((label, url)) = listen_link(&track.video_id) {
+            act = act.buttons(vec![activity::Button::new(label, url)]);
         }
         if !track.artists.is_empty() {
             act = act.state(field(&track.artists));
         }
-        // Unlike the Gateway, the IPC client accepts a plain https URL here and proxies it itself —
-        // no `external-assets` round-trip. Artwork is best-effort: no thumbnail is just a
-        // text-only presence.
-        if let Some(url) = track.thumbnail.clone() {
-            let mut assets = activity::Assets::new().large_image(url);
-            match &track.album {
-                Some(album) if !album.is_empty() => assets = assets.large_text(field(album)),
-                _ => {}
+        // Artwork is a plain https URL the IPC client proxies. The hero is the track's art; with
+        // none to show, the Ryotunes mark stands in — never the application's lemon icon.
+        let mut assets = activity::Assets::new();
+        match track.thumbnail.clone() {
+            // Real art up top: the small badge is the Ryotunes mark ("Ryotunes v2" on hover).
+            Some(url) => {
+                assets =
+                    assets.large_image(url).small_image(BRAND_IMAGE).small_text(BRAND_BADGE_TEXT);
             }
-            act = act.assets(assets);
+            // No art: the brand mark is the hero; a badge would just repeat it.
+            None => assets = assets.large_image(BRAND_IMAGE),
         }
+        assets = assets.large_text(art_hover(&track));
+        act = act.assets(assets);
 
         // The floor is charged for every frame we put on the wire, accepted or not.
         self.last_send = Some(Instant::now());
@@ -644,37 +647,85 @@ fn field(s: &str) -> String {
     out
 }
 
-/// Ready a thumbnail URL for Discord's card: request a decent resolution (stored thumbs are often
-/// row-sized, 60px) and refuse URLs over Discord's length limit. Mirrors `ui/src/lib/thumb.ts` —
-/// only googleusercontent-style URLs carry their size in the URL; i.ytimg path-variant thumbs pass
-/// through unchanged (other sizes can 404).
+/// Ready a thumbnail URL for Discord's card: upscale (stored thumbs are often 60px), then accept
+/// only a plain https URL with a real host, no credentials, and within Discord's length limit —
+/// anything else (empty, `file:`, `user:pass@…`) would fail to load and let Discord fall back to
+/// the app icon, so it's dropped to `None` and the brand fallback stands in. Mirrors
+/// `ui/src/lib/thumb.ts`: googleusercontent URLs size in-URL; i.ytimg path-variant thumbs pass through.
 fn discord_thumb(url: &str) -> Option<String> {
-    static WH: OnceLock<regex::Regex> = OnceLock::new();
-    static S: OnceLock<regex::Regex> = OnceLock::new();
-    let wh = WH.get_or_init(|| regex::Regex::new(r"=w\d+-h\d+").expect("static regex"));
-    let s = S.get_or_init(|| regex::Regex::new(r"=s\d+").expect("static regex"));
-    let sized = if wh.is_match(url) {
-        wh.replace(url, "=w512-h512").into_owned()
-    } else if s.is_match(url) {
-        s.replace(url, "=s512").into_owned()
+    static WH: LazyLock<regex::Regex> =
+        LazyLock::new(|| regex::Regex::new(r"=w\d+-h\d+").expect("static regex"));
+    static S: LazyLock<regex::Regex> =
+        LazyLock::new(|| regex::Regex::new(r"=s\d+").expect("static regex"));
+    let sized = if WH.is_match(url) {
+        WH.replace(url, "=w512-h512").into_owned()
+    } else if S.is_match(url) {
+        S.replace(url, "=s512").into_owned()
     } else {
         url.to_owned()
     };
-    (sized.len() <= MAX_ASSET_URL).then_some(sized)
+    if sized.len() > MAX_ASSET_URL {
+        return None;
+    }
+    let parsed = ::url::Url::parse(&sized).ok()?;
+    let has_host = parsed.host_str().map_or(false, |h| !h.is_empty());
+    if parsed.scheme() != "https"
+        || !has_host
+        || !parsed.username().is_empty()
+        || parsed.password().is_some()
+    {
+        return None;
+    }
+    Some(sized)
+}
+
+/// The "listen" button for a track id — label and canonical URL — or `None` when there's no
+/// verifiable page: Spotify tracks link `open.spotify.com`, well-formed YouTube ids link YouTube
+/// Music. A numeric SoundCloud id, a local path, a radio stream, or any unrecognised id gets no
+/// button rather than a fabricated one. Pure, so provider routing is testable without a socket.
+fn listen_link(video_id: &str) -> Option<(&'static str, String)> {
+    if let Some(id) = crate::spotify::spotify_track_id(video_id) {
+        return Some(("Listen on Spotify", format!("https://open.spotify.com/track/{id}")));
+    }
+    if is_youtube_id(video_id) {
+        return Some(("Listen on YouTube Music", format!("{SONG_URL}{video_id}")));
+    }
+    None
+}
+
+/// YouTube's video-id shape: exactly 11 chars of `[A-Za-z0-9_-]`.
+fn is_youtube_id(id: &str) -> bool {
+    id.len() == 11 && id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+}
+
+/// Which service a track id came from, for the card's provider-context line.
+fn provider_label(video_id: &str) -> &'static str {
+    if crate::local::is_local_song(video_id) {
+        "Local library"
+    } else if crate::radio::is_radio_id(video_id) {
+        "Radio"
+    } else if crate::spotify::is_sc_id(video_id) {
+        "SoundCloud"
+    } else if crate::spotify::is_spotify_id(video_id) {
+        "Spotify"
+    } else {
+        "YouTube Music"
+    }
+}
+
+/// Large-image hover: "<album> · <provider>", or just the provider when there's no album. Clamped
+/// to Discord's field window; a local track contributes only "Local library", never its path.
+fn art_hover(track: &Track) -> String {
+    let provider = provider_label(&track.video_id);
+    match track.album.as_deref().map(str::trim).filter(|a| !a.is_empty()) {
+        Some(album) => field(&format!("{album} · {provider}")),
+        None => field(provider),
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    /// `spawn` refuses to run without one, so a bad edit here silently disables the whole feature.
-    #[test]
-    fn app_id_is_a_snowflake() {
-        assert!(
-            !APP_ID.is_empty() && APP_ID.bytes().all(|b| b.is_ascii_digit()),
-            "APP_ID must be a Discord application id (digits only) — got {APP_ID:?}"
-        );
-    }
 
     fn track(id: &str) -> Box<Track> {
         Box::new(Track {
@@ -903,5 +954,38 @@ mod tests {
         );
         let long = format!("https://example.com/{}", "a".repeat(300));
         assert_eq!(discord_thumb(&long), None, "over-long URLs are dropped, not sent");
+        assert_eq!(discord_thumb("file:///home/u/cover.png"), None, "non-https art is dropped");
+        assert_eq!(
+            discord_thumb("https://user:pass@example.com/c.png"),
+            None,
+            "credentialed URLs are dropped"
+        );
+    }
+
+    /// Provider routing is the correctness crux of the card: a Spotify or SoundCloud id must never
+    /// ship as a YouTube URL, and private or unlinkable ids get no button at all.
+    #[test]
+    fn listen_link_routes_by_provider() {
+        // YouTube: a bare video id links its YouTube Music watch page.
+        let (label, url) = listen_link("dQw4w9WgXcQ").expect("youtube ids link");
+        assert_eq!(label, "Listen on YouTube Music");
+        assert_eq!(url, "https://music.youtube.com/watch?v=dQw4w9WgXcQ");
+
+        // Spotify: linked to its open.spotify.com track page, never smuggled into a YouTube URL.
+        let sp = format!("{}4uLU6hMCjMI75M1A2tKUQC", crate::spotify::SPOTIFY_TRACK_PREFIX);
+        let (label, url) = listen_link(&sp).expect("spotify tracks link");
+        assert_eq!(label, "Listen on Spotify");
+        assert_eq!(url, "https://open.spotify.com/track/4uLU6hMCjMI75M1A2tKUQC");
+        assert!(!url.contains("youtube"), "a spotify id must not become a youtube url");
+
+        // SoundCloud numeric id: no canonical page → no button (never a fabricated/widget link).
+        let sc = format!("{}959028242", crate::spotify::SC_TRACK_PREFIX);
+        assert_eq!(listen_link(&sc), None, "soundcloud numeric ids are omitted");
+
+        // Private / unlinkable: a local path and a radio stream carry no button.
+        assert_eq!(listen_link(&format!("{}Music/x.flac", crate::local::SONG_PREFIX)), None);
+        assert_eq!(listen_link(&format!("{}uuid-123", crate::radio::RADIO_ID_PREFIX)), None);
+        // An unrecognised bare id (not a valid 11-char YouTube id) is omitted, not made into a URL.
+        assert_eq!(listen_link("short"), None, "malformed ids get no fabricated youtube url");
     }
 }
