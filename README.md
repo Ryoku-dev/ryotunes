@@ -30,6 +30,46 @@
 
 <p align="center"><sub>Repository artwork based on the live v2 Home layout and Ryoku visual language.</sub></p>
 
+### Replace an older Ryoku-packaged Ryotunes
+
+Quit Ryotunes completely (closing its window can leave playback running).
+Download the Arch `.pkg.tar.zst` and matching `.sha256` from
+[the latest release](https://github.com/ryoku-dev/ryotunes/releases/latest).
+Before removing anything, verify the download in its directory:
+
+```bash
+sha256sum -c ryotunes-1.0.1-1-x86_64.pkg.tar.zst.sha256
+```
+
+Use the filenames for the release you downloaded, and continue only if the
+checksum reports `OK`. To remove the old application:
+
+```bash
+sudo pacman -R ryotunes
+pacman -Q ryotunes
+```
+
+The second command should report that the package was not found. Removal does
+not delete your personal configuration or music. If pacman reports a dependency
+conflict, stop and resolve it; do not bypass dependency checks with `-Rdd`.
+
+To install the standalone replacement:
+
+```bash
+sudo pacman -U ./ryotunes-1.0.1-1-x86_64.pkg.tar.zst
+pacman -Q ryotunes
+```
+
+The v1.0.1 package reports `1:1.0.1-1`: the `1:` is a pacman epoch, which orders
+the standalone package above older distribution-numbered builds such as
+`2.5.1-1`. To uninstall without replacing it, stop after the removal commands.
+
+If installation reports files that already exist, do not use a blanket
+`--overwrite`. Check each path with `pacman -Qo /path/to/file`. Preserve unowned
+files in a backup outside `/usr/share/ryotunes`, then retry installation. If
+another package owns a conflicting file, resolve that package conflict first.
+
+
 ---
 
 ## Built for Ryoku, not merely compatible with it
