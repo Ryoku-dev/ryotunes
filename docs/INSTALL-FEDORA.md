@@ -73,6 +73,32 @@ can discover upstream versions and changelogs, but Fedora builds refuse the
 install RPC before any network download or pacman invocation, even if pacman
 is installed. An upstream tag does not imply an RPM is available yet.
 
+## Release workflow and Copr
+
+`.github/workflows/release.yml` builds Fedora 44 binary RPMs and vendored SRPMs
+on pushes to the default branch or through **Run workflow**. It retains both
+application and companion packages as the `fedora-packages` Actions artifact,
+then submits the companion and application SRPMs to Copr and waits for each
+build to succeed. The separate Fedora RPM workflow continues to run desktop
+validation on pushes and pull requests.
+
+Configure these repository settings before running a release:
+
+- Secret `COPR_CONFIG`: the complete configuration from the
+  [Copr API page](https://copr.fedorainfracloud.org/api/).
+- Variable `COPR_PROJECT`: the existing destination in `owner/project` form.
+  Enable its `fedora-44-x86_64` chroot and grant the API account build access.
+
+The workflow uses the checked-in package version and release. Update them
+before publishing a new version (`scripts/sync-version.sh VERSION --release`
+keeps the version manifests aligned). It does not create commits, tags, Arch
+packages or GitHub releases. To retry a failed submission, rerun the failed
+Copr job to reuse the existing package artifact.
+
+After a successful Copr build, install with `sudo dnf copr enable OWNER/PROJECT`
+and `sudo dnf install ryotunes`. The companion `ryoku-ui` is built into the same
+repository.
+
 ## Clean container build
 
 On a host with rootless Podman and Git:

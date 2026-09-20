@@ -58,7 +58,7 @@ jobs:
           set -e
 
           if [ "$status" -eq 124 ]; then
-            echo "::warning title=libmpv integration timeout::The real-libmpv pitch rollback test timed out on this GitHub runner. Deterministic player tests passed; the Arch release workflow intentionally excludes this environment-sensitive integration case."
+            echo "::warning title=libmpv integration timeout::The real-libmpv pitch rollback test timed out on this GitHub runner. Deterministic player tests passed; the Fedora RPM checks exclude this environment-sensitive integration case."
             exit 0
           fi
 

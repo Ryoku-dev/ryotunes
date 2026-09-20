@@ -1,19 +1,10 @@
 #!/usr/bin/env bash
-# Ryotunes releases are automatic. Pushing to the default branch runs
-# .github/workflows/release.yml, which computes the next v1 version from the
-# tags, syncs every manifest, verifies the tree, then commits + tags + publishes
-# the GitHub release (package + source tarball + notes). You do not cut releases
-# by hand and you never push a tag locally.
-#
-# This script is the local preview of that pipeline:
-#
-#   scripts/release.sh            # show the current and next version + the plan
-#   scripts/release.sh --write    # additionally apply the bump to the working
-#                                 # tree for review (no commit, tag or push)
-#
-# To re-publish an existing tag (recover a failed package/publish), use the
-# workflow's manual trigger: Actions -> Release -> Run workflow -> the tag.
-# To set a specific version out of band (a reset), run scripts/sync-version.sh.
+# Preview the next version suggested by the historical release tags.
+# scripts/release.sh --write syncs that version into the working tree only.
+# Review the suggested version; Fedora releases no longer create version tags.
+# To choose a specific version, use scripts/sync-version.sh VERSION --release.
+# The release workflow builds the checked-in Fedora packages and submits their
+# SRPMs to Copr on default-branch pushes or manual dispatch.
 set -euo pipefail
 
 here="$(cd "$(dirname "$0")/.." && pwd)"
@@ -28,12 +19,12 @@ next="$(scripts/next-version.sh)"
 echo "current source version : $cur"
 echo "next release version   : $next"
 echo
-echo "A push to the default branch will reserve v$next, build the Arch package"
-echo "and source tarball, and publish the GitHub release. Nothing is pushed here."
+echo "A push to the default branch builds the checked-in Fedora version and"
+echo "submits its SRPMs to Copr. Nothing is committed, tagged or pushed here."
 
 if (( write )); then
   echo
   echo "applying v$next to the working tree for review (not committing)..."
   scripts/sync-version.sh "$next" --release
-  echo "review the diff, then commit and push to release (CI owns the tag)."
+  echo "review the version and diff before committing and pushing to release."
 fi
