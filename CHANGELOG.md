@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Stopped Now Playing stuttering while the window is resized or scaled: the cover size read the column's assigned width and the body's assigned height, feeding layout outputs back into the children's preferred sizes, so the column re-polished itself on every pass. The cover now sizes from the root and the header's implicit height, which are layout inputs.
+
 - Fixed every page rendering blank under Ryoku's Reduce motion: the page-stack enter animation used render-thread Animators, which never apply their end value at duration 0, so the stack was stranded at opacity 0. The end state now lands directly when there is no animation to run.
 
 ## v1.0.6 - 2026-09-08

@@ -86,6 +86,7 @@ Item {
 
         // ── header: eyebrow left, the Collapse pill right (in flow, so nothing sits under it) ──
         RowLayout {
+            id: headRow
             Layout.fillWidth: true
             spacing: Style.sp(4)
             Text {
@@ -141,12 +142,18 @@ Item {
                 id: artCol
                 Layout.fillHeight: true
                 Layout.fillWidth: false
-                Layout.preferredWidth: Math.min(Style.sp(110), Math.round(root.width * 0.34))
+                readonly property int colW: Math.min(Style.sp(110), Math.round(root.width * 0.34))
+                Layout.preferredWidth: colW
                 spacing: Style.sp(5)
                 // The cover is as wide as the column unless the height says otherwise: the title
-                // block (~3 lines) must always fit beneath it.
+                // block (~3 lines) must always fit beneath it. The size comes from the root and
+                // the header's implicit height -- layout inputs. Reading this column's assigned
+                // width or body's assigned height fed layout outputs back into preferredWidth/
+                // Height, re-polishing the child inside every updatePolish: the polish() loop
+                // that stuttered window resizes (#196).
                 readonly property int artPx: Math.max(Style.sp(40),
-                    Math.min(width, body.height - Style.sp(30)))
+                    Math.min(colW, root.height - Style.sp(20) - headRow.implicitHeight
+                                      - Style.sp(14) - Style.sp(12) - Style.sp(30)))
 
                 Artwork {
                     id: bigArt
