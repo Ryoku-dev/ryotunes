@@ -164,7 +164,7 @@ Item {
     }
     function share() {
         var url = "https://music.youtube.com/browse/" + encodeURIComponent(page.albumId);
-        Quickshell.execDetached(["sh", "-c", "printf %s \"$1\" | wl-copy", "sh", url]);
+        Quickshell.clipboardText = url;
         Playback.toast("Link copied", "success");
     }
     function showMore(section) {

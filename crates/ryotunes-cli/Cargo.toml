@@ -13,3 +13,7 @@ path = "src/main.rs"
 serde = { workspace = true }
 serde_json = { workspace = true }
 ryotunes-protocol = { workspace = true }
+
+[[bin]]
+name = "ryotunes-native"
+path = "src/launcher.rs"

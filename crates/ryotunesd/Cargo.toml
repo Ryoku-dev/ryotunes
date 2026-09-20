@@ -9,6 +9,9 @@ description = "Ryotunes playback daemon"
 name = "ryotunesd"
 path = "src/main.rs"
 
+[features]
+fedora = ["ryotunes-core/dnf-updates"]
+
 [dependencies]
 serde = { workspace = true }
 serde_json = { workspace = true }

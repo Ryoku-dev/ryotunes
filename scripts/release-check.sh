@@ -45,11 +45,11 @@ import json, tomllib
 from pathlib import Path
 root=Path('.')
 for p in root.rglob('*.json'):
-    if any(x in p.parts for x in ('.git','target','node_modules','.svelte-kit','build')): continue
+    if any(x in p.parts for x in ('.git','target','node_modules','.svelte-kit','build','fedora-out','.fedora-build','vendor')): continue
     if p.name == 'tsconfig.json': continue  # JSONC, parsed by TypeScript/Svelte tooling
     json.loads(p.read_text())
 for p in root.rglob('*.toml'):
-    if any(x in p.parts for x in ('.git','target','node_modules','.svelte-kit','build')): continue
+    if any(x in p.parts for x in ('.git','target','node_modules','.svelte-kit','build','fedora-out','.fedora-build','vendor')): continue
     tomllib.loads(p.read_text())
 print('JSON/TOML: OK')
 PY

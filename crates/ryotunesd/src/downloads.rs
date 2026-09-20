@@ -1077,6 +1077,10 @@ fn apply_result(job: &mut DownloadJob, result: Result<String, String>) {
 fn build_command(target: &str, staging: &Path, settings: &DownloadSettings) -> Command {
     let template = format!("{}/audio.%(ext)s", staging.to_string_lossy().replace('%', "%%"));
     let mut command = Command::new("yt-dlp");
+    // Fedora does not ship Deno or the EJS Python package. Use its supported Node
+    // runtime and yt-dlp's version-matched upstream challenge solver.
+    #[cfg(feature = "fedora")]
+    command.args(["--js-runtimes", "node", "--remote-components", "ejs:github"]);
     command
         .args([
             "--ignore-config",

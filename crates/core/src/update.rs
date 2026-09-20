@@ -96,7 +96,7 @@ fn release_info(release: Option<Release>, current: &str, reason: Option<String>)
         release.assets.iter().any(|a| a.name == name && a.size > 0 && a.size <= MAX_PACKAGE);
     let has_checksum =
         release.assets.iter().any(|a| a.name == checksum && a.size > 0 && a.size <= 4096);
-    if !has_package || !has_checksum {
+    if info.unsupported_reason.is_none() && (!has_package || !has_checksum) {
         info.unsupported_reason = Some("This release has no complete x86_64 Arch package and checksum. View the changelog or check again after the release build finishes.".into());
     }
     info.can_install = info.unsupported_reason.is_none() && has_package && has_checksum;
@@ -126,7 +126,25 @@ async fn bounded_body(mut response: reqwest::Response, limit: usize) -> Result<V
     Ok(bytes)
 }
 
+const DNF_REASON: &str = "Updates are managed by DNF. Run sudo dnf upgrade ryotunes, or install a newer RPM from your package provider. Quit and reopen Ryotunes afterwards. Upstream releases may precede Fedora packages.";
+
+fn fedora_system(os_release: &str) -> bool {
+    os_release.lines().any(|line| {
+        line.strip_prefix("ID=").or_else(|| line.strip_prefix("ID_LIKE=")).is_some_and(|value| {
+            value.trim_matches(['\"', '\'']).split_whitespace().any(|id| id == "fedora")
+        })
+    })
+}
+
+fn dnf_managed() -> bool {
+    cfg!(feature = "dnf-updates")
+        || fedora_system(&std::fs::read_to_string("/etc/os-release").unwrap_or_default())
+}
+
 async fn installation_reason() -> Option<String> {
+    if dnf_managed() {
+        return Some(DNF_REASON.into());
+    }
     if !cfg!(all(target_os = "linux", target_arch = "x86_64")) {
         return Some("Self update supports the x86_64 Arch/Ryoku package. Download a release for your platform instead.".into());
     }
@@ -211,6 +229,10 @@ async fn download(url: &str, path: &Path, expected: &str) -> Result<(), String> 
 }
 
 pub async fn install_update(requested: String) -> Result<InstalledUpdate, String> {
+    // Guard before network access, asset staging or any pacman query, even if pacman is installed.
+    if dnf_managed() {
+        return Err(DNF_REASON.into());
+    }
     if version(&requested).is_none() {
         return Err("Select a valid v1 release.".into());
     }
@@ -321,6 +343,26 @@ mod tests {
                 Asset { name: format!("{name}.sha256"), size: 120 },
             ],
         }
+    }
+
+    #[test]
+    fn fedora_discovery_preserves_dnf_guidance_without_arch_assets() {
+        assert!(fedora_system("ID=fedora\n"));
+        assert!(fedora_system("ID=derivative\nID_LIKE=\"fedora rhel\"\n"));
+        assert!(!fedora_system("ID=arch\n"));
+        let mut value = release("v1.0.9");
+        value.assets.clear();
+        let info = release_info(Some(value), "1.0.8", Some(DNF_REASON.into()));
+        assert!(info.available);
+        assert!(!info.can_install);
+        assert_eq!(info.notes, "Changes");
+        assert_eq!(info.unsupported_reason.as_deref(), Some(DNF_REASON));
+    }
+
+    #[cfg(feature = "dnf-updates")]
+    #[tokio::test]
+    async fn dnf_build_refuses_install_before_contacting_github() {
+        assert_eq!(install_update("1.0.9".into()).await.err().as_deref(), Some(DNF_REASON));
     }
 
     #[test]

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
-SKIP={'.git','target','node_modules','build','.svelte-kit'}
+SKIP={'.git','target','node_modules','build','.svelte-kit', 'fedora-out', '.fedora-build', 'vendor'}
 errs=[]
 opens={'{':'}','(':')','[':']'}
 closes={v:k for k,v in opens.items()}

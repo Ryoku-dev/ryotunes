@@ -128,7 +128,7 @@ Singleton {
         return { snap: d(root.pick("motion", "snap")), move: d(root.pick("motion", "move")),
                  swap: d(root.pick("motion", "swap")), slow: d(root.pick("motion", "slow")) };
     }
-    readonly property string decor: root.followSystem ? Tokens.decor : (root.manifest.decor || root.fallback.decor)
+    readonly property string decor: root.followSystem && Tokens.decor !== undefined ? Tokens.decor : (root.manifest.decor || root.fallback.decor)
     // "artwork" (the playing cover's colour), "provider" (the catalogue's brand colour), "sun"
     // (the skin's own primary), or a fixed "#rrggbb".
     readonly property string accent: root.manifest.accent || root.fallback.accent

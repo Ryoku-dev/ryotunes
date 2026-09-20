@@ -1,0 +1,51 @@
+name: Fedora RPM
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: fedora-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  fedora44:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build isolated Fedora images
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y podman
+          podman build --target builder -t ryotunes-builder -f packaging/fedora/Containerfile .
+          podman build --target desktop-test -t ryotunes-test -f packaging/fedora/Containerfile .
+      - name: Build companion and application RPMs
+        run: |
+          podman run --name rpm-builder -v "$PWD:/work:z" ryotunes-builder bash -ec '
+            export CARGO_TARGET_DIR=/work/.fedora-build/cargo-target
+            cargo fmt --all -- --check
+            packaging/fedora/build-companion.sh > companion-build.log 2>&1
+            packaging/fedora/build.sh > fedora-build.log 2>&1
+            packaging/fedora/build-upgrade-fixture.sh > upgrade-build.log 2>&1
+          '
+      - name: Validate installed RPM in a separate systemd container
+        run: |
+          podman run -d --name rpm-session --systemd=always -v "$PWD:/work:z" ryotunes-test
+          podman exec -w /work -e RYOTUNES_TEST_NODE_PACKAGE=nodejs22-bin rpm-session packaging/fedora/validate-container.sh
+      - name: Preserve RPMs and validation evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ryotunes-fedora44
+          path: |
+            fedora-out/RPMS/**/*.rpm
+            fedora-out/SRPMS/*.rpm
+            fedora-out/companion/RPMS/**/*.rpm
+            fedora-out/companion/SRPMS/*.rpm
+            fedora-out/validation/
+            *build*.log
+      - name: Stop containers
+        if: always()
+        run: |
+          podman rm -f rpm-session rpm-builder || true

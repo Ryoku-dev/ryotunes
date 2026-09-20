@@ -45,6 +45,9 @@ req(read('client/version').strip() == version,
 appstream = ET.fromstring(read('packaging/linux/dev.ryoku.ryotunes.metainfo.xml'))
 req(appstream.find('releases/release').get('version') == version,
     'AppStream release version does not match workspace')
+fedora = read('packaging/fedora/ryotunes.spec')
+req(re.search(rf'^Version:\s+{re.escape(version)}$', fedora, re.M),
+    'Fedora RPM version does not match workspace')
 arch = read('packaging/arch/PKGBUILD')
 req(re.search(rf'^pkgver={re.escape(version)}$', arch, re.M),
     'Arch package version does not match workspace')

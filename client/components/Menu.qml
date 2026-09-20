@@ -73,7 +73,7 @@ Item {
     function share() {
         var id = root.song.video_id;
         var url = "https://music.youtube.com/watch?v=" + encodeURIComponent(id);
-        Quickshell.execDetached(["sh", "-c", "printf %s \"$1\" | wl-copy", "sh", url]);
+        Quickshell.clipboardText = url;
         root.toast("Link copied", "success");
     }
 

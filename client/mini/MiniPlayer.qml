@@ -66,7 +66,8 @@ Item {
     Item {
         id: panel
         anchors.fill: parent
-        layer.enabled: true
+        // Software Qt cannot execute the rounded-corner shader; keep the player visible.
+        layer.enabled: panel.GraphicsInfo.api !== GraphicsInfo.Software
         layer.effect: ShaderEffect {
             property vector2d size: Qt.vector2d(panel.width * panel.Screen.devicePixelRatio, panel.height * panel.Screen.devicePixelRatio)
             property real radius: root.radius * panel.Screen.devicePixelRatio

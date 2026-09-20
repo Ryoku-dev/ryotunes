@@ -39,3 +39,7 @@ rustypipe_reports/
 .env.*
 *.pem
 *.key
+
+# Fedora source bundles, vendor trees and build evidence
+/fedora-out/
+/.fedora-build/

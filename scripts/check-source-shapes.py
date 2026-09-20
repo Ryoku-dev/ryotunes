@@ -9,7 +9,7 @@ import re
 import sys
 
 ROOT = Path(__file__).resolve().parents[1]
-SKIP = {'.git', 'target', 'node_modules', 'build', '.svelte-kit'}
+SKIP = {'.git', 'target', 'node_modules', 'build', '.svelte-kit', 'fedora-out', '.fedora-build', 'vendor'}
 
 
 def rust_files():

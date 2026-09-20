@@ -44,6 +44,8 @@ else
   sed -i '/^pkgrel=/a epoch=1' packaging/arch/PKGBUILD
 fi
 
+sed -i 's/^Version:.*/Version:        '"$ver"'/' packaging/fedora/ryotunes.spec
+
 # Cargo.lock: bump only the workspace members (path crates), matched by the names
 # the workspace actually declares, so registry crates that happen to be at the
 # same version (tauri-plugin-*) are left untouched.

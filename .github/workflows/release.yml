@@ -196,7 +196,7 @@ jobs:
           set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add Cargo.toml Cargo.lock src-tauri/tauri.conf.json ui/package.json client/version packaging/arch/PKGBUILD packaging/linux/dev.ryoku.ryotunes.metainfo.xml CHANGELOG.md
+          git add Cargo.toml Cargo.lock src-tauri/tauri.conf.json ui/package.json client/version packaging/arch/PKGBUILD packaging/fedora/ryotunes.spec packaging/linux/dev.ryoku.ryotunes.metainfo.xml CHANGELOG.md
           git commit --allow-empty -m "release: $TAG"
           git tag -a "$TAG" -m "Ryotunes $TAG" -m "Source-Commit: $SOURCE_SHA"
           git push origin "refs/tags/$TAG"

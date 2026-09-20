@@ -95,42 +95,47 @@ ShellRoot {
     // inside it: a surface that moves itself under the pointer feeds its own drag deltas back and
     // flies off, an item in a fixed surface does not. Opening it hides the main window the way the
     // Tauri app hibernated it; the maximize button brings the main window back.
-    PanelWindow {
-        id: miniWin
-        visible: appRoot.miniOpen
-        screen: shellRoot.devScreenObj
-        color: "transparent"
-        anchors { top: true; bottom: true; left: true; right: true }
-        exclusiveZone: 0
-        WlrLayershell.layer: WlrLayer.Top
-        WlrLayershell.namespace: "ryotunes-mini"
-        WlrLayershell.keyboardFocus: WlrKeyboardFocus.None
-        mask: Region { x: miniBox.x; y: miniBox.y; width: miniBox.width; height: miniBox.height }
+    // GNOME has no layer-shell protocol; GNOME and X11 use a normal toplevel.
+    readonly property bool portableMini: Quickshell.env("RYOTUNES_PORTABLE_MINI") === "1"
+        || !(Quickshell.env("WAYLAND_DISPLAY") || "")
+        || (Quickshell.env("XDG_CURRENT_DESKTOP") || "").toLowerCase().indexOf("gnome") >= 0
 
-        Item {
-            id: miniBox
-            width: 724
-            height: 356
-            ArtAccent {}
-            // Offsets from the work area's bottom-right corner, clamped so the widget stays on
-            // screen whatever the monitor.
-            x: Math.max(0, Math.min(miniWin.width - width, miniWin.width - width - Prefs.miniRight))
-            y: Math.max(0, Math.min(miniWin.height - height, miniWin.height - height - Prefs.miniBottom))
-
-            MiniPlayer {
-                anchors.fill: parent
-                active: miniWin.visible
-                dragTarget: miniBox
-                dragMaxX: Math.max(0, miniWin.width - miniBox.width)
-                dragMaxY: Math.max(0, miniWin.height - miniBox.height)
-                onMaximize: {
-                    appRoot.miniOpen = false;
-                    shellRoot.present();
-                }
-                onDragEnded: {
-                    Prefs.miniRight = Math.round(miniWin.width - miniBox.width - miniBox.x);
-                    Prefs.miniBottom = Math.round(miniWin.height - miniBox.height - miniBox.y);
-                    Prefs.save();
+    LazyLoader {
+        id: layerMini
+        active: !shellRoot.portableMini
+        source: shellRoot.portableMini ? "" : "mini/LayerPlayer.qml"
+    }
+    Binding {
+        target: layerMini.item
+        property: "visible"
+        value: appRoot.miniOpen
+        when: layerMini.active
+    }
+    Binding {
+        target: layerMini.item
+        property: "screen"
+        value: shellRoot.devScreenObj || Quickshell.screens[0]
+        when: layerMini.active
+    }
+    Connections {
+        target: layerMini.item
+        function onMaximize(): void { shellRoot.present(); }
+    }
+    LazyLoader {
+        active: shellRoot.portableMini
+        component: Component {
+            FloatingWindow {
+                id: portableMiniWin
+                title: "Ryotunes Mini"
+                visible: appRoot.miniOpen
+                implicitWidth: 724
+                implicitHeight: 356
+                color: Tokens.paper
+                ArtAccent {}
+                MiniPlayer {
+                    anchors.fill: parent
+                    active: portableMiniWin.visible
+                    onMaximize: shellRoot.present()
                 }
             }
         }

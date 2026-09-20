@@ -1,0 +1,6 @@
+.git
+fedora-out
+.fedora-build
+target
+ui/node_modules
+*.log

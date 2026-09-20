@@ -190,7 +190,7 @@ Item {
     }
     function share() {
         var url = "https://music.youtube.com/channel/" + encodeURIComponent(page.artistId);
-        Quickshell.execDetached(["sh", "-c", "printf %s \"$1\" | wl-copy", "sh", url]);
+        Quickshell.clipboardText = url;
         Playback.toast("Link copied", "success");
     }
     function showMore(section) {

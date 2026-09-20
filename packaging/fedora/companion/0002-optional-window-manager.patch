@@ -1,0 +1,34 @@
+--- a/ryoku/ui/Singletons/Wm.qml
++++ b/ryoku/ui/Singletons/Wm.qml
+@@ -3,7 +3,6 @@
+ import QtQuick
+ import Quickshell
+ import Quickshell.Io
+-import Quickshell.WindowManager
+ import Quickshell.Wayland
+ 
+ // Capability-shaped view of the window manager. Presentation lists come from the
+@@ -57,7 +56,13 @@
+ 
+     // Bound at declaration so the Wayland registry binds early; the lists fill in
+     // asynchronously after connect.
+-    readonly property var _windowsets: WindowManager.windowsets
++    // Fedora's stable Quickshell may not yet expose ext-workspace. Keep the
++    // shared design system importable for apps that do not use that protocol.
++    readonly property var _workspaceBridge: {
++        const component = Qt.createComponent(Qt.resolvedUrl("../compat/Windowsets.qml"));
++        return component.status === Component.Ready ? component.createObject(root) : null;
++    }
++    readonly property var _windowsets: root._workspaceBridge ? root._workspaceBridge.windowsets : []
+     property var _toplevelModel: ToplevelManager.toplevels
+     readonly property var toplevels: root._toplevelModel ? root._toplevelModel.values : []
+ 
+--- /dev/null
++++ b/ryoku/ui/compat/Windowsets.qml
+@@ -0,0 +1,6 @@
++import QtQuick
++import Quickshell.WindowManager
++
++QtObject {
++    readonly property var windowsets: WindowManager.windowsets
++}

@@ -260,7 +260,7 @@ Item {
     function share() {
         var raw = String(page.playlistId).replace(/^VL/, "");
         var url = "https://music.youtube.com/playlist?list=" + encodeURIComponent(raw);
-        Quickshell.execDetached(["sh", "-c", "printf %s \"$1\" | wl-copy", "sh", url]);
+        Quickshell.clipboardText = url;
         Playback.toast("Link copied", "success");
     }
     function queuePlaylist(next) {

@@ -82,7 +82,7 @@ Item {
         asynchronous: true
         cache: true
         visible: !root.isCollage && status === Image.Ready
-        layer.enabled: true
+        layer.enabled: img.GraphicsInfo.api !== GraphicsInfo.Software
         layer.effect: ShaderEffect {
             // The layer's pixel size: the item size times the window's device pixel ratio, which
             // is what the SDF needs so the radius is in the same units as the texture.
@@ -108,7 +108,7 @@ Item {
         Item {
             id: grid
             anchors.fill: parent
-            layer.enabled: true
+            layer.enabled: grid.GraphicsInfo.api !== GraphicsInfo.Software
             layer.effect: ShaderEffect {
                 property vector2d size: Qt.vector2d(grid.width * grid.Screen.devicePixelRatio, grid.height * grid.Screen.devicePixelRatio)
                 property real radius: root.cornerRadius * grid.Screen.devicePixelRatio

@@ -240,6 +240,10 @@ The design rules behind the interface are documented in **[docs/DESIGN.md](docs/
 
 ## Install
 
+Fedora 44 x86_64: [RPM installation and build instructions](docs/INSTALL-FEDORA.md).
+The Fedora package preserves the primary QML client and uses DNF-managed updates.
+
+
 Ryotunes targets **x86_64 Ryoku, CachyOS and Arch-based systems**.
 
 The published package is **`ryotunes 1:<version>-1`**. Its permanent `epoch=1` orders it above distribution-numbered 2.x packages; filenames stay epochless. This numbering transition is not a switch from QML to Tauri.

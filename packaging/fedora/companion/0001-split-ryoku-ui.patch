@@ -1,0 +1,60 @@
+--- a/release/rpm/ryoku-desktop.spec
++++ b/release/rpm/ryoku-desktop.spec
+@@ -24,6 +24,7 @@
+ Requires:       ryoku-extras = %{version}-%{release}
+ Requires:       sddm-theme-ryoku = %{version}-%{release}
+ Requires:       ryoku-desktop-compositor
++Requires:       ryoku-ui = %{version}-%{release}
+ Requires:       quickshell
+ Requires:       sddm
+ Requires:       weston
+--- a/release/rpm/stage-package.sh
++++ b/release/rpm/stage-package.sh
+@@ -19,6 +19,8 @@
+   mv "$stage/usr/lib/qt6" "$stage$libdir/qt6"
+ fi
+ if [[ $name == ryoku-desktop ]]; then
++  # Shared UI is owned once by ryoku-ui, also usable without the desktop.
++  rm -rf "$stage$libdir/qt6/qml/Ryoku/Ui"
+   # Fedora owns its boot chain; the desktop must not install Arch boot hooks.
+   rm -rf "$stage/usr/lib/initcpio" "$stage/etc/boot" "$stage/usr/share/ryoku/boot"
+   rm -f "$stage/usr/bin/ryoku-boot-apply" "$stage/usr/bin/ryoku-windows-entry"
+--- /dev/null
++++ b/release/rpm/ryoku-ui.spec
+@@ -0,0 +1,36 @@
++Name:           ryoku-ui
++Version:        0.1
++Release:        1%{?dist}
++Summary:        Shared Ryoku QML design system
++License:        GPL-3.0-or-later
++URL:            https://ryoku.dev
++Source0:        ryoku-%{version}.tar.gz
++ExclusiveArch:  x86_64 aarch64
++%global debug_package %{nil}
++Requires:       quickshell >= 0.2.1
++Requires:       qt6-qtdeclarative
++Requires:       qt6-qtsvg
++Requires:       qt6-qt5compat
++# Earlier desktop RPMs own these files; upgrade both packages in one transaction.
++Conflicts:      ryoku-desktop < %{version}-%{release}
++
++%description
++The shared Ryoku.Ui QML module, including Ryoku.Ui.Singletons. Its default
++palette works without a running Ryoku desktop. Applications and the desktop
++consume the same module on Fedora's Qt import path.
++
++%prep
++%setup -q -n ryoku-%{version}
++
++%install
++mkdir -p %{buildroot}%{_libdir}/qt6/qml/Ryoku/Ui
++cp -a ryoku/ui/. %{buildroot}%{_libdir}/qt6/qml/Ryoku/Ui/
++rm -f %{buildroot}%{_libdir}/qt6/qml/Ryoku/Ui/install.sh
++find %{buildroot}%{_libdir}/qt6/qml/Ryoku/Ui -name __pycache__ -type d -exec rm -rf {} +
++find %{buildroot}%{_libdir}/qt6/qml/Ryoku/Ui -type d -exec chmod 755 {} +
++find %{buildroot}%{_libdir}/qt6/qml/Ryoku/Ui -type f -exec chmod 644 {} +
++
++%files
++%license LICENSE
++%dir %{_libdir}/qt6/qml/Ryoku
++%{_libdir}/qt6/qml/Ryoku/Ui/

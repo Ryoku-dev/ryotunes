@@ -123,7 +123,7 @@ Singleton {
     readonly property bool decorRich: (Prefs.decor === "skin" ? Skin.decor : Prefs.decor) === "rich"
     function applyDecor() {
         var want = root.decorRich ? "rich" : "calm";
-        if (Tokens.decor !== want)
+        if (Tokens.decor !== undefined && Tokens.decor !== want)
             Tokens.decor = want;
     }
     function applyPrefs() {
@@ -132,6 +132,7 @@ Singleton {
     }
     Connections {
         target: Tokens
+        ignoreUnknownSignals: true
         function onDecorChanged(): void { root.applyDecor(); }
     }
     Connections {

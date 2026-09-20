@@ -245,7 +245,7 @@ Item {
             if (!info.canInstall && info.unsupportedReason) msg += " " + info.unsupportedReason;
             return msg;
         }
-        return "You're on the latest version.";
+        return "You're on the latest version." + ((!info.canInstall && info.unsupportedReason) ? " " + info.unsupportedReason : "");
     }
     function openUrl(url) { Quickshell.execDetached(["xdg-open", url]); }
 
