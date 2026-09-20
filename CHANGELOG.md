@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## v1.0.7 - 2026-09-20
+
 - Fixed every page rendering blank under Ryoku's Reduce motion: the page-stack enter animation used render-thread Animators, which never apply their end value at duration 0, so the stack was stranded at opacity 0. The end state now lands directly when there is no animation to run.
 
 ## v1.0.6 - 2026-09-08
