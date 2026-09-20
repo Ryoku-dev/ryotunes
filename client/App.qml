@@ -201,14 +201,28 @@ Item {
                             OpacityAnimator { target: pageStack; from: 0; to: 1; duration: Tokens.durFastEffects; easing.type: Easing.OutCubic }
                             YAnimator { target: pageStack; from: Style.sp(2); to: 0; duration: Tokens.durFastEffects; easing.type: Easing.OutCubic }
                         }
-                        onPageChanged: enter.restart()
-                        Component.onCompleted: enter.start()
+                        // A render-thread Animator with duration 0 never applies
+                        // its `to`, so under Reduce motion (which zeroes the
+                        // shared token) the page stack would be stranded at
+                        // opacity 0 -- a blank page on every route. Land the end
+                        // state directly when there is no animation to run.
+                        function reenter() {
+                            if (Tokens.durFastEffects > 0) {
+                                enter.restart();
+                            } else {
+                                enter.stop();
+                                pageStack.opacity = 1;
+                                pageStack.y = 0;
+                            }
+                        }
+                        onPageChanged: reenter()
+                        Component.onCompleted: reenter()
                         // A provider switch swaps the catalogue under every page (a YouTube
                         // library is not a Spotify one), so the content re-enters the way a
                         // route change does while the room's light tweens to the new colour.
                         Connections {
                             target: Playback
-                            function onProviderChanged(): void { enter.restart(); }
+                            function onProviderChanged(): void { pageStack.reenter(); }
                         }
                     }
                 }
