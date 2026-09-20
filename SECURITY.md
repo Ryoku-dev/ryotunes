@@ -95,6 +95,33 @@ GitHub Dependabot monitors Rust, frontend and GitHub Actions dependencies weekly
 `Security audit` workflow also runs RustSec (`cargo audit`) and a production frontend dependency
 audit (`pnpm audit`) on the hardening branch/main and on a weekly schedule.
 
+### Reviewed RustSec exceptions (2026-09-20)
+
+`.cargo/audit.toml` records three advisories whose affected operations are not
+used by the pinned librespot revision `e7eb953d5848fd97bacd00e6c0e33500765eaa63`:
+
+- [RUSTSEC-2023-0071](https://rustsec.org/advisories/RUSTSEC-2023-0071):
+  `librespot-core` is the only consumer of `rsa`. Its
+  `core/src/connection/handshake.rs` verifies Spotify's signature using
+  `RsaPublicKey::verify`. It performs no private-key operation, so the private-key
+  timing attack does not apply. There is currently no patched RSA release.
+- [RUSTSEC-2026-0194](https://rustsec.org/advisories/RUSTSEC-2026-0194) and
+  [RUSTSEC-2026-0195](https://rustsec.org/advisories/RUSTSEC-2026-0195):
+  `librespot-core` is the only consumer of `quick-xml` 0.38. Its ProductInfo
+  parser in `core/src/session.rs` uses plain `Reader` events and text decoding.
+  It never iterates XML attributes, uses `NsReader`, or calls
+  `NamespaceResolver`, which are the affected paths. The other `quick-xml`
+  dependency is already on patched version 0.41.
+
+These are reachability exceptions, not claims that the dependencies are patched.
+Re-review them whenever the librespot pin changes or new consumers of these
+crates are introduced. Remove the XML exceptions when the fork accepts
+`quick-xml` 0.41 or later. Other RustSec vulnerabilities still fail the audit.
+
+Librespot now uses platform TLS (OpenSSL on Linux) because its pinned proxy
+backend otherwise pulls in obsolete rustls 0.22 and rustls-webpki 0.102.
+The application's remaining rustls dependency is updated to 0.23.45.
+
 ## Reporting a vulnerability
 
 If you discover a bug that exposes credentials or session data, do not post the secret publicly.

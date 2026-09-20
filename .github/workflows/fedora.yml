@@ -14,15 +14,18 @@ jobs:
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
+      # Rootful containers avoid sharing the runner user's inotify budget and
+      # provide systemd with a writable delegated cgroup hierarchy.
       - name: Build isolated Fedora images
         run: |
           sudo apt-get update
           sudo apt-get install -y podman
-          podman build --target builder -t ryotunes-builder -f packaging/fedora/Containerfile .
-          podman build --target desktop-test -t ryotunes-test -f packaging/fedora/Containerfile .
+          sudo podman build --target builder -t ryotunes-builder -f packaging/fedora/Containerfile .
+          sudo podman build --target desktop-test -t ryotunes-test -f packaging/fedora/Containerfile .
       - name: Build companion and application RPMs
         run: |
-          podman run --name rpm-builder -v "$PWD:/work:z" ryotunes-builder bash -ec '
+          sudo podman run --name rpm-builder -v "$PWD:/work:z" ryotunes-builder bash -ec '
+            git config --global --add safe.directory /work
             export CARGO_TARGET_DIR=/work/.fedora-build/cargo-target
             cargo fmt --all -- --check
             packaging/fedora/build-companion.sh > companion-build.log 2>&1
@@ -31,8 +34,8 @@ jobs:
           '
       - name: Validate installed RPM in a separate systemd container
         run: |
-          podman run -d --name rpm-session --systemd=always -v "$PWD:/work:z" ryotunes-test
-          podman exec -w /work -e RYOTUNES_TEST_NODE_PACKAGE=nodejs22-bin rpm-session packaging/fedora/validate-container.sh
+          sudo podman run -d --name rpm-session --systemd=always -v "$PWD:/work:z" ryotunes-test
+          sudo podman exec -w /work -e RYOTUNES_TEST_NODE_PACKAGE=nodejs22-bin rpm-session packaging/fedora/validate-container.sh
       - name: Preserve RPMs and validation evidence
         if: always()
         uses: actions/upload-artifact@v4
@@ -48,4 +51,4 @@ jobs:
       - name: Stop containers
         if: always()
         run: |
-          podman rm -f rpm-session rpm-builder || true
+          sudo podman rm -f rpm-session rpm-builder || true

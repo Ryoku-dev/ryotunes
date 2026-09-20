@@ -24,8 +24,22 @@ grep -q libmpv "$out/daemon-libraries.txt"
 id ryotest >/dev/null 2>&1 || useradd -m ryotest
 loginctl enable-linger ryotest
 uid=$(id -u ryotest)
-for attempt in {1..50}; do [[ -S /run/user/$uid/bus ]] && break; sleep 0.2; done
+session_diagnostics() {
+    systemctl status "user@$uid.service" "user-runtime-dir@$uid.service" --no-pager > "$out/user-session-status.log" 2>&1 || true
+    journalctl -b --no-pager > "$out/system-journal.log" 2>&1 || true
+}
+trap session_diagnostics EXIT
+# Lingering alone does not guarantee that the user manager or D-Bus is ready.
+systemctl start "user@$uid.service"
 session=(runuser -u ryotest -- env XDG_RUNTIME_DIR=/run/user/$uid DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$uid/bus DISPLAY=:99 QT_QUICK_BACKEND=software XDG_CURRENT_DESKTOP=GNOME)
+"${session[@]}" systemctl --user start dbus.socket
+for attempt in {1..100}; do
+    if [[ -S /run/user/$uid/bus ]] && "${session[@]}" busctl --user list >/dev/null 2>&1; then
+        break
+    fi
+    sleep 0.2
+done
+"${session[@]}" busctl --user list > "$out/user-bus.txt"
 "${session[@]}" Xvfb :99 -screen 0 1440x1000x24 -ac > "$out/xvfb.log" 2>&1 &
 sleep 1
 "${session[@]}" openbox > "$out/openbox.log" 2>&1 &

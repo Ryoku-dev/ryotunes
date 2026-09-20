@@ -1,0 +1,12 @@
+[advisories]
+# Reviewed 2026-09-20 against librespot revision
+# e7eb953d5848fd97bacd00e6c0e33500765eaa63. Re-review on changes to that pin
+# or any new consumers of rsa / quick-xml 0.38. See SECURITY.md for evidence.
+ignore = [
+    # Only RsaPublicKey::verify is used; no private-key operations.
+    "RUSTSEC-2023-0071",
+    # ProductInfo uses plain Reader events, never attribute iteration.
+    "RUSTSEC-2026-0194",
+    # ProductInfo does not use NsReader or NamespaceResolver.
+    "RUSTSEC-2026-0195",
+]

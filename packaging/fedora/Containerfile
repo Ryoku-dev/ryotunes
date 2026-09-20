@@ -5,7 +5,7 @@ RUN dnf -y install rpm-build rust cargo rustfmt gcc gcc-c++ pkgconf-pkg-config \
 WORKDIR /work
 
 FROM registry.fedoraproject.org/fedora:44 AS desktop-test
-RUN dnf -y install systemd dbus-daemon python3 xorg-x11-server-Xvfb xdotool \
+RUN dnf -y install systemd systemd-pam dbus-broker dbus-daemon python3 xorg-x11-server-Xvfb xdotool \
     pulseaudio pulseaudio-utils procps-ng util-linux openbox ImageMagick \
     qt6-qtdeclarative-devel qt6-qttools && dnf clean all
 CMD ["/sbin/init"]

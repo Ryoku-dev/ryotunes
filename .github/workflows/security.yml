@@ -9,6 +9,8 @@ on:
     paths:
       - Cargo.toml
       - Cargo.lock
+      - .cargo/audit.toml
+      - SECURITY.md
       - crates/**/Cargo.toml
       - src-tauri/Cargo.toml
       - ui/package.json
