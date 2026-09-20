@@ -4,7 +4,7 @@
 %global source_date_epoch_from_changelog 0
 %global clamp_mtime_to_source_date_epoch 1
 Name:           ryotunes
-Version:        1.0.8
+Version:        1.1.6
 Release:        %{?ryotunes_release}%{!?ryotunes_release:1}%{?dist}
 Summary:        Native QML music player with libmpv playback
 License:        GPL-3.0-or-later
