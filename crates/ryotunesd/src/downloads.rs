@@ -103,6 +103,13 @@ pub struct DownloadJob {
     pub file_path: Option<String>,
     pub error: Option<String>,
     pub source: String,
+    /// The album/playlist this track was batch-added from, when it was. The client groups
+    /// collection downloads under one card per collection using this label. `#[serde(default)]`
+    /// keeps queues persisted by older builds loadable.
+    #[serde(default)]
+    pub collection: Option<String>,
+    #[serde(default)]
+    pub collection_kind: Option<String>,
     pub created_at: i64,
     pub finished_at: Option<i64>,
     #[serde(default = "DownloadSettings::defaults")]
@@ -162,15 +169,21 @@ fn is_youtube_id(id: &str) -> bool {
 }
 
 // --- collection downloads + smart dedup ------------------------------------------------------
-
 /// One track a collection (playlist/album) offered for batch download. camelCase on the wire,
 /// mirroring the download job's field names so the client sends what it already renders.
 #[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct CollectionEntry {
     pub video_id: String,
     pub title: String,
     pub artists: String,
     pub thumbnail: String,
+    /// The album/playlist name the batch came from; stamped onto each created job so the client
+    /// can group them. Optional so a caller may batch unlabelled tracks.
+    #[serde(default)]
+    pub collection: Option<String>,
+    #[serde(default)]
+    pub collection_kind: Option<String>,
 }
 
 /// A snapshot of the download folder's audio files, used to refuse re-downloading a track that
@@ -387,6 +400,8 @@ impl Downloads {
                     title: title.clone(),
                     artists: artists.clone(),
                     thumbnail: thumbnail.clone(),
+                    collection: None,
+                    collection_kind: None,
                 };
                 let index = FolderIndex::build(Path::new(&state.settings.path));
                 if let Some(path) = index.find(&state.settings, &entry) {
@@ -407,6 +422,8 @@ impl Downloads {
                     title: title.clone(),
                     artists: artists.clone(),
                     thumbnail: thumbnail.clone(),
+                    collection: None,
+                    collection_kind: None,
                 },
             );
             state.jobs.push(job.clone());
@@ -660,6 +677,8 @@ fn new_job(
     source: Source,
     entry: CollectionEntry,
 ) -> DownloadJob {
+    let collection =
+        entry.collection.as_deref().map(|label| truncate_chars(label.trim(), MAX_COMPONENT_BYTES));
     DownloadJob {
         id: inner.next_id(),
         video_id: entry.video_id,
@@ -671,6 +690,12 @@ fn new_job(
         file_path: None,
         error: None,
         source: source.label().into(),
+        collection: collection.filter(|label| !label.is_empty()),
+        collection_kind: entry
+            .collection_kind
+            .as_deref()
+            .filter(|kind| matches!(*kind, "album" | "playlist"))
+            .map(str::to_owned),
         created_at: now_secs(),
         finished_at: None,
         settings: settings.clone(),
@@ -1042,6 +1067,9 @@ fn apply_result(job: &mut DownloadJob, result: Result<String, String>) {
         Err(error) => {
             job.status = DownloadStatus::Failed;
             job.error = Some(truncate_chars(&error, MAX_ERROR_LEN));
+            // A worker failure never passes through the RPC chokepoint (it is async), so log it
+            // here: the diagnostics CaptureLayer picks warn+ tracing up into the same record.
+            tracing::error!(job = %job.id, video_id = %job.video_id, error, "download failed");
         }
     }
 }
@@ -1176,8 +1204,14 @@ fn publish(
         .extension()
         .and_then(|value| value.to_str())
         .ok_or("The download has no audio extension.")?;
-    let path =
-        compute_final_path(&job.settings, &job.title, &job.artists, &job.video_id, extension);
+    let path = compute_final_path(
+        &job.settings,
+        &job.title,
+        &job.artists,
+        &job.video_id,
+        extension,
+        job.collection.as_deref(),
+    );
     let parent = path.parent().ok_or("The download has no destination folder.")?;
     std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
     let root = Path::new(&job.settings.path).canonicalize().map_err(|error| error.to_string())?;
@@ -1465,16 +1499,26 @@ fn error_message(tail: &str, code: Option<i32>) -> String {
     }
 }
 
+/// The destination for a finished download. A track batch-added from an album/playlist lands in
+/// a folder named after its collection (the collection *is* the grouping, so the artist
+/// subfolder is skipped for it); a single track follows the plain artist settings. Filenames
+/// are unchanged either way, which keeps `FolderIndex::find` (stem-keyed, walks recursively)
+/// able to dedup files wherever they sit.
 fn compute_final_path(
     settings: &DownloadSettings,
     title: &str,
     artists: &str,
     video_id: &str,
     ext: &str,
+    collection: Option<&str>,
 ) -> PathBuf {
     let mut dir = PathBuf::from(&settings.path);
-    if settings.organize_by_artist {
-        dir = dir.join(sanitize_component(primary_artist(artists)));
+    match collection.map(str::trim).filter(|c| !c.is_empty()) {
+        Some(label) => dir = dir.join(sanitize_component(label)),
+        None if settings.organize_by_artist => {
+            dir = dir.join(sanitize_component(primary_artist(artists)));
+        }
+        None => {}
     }
     let base = if settings.organize_by_artist || artists.trim().is_empty() {
         title.to_string()
@@ -1617,10 +1661,15 @@ mod tests {
     struct Temp(PathBuf);
     impl Temp {
         fn new() -> Self {
+            // Tests share one process and run on parallel threads: pid+nanos alone can collide
+            // when two threads read the same coarse clock tick, failing create_dir on the
+            // loser's path. A process-local counter guarantees uniqueness.
+            static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
             let path = std::env::temp_dir().join(format!(
-                "ryotunes-download-test-{}-{}",
+                "ryotunes-download-test-{}-{}-{}",
                 std::process::id(),
-                SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos()
+                SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos(),
+                SEQ.fetch_add(1, Ordering::Relaxed),
             ));
             std::fs::create_dir(&path).unwrap();
             Self(path)
@@ -1668,6 +1717,8 @@ mod tests {
             file_path: None,
             error: None,
             source: "YouTube".into(),
+            collection: None,
+            collection_kind: None,
             created_at: 1,
             finished_at: None,
             settings: settings(directory, 1),
@@ -1681,6 +1732,8 @@ mod tests {
             title: title.into(),
             artists: artists.into(),
             thumbnail: String::new(),
+            collection: None,
+            collection_kind: None,
         }
     }
 
@@ -1763,7 +1816,85 @@ mod tests {
             .collect();
         assert!(ids.contains(&"CCCCCCCCCCC".to_string()));
         assert!(!ids.contains(&"AAAAAAAAAAA".to_string()));
+    }
+
+    // The exact wire shape the QML client posts (camelCase keys). The batch endpoint once
+    // deserialized with snake_case field names, so every collection download died with
+    // "entries: missing field `video_id`" before any track was admitted.
+    #[test]
+    fn collection_entries_deserialize_from_the_camel_case_wire_shape() {
+        let wire = serde_json::json!([
+            {
+                "videoId": "AAAAAAAAAAA",
+                "title": "Alpha",
+                "artists": "One",
+                "thumbnail": "https://example/thumb.jpg",
+                "collection": "Greatest Hits",
+                "collectionKind": "album"
+            },
+            {
+                "videoId": "BBBBBBBBBBB",
+                "title": "Beta",
+                "artists": "One",
+                "thumbnail": ""
+            }
+        ]);
+        let entries: Vec<CollectionEntry> = serde_json::from_value(wire).unwrap();
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0].video_id, "AAAAAAAAAAA");
+        assert_eq!(entries[0].collection.as_deref(), Some("Greatest Hits"));
+        assert_eq!(entries[0].collection_kind.as_deref(), Some("album"));
+        assert_eq!(entries[1].collection, None, "collection is optional on the wire");
+    }
+
+    #[tokio::test]
+    async fn batch_jobs_carry_their_collection_label_for_grouped_rendering() {
+        let directory = Temp::new();
+        let music = directory.0.join("music");
+        std::fs::create_dir(&music).unwrap();
+        let manager = manager(&directory.0);
+        manager.set_settings(settings(&music, 1)).unwrap();
+        let mut tagged = entry("AAAAAAAAAAA", "Alpha", "One");
+        tagged.collection = Some("  Late Night Playlist  ".into());
+        tagged.collection_kind = Some("playlist".into());
+        let mut untagged = entry("BBBBBBBBBBB", "Beta", "One");
+        untagged.collection = Some("   ".into());
+        untagged.collection_kind = Some("bogus-kind".into());
+        manager.enqueue_collection(vec![tagged, untagged]).unwrap();
+        let jobs = manager.snapshot()["jobs"].as_array().unwrap().clone();
+        let alpha = jobs.iter().find(|j| j["videoId"] == "AAAAAAAAAAA").unwrap();
+        assert_eq!(alpha["collection"], "Late Night Playlist", "label is trimmed");
+        assert_eq!(alpha["collectionKind"], "playlist");
+        let beta = jobs.iter().find(|j| j["videoId"] == "BBBBBBBBBBB").unwrap();
+        assert!(beta["collection"].is_null(), "a blank label stores no collection");
+        assert!(beta["collectionKind"].is_null(), "an unknown kind is dropped");
         manager.shutdown().await;
+    }
+
+    #[test]
+    fn collection_tracks_land_in_a_folder_named_after_the_collection() {
+        let directory = Temp::new();
+        let mut s = settings(&directory.0, 1);
+        s.organize_by_artist = true;
+        let album =
+            compute_final_path(&s, "Alpha", "One", "AAAAAAAAAAA", "mp3", Some("Late Night"));
+        assert_eq!(
+            album,
+            directory.0.join("Late Night").join("Alpha [AAAAAAAAAAA].mp3"),
+            "a collection track is filed under its collection, not its artist"
+        );
+        let single = compute_final_path(&s, "Beta", "Two", "BBBBBBBBBBB", "mp3", None);
+        assert_eq!(
+            single,
+            directory.0.join("Two").join("Beta [BBBBBBBBBBB].mp3"),
+            "a single track still follows the artist folder"
+        );
+        let traversal =
+            compute_final_path(&s, "Gamma", "Three", "CCCCCCCCCCC", "mp3", Some("../../etc"));
+        assert!(
+            traversal.starts_with(&directory.0),
+            "the collection folder is sanitized inside the root"
+        );
     }
 
     #[test]
@@ -1774,7 +1905,14 @@ mod tests {
         assert!(publish(&staging, &job(&directory.0), &[], &mut Vec::new()).is_err());
         std::fs::write(staging.join("audio.mp3"), b"finished audio").unwrap();
         let j = job(&directory.0);
-        let first = compute_final_path(&j.settings, &j.title, &j.artists, &j.video_id, "mp3");
+        let first = compute_final_path(
+            &j.settings,
+            &j.title,
+            &j.artists,
+            &j.video_id,
+            "mp3",
+            j.collection.as_deref(),
+        );
         std::fs::write(&first, b"existing user music").unwrap();
         let second = publish(&staging, &job(&directory.0), &[], &mut Vec::new()).unwrap();
         assert_eq!(std::fs::read(&first).unwrap(), b"existing user music");
@@ -1897,7 +2035,8 @@ mod tests {
         // Pre-place a cover at the base stem so a suffix-0 companion collision forces the whole set
         // (audio + sidecars) to the next suffix, and prove the existing cover is never overwritten.
         let j = job(&directory.0);
-        let base_audio = compute_final_path(&j.settings, &j.title, &j.artists, &j.video_id, "mp3");
+        let base_audio =
+            compute_final_path(&j.settings, &j.title, &j.artists, &j.video_id, "mp3", None);
         let base_cover = base_audio.with_extension("jpg");
         std::fs::write(&base_cover, b"existing cover").unwrap();
 

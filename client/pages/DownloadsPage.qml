@@ -2,6 +2,7 @@ pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Layouts
 import Ryoku.Ui.Singletons
+import "../lib/collections.js" as Collections
 import "../"
 import "../components"
 
@@ -42,6 +43,12 @@ Item {
         out.sort((a, b) => ((b.finishedAt || b.createdAt || 0) - (a.finishedAt || a.createdAt || 0)));
         return out;
     }
+
+    // Collapse jobs that share a collection label into one card; single tracks stay flat rows
+    // (Collections.groupJobs). The card sits where its first job sorted, so queue/history order
+    // is preserved.
+    readonly property var queueGroups: Collections.groupJobs(page.queue)
+    readonly property var historyGroups: Collections.groupJobs(page.history)
     readonly property string folderPath: (Downloads.settings && Downloads.settings.path) ? Downloads.settings.path : ""
 
     Component.onCompleted: {
@@ -272,6 +279,209 @@ Item {
         }
     }
 
+    // One album/playlist batch collapsed into a single card: cover, kind, aggregate progress,
+    // and an expandable list of its per-track rows. A collection is what the user asked for,
+    // so the queue shows one card per collection instead of a hundred anonymous rows.
+    component CollectionCard: Rectangle {
+        id: cc
+        property var group: null
+        readonly property var jobs: cc.group ? cc.group.jobs : []
+        readonly property string label: cc.group ? cc.group.label : ""
+        readonly property bool open: Downloads.openCollections[label] === true
+        readonly property var stats: Collections.stats(cc.jobs)
+        readonly property int doneCount: cc.stats.done
+        readonly property int waitingCount: cc.stats.waiting
+        readonly property int movingCount: cc.stats.moving
+        readonly property int failedCount: cc.stats.failed
+        readonly property int cancelledCount: cc.stats.cancelled
+        readonly property bool active: cc.movingCount + cc.waitingCount > 0
+        readonly property int percent: cc.stats.percent
+        readonly property string summary: {
+            var parts = [];
+            if (movingCount > 0)
+                parts.push("Downloading " + doneCount + " of " + jobs.length);
+            else if (doneCount > 0)
+                parts.push(doneCount + " saved");
+            if (waitingCount > 0)
+                parts.push(waitingCount + " waiting");
+            if (failedCount > 0)
+                parts.push(failedCount + " failed");
+            if (cancelledCount > 0)
+                parts.push(cancelledCount + " cancelled");
+            return parts.join(" \u00b7 ");
+        }
+        // The first artwork the batch carried; album pages always have one.
+        readonly property string cover: {
+            for (var i = 0; i < jobs.length; i++)
+                if (jobs[i].thumbnail)
+                    return jobs[i].thumbnail;
+            return "";
+        }
+
+        implicitHeight: body.implicitHeight + Style.sp(4)
+        radius: Style.radius
+        color: cardHover.hovered ? Tokens.tint5 : "transparent"
+        Behavior on color { ColorAnimation { duration: Style.motion.snap } }
+        HoverHandler { id: cardHover }
+
+        ColumnLayout {
+            id: body
+            anchors.left: parent.left
+            anchors.right: parent.right
+            anchors.top: parent.top
+            anchors.margins: Style.sp(2)
+            spacing: Style.sp(1)
+
+            RowLayout {
+                id: header
+                Layout.fillWidth: true
+                spacing: Style.sp(3)
+
+                Artwork {
+                    Layout.alignment: Qt.AlignVCenter
+                    url: cc.cover
+                    px: Style.sp(11)
+                }
+                ColumnLayout {
+                    Layout.fillWidth: true
+                    Layout.minimumWidth: 0
+                    spacing: Style.sp(0.5)
+                    Text {
+                        text: (cc.group && cc.group.kind === "album") ? "Album" : "Playlist"
+                        textFormat: Text.PlainText
+                        color: Tokens.inkFaint
+                        font.family: Style.fontMono
+                        font.pixelSize: Style.fs.micro
+                        font.letterSpacing: Style.trackMicro
+                    }
+                    Text {
+                        Layout.fillWidth: true
+                        text: cc.label
+                        textFormat: Text.PlainText
+                        color: Tokens.ink
+                        font.family: Style.fontUi
+                        font.pixelSize: Style.fs.md
+                        font.weight: Font.Medium
+                        elide: Text.ElideRight
+                    }
+                    // aggregate progress while anything is still moving
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: Style.sp(2)
+                        visible: cc.active
+                        Rectangle {
+                            Layout.fillWidth: true
+                            Layout.maximumWidth: Style.sp(60)
+                            Layout.alignment: Qt.AlignVCenter
+                            implicitHeight: Style.sp(1)
+                            radius: height / 2
+                            color: Tokens.lineSoft
+                            Rectangle {
+                                height: parent.height
+                                width: parent.width * cc.percent / 100
+                                radius: height / 2
+                                color: Style.accent
+                                Behavior on width {
+                                    enabled: !Tokens.reduceMotion
+                                    NumberAnimation { duration: Style.motion.move; easing.type: Easing.OutCubic }
+                                }
+                            }
+                        }
+                        Text {
+                            text: cc.percent + "%"
+                            textFormat: Text.PlainText
+                            color: Tokens.inkMuted
+                            font.family: Style.fontMono
+                            font.pixelSize: Style.fs.sm
+                        }
+                    }
+                    Text {
+                        Layout.fillWidth: true
+                        text: cc.summary
+                        textFormat: Text.PlainText
+                        visible: text !== ""
+                        color: (cc.failedCount + cc.cancelledCount) > 0 ? Style.alert : Tokens.inkMuted
+                        font.family: Style.fontUi
+                        font.pixelSize: Style.fs.sm
+                        elide: Text.ElideRight
+                    }
+                }
+
+                // Reveal the collection folder (any completed file sits in it).
+                IconAction {
+                    Layout.alignment: Qt.AlignVCenter
+                    visible: cc.doneCount > 0
+                    icon: "folder"
+                    iconSize: Style.fs.md
+                    diameter: Style.sp(9)
+                    a11y: "Open " + cc.label + " folder"
+                    onClicked: {
+                        for (var i = 0; i < cc.jobs.length; i++)
+                            if (cc.jobs[i].status === "completed") {
+                                Downloads.open(cc.jobs[i].id);
+                                return;
+                            }
+                    }
+                }
+                // Cancel every unfinished track of this collection.
+                IconAction {
+                    Layout.alignment: Qt.AlignVCenter
+                    visible: cc.active
+                    icon: "close"
+                    iconSize: Style.fs.md
+                    diameter: Style.sp(9)
+                    a11y: "Cancel " + cc.label + " downloads"
+                    onClicked: {
+                        for (var i = 0; i < cc.jobs.length; i++)
+                            if (cc.jobs[i].status === "downloading" || cc.jobs[i].status === "queued")
+                                Downloads.cancel(cc.jobs[i].id);
+                    }
+                }
+                IconAction {
+                    Layout.alignment: Qt.AlignVCenter
+                    icon: cc.open ? "chevron-down" : "chevron-right"
+                    iconSize: Style.fs.md
+                    diameter: Style.sp(9)
+                    a11y: (cc.open ? "Collapse " : "Expand ") + cc.label
+                    onClicked: Downloads.toggleCollection(cc.label)
+                }
+            }
+
+            // Expanded: the per-track rows, indented under their collection.
+            ColumnLayout {
+                id: rows
+                Layout.fillWidth: true
+                Layout.leftMargin: Style.sp(4)
+                visible: cc.open
+                spacing: 0
+                Repeater {
+                    model: cc.jobs
+                    delegate: JobRow {
+                        required property var modelData
+                        job: modelData
+                    }
+                }
+            }
+        }
+    }
+
+    // One entry of the grouped queue/history list: a collection card when the batch shares a
+    // label, a flat JobRow for a single track.
+    component GroupRow: Loader {
+        required property var entry
+        Layout.fillWidth: true
+        sourceComponent: entry && entry.group ? collectionCard : jobRow
+        readonly property var group: entry ? entry.group : null
+        readonly property var job: entry ? entry.job : null
+        Component {
+            id: collectionCard
+            CollectionCard { group: parent.group }
+        }
+        Component {
+            id: jobRow
+            JobRow { job: parent.job }
+        }
+    }
     Flickable {
         id: scroll
         anchors.fill: parent
@@ -432,10 +642,10 @@ Item {
                     font.pixelSize: Style.fs.sm
                 }
                 Repeater {
-                    model: page.queue
-                    delegate: JobRow {
+                    model: page.queueGroups
+                    delegate: GroupRow {
                         required property var modelData
-                        job: modelData
+                        entry: modelData
                     }
                 }
             }
@@ -469,10 +679,10 @@ Item {
                     font.pixelSize: Style.fs.sm
                 }
                 Repeater {
-                    model: page.history
-                    delegate: JobRow {
+                    model: page.historyGroups
+                    delegate: GroupRow {
                         required property var modelData
-                        job: modelData
+                        entry: modelData
                     }
                 }
             }

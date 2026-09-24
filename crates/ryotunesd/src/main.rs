@@ -1,4 +1,5 @@
 mod app;
+mod diagnostics;
 mod download_media;
 mod downloads;
 mod gtk_thread;
@@ -16,11 +17,21 @@ use std::os::unix::net::UnixStream;
 use std::path::Path;
 use std::sync::Arc;
 
+use tracing_subscriber::layer::SubscriberExt as _;
+use tracing_subscriber::util::SubscriberInitExt as _;
+
 fn main() -> anyhow::Result<()> {
-    tracing_subscriber::fmt()
-        .with_env_filter(
+    // Panics and warn+ tracing land in the diagnostics ring + rolling file before anything
+    // else can fail, so even a daemon that dies on launch leaves evidence for the next session.
+    diagnostics::install_panic_hook();
+    let logs_dir = app::paths().data_dir.join("logs");
+    let _diagnostics = diagnostics::Diagnostics::install(&logs_dir);
+    tracing_subscriber::registry()
+        .with(
             tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "warn".into()),
         )
+        .with(tracing_subscriber::fmt::layer())
+        .with(diagnostics::CaptureLayer)
         .init();
 
     let path = ryotunes_protocol::socket_path();

@@ -18,6 +18,9 @@ ShellRoot {
         // intact until the user quits and reopens, rather than reloading mid-transaction.
         Quickshell.watchFiles = false;
         Daemon.subscribeAll();
+        // Touch the Logs singleton so its Connections (callFailed capture + reconnect flush)
+        // exist from the first moment a failure could happen; the flush is a no-op when empty.
+        Logs.flush();
         Style.applyPrefs();
     }
 

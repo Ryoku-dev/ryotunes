@@ -17,6 +17,10 @@ Singleton {
 
     // A daemon event (no id): name plus its payload, fanned out to Playback and any surface.
     signal event(string name, var data)
+    // A failure the daemon itself cannot record (not connected, socket dropped). `level` is
+    // "warn"/"error"; Logs subscribes and forwards into the diagnostics record. Emitted as a
+    // signal rather than calling Logs directly so the two singletons do not import each other.
+    signal callFailed(string level, string target, string message)
     // The `subscribe` reply: the full { playback, queue, settings, auth } snapshot, delivered on
     // the first subscribe and again after every reconnect so Playback resynchronises each time.
     signal snapshot(var data)
@@ -40,6 +44,9 @@ Singleton {
     function call(method, params) {
         return new Promise((resolve, reject) => {
             if (!root.connected) {
+                // The daemon never sees this failure, so it can only be recorded here: a user
+                // clicking play against a dead daemon is a support ticket with no other trace.
+                root.callFailed("warn", "rpc:" + method, "ryotunesd is not connected");
                 reject({ code: "disconnected", message: "ryotunesd is not connected" });
                 return;
             }
@@ -91,6 +98,7 @@ Singleton {
                 if (connection.connected) {
                     if (root.wantSubscribe) root._subscribe();
                 } else {
+                    root.callFailed("error", "daemon", "connection to ryotunesd lost (socket closed)");
                     for (const id in root.pending) root.pending[id].reject({ code: "disconnected", message: "connection lost" });
                     root.pending = {};
                 }

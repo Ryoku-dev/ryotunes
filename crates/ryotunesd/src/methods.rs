@@ -942,6 +942,33 @@ impl Dispatch for Methods {
                 null()
             }
 
+            // --- diagnostics ---------------------------------------------------------------
+            "get_logs" => {
+                let level =
+                    arg::<Option<String>>(&params, "level")?.unwrap_or_else(|| "warn".into());
+                let source =
+                    arg::<Option<String>>(&params, "source")?.unwrap_or_else(|| "all".into());
+                let query = arg::<Option<String>>(&params, "query")?.unwrap_or_default();
+                let limit = arg::<Option<usize>>(&params, "limit")?.unwrap_or(500).clamp(1, 2000);
+                Ok(crate::diagnostics::snapshot(&level, &source, &query, limit))
+            }
+            "log_client_error" => {
+                // The client's own failures (including ones it buffered while the daemon was
+                // down) join the same record, tagged `client` so the UI can filter them apart.
+                let message = arg::<String>(&params, "message")?;
+                let target =
+                    arg::<Option<String>>(&params, "target")?.unwrap_or_else(|| "client".into());
+                let level =
+                    arg::<Option<String>>(&params, "level")?.unwrap_or_else(|| "error".into());
+                let level = if level == "warn" { "warn" } else { "error" };
+                crate::diagnostics::record(level, "client", &target, &message);
+                null()
+            }
+            "open_logs_folder" => {
+                crate::diagnostics::open_logs_folder().map_err(err)?;
+                null()
+            }
+
             // --- client-side / not ported ----------------------------------------------------
             "frontend_ready" | "open_mini" | "close_mini" | "login_webview" => Err(ErrorBody {
                 code: "client_side".into(),

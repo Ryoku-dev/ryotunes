@@ -144,6 +144,12 @@ async fn handle(
         let req = match serde_json::from_str::<Incoming>(&line) {
             Ok(Incoming::Request(r)) => r,
             Err(e) => {
+                crate::diagnostics::record(
+                    "warn",
+                    "client",
+                    "rpc:framing",
+                    &format!("unparsable request line: {e}"),
+                );
                 let _ = tx.send(
                     Outgoing::Response(Response::err(0, "bad_request", e.to_string())).to_line(),
                 );
@@ -157,7 +163,20 @@ async fn handle(
             let Request { id, method, params } = req;
             let resp = match dispatch.call(&method, params, &conn).await {
                 Ok(v) => Response::ok(id, v),
-                Err(e) => Response { id, result: None, error: Some(e) },
+                Err(e) => {
+                    // The one chokepoint every RPC error passes: record it (minus codes that
+                    // describe an expected state rather than a failure) so the Diagnostics page
+                    // sees what actually broke, with the method name attached.
+                    if !matches!(e.code.as_str(), "spotify_signed_out" | "client_side") {
+                        crate::diagnostics::record(
+                            "error",
+                            "daemon",
+                            &format!("rpc:{method}"),
+                            &format!("[{}] {}", e.code, e.message),
+                        );
+                    }
+                    Response { id, result: None, error: Some(e) }
+                }
             };
             let _ = tx.send(Outgoing::Response(resp).to_line());
         });

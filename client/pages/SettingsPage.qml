@@ -66,6 +66,7 @@ Item {
         { k: "account", l: "Account", jp: "鍵" },
         { k: "local", l: "Local music", jp: "音源" },
         { k: "playlists", l: "Playlists", jp: "転送" },
+        { k: "diagnostics", l: "Diagnostics", jp: "診" },
         { k: "about", l: "About", jp: "力" }
     ]
 
@@ -514,6 +515,7 @@ Item {
                     else if (page.section === "account") h = accountCol.implicitHeight;
                     else if (page.section === "local") h = localCol.implicitHeight;
                     else if (page.section === "playlists") h = playlistsCol.implicitHeight;
+                    else if (page.section === "diagnostics") h = diagnosticsLoader.item ? diagnosticsLoader.item.implicitHeight : 0;
                     else h = aboutCol.implicitHeight;
                     return h + Style.sp(16);
                 }
@@ -1317,6 +1319,16 @@ Item {
                         }
                     }
                 }
+
+                // ─────────────────────────── DIAGNOSTICS ───────────────────────────
+                Loader {
+                    id: diagnosticsLoader
+                    active: page.section === "diagnostics"
+                    visible: active
+                    anchors { left: parent.left; right: parent.right; top: parent.top; leftMargin: Style.sp(6); rightMargin: Style.sp(6); topMargin: Style.sp(4) }
+                    source: "DiagnosticsPage.qml"
+                }
+
 
                 // ─────────────────────────── ABOUT ───────────────────────────
                 ColumnLayout {

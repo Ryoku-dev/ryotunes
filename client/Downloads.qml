@@ -23,6 +23,19 @@ Singleton {
     property string error: ""
     property bool addingAlbum: false
 
+    // Which collection cards the downloads page has expanded (label -> true). Lives on the
+    // singleton so the page's inline components (ComponentBehavior: Bound, no outer ids) can
+    // toggle it; replaced whole so bindings on it re-evaluate.
+    property var openCollections: ({})
+    function toggleCollection(label) {
+        var next = Object.assign({}, root.openCollections);
+        if (next[label])
+            delete next[label];
+        else
+            next[label] = true;
+        root.openCollections = next;
+    }
+
     // The daemon's persisted download preferences, fetched lazily on demand; null until loaded. The
     // settings page owns editing them (it calls the daemon directly); this is an optional read for a
     // surface that wants to show the destination folder.
@@ -145,12 +158,16 @@ Singleton {
     // folder in one pass (exact name, collision suffix, or the same normalized "artist title"
     // from a different upload) and against the queue, so re-downloading an album you half own
     // adds only the missing tracks and the toast can say exactly what happened.
-    function toEntry(song, fallbackArtist, fallbackThumb) {
+    // `collection`/`collectionKind` name the album/playlist the batch came from; the daemon
+    // stamps them onto every job it admits so the downloads page can group them under one card.
+    function toEntry(song, fallbackArtist, fallbackThumb, collection, collectionKind) {
         return {
             videoId: song.video_id,
             title: song.title,
             artists: song.artists || fallbackArtist || "",
-            thumbnail: song.thumbnail || fallbackThumb || ""
+            thumbnail: song.thumbnail || fallbackThumb || "",
+            collection: collection || "",
+            collectionKind: collectionKind || ""
         };
     }
 
@@ -202,7 +219,7 @@ Singleton {
             // back to the page's artist, then its cover, exactly as the old per-track path did.
             var entries = [];
             for (var i = 0; i < tracks.length; i++)
-                entries.push(root.toEntry(tracks[i], page.artist, page.thumbnail));
+                entries.push(root.toEntry(tracks[i], page.artist, page.thumbnail, page.title, label));
             return root.enqueueCollection(entries, label);
         }).catch((e) => {
             Playback.toast(((e && e.message) ? e.message : "Could not download " + label), "error");
