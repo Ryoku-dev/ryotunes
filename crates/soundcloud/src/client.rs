@@ -1,14 +1,16 @@
-//! The `SoundCloud` guest client: `client_id` discovery + cache + one-retry, and every endpoint
-//! the daemon bridge needs. Pure transport — no UI, no mpv.
+//! The `SoundCloud` client: `client_id` discovery + cache + one-retry for guests, an OAuth
+//! bearer (with rotating refresh) once the host installs a sign-in, and every endpoint the
+//! daemon bridge needs. Pure transport — no UI, no mpv.
 
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use serde::de::DeserializeOwned;
 use serde::Deserialize;
 use tokio::sync::RwLock;
 
+use crate::auth::{SoundcloudAuth, REFRESH_URL};
 use crate::models::*;
 use crate::{asset_script_srcs, downsample_waveform, scrape_client_id_from_js};
 
@@ -40,12 +42,26 @@ pub enum Error {
 
 pub type Result<T, E = Error> = std::result::Result<T, E>;
 
-/// A guest SoundCloud client. Cheap to clone the way callers expect an `Arc` wrapper (holds a
-/// pooled `reqwest::Client` and a shared, refreshable `client_id`).
+/// A SoundCloud client: guest-capable, and signed-in once an OAuth bearer is installed. Cheap
+/// to clone the way callers expect an `Arc` wrapper (holds a pooled `reqwest::Client` and
+/// shared, refreshable `client_id` / auth).
 pub struct SoundCloud {
     http: reqwest::Client,
     cache_dir: PathBuf,
     client_id: RwLock<Option<String>>,
+    /// The current sign-in, installed by the host after capture or a refresh. When present its
+    /// bearer rides every api-v2 request as `Authorization: OAuth <token>`, which is what
+    /// unlocks `/me` and the personal endpoints. A sync (parking_lot) lock: the guards are
+    /// only ever held long enough to clone, never across an `.await` — so the plain accessors
+    /// below are safe to call from async context (a tokio `blocking_read` there panics).
+    auth: parking_lot::RwLock<Option<SoundcloudAuth>>,
+    /// Serialises refreshes: SoundCloud's refresh token is single-use and rotates on every
+    /// exchange, so two concurrent refreshes would spend one token twice and log the session
+    /// out. The loser re-reads what the winner installed instead of exchanging again.
+    refresh_lock: tokio::sync::Mutex<()>,
+    /// Called after a successful refresh so the host can persist the rotated pair (the crate
+    /// owns no storage for secrets).
+    on_rotate: parking_lot::RwLock<Option<std::sync::Arc<dyn Fn(SoundcloudAuth) + Send + Sync>>>,
 }
 
 impl SoundCloud {
@@ -59,7 +75,14 @@ impl SoundCloud {
             .pool_idle_timeout(Duration::from_secs(90))
             .build()
             .expect("reqwest client builds with rustls");
-        SoundCloud { http, cache_dir, client_id: RwLock::new(None) }
+        SoundCloud {
+            http,
+            cache_dir,
+            client_id: RwLock::new(None),
+            auth: parking_lot::RwLock::new(None),
+            refresh_lock: tokio::sync::Mutex::new(()),
+            on_rotate: parking_lot::RwLock::new(None),
+        }
     }
 
     fn cache_file(&self) -> PathBuf {
@@ -94,6 +117,136 @@ impl SoundCloud {
         Ok(id)
     }
 
+    // --- sign-in -------------------------------------------------------------
+
+    /// Install (or clear, with `None`) the sign-in. Takes effect through every clone
+    /// immediately, the same way the shared `client_id` does.
+    pub fn set_auth(&self, auth: Option<SoundcloudAuth>) {
+        *self.auth.write() = auth;
+    }
+
+    /// A snapshot of the current sign-in, if any.
+    pub fn auth(&self) -> Option<SoundcloudAuth> {
+        self.auth.read().clone()
+    }
+
+    /// Whether a bearer is installed (the client presents itself as signed in). An expired
+    /// bearer still counts until proven dead: expiry is repaired by `ensure_fresh` on use.
+    pub fn signed_in(&self) -> bool {
+        self.auth.read().is_some()
+    }
+
+    /// Register the persistence hook for rotated tokens (see `SoundcloudAuth`'s single-use
+    /// refresh rotation).
+    pub fn set_on_rotate(&self, hook: std::sync::Arc<dyn Fn(SoundcloudAuth) + Send + Sync>) {
+        *self.on_rotate.write() = Some(hook);
+    }
+
+    /// The signed-in user (`/me`). Requires a token — without one SoundCloud answers 401 and
+    /// this returns `Err(Api{{401}})`, which is also how the host detects a dead token.
+    pub async fn me(&self) -> Result<User> {
+        self.ensure_fresh().await?;
+        let url = format!("{API}/me");
+        let w: WireUser = self.get_json(&url, &[]).await?;
+        Ok(map_user(w))
+    }
+
+    /// Refresh the bearer if it is (nearly) expired, exactly once per rotation. A refresh
+    /// failure with a still-valid token is ignored (the request may well succeed); with a dead
+    /// token it surfaces so the caller can report the sign-in as broken.
+    async fn ensure_fresh(&self) -> Result<()> {
+        let Some(current) = self.auth.read().clone() else { return Ok(()) };
+        let now =
+            SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs() as i64).unwrap_or(0);
+        if !current.is_expired(now) {
+            return Ok(());
+        }
+        if current.refresh_token.is_none() || current.connect_session.is_none() {
+            // Nothing to rotate with: the bearer is what it is. Personal calls will 401 and the
+            // host will ask the user to sign in again.
+            return Ok(());
+        }
+        let _guard = self.refresh_lock.lock().await;
+        // Re-check under the lock: a sibling refresh may have landed while this call queued.
+        let Some(auth) = self.auth.read().clone() else { return Ok(()) };
+        if !auth.is_expired(now) {
+            return Ok(());
+        }
+        let rotated = self.refresh_token(&auth).await?;
+        *self.auth.write() = Some(rotated.clone());
+        if let Some(hook) = self.on_rotate.read().clone() {
+            hook(rotated);
+        }
+        Ok(())
+    }
+
+    /// The site's own refresh exchange. The response rotates BOTH tokens; the old refresh
+    /// token is dead server-side the moment this call succeeds.
+    async fn refresh_token(&self, auth: &SoundcloudAuth) -> Result<SoundcloudAuth> {
+        let cookie = auth
+            .refresh_cookie()
+            .ok_or_else(|| Error::Api { status: 401, url: REFRESH_URL.to_string() })?;
+        let body = serde_json::json!({
+            "client_id": auth.client_id,
+            "grant_type": "refresh_token",
+            "refresh_token": auth.refresh_token,
+        });
+        let resp = self
+            .http
+            .post(REFRESH_URL)
+            .header(reqwest::header::COOKIE, cookie)
+            .header(reqwest::header::REFERER, HOME)
+            .header(reqwest::header::ORIGIN, "https://soundcloud.com")
+            .json(&body)
+            .send()
+            .await?;
+        let status = resp.status();
+        if !status.is_success() {
+            return Err(Error::Api { status: status.as_u16(), url: REFRESH_URL.to_string() });
+        }
+        let wire: crate::auth::RefreshResponse = resp.json().await?;
+        let now =
+            SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs() as i64).unwrap_or(0);
+        let mut rotated = SoundcloudAuth::from_access_token(
+            wire.access_token,
+            wire.refresh_token.or_else(|| auth.refresh_token.clone()),
+            auth.connect_session.clone(),
+        )
+        .ok_or(Error::ClientId)?;
+        // The JWT's own exp wins; expires_in is the site's promise and the earlier of the two
+        // is the safe choice.
+        if let Some(secs) = wire.expires_in {
+            rotated.expires_at = rotated.expires_at.min(now + secs);
+        }
+        tracing::info!("soundcloud: refreshed the access token");
+        Ok(rotated)
+    }
+
+    /// The signed-in user's own playlists (`/users/{me}/playlists`).
+    pub async fn my_playlists(&self) -> Result<Vec<Playlist>> {
+        let me = self.me().await?;
+        let url = format!("{API}/users/{}/playlists", me.id);
+        let w: WireCollection<WirePlaylist> =
+            self.get_json(&url, &[("limit", "50".into())]).await?;
+        Ok(w.collection.iter().map(map_playlist).collect())
+    }
+
+    /// The tracks the signed-in user liked (`/users/{me}/likes` — the same envelope
+    /// `user_likes` reads, reached through the token's identity).
+    pub async fn my_likes(&self) -> Result<Vec<Track>> {
+        let me = self.me().await?;
+        self.user_likes(me.id).await
+    }
+
+    /// The users the signed-in account follows (`/users/{me}/followings`), for the
+    /// Following shelf.
+    pub async fn my_followings(&self) -> Result<Vec<User>> {
+        let me = self.me().await?;
+        let url = format!("{API}/users/{}/followings", me.id);
+        let w: WireCollection<WireUser> = self.get_json(&url, &[("limit", "50".into())]).await?;
+        Ok(w.collection.into_iter().map(map_user).collect())
+    }
+
     /// Fetch soundcloud.com, collect its asset bundles, and scan them (last first) for a client_id.
     async fn scrape_client_id(&self) -> Result<String> {
         let html = self.http.get(HOME).send().await?.text().await?;
@@ -113,9 +266,16 @@ impl SoundCloud {
 
     // --- transport -----------------------------------------------------------
 
-    /// GET `url` with `extra` query params plus the current `client_id`; on 401/403 re-scrape the
-    /// id once and retry. Returns the raw (decompressed) body bytes.
+    /// GET `url` with `extra` query params plus the current `client_id` (and the bearer token
+    /// when signed in); on 401/403 re-scrape the id once and retry. Returns the raw
+    /// (decompressed) body bytes.
     async fn get_bytes(&self, url: &str, extra: &[(&str, String)]) -> Result<Vec<u8>> {
+        let personal = url.starts_with(API) && is_personal_path(url);
+        if personal {
+            // A near-expiry bearer is repaired before the call, not after the 401: the
+            // rotating refresh must be spent exactly once.
+            self.ensure_fresh().await?;
+        }
         let id = self.client_id().await?;
         let resp = self.send(url, extra, &id).await?;
         let status = resp.status();
@@ -123,6 +283,12 @@ impl SoundCloud {
             return Ok(resp.bytes().await?.to_vec());
         }
         if status == reqwest::StatusCode::UNAUTHORIZED || status == reqwest::StatusCode::FORBIDDEN {
+            // A signed-in 401 on a personal endpoint is a dead token, not a rotated public
+            // id; re-scraping cannot fix it, so surface the 401 (the host treats that as
+            // "token needs re-capture").
+            if personal && self.signed_in() {
+                return Err(Error::Api { status: status.as_u16(), url: url.to_string() });
+            }
             let id = self.refresh_client_id().await?;
             let resp = self.send(url, extra, &id).await?;
             let status = resp.status();
@@ -140,7 +306,12 @@ impl SoundCloud {
         extra: &[(&str, String)],
         client_id: &str,
     ) -> Result<reqwest::Response> {
-        Ok(self.http.get(url).query(extra).query(&[("client_id", client_id)]).send().await?)
+        let mut req = self.http.get(url).query(extra).query(&[("client_id", client_id)]);
+        if let Some(token) = self.auth.read().as_ref().map(|a| a.access_token.clone()) {
+            // SoundCloud's web API takes its bearer scheme as `OAuth <token>`, not `Bearer`.
+            req = req.header("Authorization", format!("OAuth {token}"));
+        }
+        Ok(req.send().await?)
     }
 
     /// GET + deserialize JSON, with the client_id retry.
@@ -415,6 +586,22 @@ impl SoundCloud {
         };
         Ok(PlaylistDetail { playlist, tracks, description: system.description.clone() })
     }
+}
+
+/// Whether an api-v2 URL asks for the signed-in user's own data (`/me`, or a personal
+/// collection like `/users/{id}/likes|followings|playlists` when the id is the caller's).
+/// A 401 here with a token installed means the token died — re-scraping the public
+/// client_id cannot help, so `get_bytes` surfaces the 401 instead of burning a retry.
+fn is_personal_path(url: &str) -> bool {
+    let Some(rest) = url.strip_prefix(API) else { return false };
+    let rest = rest.trim_start_matches('/');
+    if rest == "me" || rest.starts_with("me/") {
+        return true;
+    }
+    rest.starts_with("users/")
+        && ["/likes", "/followings", "/playlists", "/track_likes", "/playlist_likes"]
+            .iter()
+            .any(|suffix| rest.ends_with(suffix))
 }
 
 /// Turn a `{collection, next_href}` envelope into a `Page`, deriving the next offset from the

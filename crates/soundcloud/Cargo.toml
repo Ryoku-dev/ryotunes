@@ -3,15 +3,17 @@ name = "ryotunes-soundcloud"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "Ryotunes SoundCloud provider: guest api-v2 client (client_id scrape, HLS streams, waveforms)."
+description = "Ryotunes SoundCloud provider: api-v2 client (guest scrape + OAuth bearer, HLS streams, waveforms)."
 
 [dependencies]
 serde = { workspace = true }
 serde_json = { workspace = true }
+base64 = "0.22"
 thiserror = { workspace = true }
 tracing = { workspace = true }
+parking_lot = "0.12"
 tokio = { workspace = true, features = ["fs", "sync"] }
-reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "gzip", "brotli"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "gzip", "brotli", "json"] }
 regex = "1"
 
 [dev-dependencies]

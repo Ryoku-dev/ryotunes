@@ -48,6 +48,11 @@ pub const LOCAL_PLAYLIST_PREFIX: &str = "RYOTUNES_LOCAL_PLAYLIST:";
 pub const LIKED_SONGS_ID: &str = "RYOTUNES_LOCAL_PLAYLIST:liked";
 pub const LIKED_SONGS_TITLE: &str = "Liked Songs";
 
+/// The persisted SoundCloud OAuth blob (access + rotating refresh token + session cookie).
+/// Deliberately NOT in [`UI_SETTINGS`]: like `session_cookie`, it is auth material the
+/// renderer must never see; only the daemon's sign-in/rotate paths write it.
+pub const SOUNDCLOUD_AUTH_KEY: &str = "soundcloud_auth";
+
 /// Settings the UI is allowed to read *and write*. Session/auth material (`session_cookie`,
 /// `selected_identity_json`, `data_sync_id`, `account_json`, `account_selection_pending`,
 /// `visitor_data`) and internal blobs (`queue_json`, `queue_index`, `queue_position`) never cross
@@ -431,6 +436,25 @@ impl AppState {
             Arc::new(crate::spotify::SpotifyState::new(paths.data_dir.join("spotify"), selected));
         let soundcloud =
             Arc::new(ryotunes_soundcloud::SoundCloud::new(paths.data_dir.join("soundcloud")));
+        // A captured SoundCloud sign-in survives restarts like the YouTube cookie does: the
+        // JSON blob lives under a settings key outside UI_SETTINGS, so the renderer can
+        // neither read nor overwrite it. Every token rotation writes the new pair back
+        // through this hook (SoundCloud's refresh token is single-use — losing a rotation
+        // dead-ends the session), and the restore is validated against /me by the host.
+        if let Some(raw) = db.get_setting(SOUNDCLOUD_AUTH_KEY) {
+            if let Ok(auth) = serde_json::from_str::<ryotunes_soundcloud::SoundcloudAuth>(&raw) {
+                soundcloud.set_auth(Some(auth));
+            }
+        }
+        let rotate_db = Arc::clone(&db);
+        soundcloud.set_on_rotate(std::sync::Arc::new(move |auth| {
+            match serde_json::to_string(&auth) {
+                Ok(json) => rotate_db.set_setting(SOUNDCLOUD_AUTH_KEY, &json),
+                Err(e) => {
+                    tracing::error!(error = %e, "soundcloud: cannot serialize rotated auth")
+                }
+            }
+        }));
         AppState {
             it,
             clients,

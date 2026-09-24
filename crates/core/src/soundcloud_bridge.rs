@@ -195,6 +195,32 @@ pub fn discover_home(selections: &[Selection]) -> HomePage {
     HomePage { chips: Vec::new(), sections, continuation: None }
 }
 
+/// The signed-in user's own shelves, first on Home: their playlists, their liked tracks, and
+/// the artists they follow. Empty lists drop their shelf, so a partial fetch (or a fresh
+/// account) never renders a blank row.
+pub fn personal_home(playlists: &[Playlist], likes: &[Track], followings: &[User]) -> Vec<Section> {
+    let mut sections = Vec::new();
+    if !playlists.is_empty() {
+        sections.push(card_section(
+            "Your playlists".to_string(),
+            playlists.iter().map(playlist_to_card).collect(),
+        ));
+    }
+    if !likes.is_empty() {
+        sections.push(card_section(
+            "Liked tracks".to_string(),
+            likes.iter().map(track_to_card).collect(),
+        ));
+    }
+    if !followings.is_empty() {
+        sections.push(card_section(
+            "Following".to_string(),
+            followings.iter().map(user_to_card).collect(),
+        ));
+    }
+    sections
+}
+
 /// One discover shelf entry as a card: a regular playlist, or a SoundCloud system playlist (a
 /// curated/charts list keyed by permalink).
 fn discover_item_to_card(item: &DiscoverItem) -> BrowseItem {

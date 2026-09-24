@@ -35,9 +35,9 @@ Item {
     property int requestId: 0
     property var recommendations: ({ items: [], explanation: "" })
 
-    // Spotify is selected but not signed in: show the sign-in empty state instead of calling the
-    // daemon (browsing is gated on a signed-in Spotify account).
-    readonly property bool spotifyGate: Playback.provider === "spotify" && !(Playback.spotify && Playback.spotify.signedIn)
+    // Home is the merged feed: YouTube Music's own shelves (always available, signed in or
+    // not) plus the shelves of every signed-in provider. There is no sign-in gate here —
+    // Library and Search still gate on the selected catalogue.
 
     // Personal shelves, live off the shared store.
     readonly property var recents: Personal.recent(100).filter((item) => page.providerFor(item.id) === Playback.provider).slice(0, 6)
@@ -125,15 +125,6 @@ Item {
         blocks.clear();
         page.forgotten = null;
         page.listenAgain = null;
-        // Gated: no daemon call, the sign-in card carries the page.
-        if (page.spotifyGate) {
-            page.home = null;
-            page.chips = [];
-            page.recommendations = ({ items: [], explanation: "" });
-            page.errorMsg = "";
-            page.loading = false;
-            return;
-        }
         page.loading = true;
         page.errorMsg = "";
         Daemon.call("get_home", { params: params ? params : null })
@@ -193,7 +184,6 @@ Item {
     HomeFeed {
         id: list
         anchors.fill: parent
-        visible: !page.spotifyGate
         clip: true
         reuseItems: true
         cacheBuffer: Math.max(0, Math.round(height * 1.5))
@@ -281,7 +271,7 @@ Item {
                         }
                         Text {
                             Layout.fillWidth: true
-                            text: Playback.provider === "soundcloud"
+                            text: Playback.provider === "soundcloud" && !(Playback.soundcloud && Playback.soundcloud.signedIn)
                                 ? "SoundCloud \u00b7 listening as a guest"
                                 : "Pick up where you left off, or find the next thing worth hearing."
                             color: Tokens.inkMuted
@@ -611,9 +601,10 @@ Item {
 
                 HomePersonal {
                     Layout.fillWidth: true
-                    // The recents / familiar artists are YouTube Music history; under another
-                    // catalogue the provider's own shelves lead instead.
-                    visible: page.selected === "" && Playback.provider === "youtube"
+                    // The recents / familiar artists are YouTube Music history. The merged
+                    // home always carries the YouTube spine, so they always belong; a mood
+                    // chip filter narrows the YouTube feed alone, so they step aside then.
+                    visible: page.selected === ""
                     artists: page.famArtists
                     listenAgain: page.listenAgain
                 }
@@ -718,13 +709,6 @@ Item {
                 }
             }
         }
-    }
-
-    // The Spotify sign-in empty state: shown when Spotify is selected but not signed in, in place of
-    // the feed. It never touches the daemon — the button starts the OAuth flow.
-    SpotifyGate {
-        anchors.centerIn: parent
-        visible: page.spotifyGate
     }
 
     ShortcutPicker {

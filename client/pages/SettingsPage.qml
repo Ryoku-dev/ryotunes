@@ -1120,14 +1120,30 @@ Item {
                             Layout.fillWidth: true
                             spacing: 1
                             Text {
-                                text: "Listening as a guest"
+                                readonly property var sc: Playback.soundcloud || ({})
+                                text: (sc.signedIn && sc.name) ? sc.name : (sc.signedIn ? "Signed in" : "Listening as a guest")
                                 color: Tokens.ink; font.family: Style.fontUi; font.pixelSize: Style.fs.lg; font.weight: Font.DemiBold
                                 elide: Text.ElideRight; Layout.fillWidth: true
                             }
                             Text {
-                                text: "No account needed \u00b7 SoundCloud's public catalogue plays for everyone."
-                                color: Tokens.inkMuted; font.family: Style.fontUi; font.pixelSize: Style.fs.sm
+                                readonly property var sc: Playback.soundcloud || ({})
+                                text: sc.signedIn ? "Connected \u00b7 your playlists and likes join Home"
+                                    : (sc.error ? sc.error
+                                    : "No account needed \u00b7 SoundCloud's public catalogue plays for everyone.")
+                                color: (sc.error && !sc.signedIn) ? Style.accent : Tokens.inkMuted
+                                font.family: Style.fontUi; font.pixelSize: Style.fs.sm
                                 wrapMode: Text.WordWrap; Layout.fillWidth: true
+                            }
+                        }
+                        Pill {
+                            readonly property var sc: Playback.soundcloud || ({})
+                            label: sc.signedIn ? "Sign out" : "Sign in to SoundCloud"
+                            icon: sc.signedIn ? "close" : "soundcloud"
+                            primary: !sc.signedIn
+                            onClicked: {
+                                var out = !!(Playback.soundcloud && Playback.soundcloud.signedIn);
+                                var call = out ? Playback.soundcloudSignOut() : Playback.soundcloudSignIn();
+                                call.catch((e) => Playback.toast((e && e.message) ? e.message : String(e), "error"));
                             }
                         }
                     }

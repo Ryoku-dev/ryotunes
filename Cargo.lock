@@ -4788,6 +4788,8 @@ dependencies = [
 name = "ryotunes-soundcloud"
 version = "1.1.0"
 dependencies = [
+ "base64 0.22.1",
+ "parking_lot",
  "regex",
  "reqwest 0.12.28",
  "serde",
@@ -4827,6 +4829,7 @@ version = "1.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
+ "base64 0.22.1",
  "glib",
  "gtk",
  "innertube",

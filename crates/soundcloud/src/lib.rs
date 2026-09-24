@@ -1,16 +1,22 @@
 //! Ryotunes SoundCloud provider.
 //!
-//! A guest-only client for SoundCloud's internal `api-v2` (no account, no OAuth). It discovers a
-//! public `client_id` by scraping soundcloud.com's asset bundles, caches it in memory and on disk,
-//! and re-scrapes once on a 401/403 (the id rotates). Tracks stream as HLS m3u8 playlists that mpv
-//! plays directly; waveforms come from SoundCloud's own peak arrays, downsampled for the seek bar.
+//! A client for SoundCloud's internal `api-v2`. Guest mode needs no account: it discovers a
+//! public `client_id` by scraping soundcloud.com's asset bundles, caches it in memory and on
+//! disk, and re-scrapes once on a 401/403 (the id rotates). Signed-in mode ([`SoundcloudAuth`])
+//! adds the web player's OAuth bearer — captured from a login window's cookie jar by the host —
+//! which unlocks `/me`, the user's playlists/likes/followings, and their personal feed; the
+//! access token's expiry is read from its JWT and refreshed through the site's own rotating
+//! refresh-token exchange. Tracks stream as HLS m3u8 playlists that mpv plays directly;
+//! waveforms come from SoundCloud's own peak arrays, downsampled for the seek bar.
 //!
 //! Boundary: this crate knows nothing about GPUI, Tauri, mpv, or UI state. It maps SoundCloud's
 //! (frequently field-absent) JSON into tolerant models and hands them to the daemon bridge.
 
+mod auth;
 mod client;
 mod models;
 
+pub use auth::SoundcloudAuth;
 pub use client::{Error, Result, SoundCloud};
 pub use models::{
     DiscoverItem, Page, Playlist, PlaylistDetail, SearchResults, Selection, SystemPlaylist, Track,

@@ -136,6 +136,26 @@ function applyEvent(s, name, data) {
         }
         return null;
     }
+    case "soundcloud-auth": {
+        // The SoundCloud capture flow's progress. The window is visible (the daemon owns it),
+        // so unlike Spotify there is no url step; the states are signed_in, signed_out,
+        // restore_failed (a persisted token died) and error.
+        var sc = (data && data.state) ? data.state : "";
+        if (sc === "signed_in") {
+            s.soundcloud = { signedIn: true, name: (data && data.name) ? data.name : null, error: "" };
+            return { toast: "Signed in to SoundCloud" + ((data && data.name) ? (" as " + data.name) : ""), kind: "success" };
+        }
+        if (sc === "signed_out") {
+            s.soundcloud = { signedIn: false, name: null, error: "" };
+            return null;
+        }
+        if (sc === "restore_failed" || sc === "error") {
+            var why = (data && data.message) ? data.message : "SoundCloud sign-in failed";
+            s.soundcloud = { signedIn: false, name: null, error: why };
+            return { toast: why, kind: "error" };
+        }
+        return null;
+    }
     case "playback-error":
         s.lastError = (data && data.message !== undefined) ? data.message : String(data);
         s.pendingVideoId = null;

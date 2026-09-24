@@ -8,8 +8,8 @@ mod login;
 mod methods;
 mod server;
 mod sink;
+mod soundcloud_login;
 mod tray;
-
 use std::io::{BufRead, BufReader, Write};
 use std::os::unix::io::AsRawFd;
 use std::os::unix::net::UnixStream;
@@ -99,6 +99,7 @@ fn main() -> anyhow::Result<()> {
             state: state.clone(),
             quit: quit_tx,
             downloads: downloads.clone(),
+            soundcloud_login: Arc::new(soundcloud_login::SoundcloudLogin::new(gtk.clone())),
         });
         // A `systemctl stop` (or any `kill`) sends SIGTERM: handle it exactly like ctrl_c / an
         // explicit quit so the awaited teardown below runs — cancelling and reaping every download

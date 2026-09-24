@@ -89,4 +89,21 @@ TestCase {
         compare(s.spotify.stored, true);
         compare(s.spotify.error, "bad credentials");
     }
+
+    // The SoundCloud capture flow drives its own mirror: sign-in, expiry, sign-out.
+    function test_soundcloud_auth_events_mirror_the_capture_flow() {
+        var s = freshState();
+        s.soundcloud = { signedIn: false, name: null, error: "" };
+        var fx = PB.applyEvent(s, "soundcloud-auth", { state: "signed_in", name: "nero" });
+        compare(s.soundcloud.signedIn, true);
+        compare(s.soundcloud.name, "nero");
+        compare(fx.kind, "success");
+        // An expired persisted token reports itself and keeps the reason for the settings row.
+        PB.applyEvent(s, "soundcloud-auth", { state: "restore_failed", message: "expired" });
+        compare(s.soundcloud.signedIn, false);
+        compare(s.soundcloud.error, "expired");
+        PB.applyEvent(s, "soundcloud-auth", { state: "signed_out" });
+        compare(s.soundcloud.signedIn, false);
+        compare(s.soundcloud.error, "");
+    }
 }

@@ -32,12 +32,16 @@ Singleton {
     property var audioFx: ({ speed: 1, semitones: 0, reverb: 0, bass: 0, width: 0 })
     // The active music provider ("youtube" | "spotify" | "soundcloud"), mirrored from the daemon
     // (the subscribe snapshot's `provider` and a `provider-changed` event). The title bar's switch
-    // reads it; SoundCloud is a guest catalogue with no sign-in gate.
+    // reads it; each catalogue's own sign-in state gates its shelves, not the selector.
     property string provider: "youtube"
     // The Spotify account, mirrored from the daemon (the subscribe snapshot's `spotify` object and
     // the `spotify-auth` events). `signedIn` gates the Spotify catalogue; `premium` is null until the
     // profile is known. Never a source of truth — every field lands from the daemon.
     property var spotify: ({ signedIn: false, stored: false, name: null, premium: null })
+    // The SoundCloud account, mirrored the same way (the snapshot's `soundcloud` object and the
+    // `soundcloud-auth` events). SoundCloud browses and plays as a guest; signing in only adds
+    // the account's own shelves (playlists, likes, following) to Home.
+    property var soundcloud: ({ signedIn: false, name: null, error: "" })
 
     // --- SoundCloud waveform cache -----------------------------------------------------------
     // The playing track's 240 amplitude samples (get_waveform), for the Orange seek bar; null for a
@@ -100,6 +104,9 @@ Singleton {
         if (snap.spotify)
             root.spotify = { signedIn: !!snap.spotify.signedIn, stored: !!snap.spotify.stored,
                 name: snap.spotify.name, premium: snap.spotify.premium };
+        if (snap.soundcloud)
+            root.soundcloud = { signedIn: !!snap.soundcloud.signedIn,
+                name: snap.soundcloud.name, error: "" };
     }
 
     // --- SoundCloud waveform -----------------------------------------------------------------
@@ -149,6 +156,8 @@ Singleton {
     // spotify-auth events (the url step opens the browser). Idempotent while a flow is running.
     function spotifySignIn() { return Daemon.call("spotify_sign_in"); }
     function spotifySignOut() { return Daemon.call("spotify_sign_out"); }
+    function soundcloudSignIn() { return Daemon.call("soundcloud_sign_in"); }
+    function soundcloudSignOut() { return Daemon.call("soundcloud_sign_out"); }
     function toggleShuffle() { return Daemon.call("toggle_shuffle"); }
     // off -> all -> one -> off, matching player.svelte.ts cycleRepeat.
     function cycleRepeat() {

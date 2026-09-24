@@ -36,6 +36,9 @@ javascriptcore = { package = "javascriptcore-rs", version = "1.1" }
 # `session::allowed_login_navigation` takes a `&url::Url`; the GTK policy hook only gives us the URI
 # string, so we parse it (Tauri handed a `url::Url` straight to the callback).
 url = "2"
+# The sign-in window's tests build a fake JWT to feed the cookie harvester (same base64 the
+# lock already carries via reqwest).
+base64 = "0.22"
 # System tray via StatusNotifierItem. `ksni` speaks the protocol directly (left-click `Activate`
 # works, unlike libappindicator), the same reason `src-tauri/src/tray.rs` uses it on Linux.
 ksni = "0.3"
