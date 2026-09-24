@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## v1.1.3 - 2026-09-24
+
 - Fixed "Download playlist / Download album" always failing with "entries: missing field `video_id`": the batch endpoint's wire format was snake_case while the client posts camelCase, so no collection download was ever admitted. Single-track downloads were unaffected, which is why only albums and playlists broke.
 - Album and playlist downloads now read as one collection: the queue and history group every batch under a single card showing the album/playlist cover, kind, aggregate progress and how many tracks are saved, waiting, failed or cancelled — expandable to its per-track rows. Batch tracks also land in a folder named after their collection on disk, and re-downloading still dedups against them wherever they sit.
 - Added Settings ▸ Diagnostics: one rolling record of everything that went wrong, for both halves of the app. The daemon logs its own warnings and errors, every failed request, and panics to a ring buffer and a rotating file (`$XDG_DATA_HOME/dev.ryoku.ryotunes/logs/ryotunesd.log`); the client forwards the failures it sees (rejected actions, lost connections, error toasts), buffering them while the daemon is down and delivering them on reconnect. The page filters by level, source and text, copies the whole list to the clipboard, and opens the log folder — so "songs won't play" finally has evidence to show instead of a guess.
