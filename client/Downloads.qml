@@ -171,13 +171,11 @@ Singleton {
         };
     }
 
-    // Post a gathered list of page rows (snake_case SongItems) as one batch. `label` names the
-    // collection in the progress/failure toasts. This singleton owns the operation, so
-    // navigating away cannot interrupt it.
-    function enqueueCollection(songs, label) {
-        var entries = [];
-        for (var i = 0; i < songs.length; i++)
-            entries.push(root.toEntry(songs[i], "", ""));
+    // Post pre-built entries (from toEntry) as one batch. `label` names the collection in the
+    // progress/failure toasts. This singleton owns the operation, so navigating away cannot
+    // interrupt it. Entries are mapped exactly once — a second toEntry pass would read
+    // `video_id` off an object that already carries `videoId` and send empty rows.
+    function enqueueCollection(entries, label) {
         Playback.toast("Preparing " + label + " downloads\u2026", "info");
         return Daemon.call("enqueue_collection", { entries: entries }).then((res) => {
             var parts = [];
