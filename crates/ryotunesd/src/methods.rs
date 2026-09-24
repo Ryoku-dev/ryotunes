@@ -832,6 +832,10 @@ impl Dispatch for Methods {
                 let thumbnail = arg::<Option<String>>(&params, "thumbnail")?.unwrap_or_default();
                 ok(self.downloads.enqueue(video_id, title, artists, thumbnail).map_err(err)?)
             }
+            "enqueue_collection" => {
+                let entries = arg::<Vec<crate::downloads::CollectionEntry>>(&params, "entries")?;
+                ok(self.downloads.enqueue_collection(entries).map_err(err)?)
+            }
             "cancel_download" => {
                 self.downloads.cancel(&arg::<String>(&params, "id")?).map_err(err)?;
                 null()

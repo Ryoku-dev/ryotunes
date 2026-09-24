@@ -283,6 +283,9 @@ Item {
         var out = [];
         out.push({ icon: "arrow-up", label: "Play next", danger: false, act: () => page.queuePlaylist(true) });
         out.push({ icon: "queue", label: "Add to queue", danger: false, act: () => page.queuePlaylist(false) });
+        if (!page.isLocal && page.pl && page.pl.items && page.pl.items.length)
+            out.push({ icon: "download", label: Downloads.addingAlbum ? "Adding playlist\u2026" : "Download playlist",
+                danger: false, act: () => Downloads.enqueueCollectionFromPage(page.pl, "playlist") });
         if (!page.isSmart && !page.isLocal)
             out.push({ icon: "radio", label: "Start radio", danger: false, act: () => page.radio() });
         if (page.owned) {

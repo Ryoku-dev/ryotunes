@@ -90,6 +90,11 @@ impl AuthConfig {
     pub fn file(&self) -> PathBuf {
         self.cache_dir.join(credentials::FILE)
     }
+
+    /// The per-installation Spotify device id file, next to the credentials.
+    fn device_file(&self) -> PathBuf {
+        self.cache_dir.join(credentials::DEVICE_FILE)
+    }
 }
 
 /// The loopback authority (`host:port`) a redirect URI redirects to, so the callback listener knows
@@ -261,16 +266,59 @@ fn classify(message: &str) -> SignInProblem {
 
 pub fn forget(config: &AuthConfig) {
     credentials::remove(&config.file());
+    // The device id is kept: it identifies this installation, not this account, and reusing it
+    // after a sign-out/sign-in is what keeps the new credentials attached to a known device.
 }
 
 fn session(config: &AuthConfig) -> Result<Session> {
     let cache = Cache::new(Some(config.cache_dir.as_path()), None, None, None)
         .with_context(|| format!("cannot open cache at {}", config.cache_dir.display()))?;
 
-    let session_config =
-        SessionConfig { client_id: config.client_id.clone(), ..Default::default() };
+    let session_config = SessionConfig {
+        client_id: config.client_id.clone(),
+        device_id: device_id(config),
+        ..Default::default()
+    };
 
     Ok(Session::new(session_config, Some(cache)))
+}
+
+/// The device identity librespot registers with Spotify. librespot's default mints a fresh
+/// random uuid per process; a daemon that restarts on every launch (socket activation, idle
+/// exit) then re-registers a "new device" each time, which Spotify's session/credential
+/// handling treats as a different device — part of why restore kept demanding a fresh sign-in.
+/// Persisting one id per installation keeps the stored credentials tied to the device that
+/// earned them.
+fn device_id(config: &AuthConfig) -> String {
+    let path = config.device_file();
+    if let Ok(stored) = std::fs::read_to_string(&path) {
+        let id = stored.trim();
+        if is_valid_device_id(id) {
+            return id.to_owned();
+        }
+    }
+    let id = uuid::Uuid::new_v4().as_hyphenated().to_string();
+    if let Some(dir) = path.parent() {
+        let _ = std::fs::create_dir_all(dir);
+    }
+    match std::fs::write(&path, &id) {
+        Ok(()) => {
+            credentials::secure(&path);
+            log::info!("auth: generated a persistent Spotify device id");
+        }
+        Err(e) => {
+            log::warn!("auth: cannot persist the device id, using a per-process one: {e}");
+        }
+    }
+    id
+}
+
+/// A uuid-shaped id, no longer than a uuid, nothing but hex and hyphens. Guards against a
+/// truncated or corrupt device file being handed to Spotify as the device identity.
+fn is_valid_device_id(id: &str) -> bool {
+    !id.is_empty()
+        && id.len() <= 36
+        && id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')
 }
 
 #[cfg(test)]

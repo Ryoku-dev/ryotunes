@@ -165,6 +165,9 @@ pub struct AppState {
     /// now-playing snapshot can render the meta line without another round-trip. Bounded in
     /// `remember_sc_meta`.
     sc_meta: parking_lot::Mutex<std::collections::HashMap<String, ScTrackMeta>>,
+    /// Unix secs of the last on-demand visitorData (re)bootstrap attempt, so a failing session
+    /// retries on a cooldown instead of hammering sw.js_data on every skipped track.
+    last_visitor_try: AtomicU64,
 }
 
 /// One live Spotify stream held on [`AppState`]: the cheap transport handle the daemon seeks
@@ -444,6 +447,7 @@ impl AppState {
             spotify,
             soundcloud,
             sc_meta: parking_lot::Mutex::new(std::collections::HashMap::new()),
+            last_visitor_try: AtomicU64::new(0),
             queue: Mutex::new(QueueState::default()),
             is_playing: AtomicBool::new(false),
             generation: AtomicU64::new(0),
@@ -894,7 +898,10 @@ impl AppState {
         // them. Opening the stream starts librespot decoding into the FIFO immediately; mpv is
         // pointed at that FIFO with the rawaudio demuxer options.
         if let Some(tid) = crate::spotify::spotify_track_id(video_id) {
-            let Some(client) = self.spotify.client().await else {
+            // `client_or_recover` gives a session that died since startup (or a restore that lost
+            // the race with the first client connecting) exactly one chance to come back from the
+            // saved credentials before this track is honestly reported as needing sign-in.
+            let Some(client) = self.spotify.client_or_recover().await else {
                 return Err(ResolveError::SignInRequired(
                     "Sign in to Spotify to play this".to_owned(),
                 ));
@@ -1010,10 +1017,33 @@ impl AppState {
                 stream_client: "soundcloud".to_owned(),
             });
         }
-        let data = self
+        let data = match self
             .orchestrator
             .resolve(video_id, is_upload, self.quality(), &self.disabled_clients())
-            .await?;
+            .await
+        {
+            Ok(d) => d,
+            // Every InnerTube client answered "confirm you're not a bot": the session's
+            // visitorData is missing or stale (YouTube only honours the anonymous fallback
+            // clients with one). Fetch a fresh identity — once per cooldown window — and retry
+            // this resolve exactly once. Without this the one-shot startup bootstrap leaving a
+            // user unable to play ANY track until a restart was unrepairable.
+            Err(ResolveError::BotGated(vid)) => {
+                if self.refresh_visitor_data().await.is_none() {
+                    return Err(ResolveError::AllClientsFailed(vid));
+                }
+                self.orchestrator
+                    .resolve(video_id, is_upload, self.quality(), &self.disabled_clients())
+                    .await
+                    .map_err(|e| match e {
+                        // The fresh token didn't help (or the IP itself is flagged): report the
+                        // same generic failure users saw before, never the internal variant.
+                        ResolveError::BotGated(v) => ResolveError::AllClientsFailed(v),
+                        other => other,
+                    })?
+            }
+            Err(e) => return Err(e),
+        };
         // Never cache rustypipe URLs: googlevideo serves them only for bounded-Range requests,
         // which mpv doesn't send → LOADING_FAILED(-13). Caching one poisons the videoId for ~6h.
         if data.stream_client != "rustypipe" && !is_upload {
@@ -1032,6 +1062,36 @@ impl AppState {
             );
         }
         Ok(data)
+    }
+
+    /// The on-demand visitorData (re)bootstrap a bot-gated resolve triggers: fetch a fresh
+    /// anonymous identity from sw.js_data, install it in the shared session, and persist it so
+    /// the next launch starts with one. Returns `Some(vd)` when a *new* token is in place,
+    /// `None` when the fetch failed or the cooldown suppressed the attempt — callers then treat
+    /// the gate as a plain failure rather than hammering Google.
+    ///
+    /// Cooldown lives here rather than in the orchestrator's retry because a whole broken queue
+    /// skips track-per-track: every skip would otherwise pay one sw.js_data round trip.
+    pub async fn refresh_visitor_data(self: &std::sync::Arc<Self>) -> Option<String> {
+        const RETRY_COOLDOWN_SECS: u64 = 5 * 60;
+        let now = now_secs().max(0) as u64;
+        let last = self.last_visitor_try.swap(now, Ordering::Relaxed);
+        if last != 0 && now.saturating_sub(last) < RETRY_COOLDOWN_SECS {
+            tracing::debug!("visitorData refresh on cooldown; skipping");
+            return None;
+        }
+        match self.it.fetch_visitor_data().await {
+            Ok(vd) => {
+                tracing::info!("visitorData re-bootstrapped after bot gate");
+                self.it.set_visitor_data(Some(vd.clone()));
+                self.db.set_setting("visitor_data", &vd);
+                Some(vd)
+            }
+            Err(e) => {
+                tracing::warn!(error = %e, "visitorData refresh failed");
+                None
+            }
+        }
     }
 
     /// Speculatively resolve one stream into the normal latency cache without touching playback.
@@ -1733,6 +1793,15 @@ impl AppState {
                     }
                 }
                 Err(e) => {
+                    // A provider stream that needs the user signed in is not "unavailable":
+                    // skipping past it row-by-row turns a whole Spotify queue into a storm of
+                    // "Skipped (unavailable)" toasts and hides the one action that fixes it.
+                    // Stop the queue on the spot and say what is actually wrong.
+                    if let ResolveError::SignInRequired(message) = &e {
+                        tracing::warn!(video_id = item.video_id, message, "playback needs sign-in");
+                        self.emit_error(&item.video_id, message);
+                        return false;
+                    }
                     let mut q = self.queue.lock().await;
                     // Deliberately ignores repeat-all: wrapping the unplayable-skip would spin
                     // forever on a queue where nothing resolves. Skips stop at the tail.

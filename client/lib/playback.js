@@ -108,6 +108,22 @@ function applyEvent(s, name, data) {
                 flow: "", error: "" };
             return { toast: "Signed in to Spotify" + ((data && data.name) ? (" as " + data.name) : ""), kind: "success" };
         }
+        if (st === "restored") {
+            // The startup restore finished after this client's opening snapshot was taken --
+            // the fix for the sign-in gate that reappeared on every launch. Restore is gated
+            // on Premium, so premium is known true; the display name arrives with a snapshot.
+            s.spotify = { signedIn: true, stored: true,
+                name: (s.spotify && s.spotify.name) ? s.spotify.name : null,
+                premium: true, flow: "", error: "" };
+            return null;
+        }
+        if (st === "restore_failed") {
+            // Credentials are on disk but the cached session is dead: keep the reason on the
+            // gate instead of silently demanding a fresh sign-in.
+            var why = (data && data.message) ? data.message : "Spotify sign-in no longer works";
+            s.spotify = Object.assign({}, s.spotify, { signedIn: false, stored: true, error: why });
+            return null;
+        }
         if (st === "signed_out") {
             s.spotify = { signedIn: false, stored: false, name: null, premium: null };
             return null;

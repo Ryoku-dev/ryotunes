@@ -9,6 +9,9 @@ use std::sync::OnceLock;
 
 /// The credential file librespot writes after a successful connect.
 pub(crate) const FILE: &str = "credentials.json";
+/// The stable per-installation Spotify device id (see `auth::device_id`). Lives next to the
+/// credentials so one sign-out forgets both together.
+pub(crate) const DEVICE_FILE: &str = "device.id";
 
 static ROOT: OnceLock<PathBuf> = OnceLock::new();
 

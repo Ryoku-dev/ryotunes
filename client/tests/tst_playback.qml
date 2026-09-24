@@ -74,4 +74,19 @@ TestCase {
         PB.applyEvent(s, "volume", 90);
         compare(s.volume, 42);                      // echo ignored mid-drag
     }
+
+    // A late startup restore (the snapshot said signedIn:false) must clear the sign-in gate.
+    function test_spotify_restore_announcement_signs_the_client_in() {
+        var s = freshState();
+        s.spotify = { signedIn: false, stored: true, name: null, premium: null };
+        compare(PB.applyEvent(s, "spotify-auth", { state: "restored" }), null);
+        compare(s.spotify.signedIn, true);
+        compare(s.spotify.stored, true);
+        compare(s.spotify.premium, true);
+        // A dead cached session says why instead of silently demanding a sign-in.
+        PB.applyEvent(s, "spotify-auth", { state: "restore_failed", message: "bad credentials" });
+        compare(s.spotify.signedIn, false);
+        compare(s.spotify.stored, true);
+        compare(s.spotify.error, "bad credentials");
+    }
 }

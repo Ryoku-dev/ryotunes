@@ -100,6 +100,17 @@ impl PlayabilityStatus {
                 | "CONTENT_CHECK_REQUIRED"
         )
     }
+    /// YouTube's anti-bot gate: a `LOGIN_REQUIRED` whose reason asks the (anonymous) client to
+    /// prove it isn't a bot. Distinct from a genuine age/login gate — it is answered by carrying a
+    /// valid `visitorData` (or signing in), not by the WEB_CREATOR retry, so the orchestrator
+    /// treats it as "our session identity is missing/stale" and re-bootstraps it.
+    pub fn is_bot_gate(&self) -> bool {
+        self.status == "LOGIN_REQUIRED"
+            && self.reason.as_deref().is_some_and(|r| {
+                let r = r.to_ascii_lowercase();
+                r.contains("not a bot") || r.contains("confirm you")
+            })
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -402,6 +413,23 @@ mod tests {
         assert_eq!(omv.is_music_video(), Some(true));
         assert_eq!(ugc.is_music_video(), Some(true));
         assert_eq!(bare.is_music_video(), None);
+    }
+
+    /// The bot gate must be told from a genuine login/age gate: only the former is answered by
+    /// a fresh visitorData, and the orchestrator re-bootstraps the session on it.
+    #[test]
+    fn bot_gate_is_the_login_required_why_not_a_bot() {
+        let gate = |status: &str, reason: Option<&str>| PlayabilityStatus {
+            status: status.into(),
+            reason: reason.map(Into::into),
+        };
+        assert!(gate("LOGIN_REQUIRED", Some("Sign in to confirm you're not a bot")).is_bot_gate());
+        assert!(gate("LOGIN_REQUIRED", Some("Please sign in to confirm you're not a bot")).is_bot_gate());
+        // A real login/age gate: nothing to do with visitorData.
+        assert!(!gate("LOGIN_REQUIRED", Some("This video is unavailable")).is_bot_gate());
+        assert!(!gate("LOGIN_REQUIRED", None).is_bot_gate());
+        assert!(!gate("UNPLAYABLE", Some("Sign in to confirm you're not a bot")).is_bot_gate());
+        assert!(!gate("OK", Some("you're not a bot")).is_bot_gate());
     }
 }
 

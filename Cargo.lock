@@ -4817,6 +4817,7 @@ dependencies = [
  "serde_json",
  "tokio",
  "url",
+ "uuid 1.25.0",
  "vergen",
 ]
 

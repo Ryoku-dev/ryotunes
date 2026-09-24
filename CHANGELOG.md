@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Fixed some users being unable to play any YouTube track ("Skipped (unavailable)" on everything): YouTube's anonymous playback clients now require a valid `visitorData`, and a failed first fetch used to leave the daemon without one for its whole life, so every stream request hit Google's bot gate. The startup bootstrap retries with backoff, and a resolve that is rejected by the bot gate now fetches a fresh `visitorData` on the spot and retries once.
+- Fixed Spotify Premium users seeing "sign in" on every launch and every track skipped as "not available": the cached session is announced to clients once it restores (it used to finish silently after the UI snapshot, leaving the gate up), the sign-in gate explains a genuinely dead session instead of demanding a fresh login, a dead librespot session is detected and (once per credential lifetime) recovered from saved credentials before a track is reported as needing sign-in, a Spotify queue that needs sign-in now stops with the real reason instead of toast-storming "Skipped (unavailable)", and the Spotify device identity is persisted per installation instead of re-randomising on every launch.
+- Added Download playlist to the playlist page menu: albums and playlists batch-download through one daemon call that gathers every continuation page and admits the whole collection against a single dedup pass.
+- Downloaded tracks are now smart-deduplicated: re-downloading a collection (or a single track) skips audio already in the download folder even when it lives there under a different upload's id or a ` (N)` collision name, matching on the normalized "artist title" as well as the exact filename.
+
 ## v1.0.8 - 2026-09-20
 
 - Stopped Now Playing stuttering while the window is resized or scaled: the cover size read the column's assigned width and the body's assigned height, feeding layout outputs back into the children's preferred sizes, so the column re-polished itself on every pass. The cover now sizes from the root and the header's implicit height, which are layout inputs.

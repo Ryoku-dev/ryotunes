@@ -184,21 +184,37 @@ pub fn build(
         });
     }
 
-    // First-run visitorData bootstrap, off the startup path.
+    // First-run visitorData bootstrap, off the startup path. A missing visitorData makes every
+    // anonymous fallback /player request hit YouTube's "confirm you're not a bot" gate, so one
+    // failed fetch (offline at boot, consent interstitial, transient 5xx) used to leave the daemon
+    // unable to play *any* track until the next restart. Retry with backoff until it lands.
     if needs_visitor_bootstrap {
         let st = app_state.clone();
         rt.spawn(async move {
-            tokio::time::sleep(Duration::from_secs(5)).await;
-            match st.it.fetch_visitor_data().await {
-                Ok(vd) => {
-                    st.it.set_visitor_data(Some(vd.clone()));
-                    st.db.set_setting("visitor_data", &vd);
-                    tracing::info!("visitorData bootstrapped (background)");
-                }
-                Err(e) => {
-                    tracing::warn!(error = %e, "visitorData bootstrap failed (continuing)")
+            const DELAYS: [Duration; 5] = [
+                Duration::from_secs(5),
+                Duration::from_secs(20),
+                Duration::from_secs(60),
+                Duration::from_secs(180),
+                Duration::from_secs(600),
+            ];
+            for (attempt, delay) in DELAYS.iter().enumerate() {
+                tokio::time::sleep(*delay).await;
+                match st.it.fetch_visitor_data().await {
+                    Ok(vd) => {
+                        st.it.set_visitor_data(Some(vd.clone()));
+                        st.db.set_setting("visitor_data", &vd);
+                        tracing::info!("visitorData bootstrapped (background)");
+                        return;
+                    }
+                    Err(e) => tracing::warn!(
+                        attempt = attempt + 1,
+                        error = %e,
+                        "visitorData bootstrap failed; will retry"
+                    ),
                 }
             }
+            tracing::warn!("visitorData bootstrap gave up; playback will retry on demand");
         });
     }
 

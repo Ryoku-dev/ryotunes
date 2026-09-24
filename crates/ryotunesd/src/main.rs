@@ -52,13 +52,33 @@ fn main() -> anyhow::Result<()> {
 
         // Restore a cached Spotify session in the background so browsing and playback are ready
         // without blocking startup. Logged, never fatal: no cached credentials is the common case.
+        // The result is also announced as a `spotify-auth` event: a client that subscribed before
+        // the restore finished (the server binds while this is still connecting — the premium
+        // check alone can take 5s) otherwise never learns the session came back, and shows its
+        // sign-in gate on every launch even though the credentials are live.
         {
             let state = state.clone();
             tokio::spawn(async move {
                 match state.spotify.restore().await {
-                    Ok(true) => tracing::info!("spotify: restored a cached session"),
+                    Ok(true) => {
+                        tracing::info!("spotify: restored a cached session");
+                        state.emit("spotify-auth", serde_json::json!({ "state": "restored" }));
+                    }
                     Ok(false) => tracing::debug!("spotify: no cached session to restore"),
-                    Err(e) => tracing::warn!("spotify: restore failed: {:#}", e),
+                    Err(e) => {
+                        tracing::warn!("spotify: restore failed: {:#}", e);
+                        // Credentials exist on disk but the session is dead — tell the UI so the
+                        // gate can explain rather than silently demanding a fresh sign-in.
+                        if state.spotify.stored() {
+                            state.emit(
+                                "spotify-auth",
+                                serde_json::json!({
+                                    "state": "restore_failed",
+                                    "message": format!("Spotify sign-in no longer works: {e:#}"),
+                                }),
+                            );
+                        }
+                    }
                 }
             });
         }

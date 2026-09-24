@@ -140,64 +140,80 @@ Singleton {
         });
     }
 
-    // Gather the complete album before admission, then use the same bounded queue as single
-    // downloads. This singleton owns the operation so navigating away cannot interrupt it.
-    function enqueueAlbum(album) {
-        if (!album || root.addingAlbum)
+    // --- collections (albums + playlists) ----------------------------------------------------
+    // The batch endpoint owns smart dedup: it checks the whole collection against the download
+    // folder in one pass (exact name, collision suffix, or the same normalized "artist title"
+    // from a different upload) and against the queue, so re-downloading an album you half own
+    // adds only the missing tracks and the toast can say exactly what happened.
+    function toEntry(song, fallbackArtist, fallbackThumb) {
+        return {
+            videoId: song.video_id,
+            title: song.title,
+            artists: song.artists || fallbackArtist || "",
+            thumbnail: song.thumbnail || fallbackThumb || ""
+        };
+    }
+
+    // Post a gathered list of page rows (snake_case SongItems) as one batch. `label` names the
+    // collection in the progress/failure toasts. This singleton owns the operation, so
+    // navigating away cannot interrupt it.
+    function enqueueCollection(songs, label) {
+        var entries = [];
+        for (var i = 0; i < songs.length; i++)
+            entries.push(root.toEntry(songs[i], "", ""));
+        Playback.toast("Preparing " + label + " downloads\u2026", "info");
+        return Daemon.call("enqueue_collection", { entries: entries }).then((res) => {
+            var parts = [];
+            var added = res && res.added ? res.added : 0;
+            if (added)
+                parts.push(added + (added === 1 ? " track added" : " tracks added"));
+            if (res && res.alreadyDownloaded)
+                parts.push(res.alreadyDownloaded + " already saved");
+            if (res && res.skipped)
+                parts.push(res.skipped + " unavailable");
+            Playback.toast(parts.length ? parts.join(" \u00b7 ") : "Nothing new to download",
+                added ? "success" : "info");
+            return res;
+        });
+    }
+
+    // Gather the complete album/playlist (every continuation page) before admission so the
+    // daemon dedups the whole collection, not just the part the UI had loaded.
+    function enqueueCollectionFromPage(page, label) {
+        if (!page || root.addingAlbum)
             return;
         root.addingAlbum = true;
         var tokens = Object.create(null);
-        var seen = Object.create(null);
-        var tracks = (album.items || []).slice();
-        var accepted = 0;
-        var skipped = 0;
-        Playback.toast("Preparing album downloads…", "info");
+        var tracks = (page.items || []).slice();
 
         function collect(token) {
             if (!token)
                 return Promise.resolve();
             if (tokens[token])
-                return Promise.reject(new Error("Album pagination repeated; no downloads were added."));
+                return Promise.reject(new Error("Pagination repeated; no downloads were added."));
             tokens[token] = true;
             return Daemon.call("get_playlist_more", { token: token }).then((more) => {
                 tracks = tracks.concat(more.items || []);
                 return collect(more.continuation);
             });
         }
-        function admit(index) {
-            while (index < tracks.length) {
-                var song = tracks[index++];
-                var track = {
-                    videoId: song.video_id,
-                    title: song.title,
-                    artists: song.artists || album.artist,
-                    thumbnail: song.thumbnail || album.thumbnail
-                };
-                if (seen[track.videoId])
-                    continue;
-                seen[track.videoId] = true;
-                if (!root.canDownload(track)) {
-                    skipped++;
-                    continue;
-                }
-                return root.enqueueRequest(track).then(() => {
-                    accepted++;
-                    return admit(index);
-                });
-            }
-            return Promise.resolve();
-        }
-        return collect(album.continuation).then(() => admit(0)).then(() => {
-            root.addingAlbum = false;
-            var message = accepted + (accepted === 1 ? " track in Downloads" : " tracks in Downloads");
-            if (skipped)
-                message += " · " + skipped + " unavailable";
-            Playback.toast(message, accepted ? "success" : "info");
+        return collect(page.continuation).then(() => {
+            // Rows carry their own artist line on playlist pages; album pages may not, so fall
+            // back to the page's artist, then its cover, exactly as the old per-track path did.
+            var entries = [];
+            for (var i = 0; i < tracks.length; i++)
+                entries.push(root.toEntry(tracks[i], page.artist, page.thumbnail));
+            return root.enqueueCollection(entries, label);
         }).catch((e) => {
+            Playback.toast(((e && e.message) ? e.message : "Could not download " + label), "error");
+        }).then((res) => {
             root.addingAlbum = false;
-            Playback.toast(accepted + " tracks in Downloads · "
-                + ((e && e.message) ? e.message : "Could not download album"), "error");
+            return res;
         });
+    }
+
+    function enqueueAlbum(album) {
+        return root.enqueueCollectionFromPage(album, "album");
     }
 
     // Save the given track (a Playback.now-shaped object). Immediate: a toast confirms or surfaces
