@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## v1.1.1 - 2026-09-24
+
 - Added SoundCloud sign-in: a Ryotunes window opens the site's own sign-in (account or Google/Facebook/Apple), captures the session's OAuth token from the webview's cookie jar, proves it against `/me` before saving it, and keeps it alive through SoundCloud's rotating refresh. Signing in is optional — SoundCloud still browses and plays as a guest — but a signed-in account adds its own playlists, liked tracks and followed artists to Home, and the token survives restarts (an expired one says so instead of silently vanishing).
 - Home is now the merged feed: YouTube Music's shelves remain the spine (the default source, signed in or not), and every signed-in provider contributes its own shelves to the same page — Spotify's made-for-you rows when a Premium session exists, SoundCloud's personal rows when connected. Cards navigate and play across providers exactly as before; one provider being down never blanks the page.
 
