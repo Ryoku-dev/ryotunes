@@ -424,7 +424,8 @@ mod tests {
             reason: reason.map(Into::into),
         };
         assert!(gate("LOGIN_REQUIRED", Some("Sign in to confirm you're not a bot")).is_bot_gate());
-        assert!(gate("LOGIN_REQUIRED", Some("Please sign in to confirm you're not a bot")).is_bot_gate());
+        assert!(gate("LOGIN_REQUIRED", Some("Please sign in to confirm you're not a bot"))
+            .is_bot_gate());
         // A real login/age gate: nothing to do with visitorData.
         assert!(!gate("LOGIN_REQUIRED", Some("This video is unavailable")).is_bot_gate());
         assert!(!gate("LOGIN_REQUIRED", None).is_bot_gate());

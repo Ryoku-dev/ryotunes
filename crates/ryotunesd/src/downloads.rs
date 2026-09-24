@@ -270,11 +270,7 @@ fn strip_id_tag(stem: &str) -> &str {
 /// Lowercase alphanumeric only: the collision course for "Artist - Title", "artist–title", and a
 /// name re-sanitized through a different character set.
 fn normalize_key(input: &str) -> String {
-    input
-        .chars()
-        .filter(|c| c.is_alphanumeric())
-        .flat_map(char::to_lowercase)
-        .collect()
+    input.chars().filter(|c| c.is_alphanumeric()).flat_map(char::to_lowercase).collect()
 }
 
 struct Running {
@@ -1692,11 +1688,8 @@ mod tests {
     fn folder_index_matches_exact_names_and_normalized_titles() {
         let directory = Temp::new();
         std::fs::write(directory.0.join("Artist - Song [AAAAAAAAAAA].opus"), b"x").unwrap();
-        std::fs::write(
-            directory.0.join(format!("{STAGING_DIR}-whatever.opus")),
-            b"partial",
-        )
-        .unwrap();
+        std::fs::write(directory.0.join(format!("{STAGING_DIR}-whatever.opus")), b"partial")
+            .unwrap();
         let settings = settings(&directory.0, 1);
         let index = FolderIndex::build(&directory.0);
 
@@ -1748,9 +1741,7 @@ mod tests {
         manager.set_settings(settings(&music, 1)).unwrap();
         std::fs::write(music.join("One - Alpha [AAAAAAAAAAA].opus"), b"saved").unwrap();
         // One already-queued (downloading) job counts as already covered, not added.
-        manager
-            .enqueue("BBBBBBBBBBB".into(), "Beta".into(), "One".into(), String::new())
-            .unwrap();
+        manager.enqueue("BBBBBBBBBBB".into(), "Beta".into(), "One".into(), String::new()).unwrap();
         let res = manager
             .enqueue_collection(vec![
                 entry("AAAAAAAAAAA", "Alpha", "One"),

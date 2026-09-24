@@ -181,9 +181,7 @@ impl SpotifyState {
             return Some(client);
         }
         if !self.provider.stored()
-            || self
-                .recovery_used
-                .swap(true, std::sync::atomic::Ordering::Relaxed)
+            || self.recovery_used.swap(true, std::sync::atomic::Ordering::Relaxed)
         {
             return None;
         }

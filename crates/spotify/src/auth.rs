@@ -316,9 +316,7 @@ fn device_id(config: &AuthConfig) -> String {
 /// A uuid-shaped id, no longer than a uuid, nothing but hex and hyphens. Guards against a
 /// truncated or corrupt device file being handed to Spotify as the device identity.
 fn is_valid_device_id(id: &str) -> bool {
-    !id.is_empty()
-        && id.len() <= 36
-        && id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')
+    !id.is_empty() && id.len() <= 36 && id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')
 }
 
 #[cfg(test)]
