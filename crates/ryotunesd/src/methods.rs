@@ -32,8 +32,6 @@ pub struct Methods {
     pub state: Arc<AppState>,
     pub quit: tokio::sync::mpsc::UnboundedSender<()>,
     pub downloads: Arc<crate::downloads::Downloads>,
-    /// The visible SoundCloud sign-in window (cookie-jar OAuth capture).
-    pub soundcloud_login: Arc<crate::soundcloud_login::SoundcloudLogin>,
 }
 
 fn arg<T: DeserializeOwned>(params: &Value, key: &str) -> Result<T, ErrorBody> {
@@ -74,14 +72,45 @@ impl Drop for SignInGuard {
     }
 }
 
-/// Guards the SoundCloud sign-in window so two capture flows never open at once.
+/// Guards the SoundCloud browser-import flow so two watchers never run at once.
 static SC_SIGNING_IN: AtomicBool = AtomicBool::new(false);
+/// How often the browser-import watcher re-reads the browser cookie stores, and how long the
+/// user gets to finish signing in there before the flow gives up.
+const SC_SIGN_IN_POLL_SECS: u64 = 2;
+const SC_SIGN_IN_TIMEOUT_SECS: u64 = 5 * 60;
 
-/// Resets [`SC_SIGNING_IN`] whenever the spawned flow ends — success, failure or panic.
+/// Resets [`SC_SIGNING_IN`] whenever the capture flow ends — success, failure or panic.
 struct SoundcloudSignInGuard;
 impl Drop for SoundcloudSignInGuard {
     fn drop(&mut self) {
         SC_SIGNING_IN.store(false, Ordering::SeqCst);
+    }
+}
+
+/// Finish a SoundCloud sign-in from an imported session: prove the bearer against /me before
+/// persisting it, and carry the account name back for the status line.
+async fn complete_soundcloud_sign_in(
+    st: &Arc<AppState>,
+    mut auth: ryotunes_soundcloud::SoundcloudAuth,
+) {
+    st.soundcloud.set_auth(Some(auth.clone()));
+    match st.soundcloud.me().await {
+        Ok(user) => {
+            auth.username = Some(user.username.clone());
+            persist_soundcloud_auth(st, Some(&auth));
+            st.soundcloud.set_auth(Some(auth));
+            st.emit("soundcloud-auth", json!({ "state": "signed_in", "name": user.username }));
+        }
+        Err(e) => {
+            st.soundcloud.set_auth(None);
+            st.emit(
+                "soundcloud-auth",
+                json!({
+                    "state": "error",
+                    "message": format!("SoundCloud sign-in failed: {e}"),
+                }),
+            );
+        }
     }
 }
 
@@ -885,41 +914,55 @@ impl Dispatch for Methods {
                     return ok(json!({ "started": false }));
                 }
                 let task = st.clone();
-                let window = self.soundcloud_login.clone();
                 tokio::spawn(async move {
                     let _guard = SoundcloudSignInGuard;
-                    match window.sign_in().await {
-                        Ok(mut auth) => {
-                            // Proof before persistence: the bearer must actually answer /me,
-                            // and the account name rides back for the status line.
-                            task.soundcloud.set_auth(Some(auth.clone()));
-                            match task.soundcloud.me().await {
-                                Ok(user) => {
-                                    auth.username = Some(user.username.clone());
-                                    persist_soundcloud_auth(&task, Some(&auth));
-                                    task.soundcloud.set_auth(Some(auth));
-                                    task.emit(
-                                        "soundcloud-auth",
-                                        json!({ "state": "signed_in", "name": user.username }),
-                                    );
-                                }
-                                Err(e) => {
-                                    task.soundcloud.set_auth(None);
-                                    task.emit(
-                                        "soundcloud-auth",
-                                        json!({
-                                            "state": "error",
-                                            "message": format!("SoundCloud sign-in failed: {e}"),
-                                        }),
-                                    );
-                                }
-                            }
-                        }
-                        Err(ryotunes_core::host::LoginError::Cancelled) => {}
-                        Err(e) => task.emit(
+                    // Already signed in in the browser? Import it right now — no round trip.
+                    if let Some(auth) = tokio::task::spawn_blocking(crate::browser_auth::import_any)
+                        .await
+                        .ok()
+                        .flatten()
+                    {
+                        complete_soundcloud_sign_in(&task, auth).await;
+                        return;
+                    }
+                    // Otherwise hand the real sign-in to the system default browser, where
+                    // hCaptcha and the Google/Facebook/Apple popups actually work, and watch the
+                    // browser's cookie store for the session to appear.
+                    if !crate::browser_auth::open_in_default_browser() {
+                        task.emit(
                             "soundcloud-auth",
-                            json!({ "state": "error", "message": e.to_string() }),
-                        ),
+                            json!({
+                                "state": "error",
+                                "message": "Could not open your browser. Sign in at soundcloud.com, then press the button again.",
+                            }),
+                        );
+                        return;
+                    }
+                    task.emit("soundcloud-auth", json!({ "state": "waiting" }));
+                    let deadline = tokio::time::Instant::now()
+                        + std::time::Duration::from_secs(SC_SIGN_IN_TIMEOUT_SECS);
+                    loop {
+                        tokio::time::sleep(std::time::Duration::from_secs(SC_SIGN_IN_POLL_SECS))
+                            .await;
+                        if tokio::time::Instant::now() >= deadline {
+                            task.emit(
+                                "soundcloud-auth",
+                                json!({
+                                    "state": "expired",
+                                    "message": "No SoundCloud sign-in was completed in the browser.",
+                                }),
+                            );
+                            return;
+                        }
+                        if let Some(auth) =
+                            tokio::task::spawn_blocking(crate::browser_auth::import_any)
+                                .await
+                                .ok()
+                                .flatten()
+                        {
+                            complete_soundcloud_sign_in(&task, auth).await;
+                            return;
+                        }
                     }
                 });
                 ok(json!({ "started": true }))

@@ -137,9 +137,11 @@ function applyEvent(s, name, data) {
         return null;
     }
     case "soundcloud-auth": {
-        // The SoundCloud capture flow's progress. The window is visible (the daemon owns it),
-        // so unlike Spotify there is no url step; the states are signed_in, signed_out,
-        // restore_failed (a persisted token died) and error.
+        // The SoundCloud sign-in flow's progress. Sign-in happens in the user's own browser
+        // (captchas and IdP popups work there); the daemon opens it and watches the browser's
+        // cookie store, so the states are: waiting (browser opened, polling), signed_in,
+        // signed_out, expired (nobody finished in the browser), restore_failed (a persisted
+        // token died) and error.
         var sc = (data && data.state) ? data.state : "";
         if (sc === "signed_in") {
             s.soundcloud = { signedIn: true, name: (data && data.name) ? data.name : null, error: "" };
@@ -148,6 +150,14 @@ function applyEvent(s, name, data) {
         if (sc === "signed_out") {
             s.soundcloud = { signedIn: false, name: null, error: "" };
             return null;
+        }
+        if (sc === "waiting") {
+            s.soundcloud = { signedIn: false, name: null, error: "Finish signing in at soundcloud.com in your browser \u2014 Ryotunes picks the session up automatically." };
+            return { toast: "Opened soundcloud.com in your browser \u2014 sign in there and Ryotunes will connect", kind: "info" };
+        }
+        if (sc === "expired") {
+            s.soundcloud = { signedIn: false, name: null, error: "" };
+            return { toast: "No SoundCloud sign-in was completed in the browser", kind: "info" };
         }
         if (sc === "restore_failed" || sc === "error") {
             var why = (data && data.message) ? data.message : "SoundCloud sign-in failed";

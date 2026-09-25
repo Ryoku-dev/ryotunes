@@ -42,6 +42,16 @@ base64 = "0.22"
 # System tray via StatusNotifierItem. `ksni` speaks the protocol directly (left-click `Activate`
 # works, unlike libappindicator), the same reason `src-tauri/src/tray.rs` uses it on Linux.
 ksni = "0.3"
+# Browser-connected SoundCloud sign-in (`browser_auth`): read the session cookies out of the
+# user's own browser profile databases (Gecko plaintext, Chromium v10 AES-CBC) instead of an
+# embedded webview, so captchas and IdP popups work in the browser they were built for.
+rusqlite = { version = "0.32", features = ["bundled"] }
+tempfile = "3"
+aes = "0.8"
+cbc = { version = "0.1", features = ["std", "block-padding"] }
+pbkdf2 = "0.12"
+sha1 = "0.10"
+sha2 = "0.10"
 # Download enrichment (`download_media`) embeds cover art + lyrics into the finished audio and reads
 # its real duration. Same version core pins so the workspace resolves one `lofty` (in the lock
 # already via core, so `--locked` is unaffected).

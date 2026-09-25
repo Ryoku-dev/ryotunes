@@ -90,14 +90,26 @@ TestCase {
         compare(s.spotify.error, "bad credentials");
     }
 
-    // The SoundCloud capture flow drives its own mirror: sign-in, expiry, sign-out.
-    function test_soundcloud_auth_events_mirror_the_capture_flow() {
+    // The SoundCloud browser flow drives its own mirror: waiting, sign-in, expiry, sign-out.
+    function test_soundcloud_auth_events_mirror_the_browser_flow() {
         var s = freshState();
         s.soundcloud = { signedIn: false, name: null, error: "" };
+        // Opening the browser is progress, not an error: an info toast plus a guidance line.
+        var wait = PB.applyEvent(s, "soundcloud-auth", { state: "waiting" });
+        compare(wait.kind, "info");
+        compare(s.soundcloud.signedIn, false);
+        verify(s.soundcloud.error.indexOf("browser") >= 0);
+        // Importing the session from the browser completes the sign-in.
         var fx = PB.applyEvent(s, "soundcloud-auth", { state: "signed_in", name: "nero" });
         compare(s.soundcloud.signedIn, true);
         compare(s.soundcloud.name, "nero");
+        compare(s.soundcloud.error, "");
         compare(fx.kind, "success");
+        // Giving up clears the guidance line with a calm info toast, not an error.
+        var expired = PB.applyEvent(s, "soundcloud-auth", { state: "expired" });
+        compare(expired.kind, "info");
+        compare(s.soundcloud.signedIn, false);
+        compare(s.soundcloud.error, "");
         // An expired persisted token reports itself and keeps the reason for the settings row.
         PB.applyEvent(s, "soundcloud-auth", { state: "restore_failed", message: "expired" });
         compare(s.soundcloud.signedIn, false);

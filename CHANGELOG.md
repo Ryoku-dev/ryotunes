@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- SoundCloud sign-in now happens in your own browser instead of a Ryotunes window: pressing Connect opens soundcloud.com (captchas and Google/Facebook/Apple popups work there), and the daemon watches your browser's cookie stores — Firefox-family and Chromium-family profiles, default browser first — importing the session the moment it appears and proving the token against `/me` before saving it. Already signed in in the browser? One click imports it instantly, no browser round trip. Cookie stores are only re-read when their file actually changes, and an unfinished sign-in ends with a clear message after five minutes rather than hanging.
+
 ## v1.1.5 - 2026-09-25
 
 ## v1.1.4 - 2026-09-24
