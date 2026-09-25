@@ -68,6 +68,17 @@ which mpv reads as end-of-file. So the daemon's normal pause should **pause mpv*
 (backpressure), keeping the pipe open. Use `StreamHandle::pause()`/`play()` only when a real
 teardown/reload is acceptable. Gapless is **off** for v1 (each track is a fresh `loadfile`).
 
+### End of track and seeking
+
+The daemon's mpv runs with `cache=yes`, so it drains the FIFO into its seekable demuxer cache and
+librespot finishes decoding a track within seconds of it starting. Two consequences:
+
+- librespot does **not** close its sink after the last packet (it expects a next `load`), so mpv
+  would wait on the pipe forever. `next_event()` closes it (`Player::stop`) on this handle's own
+  `EndOfTrack`; mpv plays out its cache, hits EOF, and the daemon advances the queue as usual.
+- A seek is a plain mpv seek within that cache. librespot has already left its playing state, so
+  `StreamHandle::seek` would be rejected there.
+
 Endianness: librespot emits native-endian S16, i.e. little-endian on Ryotunes' Linux x86-64 target,
 matching `s16le`.
 
