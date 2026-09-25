@@ -165,7 +165,9 @@ Item {
     }
     function setQuality(q) {
         page.setSetting("quality", q)
-            .then(() => Daemon.call("clear_caches").catch(() => {}))
+            // URLs are keyed by video only, so they must be dropped; the playback identity
+            // survives a quality change untouched.
+            .then(() => Daemon.call("clear_caches", { rotate: false }).catch(() => {}))
             .then(() => Playback.toast("Audio quality updated", "success"));
     }
     function saveProxy() {
@@ -176,7 +178,15 @@ Item {
     function clearCaches() {
         page.clearing = true;
         Daemon.call("clear_caches")
-            .then(() => { page.clearing = false; Playback.toast("Caches cleared", "success"); })
+            .then((res) => {
+                page.clearing = false;
+                // The daemon force-clears every stream cache and re-bootstraps the YouTube
+                // playback identity; the second half needs the network to work.
+                if (res && res.visitorDataRefreshed === false)
+                    Playback.toast("Caches cleared — offline, playback ID will retry on next play", "info");
+                else
+                    Playback.toast("Playback caches cleared", "success");
+            })
             .catch((e) => { page.clearing = false; Playback.toast((e && e.message) ? e.message : String(e), "error"); });
     }
 
@@ -1004,13 +1014,13 @@ Item {
                             Text { Layout.fillWidth: true; text: "Cache"; color: Tokens.ink; font.family: Style.fontUi; font.pixelSize: Style.fs.md; font.weight: Font.Medium; wrapMode: Text.WordWrap }
                             Text {
                                 Layout.fillWidth: true
-                                text: "Clear cached stream URLs and downloaded audio bytes."
+                                text: "Clear cached stream URLs and downloaded audio bytes, and reset the YouTube playback identity. Fixes tracks that fail with “YouTube rejected the stream link”."
                                 color: Tokens.inkMuted; font.family: Style.fontUi; font.pixelSize: Style.fs.sm; wrapMode: Text.WordWrap
                             }
                         }
                         Pill {
                             Layout.alignment: Qt.AlignVCenter
-                            label: page.clearing ? "Clearing…" : "Clear caches"
+                            label: page.clearing ? "Clearing…" : "Force clear caches"
                             icon: "close"
                             enabled: !page.clearing
                             onClicked: page.clearCaches()

@@ -2921,9 +2921,18 @@ impl AppState {
         self.db.set_setting("queue_position", &pos.to_string());
     }
 
-    /// Clear both cache tiers (settings "Clear caches"): the SQLite URL cache + mpv's on-disk
-    /// audio bytes. File cleanup is best-effort; the current track may need to re-buffer.
-    pub fn clear_caches(&self) {
+    /// Force-clear everything playback remembers about how to get a stream: the SQLite URL +
+    /// lyrics cache, mpv's on-disk audio bytes, the stored PoToken, and the per-video WEB_REMIX
+    /// blacklist. A stale cached stream URL or a stale/missing `visitorData` both surface as mpv
+    /// 403s ("YouTube rejected the stream link") that no retry can fix on their own — this is
+    /// the manual lever for it.
+    ///
+    /// `rotate_identity` additionally drops the anonymous YouTube playback identity and
+    /// re-bootstraps a fresh one (the settings button; quality changes pass false). Returns
+    /// whether a fresh visitorData was installed — false when not rotating or when the fetch
+    /// failed (offline). A failed fetch still leaves the token deleted, so the next launch or
+    /// bot-gated resolve re-bootstraps it anyway.
+    pub async fn clear_caches(&self, rotate_identity: bool) -> bool {
         self.db.clear_stream_cache();
         // The stored PoToken is a cache too, and "clear caches" is where someone goes when
         // playback has started behaving oddly. Dropping it costs one BotGuard bootstrap.
@@ -2931,6 +2940,30 @@ impl AppState {
         if let Ok(entries) = std::fs::read_dir(&self.paths.cache_dir) {
             for e in entries.flatten() {
                 let _ = std::fs::remove_file(e.path());
+            }
+        }
+        self.orchestrator.clear_web_remix_failures().await;
+        // The blacklist is an in-memory hint derived from cached URLs; with the cache wiped,
+        // WEB_REMIX gets another chance.
+        if !rotate_identity {
+            return false;
+        }
+        // Drop the persisted anonymous identity before fetching, so a fetch failure still leaves
+        // the daemon in the "re-bootstrap" state instead of holding the stale token it just
+        // complained about. Clearing the cooldown lets the on-demand bot-gate heal fire again.
+        self.db.delete_setting("visitor_data");
+        self.it.set_visitor_data(None);
+        self.last_visitor_try.store(0, Ordering::Relaxed);
+        match self.it.fetch_visitor_data().await {
+            Ok(vd) => {
+                self.it.set_visitor_data(Some(vd.clone()));
+                self.db.set_setting("visitor_data", &vd);
+                tracing::info!("playback caches force-cleared; visitorData re-bootstrapped");
+                true
+            }
+            Err(e) => {
+                tracing::warn!(error = %e, "visitorData refresh during cache clear failed");
+                false
             }
         }
     }

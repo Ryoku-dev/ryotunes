@@ -343,8 +343,9 @@ impl Dispatch for Methods {
                 ok(v)
             }
             "clear_caches" => {
-                st.clear_caches();
-                null()
+                let rotate = arg::<Option<bool>>(&params, "rotate")?.unwrap_or(true);
+                let refreshed = st.clear_caches(rotate).await;
+                ok(json!({ "visitorDataRefreshed": refreshed }))
             }
 
             // --- auth ------------------------------------------------------------------------

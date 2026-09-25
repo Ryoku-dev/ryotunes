@@ -380,8 +380,9 @@ export interface DiscordStatus { enabled: boolean; status: 'disabled' | 'connect
 export const discordStatus = () => invoke<DiscordStatus>('discord_status');
 /** Streamable client keys for the "disabled clients" setting. */
 export const getStreamClients = () => invoke<string[]>('get_stream_clients');
-/** Wipe both cache tiers (URL cache + mpv on-disk audio cache). */
-export const clearCaches = () => invoke<void>('clear_caches');
+/** Force-clear every playback cache; `rotate` (default true) also re-bootstraps the YouTube visitorData. */
+export const clearCaches = (rotate = true) =>
+	invoke<{ visitorDataRefreshed: boolean }>('clear_caches', { rotate });
 /** Open an http(s) link in the real browser, never in the webview itself. */
 export const openExternal = (url: string) => invoke<void>('open_external', { url });
 

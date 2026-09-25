@@ -133,6 +133,13 @@ impl Orchestrator {
         self.web_remix_failed.lock().await.insert(video_id.to_owned());
     }
 
+    /// Forget every per-video WEB_REMIX failure. The blacklist only steers around dead cached
+    /// URLs; a force-clear of the caches wipes those too, so the next resolve should retry
+    /// WEB_REMIX rather than stay locked out for the life of the process.
+    pub async fn clear_web_remix_failures(&self) {
+        self.web_remix_failed.lock().await.clear();
+    }
+
     /// Claim the one self-heal allowed per `HEAL_WINDOW`; false while a recent heal is cooling.
     async fn take_heal_slot(&self) -> bool {
         let mut last = self.last_heal.lock().await;

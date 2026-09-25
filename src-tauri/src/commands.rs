@@ -457,11 +457,16 @@ pub async fn get_stream_clients() -> Result<Vec<String>, String> {
     Ok(v)
 }
 
-/// Wipe both cache tiers: resolved stream URLs and mpv's on-disk audio cache.
+/// Force-clear every resolution cache (URLs, audio bytes, PoToken, WEB_REMIX blacklist) and,
+/// unless `rotate` is false, re-bootstrap the YouTube visitorData — the manual repair for
+/// "YouTube rejected the stream link".
 #[tauri::command]
-pub async fn clear_caches(state: St<'_>) -> Result<(), String> {
-    state.clear_caches();
-    Ok(())
+pub async fn clear_caches(
+    state: St<'_>,
+    rotate: Option<bool>,
+) -> Result<serde_json::Value, String> {
+    let refreshed = state.clear_caches(rotate.unwrap_or(true)).await;
+    Ok(serde_json::json!({ "visitorDataRefreshed": refreshed }))
 }
 
 // --- auth (authentication flow) ---------------------------------------------------------------------

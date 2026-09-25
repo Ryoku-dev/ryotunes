@@ -186,7 +186,7 @@
 		settings.quality = q;
 		await api.setSetting('quality', q);
 		// Cached URLs are keyed by video only, so clear them to apply the new quality everywhere.
-		await api.clearCaches();
+		await api.clearCaches(false);
 		toast.success('Audio quality updated');
 	}
 
@@ -299,8 +299,10 @@
 	async function doClearCaches() {
 		clearing = true;
 		try {
-			await api.clearCaches();
-			toast.success('Caches cleared');
+			const res = await api.clearCaches();
+			if (res && res.visitorDataRefreshed === false)
+				toast.info('Caches cleared — offline, playback ID will retry on next play');
+			else toast.success('Playback caches cleared');
 		} finally {
 			clearing = false;
 		}
@@ -602,10 +604,10 @@
 					<div class="py-3">
 						<div class="font-medium">Cache</div>
 						<p class="mt-0.5 mb-3 text-sm text-muted-foreground">
-							Clear cached stream URLs and downloaded audio bytes.
+							Clear cached stream URLs and downloaded audio bytes, and reset the YouTube playback identity. Fixes tracks that fail with “YouTube rejected the stream link”.
 						</p>
 						<Button variant="destructive" size="sm" onclick={doClearCaches} disabled={clearing}>
-							{clearing ? 'Clearing…' : 'Clear caches'}
+							{clearing ? 'Clearing…' : 'Force clear caches'}
 						</Button>
 					</div>
 				{:else if tab === 'keybinds'}
