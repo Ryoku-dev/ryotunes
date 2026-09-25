@@ -76,7 +76,12 @@ impl Engine {
         let uri = track_uri(track_id)?;
         let events = self.player.get_player_event_channel();
         self.player.load(uri, true, 0);
-        Ok(StreamHandle { player: self.player.clone(), fifo: self.fifo.clone(), events })
+        Ok(StreamHandle {
+            player: self.player.clone(),
+            fifo: self.fifo.clone(),
+            events,
+            request: None,
+        })
     }
 }
 
@@ -87,19 +92,16 @@ pub struct StreamHandle {
     player: Arc<Player>,
     fifo: Arc<Fifo>,
     events: PlayerEventChannel,
+    /// librespot's id for this handle's load, learned from the first `PlayRequestIdChanged`. The
+    /// channel is shared with the whole player, so anything tagged with another id is a previous
+    /// track's straggler and must not steer this one.
+    request: Option<u64>,
 }
 
 impl StreamHandle {
     /// The FIFO mpv should `loadfile` with the rawaudio demuxer options (see the module docs).
     pub fn fifo_path(&self) -> &Path {
         self.fifo.path()
-    }
-
-    /// A cheap, cloneable transport handle (seek/play + FIFO path). The daemon keeps this to
-    /// drive scrubbing while a separate task owns the [`StreamHandle`] to poll
-    /// [`StreamHandle::next_event`] — the two halves can't share `&mut self`.
-    pub fn controls(&self) -> StreamControls {
-        StreamControls { player: self.player.clone(), fifo: self.fifo.clone() }
     }
 
     /// Seek within the current track.
@@ -119,43 +121,29 @@ impl StreamHandle {
         self.player.pause();
     }
 
-    /// The next playback event, or `None` once the player has shut down. librespot events that do not
-    /// map onto [`StreamEvent`] (e.g. `Loading`) are skipped.
+    /// The next playback event for this track, or `None` once the player has shut down. librespot
+    /// events that do not map onto [`StreamEvent`] (e.g. `Loading`) and events from other loads are
+    /// skipped.
+    ///
+    /// At [`StreamEvent::EndOfTrack`] the pipe is closed here: librespot keeps its sink open after
+    /// the last packet (waiting for a next track that never comes), and without the close the
+    /// reader never sees EOF and playback hangs at the end.
     pub async fn next_event(&mut self) -> Option<StreamEvent> {
         loop {
             let event = self.events.recv().await?;
-            if let Some(event) = translate(event) {
-                return Some(event);
+            if let PlayerEvent::PlayRequestIdChanged { play_request_id } = event {
+                self.request.get_or_insert(play_request_id);
+                continue;
             }
+            if event.get_play_request_id().is_some_and(|id| Some(id) != self.request) {
+                continue;
+            }
+            let Some(event) = translate(event) else { continue };
+            if event == StreamEvent::EndOfTrack {
+                self.player.stop();
+            }
+            return Some(event);
         }
-    }
-}
-
-/// The transport half of a live stream, split off from [`StreamHandle`] so the daemon can seek
-/// and reload from one place while the handle itself is owned by the task polling its events.
-/// Cheap to clone: two `Arc`s. Dropping it does not tear the player down (see [`StreamHandle`]).
-#[derive(Clone)]
-pub struct StreamControls {
-    player: Arc<Player>,
-    fifo: Arc<Fifo>,
-}
-
-impl StreamControls {
-    /// The FIFO mpv should `loadfile` with the rawaudio demuxer options (see the module docs).
-    pub fn fifo_path(&self) -> &Path {
-        self.fifo.path()
-    }
-
-    /// Seek within the current track. The daemon reloads mpv on the FIFO afterwards so it reads
-    /// the post-seek PCM (mpv cannot seek a pipe itself).
-    pub fn seek(&self, position: Duration) {
-        self.player.seek(position.as_millis() as u32);
-    }
-
-    /// Resume librespot decoding. Never used for an ordinary pause (that pauses mpv and lets FIFO
-    /// backpressure stall librespot); only after a seek reload.
-    pub fn play(&self) {
-        self.player.play();
     }
 }
 
@@ -177,9 +165,7 @@ fn translate(event: PlayerEvent) -> Option<StreamEvent> {
         | PlayerEvent::PositionCorrection { position_ms, .. } => {
             Some(StreamEvent::Position(millis(position_ms)))
         }
-        PlayerEvent::Stopped { .. } | PlayerEvent::EndOfTrack { .. } => {
-            Some(StreamEvent::EndOfTrack)
-        }
+        PlayerEvent::EndOfTrack { .. } => Some(StreamEvent::EndOfTrack),
         PlayerEvent::Unavailable { .. } => Some(StreamEvent::Unavailable),
         _ => None,
     }
@@ -267,6 +253,14 @@ mod tests {
                 track_id: SpotifyUri::from_uri("spotify:track:4uLU6hMCjMI75M1A2tKUQC").unwrap(),
             }),
             Some(StreamEvent::EndOfTrack)
+        );
+        // `Stopped` is the echo of the pipe close `next_event` issues at EndOfTrack.
+        assert_eq!(
+            translate(PlayerEvent::Stopped {
+                play_request_id: 0,
+                track_id: SpotifyUri::from_uri("spotify:track:4uLU6hMCjMI75M1A2tKUQC").unwrap(),
+            }),
+            None
         );
     }
 }
