@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## v1.1.5 - 2026-09-25
+
 ## v1.1.4 - 2026-09-24
 
 - Fixed "Download playlist / Download album" always failing (albums: "missing field `video_id`", playlists: "missing field `videoId`"): two stacked bugs — the client mapped an album/playlist's rows into batch entries twice, dropping every track id, and the daemon's batch endpoint read its JSON in snake_case while the client posts camelCase. Single-track downloads were unaffected, which is why only albums and playlists broke.
