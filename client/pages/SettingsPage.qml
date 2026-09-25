@@ -208,13 +208,34 @@ Item {
         page.updateStatus = "installing";
         page.updateError = "";
         Daemon.call("install_update", { version: version })
-            .then((res) => { page.installedVersion = (res && res.version) ? res.version : version; page.updateStatus = "installed"; })
+            .then((res) => {
+                page.installedVersion = (res && res.version) ? res.version : version;
+                page.updateStatus = "installed";
+                page.restartIntoUpdate();
+            })
             .catch((e) => { page.updateError = (e && e.message) ? e.message : String(e); page.updateStatus = "error"; });
+    }
+    // The package is on disk, but this client and the daemon are still running the old code.
+    // Finish like a normal app does: restart itself. A detached helper waits for the old
+    // daemon to release its lock file — the daemon's exit is the full teardown (download
+    // reaping included), so waiting on the lock beats racing it with a timer — then runs the
+    // launcher, which socket-activates the new daemon and opens the new client. Meanwhile we
+    // ask the daemon to quit and close this window. If the helper somehow fails, the app
+    // stays open showing the manual "quit and reopen" guidance as the fallback.
+    function restartIntoUpdate() {
+        var lock = (Quickshell.env("XDG_RUNTIME_DIR") || "/tmp") + "/ryotunes/ryotunesd.sock.lock";
+        Quickshell.execDetached([
+            "sh", "-c",
+            "flock -w 60 \"$1\" -c true 2>/dev/null; exec ryotunes",
+            "ryotunes-update-restart", lock
+        ]);
+        Daemon.call("quit").catch(() => {});
+        Qt.quit();
     }
     function updateMessage() {
         if (page.updateStatus === "checking") return "Checking for a new version…";
         if (page.updateStatus === "installing") return "Downloading and verifying the update, then asking for administrator approval. Keep Ryotunes open until it finishes.";
-        if (page.updateStatus === "installed") return "Ryotunes " + page.installedVersion + " is installed. Quit Ryotunes and open it again to finish — closing the window isn't enough; the background service reloads only on a full restart.";
+        if (page.updateStatus === "installed") return "Ryotunes " + page.installedVersion + " installed — restarting Ryotunes to finish. If the window is still here, quit it and open it again; the background service reloads only on a full restart.";
         if (page.updateStatus === "error") return "Update failed: " + page.updateError;
         var info = page.updateInfo;
         if (!info) return "";

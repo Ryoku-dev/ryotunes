@@ -4,6 +4,8 @@
 
 - SoundCloud sign-in now happens in your own browser instead of a Ryotunes window: pressing Connect opens soundcloud.com (captchas and Google/Facebook/Apple popups work there), and the daemon watches your browser's cookie stores — Firefox-family and Chromium-family profiles, default browser first — importing the session the moment it appears and proving the token against `/me` before saving it. Already signed in in the browser? One click imports it instantly, no browser round trip. Cookie stores are only re-read when their file actually changes, and an unfinished sign-in ends with a clear message after five minutes rather than hanging.
 
+- Installing an update from Settings now restarts Ryotunes by itself: after the package lands, a detached helper waits for the old daemon to release its socket lock, then relaunches — socket-activating the new daemon and opening the new client — instead of leaving "quit and reopen" as the user's chore. If the helper fails, the app stays open with the old manual guidance as the fallback.
+
 ## v1.1.5 - 2026-09-25
 
 ## v1.1.4 - 2026-09-24
