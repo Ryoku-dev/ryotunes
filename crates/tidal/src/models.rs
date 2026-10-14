@@ -145,6 +145,22 @@ pub struct SearchResults {
     pub playlists: Page<Playlist>,
 }
 
+/// The account record behind `/users/{id}`. Only the profile name is read off it: the rest is
+/// either already in the token response or personal data this client has no business holding.
+#[derive(Debug, Deserialize)]
+pub struct UserProfile {
+    #[serde(rename = "profileName", default)]
+    pub profile_name: Option<String>,
+}
+
+impl UserProfile {
+    /// The name worth showing. An account that never made a profile answers `null`; a blank is
+    /// not a name either, and printing one would leave a gap where the account should be.
+    pub fn name(&self) -> Option<String> {
+        self.profile_name.as_deref().map(str::trim).filter(|s| !s.is_empty()).map(str::to_owned)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -181,6 +197,19 @@ mod tests {
         )
         .unwrap();
         assert_eq!(t.artist_line(), "A, B", "empty names are dropped, order is kept");
+    }
+
+    #[test]
+    fn a_profile_name_is_read_and_a_blank_one_counts_as_absent() {
+        let named: UserProfile =
+            serde_json::from_str(r#"{"profileName":"vlad","username":"a@b.c"}"#).unwrap();
+        assert_eq!(named.name().as_deref(), Some("vlad"));
+        for raw in
+            [r#"{"profileName":null}"#, r#"{}"#, r#"{"profileName":""}"#, r#"{"profileName":"  "}"#]
+        {
+            let p: UserProfile = serde_json::from_str(raw).unwrap();
+            assert_eq!(p.name(), None, "{raw} must not reach the status line");
+        }
     }
 
     #[test]

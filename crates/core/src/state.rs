@@ -458,9 +458,9 @@ impl AppState {
             }
         }));
         let tidal = Arc::new(ryotunes_tidal::Tidal::new(paths.data_dir.join("tidal")));
-        // TIDAL publishes no client credentials for third-party playback, so the crate carries
-        // none and the user supplies a pair. Without them every call reports NoCredentials rather
-        // than failing somewhere deeper.
+        // The crate ships a credential pair so signing in needs nothing but the button. A stored
+        // pair overrides it field by field, so someone supplying only their own device id keeps
+        // the shipped PKCE half rather than losing hi-res.
         if let Some(raw) = db.get_setting(TIDAL_CREDENTIALS_KEY) {
             if let Ok(creds) = serde_json::from_str::<TidalCredentials>(&raw) {
                 tidal.set_credentials(creds.into());

@@ -109,15 +109,26 @@ pub struct TidalAuth {
     /// Which flow minted this token. Persisted so a restart knows whether hi-res is reachable
     /// without a round trip.
     pub entitlement: Entitlement,
-    /// Filled in by the host after a `/users/me` call so the status line survives restarts.
+    /// The login identifier the token response carries. An account registered with an email has
+    /// its email here, so this is the fallback a status line falls back *to*, not what it shows
+    /// first.
     #[serde(default)]
     pub username: Option<String>,
+    /// The public profile name, which exists only for an account that ever made a profile. Read
+    /// once at sign-in, because neither the token response nor a refresh ever repeats it.
+    #[serde(default)]
+    pub profile_name: Option<String>,
 }
 
 impl TidalAuth {
     /// Whether the bearer is dead or about to be.
     pub fn is_expired(&self, now: i64) -> bool {
         self.expires_at <= now + EXPIRY_MARGIN_SECS
+    }
+
+    /// What a status line shows: the profile name when the account has one, else the username.
+    pub fn display_name(&self) -> Option<String> {
+        self.profile_name.clone().or_else(|| self.username.clone())
     }
 }
 
@@ -198,10 +209,26 @@ mod tests {
             country_code: "DE".into(),
             entitlement: Entitlement::Standard,
             username: None,
+            profile_name: None,
         };
         assert!(!auth.is_expired(900), "still good well before the margin");
         assert!(auth.is_expired(941), "inside the 60 s margin counts as expired");
         assert!(auth.is_expired(1_000));
+    }
+
+    // The username TIDAL hands back is the login, and an email registration logs in with its
+    // email. Only an account that made a profile has a name worth showing instead.
+    #[test]
+    fn the_profile_name_is_shown_over_the_email() {
+        let mut auth: TidalAuth = serde_json::from_str(
+            r#"{"access_token":"a","refresh_token":null,"expires_at":0,"user_id":1,
+                "country_code":"DE","entitlement":"standard","username":"me@example.com"}"#,
+        )
+        .unwrap();
+        assert_eq!(auth.profile_name, None, "an older blob has no such field and must still load");
+        assert_eq!(auth.display_name().as_deref(), Some("me@example.com"));
+        auth.profile_name = Some("vlad".into());
+        assert_eq!(auth.display_name().as_deref(), Some("vlad"));
     }
 
     #[test]

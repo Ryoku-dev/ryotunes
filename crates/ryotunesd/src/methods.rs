@@ -1063,13 +1063,23 @@ impl Dispatch for Methods {
                         tokio::time::sleep(std::time::Duration::from_secs(login.interval)).await;
                         match task.tidal.device_poll(&login.device_code).await {
                             Ok(auth) => {
+                                // The token response names the account by its login, which is an
+                                // email. Ask once for the profile name so the status line can
+                                // show it; an account without one keeps the email.
+                                let auth = match task.tidal.load_profile_name().await {
+                                    Ok(filled) => filled,
+                                    Err(e) => {
+                                        tracing::debug!(error = %e, "tidal: no profile name");
+                                        auth
+                                    }
+                                };
                                 if let Ok(json) = serde_json::to_string(&auth) {
                                     task.db
                                         .set_setting(ryotunes_core::state::TIDAL_AUTH_KEY, &json);
                                 }
                                 task.emit(
                                     "tidal-auth",
-                                    json!({ "state": "signed_in", "name": auth.username }),
+                                    json!({ "state": "signed_in", "name": auth.display_name() }),
                                 );
                                 return;
                             }
@@ -2375,7 +2385,7 @@ fn tidal_status_json(st: &Arc<AppState>) -> Value {
     match st.tidal.auth() {
         Some(auth) => json!({
             "signedIn": true,
-            "name": auth.username,
+            "name": auth.display_name(),
             "quality": auth.entitlement.ceiling().as_str(),
             "hasCredentials": creds.has_device() || creds.has_pkce(),
         }),

@@ -12,7 +12,7 @@ use crate::auth::{
     now_secs, Credentials, DeviceLogin, DeviceResponse, Entitlement, PkceChallenge, TidalAuth,
     TokenResponse, DEVICE_AUTH_URL, PKCE_AUTH_URL, SCOPE, TOKEN_URL,
 };
-use crate::models::{Album, Artist, Favourite, Page, Playlist, SearchResults, Track};
+use crate::models::{Album, Artist, Favourite, Page, Playlist, SearchResults, Track, UserProfile};
 use crate::stream::{resolve, PlaybackInfo, Quality, Stream};
 use crate::{Error, Result};
 
@@ -191,6 +191,26 @@ impl Tidal {
         *self.auth.write() = None;
     }
 
+    /// Read the account's public profile name and keep it. TIDAL's token response only carries
+    /// the username, which for an email registration is the email itself, so the name a person
+    /// recognises costs one request. `None` is an account that never made a profile, and that is
+    /// a normal answer, not a failure.
+    pub async fn load_profile_name(&self) -> Result<TidalAuth> {
+        let id = self.auth.read().as_ref().map(|a| a.user_id).ok_or(Error::SignedOut)?;
+        let profile: UserProfile = self.get(&format!("/users/{id}"), &[]).await?;
+        let name = profile.name();
+        let updated = {
+            let mut guard = self.auth.write();
+            let auth = guard.as_mut().ok_or(Error::SignedOut)?;
+            auth.profile_name = name;
+            auth.clone()
+        };
+        if let Some(hook) = self.on_rotate.read().clone() {
+            hook(updated.clone());
+        }
+        Ok(updated)
+    }
+
     // ---- catalogue -----------------------------------------------------------------------
 
     pub async fn search(&self, query: &str, limit: u32) -> Result<SearchResults> {
@@ -290,16 +310,15 @@ impl Tidal {
     fn adopt(&self, token: TokenResponse, entitlement: Entitlement) -> Result<TidalAuth> {
         let prior = self.auth.read().clone();
         let user = token.user.as_ref();
+        let user_id =
+            user.and_then(|u| u.user_id).or_else(|| prior.as_ref().map(|p| p.user_id)).unwrap_or(0);
         let auth = TidalAuth {
             access_token: token.access_token,
             refresh_token: token
                 .refresh_token
                 .or_else(|| prior.as_ref().and_then(|p| p.refresh_token.clone())),
             expires_at: now_secs() + token.expires_in.unwrap_or(3600),
-            user_id: user
-                .and_then(|u| u.user_id)
-                .or_else(|| prior.as_ref().map(|p| p.user_id))
-                .unwrap_or(0),
+            user_id,
             country_code: user
                 .and_then(|u| u.country_code.clone())
                 .or_else(|| prior.as_ref().map(|p| p.country_code.clone()))
@@ -308,6 +327,13 @@ impl Tidal {
             username: user
                 .and_then(|u| u.username.clone())
                 .or_else(|| prior.as_ref().and_then(|p| p.username.clone())),
+            // A refresh never repeats the profile name, so keep the one already read, but only
+            // while it still belongs to this account: signing in as someone else must not
+            // inherit the previous account's name.
+            profile_name: prior
+                .as_ref()
+                .filter(|p| p.user_id == user_id)
+                .and_then(|p| p.profile_name.clone()),
         };
         *self.auth.write() = Some(auth.clone());
         if let Some(hook) = self.on_rotate.read().clone() {
@@ -406,6 +432,7 @@ fn random_token(len: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::auth::TokenUser;
 
     fn client() -> Tidal {
         Tidal::new(PathBuf::from("/tmp"))
@@ -466,6 +493,7 @@ mod tests {
             country_code: "DE".into(),
             entitlement: Entitlement::Standard,
             username: None,
+            profile_name: None,
         }));
         assert_eq!(t.ceiling(), Some(Quality::Lossless));
         assert_eq!(
@@ -516,6 +544,7 @@ mod tests {
             country_code: "DE".into(),
             entitlement: Entitlement::HiRes,
             username: Some("vlad".into()),
+            profile_name: None,
         }));
         let fresh = t
             .adopt(
@@ -532,6 +561,55 @@ mod tests {
         assert_eq!(fresh.country_code, "DE");
         assert_eq!(fresh.refresh_token.as_deref(), Some("r1"), "keep the rotation token too");
         assert_eq!(fresh.username.as_deref(), Some("vlad"));
+    }
+
+    // The profile name is read once and never repeated by TIDAL, so a refresh that drops it would
+    // send the status line back to showing the email an hour after every sign-in.
+    #[test]
+    fn a_refresh_keeps_the_profile_name_but_another_account_does_not_inherit_it() {
+        let t = client();
+        let signed_in = TidalAuth {
+            access_token: "old".into(),
+            refresh_token: Some("r1".into()),
+            expires_at: 0,
+            user_id: 42,
+            country_code: "DE".into(),
+            entitlement: Entitlement::Standard,
+            username: Some("vlad@example.com".into()),
+            profile_name: Some("vlad".into()),
+        };
+        t.set_auth(Some(signed_in.clone()));
+        let refreshed = t
+            .adopt(
+                TokenResponse {
+                    access_token: "new".into(),
+                    refresh_token: None,
+                    expires_in: Some(60),
+                    user: None,
+                },
+                Entitlement::Standard,
+            )
+            .unwrap();
+        assert_eq!(refreshed.profile_name.as_deref(), Some("vlad"));
+
+        t.set_auth(Some(signed_in));
+        let other = t
+            .adopt(
+                TokenResponse {
+                    access_token: "new".into(),
+                    refresh_token: None,
+                    expires_in: Some(60),
+                    user: Some(TokenUser {
+                        user_id: Some(7),
+                        country_code: Some("DE".into()),
+                        username: Some("someone@example.com".into()),
+                    }),
+                },
+                Entitlement::Standard,
+            )
+            .unwrap();
+        assert_eq!(other.profile_name, None, "a second account must not wear the first one's name");
+        assert_eq!(other.display_name().as_deref(), Some("someone@example.com"));
     }
 
     #[test]
