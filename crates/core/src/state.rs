@@ -54,8 +54,9 @@ pub const SOUNDCLOUD_AUTH_KEY: &str = "soundcloud_auth";
 /// The TIDAL session blob. Outside `UI_SETTINGS` for the same reason as SoundCloud's: the renderer
 /// may neither read nor overwrite a bearer.
 pub const TIDAL_AUTH_KEY: &str = "tidal_auth";
-/// The TIDAL client credentials the user supplies. The crate ships none, so without this TIDAL
-/// stays unreachable and says so rather than failing at the first request.
+/// A TIDAL client pair the user supplies. Optional: the crate ships a working pair, and this one
+/// overrides it field by field, so someone with their own registered application can replace one
+/// half and keep the other.
 pub const TIDAL_CREDENTIALS_KEY: &str = "tidal_credentials";
 
 /// Settings the UI is allowed to read *and write*. Session/auth material (`session_cookie`,
@@ -1076,11 +1077,15 @@ impl AppState {
         // one fails mid-track rather than at resolve time.
         if let Some(id) = crate::spotify::tidal_track_id(video_id) {
             let want = self.tidal_quality();
-            let stream = self
-                .tidal
-                .stream(id, want)
-                .await
-                .map_err(|e| ResolveError::AllClientsFailed(format!("{video_id}: {e}")))?;
+            // A signed-out TIDAL is a sign-in prompt, not a dead row: flattening it into
+            // AllClientsFailed sends the queue handler down the skip path, and a whole TIDAL
+            // queue then walks itself to the tail one "Skipped" toast at a time.
+            let stream = self.tidal.stream(id, want).await.map_err(|e| match e {
+                ryotunes_tidal::Error::SignedOut => {
+                    ResolveError::SignInRequired("Sign in to TIDAL to play this".to_owned())
+                }
+                e => ResolveError::AllClientsFailed(format!("{video_id}: {e}")),
+            })?;
             let url = match stream.source {
                 ryotunes_tidal::Source::Direct(url) => url,
                 ryotunes_tidal::Source::Presentation { xml } => {

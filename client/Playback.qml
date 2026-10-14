@@ -45,8 +45,8 @@ Singleton {
 
     // The TIDAL account. Unlike SoundCloud there is no guest catalogue, so a signed-out TIDAL
     // shows a sign-in prompt rather than a browsable home. `quality` is the best tier the session
-    // can actually reach, which the device flow caps below hi-res; `hasCredentials` is false until
-    // the user supplies a client id, because the daemon ships none.
+    // can actually reach, which the device flow caps below hi-res; `hasCredentials` stays true
+    // while the daemon ships a pair and only turns false if a host clears one.
     property var tidal: ({ signedIn: false, name: null, quality: null, hasCredentials: false,
         code: "", url: "", error: "" })
 

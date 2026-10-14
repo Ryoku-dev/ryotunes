@@ -31,6 +31,9 @@ pub struct Tidal {
     /// spend a token that is already dead and sign the user out.
     refresh_lock: tokio::sync::Mutex<()>,
     on_rotate: parking_lot::RwLock<Option<RotateHook>>,
+    /// Bumped by every sign-out. A token exchange reads it before it leaves and `adopt` refuses
+    /// a session minted under an older number, so a sign-out that lands mid-flight stays.
+    epoch: std::sync::atomic::AtomicU64,
 }
 
 impl Tidal {
@@ -42,6 +45,7 @@ impl Tidal {
             auth: parking_lot::RwLock::new(None),
             refresh_lock: tokio::sync::Mutex::new(()),
             on_rotate: parking_lot::RwLock::new(None),
+            epoch: std::sync::atomic::AtomicU64::new(0),
         }
     }
 
@@ -117,6 +121,7 @@ impl Tidal {
     /// One poll of the device flow. [`Error::Pending`] means keep waiting;
     /// [`Error::LoginExpired`] means start over.
     pub async fn device_poll(&self, device_code: &str) -> Result<TidalAuth> {
+        let epoch = self.epoch();
         let (id, secret) = self.device_creds()?;
         let mut form = vec![
             ("client_id", id.as_str()),
@@ -131,7 +136,7 @@ impl Tidal {
         let status = res.status();
         if status.is_success() {
             let token: TokenResponse = res.json().await?;
-            return self.adopt(token, Entitlement::Standard);
+            return self.adopt(token, Entitlement::Standard, epoch);
         }
         let body = res.text().await.unwrap_or_default();
         match pending_kind(&body) {
@@ -164,6 +169,7 @@ impl Tidal {
 
     /// Redeem the code the host captured from the redirect.
     pub async fn pkce_finish(&self, code: &str, verifier: &str) -> Result<TidalAuth> {
+        let epoch = self.epoch();
         let creds = self.creds.read().clone();
         if !creds.has_pkce() {
             return Err(Error::NoCredentials("pkce"));
@@ -184,11 +190,16 @@ impl Tidal {
         let res = self.http.post(TOKEN_URL).form(&form).send().await?;
         let res = check(res, TOKEN_URL).await?;
         let token: TokenResponse = res.json().await?;
-        self.adopt(token, Entitlement::HiRes)
+        self.adopt(token, Entitlement::HiRes, epoch)
     }
 
     pub fn sign_out(&self) {
+        self.epoch.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         *self.auth.write() = None;
+    }
+
+    fn epoch(&self) -> u64 {
+        self.epoch.load(std::sync::atomic::Ordering::SeqCst)
     }
 
     /// Read the account's public profile name and keep it. TIDAL's token response only carries
@@ -226,7 +237,7 @@ impl Tidal {
     }
 
     pub async fn album_tracks(&self, id: u64, limit: u32) -> Result<Page<Track>> {
-        self.get(&format!("/albums/{id}/tracks"), &[("limit", &limit.to_string())]).await
+        self.paged(&format!("/albums/{id}/tracks"), limit).await
     }
 
     pub async fn artist(&self, id: u64) -> Result<Artist> {
@@ -246,7 +257,7 @@ impl Tidal {
     }
 
     pub async fn playlist_tracks(&self, uuid: &str, limit: u32) -> Result<Page<Track>> {
-        self.get(&format!("/playlists/{uuid}/tracks"), &[("limit", &limit.to_string())]).await
+        self.paged(&format!("/playlists/{uuid}/tracks"), limit).await
     }
 
     pub async fn my_tracks(&self, limit: u32) -> Result<Page<Favourite<Track>>> {
@@ -307,7 +318,15 @@ impl Tidal {
         self.auth.read().as_ref().map(|a| a.user_id).ok_or(Error::SignedOut)
     }
 
-    fn adopt(&self, token: TokenResponse, entitlement: Entitlement) -> Result<TidalAuth> {
+    fn adopt(
+        &self,
+        token: TokenResponse,
+        entitlement: Entitlement,
+        epoch: u64,
+    ) -> Result<TidalAuth> {
+        if epoch != self.epoch() {
+            return Err(Error::SignedOut);
+        }
         let prior = self.auth.read().clone();
         let user = token.user.as_ref();
         let user_id =
@@ -344,6 +363,7 @@ impl Tidal {
 
     /// Refresh under the lock, re-checking first in case a sibling already did it.
     async fn ensure_fresh(&self) -> Result<TidalAuth> {
+        let epoch = self.epoch();
         let current = self.auth.read().clone().ok_or(Error::SignedOut)?;
         if !current.is_expired(now_secs()) {
             return Ok(current);
@@ -376,7 +396,35 @@ impl Tidal {
         let res = self.http.post(TOKEN_URL).form(&form).send().await?;
         let res = check(res, TOKEN_URL).await?;
         let token: TokenResponse = res.json().await?;
-        self.adopt(token, current.entitlement)
+        self.adopt(token, current.entitlement, epoch)
+    }
+
+    /// Walk a track list to `want` items. TIDAL serves at most 100 per request, so a longer album
+    /// or playlist needs the offset; without this the head count reports a total the list does not
+    /// hold and everything past the first hundred is unreachable.
+    async fn paged(&self, path: &str, want: u32) -> Result<Page<Track>> {
+        const PER_REQUEST: u32 = 100;
+        let mut out: Page<Track> = self
+            .get(path, &[("limit", &want.min(PER_REQUEST).to_string()), ("offset", "0")])
+            .await?;
+        let total = out.total.unwrap_or(0).min(want);
+        while (out.items.len() as u32) < total {
+            let offset = out.items.len() as u32;
+            let next: Page<Track> = self
+                .get(
+                    path,
+                    &[
+                        ("limit", &(total - offset).min(PER_REQUEST).to_string()),
+                        ("offset", &offset.to_string()),
+                    ],
+                )
+                .await?;
+            if next.items.is_empty() {
+                break;
+            }
+            out.items.extend(next.items);
+        }
+        Ok(out)
     }
 
     /// Every catalogue call goes through here: refresh if needed, add the bearer and the country,
@@ -528,6 +576,7 @@ mod tests {
                 user: None,
             },
             Entitlement::Standard,
+            t.epoch(),
         )
         .unwrap();
         assert_eq!(seen.lock().as_ref().map(|a| a.access_token.clone()), Some("new".into()));
@@ -555,6 +604,7 @@ mod tests {
                     user: None,
                 },
                 Entitlement::HiRes,
+                t.epoch(),
             )
             .unwrap();
         assert_eq!(fresh.user_id, 42, "a refresh response names no user; keep the one we had");
@@ -588,6 +638,7 @@ mod tests {
                     user: None,
                 },
                 Entitlement::Standard,
+                t.epoch(),
             )
             .unwrap();
         assert_eq!(refreshed.profile_name.as_deref(), Some("vlad"));
@@ -606,10 +657,57 @@ mod tests {
                     }),
                 },
                 Entitlement::Standard,
+                t.epoch(),
             )
             .unwrap();
         assert_eq!(other.profile_name, None, "a second account must not wear the first one's name");
         assert_eq!(other.display_name().as_deref(), Some("someone@example.com"));
+    }
+
+    // A sign-out that lands while a token exchange is in flight used to be undone when the
+    // exchange came back, in memory and through the rotate hook on disk, so the user stayed
+    // signed in to an account they had just left.
+    #[test]
+    fn a_sign_out_during_a_token_exchange_is_not_undone() {
+        let t = client();
+        let persisted = Arc::new(parking_lot::Mutex::new(None::<TidalAuth>));
+        let sink = persisted.clone();
+        t.set_on_rotate(move |a| *sink.lock() = Some(a));
+
+        let in_flight = t.epoch();
+        t.sign_out();
+        let err = t.adopt(
+            TokenResponse {
+                access_token: "late".into(),
+                refresh_token: Some("r".into()),
+                expires_in: Some(60),
+                user: Some(TokenUser {
+                    user_id: Some(1),
+                    country_code: Some("DE".into()),
+                    username: Some("me@example.com".into()),
+                }),
+            },
+            Entitlement::Standard,
+            in_flight,
+        );
+        assert!(matches!(err, Err(Error::SignedOut)), "a stale exchange must not sign anyone in");
+        assert!(t.auth().is_none(), "the sign-out stands");
+        assert!(persisted.lock().is_none(), "and nothing reaches the disk either");
+
+        // The same exchange started after the sign-out is a real sign-in and must still work.
+        let fresh = t.epoch();
+        assert!(t
+            .adopt(
+                TokenResponse {
+                    access_token: "new".into(),
+                    refresh_token: Some("r".into()),
+                    expires_in: Some(60),
+                    user: None,
+                },
+                Entitlement::Standard,
+                fresh,
+            )
+            .is_ok());
     }
 
     #[test]

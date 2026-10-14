@@ -34,7 +34,7 @@ pub enum Error {
     #[error("tidal answered {status} for {url}")]
     Api { status: u16, url: String },
     /// No client id for the flow the caller asked for. A configuration state, not a fault: the
-    /// host decides where those ids come from, and this crate ships none.
+    /// crate ships a default pair, so this only surfaces when a host clears one deliberately.
     #[error("no tidal client credentials configured for the {0} flow")]
     NoCredentials(&'static str),
     /// A call that needs a signed-in user was made without one.

@@ -12,7 +12,7 @@ use innertube::{BrowseItem, PlaylistPage, PlaylistSort, Rating, SongItem, YouTub
 use ryotunes_core::db::LocalPlaylist;
 use ryotunes_core::soundcloud_bridge;
 use ryotunes_core::spotify::{
-    is_sc_id, sc_playlist_id, sc_system_id, sc_track_id, sc_user_id, spotify_track_id,
+    is_sc_id, is_tidal_id, sc_playlist_id, sc_system_id, sc_track_id, sc_user_id, spotify_track_id,
     tidal_album_id, tidal_artist_id, tidal_playlist_id, Provider,
 };
 use ryotunes_core::spotify_bridge;
@@ -679,6 +679,7 @@ impl Dispatch for Methods {
                 let no_youtube = radio::is_radio_id(&video_id)
                     || local::is_local_song(&video_id)
                     || is_sc_id(&video_id)
+                    || is_tidal_id(&video_id)
                     || !st.it.is_logged_in();
                 if no_youtube {
                     st.rate_locally(&video_id, matches!(rating, Rating::Like))
@@ -1079,7 +1080,11 @@ impl Dispatch for Methods {
                                 }
                                 task.emit(
                                     "tidal-auth",
-                                    json!({ "state": "signed_in", "name": auth.display_name() }),
+                                    json!({
+                                        "state": "signed_in",
+                                        "name": auth.display_name(),
+                                        "quality": auth.entitlement.ceiling().as_str(),
+                                    }),
                                 );
                                 return;
                             }
@@ -1094,6 +1099,18 @@ impl Dispatch for Methods {
                                     );
                                     return;
                                 }
+                            }
+                            // TIDAL declares the code dead on its own schedule as well as ours,
+                            // and that is the same answer to the user, not a failure.
+                            Err(ryotunes_tidal::Error::LoginExpired) => {
+                                task.emit(
+                                    "tidal-auth",
+                                    json!({
+                                        "state": "expired",
+                                        "message": "The TIDAL code expired before it was approved.",
+                                    }),
+                                );
+                                return;
                             }
                             Err(e) => {
                                 task.emit(

@@ -143,7 +143,8 @@ function applyEvent(s, name, data) {
         var keep = s.tidal || {};
         if (td === "signed_in") {
             s.tidal = { signedIn: true, name: (data && data.name) ? data.name : null,
-                quality: keep.quality || null, hasCredentials: true, code: "", url: "", error: "" };
+                quality: (data && data.quality) ? data.quality : (keep.quality || null),
+                hasCredentials: true, code: "", url: "", error: "" };
             return { toast: "Signed in to TIDAL" + ((data && data.name) ? (" as " + data.name) : ""), kind: "success" };
         }
         if (td === "signed_out") {
