@@ -542,7 +542,7 @@ Item {
                         // While a device code is live this is the only place the code is visible
                         // from, so it takes priority over the quality line.
                         readonly property var td: Playback.tidal || ({})
-                        text: td.code ? ("Enter " + td.code + " at tidal.com")
+                        text: td.code ? ("Enter " + td.code + " at " + (td.url || "link.tidal.com"))
                             : td.signedIn ? ("TIDAL \u00b7 " + (td.quality || "LOSSLESS"))
                             : "Subscription required"
                         color: Tokens.inkMuted

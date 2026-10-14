@@ -1212,7 +1212,7 @@ Item {
                             }
                             Text {
                                 readonly property var td: Playback.tidal || ({})
-                                text: td.code ? ("Enter " + td.code + " at " + (td.url || "tidal.com/activate"))
+                                text: td.code ? ("Enter " + td.code + " at " + (td.url || "link.tidal.com"))
                                     : td.signedIn ? ("Connected \u00b7 best reachable quality " + (td.quality || "unknown"))
                                     : td.error ? td.error
                                     : "TIDAL has no guest catalogue \u00b7 sign in to browse and play."
