@@ -15,6 +15,16 @@ TestCase {
         compare(Ids.sourceGlyph("spotify:playlist:liked"), "spotify");
         compare(Ids.sourceGlyph("sc:playlist:123"), "soundcloud");
         compare(Ids.sourceGlyph("sc:system:weekly"), "soundcloud");
+        compare(Ids.sourceGlyph("tidal:track:12345"), "sound");
+        compare(Ids.sourceGlyph("tidal:playlist:1f-2e-3d"), "sound");
+    }
+
+    // A tidal id must not fall through to YouTube the way an unprefixed id does: the fallthrough
+    // is what makes a missed prefix a silent wrong badge rather than an error.
+    function test_tidal_ids_are_their_own_provider() {
+        compare(Ids.providerOf("tidal:track:1"), "tidal");
+        compare(Ids.providerOf("tidal:album:1"), "tidal");
+        compare(Ids.providerOf("tidalish"), "youtube");
     }
 
     function test_ryotunes_own_collections_wear_none() {

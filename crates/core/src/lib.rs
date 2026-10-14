@@ -19,4 +19,5 @@ pub mod soundcloud_bridge;
 pub mod spotify;
 pub mod spotify_bridge;
 pub mod state;
+pub mod tidal_bridge;
 pub mod update;

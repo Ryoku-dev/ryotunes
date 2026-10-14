@@ -21,6 +21,7 @@ pub enum Provider {
     Youtube,
     Spotify,
     Soundcloud,
+    Tidal,
 }
 
 impl Provider {
@@ -29,6 +30,7 @@ impl Provider {
             Provider::Youtube => "youtube",
             Provider::Spotify => "spotify",
             Provider::Soundcloud => "soundcloud",
+            Provider::Tidal => "tidal",
         }
     }
     pub fn parse(s: &str) -> Option<Self> {
@@ -36,6 +38,7 @@ impl Provider {
             "youtube" => Some(Provider::Youtube),
             "spotify" => Some(Provider::Spotify),
             "soundcloud" => Some(Provider::Soundcloud),
+            "tidal" => Some(Provider::Tidal),
             _ => None,
         }
     }
@@ -83,6 +86,39 @@ pub fn sc_playlist_id(id: &str) -> Option<u64> {
 /// playlist keyed by permalink rather than a numeric id. `None` for anything else.
 pub fn sc_system_id(id: &str) -> Option<&str> {
     id.strip_prefix(SC_SYSTEM_PREFIX).filter(|s| !s.is_empty())
+}
+
+pub const TIDAL_TRACK_PREFIX: &str = "tidal:track:";
+pub const TIDAL_ARTIST_PREFIX: &str = "tidal:artist:";
+pub const TIDAL_ALBUM_PREFIX: &str = "tidal:album:";
+pub const TIDAL_PLAYLIST_PREFIX: &str = "tidal:playlist:";
+
+/// True for any id the daemon minted for a TIDAL item (`tidal:<kind>:<id>`). TIDAL tracks stream
+/// over plain HTTPS, either a progressive file or a DASH presentation written to disk, so they take
+/// the same mpv path SoundCloud does rather than the Spotify FIFO.
+pub fn is_tidal_id(id: &str) -> bool {
+    id.starts_with("tidal:")
+}
+
+/// The numeric id of a TIDAL track id (`tidal:track:<num>`), or None for anything else.
+pub fn tidal_track_id(id: &str) -> Option<u64> {
+    id.strip_prefix(TIDAL_TRACK_PREFIX)?.parse().ok()
+}
+
+/// The numeric id of a TIDAL artist id (`tidal:artist:<num>`).
+pub fn tidal_artist_id(id: &str) -> Option<u64> {
+    id.strip_prefix(TIDAL_ARTIST_PREFIX)?.parse().ok()
+}
+
+/// The numeric id of a TIDAL album id (`tidal:album:<num>`).
+pub fn tidal_album_id(id: &str) -> Option<u64> {
+    id.strip_prefix(TIDAL_ALBUM_PREFIX)?.parse().ok()
+}
+
+/// The uuid of a TIDAL playlist id (`tidal:playlist:<uuid>`). TIDAL keys playlists by uuid rather
+/// than a number, so this one stays a string.
+pub fn tidal_playlist_id(id: &str) -> Option<&str> {
+    id.strip_prefix(TIDAL_PLAYLIST_PREFIX).filter(|s| !s.is_empty())
 }
 
 const RECOVERY_COOLDOWN: std::time::Duration = std::time::Duration::from_secs(30);
@@ -134,6 +170,12 @@ impl SpotifyState {
     /// is just the selection — there is no sign-in gate like [`Self::browsing_spotify`].
     pub fn browsing_soundcloud(&self) -> bool {
         self.selected() == Provider::Soundcloud
+    }
+
+    /// Whether browsing should go to TIDAL. Unlike SoundCloud there is no guest catalogue, so the
+    /// caller still has to check that a session exists before it asks for anything.
+    pub fn browsing_tidal(&self) -> bool {
+        self.selected() == Provider::Tidal
     }
 
     /// Whether a credential file exists to restore from (no network).

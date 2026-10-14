@@ -20,6 +20,7 @@ thiserror = { workspace = true }
 async-trait = { workspace = true }
 ryotunes-core = { workspace = true }
 ryotunes-soundcloud = { path = "../soundcloud" }
+ryotunes-tidal = { path = "../tidal" }
 ryotunes-protocol = { workspace = true }
 innertube = { path = "../innertube" }
 player = { path = "../player" }

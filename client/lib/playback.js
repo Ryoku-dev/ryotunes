@@ -136,6 +136,37 @@ function applyEvent(s, name, data) {
         }
         return null;
     }
+    case "tidal-auth": {
+        // The TIDAL device flow's progress. TIDAL shows a short code the user types on its own
+        // site, so "waiting" carries the code and the page to open; the rest mirror SoundCloud.
+        var td = (data && data.state) ? data.state : "";
+        var keep = s.tidal || {};
+        if (td === "signed_in") {
+            s.tidal = { signedIn: true, name: (data && data.name) ? data.name : null,
+                quality: keep.quality || null, hasCredentials: true, code: "", url: "", error: "" };
+            return { toast: "Signed in to TIDAL" + ((data && data.name) ? (" as " + data.name) : ""), kind: "success" };
+        }
+        if (td === "signed_out") {
+            s.tidal = { signedIn: false, name: null, quality: null,
+                hasCredentials: !!keep.hasCredentials, code: "", url: "", error: "" };
+            return null;
+        }
+        if (td === "waiting") {
+            s.tidal = { signedIn: false, name: null, quality: null, hasCredentials: true,
+                code: (data && data.code) ? data.code : "",
+                url: (data && data.url) ? data.url : "", error: "" };
+            return { toast: "Enter " + ((data && data.code) ? data.code : "the code") + " at tidal.com to finish signing in", kind: "info" };
+        }
+        if (td === "expired") {
+            s.tidal = { signedIn: false, name: null, quality: null, hasCredentials: true,
+                code: "", url: "", error: "" };
+            return { toast: "The TIDAL code expired before it was approved", kind: "info" };
+        }
+        s.tidal = { signedIn: false, name: null, quality: null,
+            hasCredentials: !!keep.hasCredentials, code: "", url: "",
+            error: (data && data.message) ? data.message : "" };
+        return (data && data.message) ? { toast: data.message, kind: "error" } : null;
+    }
     case "soundcloud-auth": {
         // The SoundCloud sign-in flow's progress. Sign-in happens in the user's own browser
         // (captchas and IdP popups work there); the daemon opens it and watches the browser's

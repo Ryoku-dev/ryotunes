@@ -30,7 +30,7 @@ Singleton {
     // The Sound dialog's effects, mirrored from the daemon (the `audio-fx` event and the subscribe
     // snapshot). `bass` is dB, reverb/width are 0..1, speed is the tempo multiplier.
     property var audioFx: ({ speed: 1, semitones: 0, reverb: 0, bass: 0, width: 0 })
-    // The active music provider ("youtube" | "spotify" | "soundcloud"), mirrored from the daemon
+    // The active music provider ("youtube" | "spotify" | "soundcloud" | "tidal"), mirrored from the daemon
     // (the subscribe snapshot's `provider` and a `provider-changed` event). The title bar's switch
     // reads it; each catalogue's own sign-in state gates its shelves, not the selector.
     property string provider: "youtube"
@@ -42,6 +42,13 @@ Singleton {
     // `soundcloud-auth` events). SoundCloud browses and plays as a guest; signing in only adds
     // the account's own shelves (playlists, likes, following) to Home.
     property var soundcloud: ({ signedIn: false, name: null, error: "" })
+
+    // The TIDAL account. Unlike SoundCloud there is no guest catalogue, so a signed-out TIDAL
+    // shows a sign-in prompt rather than a browsable home. `quality` is the best tier the session
+    // can actually reach, which the device flow caps below hi-res; `hasCredentials` is false until
+    // the user supplies a client id, because the daemon ships none.
+    property var tidal: ({ signedIn: false, name: null, quality: null, hasCredentials: false,
+        code: "", url: "", error: "" })
 
     // --- SoundCloud waveform cache -----------------------------------------------------------
     // The playing track's 240 amplitude samples (get_waveform), for the Orange seek bar; null for a
@@ -104,6 +111,10 @@ Singleton {
         if (snap.spotify)
             root.spotify = { signedIn: !!snap.spotify.signedIn, stored: !!snap.spotify.stored,
                 name: snap.spotify.name, premium: snap.spotify.premium };
+        if (snap.tidal)
+            root.tidal = { signedIn: !!snap.tidal.signedIn, name: snap.tidal.name,
+                quality: snap.tidal.quality, hasCredentials: !!snap.tidal.hasCredentials,
+                code: "", url: "", error: "" };
         if (snap.soundcloud)
             root.soundcloud = { signedIn: !!snap.soundcloud.signedIn,
                 name: snap.soundcloud.name, error: "" };
@@ -156,6 +167,10 @@ Singleton {
     // spotify-auth events (the url step opens the browser). Idempotent while a flow is running.
     function spotifySignIn() { return Daemon.call("spotify_sign_in"); }
     function spotifySignOut() { return Daemon.call("spotify_sign_out"); }
+    function tidalSignIn() { return Daemon.call("tidal_sign_in"); }
+    function tidalSignOut() { return Daemon.call("tidal_sign_out"); }
+    function tidalSetCredentials(c) { return Daemon.call("tidal_set_credentials", c); }
+
     function soundcloudSignIn() { return Daemon.call("soundcloud_sign_in"); }
     function soundcloudSignOut() { return Daemon.call("soundcloud_sign_out"); }
     function toggleShuffle() { return Daemon.call("toggle_shuffle"); }

@@ -21,6 +21,7 @@ innertube = { path = "../innertube" }
 player = { path = "../player" }
 ryotunes-spotify = { path = "../spotify" }
 ryotunes-soundcloud = { path = "../soundcloud" }
+ryotunes-tidal = { path = "../tidal" }
 rusqlite = { version = "0.32", features = ["bundled"] }
 base64 = "0.22"
 regex = "1"

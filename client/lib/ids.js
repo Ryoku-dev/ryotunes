@@ -39,6 +39,8 @@ function providerOf(id) {
         return "spotify";
     if (id.indexOf("sc:") === 0)
         return "soundcloud";
+    if (id.indexOf("tidal:") === 0)
+        return "tidal";
     return "youtube";
 }
 
@@ -51,6 +53,8 @@ function sourceGlyph(id) {
         return "spotify";
     case "soundcloud":
         return "soundcloud";
+    case "tidal":
+        return "sound";
     case "youtube":
         return isSmartPlaylistId(id) || id.indexOf("RYOTUNES_") === 0 ? "" : "youtube-music";
     default:

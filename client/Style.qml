@@ -95,7 +95,7 @@ Singleton {
     // Spotify's green, SoundCloud's orange. It tints the room's light (Backdrop's glow, the mini's
     // glow), the provider pill and the accent's fallback when nothing plays, so switching provider
     // changes the mood of the whole window at once.
-    readonly property var providerColors: ({ spotify: "#1db954", soundcloud: "#ff5500", youtube: "#ff2d2d" })
+    readonly property var providerColors: ({ spotify: "#1db954", soundcloud: "#ff5500", youtube: "#ff2d2d", tidal: "#4fc3dc" })
     readonly property color providerColor: root.providerColors[Playback.provider] || root.providerColors.youtube
     // The skin's accent policy: "artwork" (the cover, provider colour when nothing plays),
     // "provider", "sun" (the skin's own primary) or a fixed "#rrggbb".
