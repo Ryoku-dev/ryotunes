@@ -26,6 +26,7 @@ async fn main() {
         device_id: std::env::var("RYOTUNES_TIDAL_CLIENT_ID").ok(),
         device_secret: std::env::var("RYOTUNES_TIDAL_CLIENT_SECRET").ok(),
         pkce_id: std::env::var("RYOTUNES_TIDAL_PKCE_ID").ok(),
+        pkce_secret: std::env::var("RYOTUNES_TIDAL_PKCE_SECRET").ok(),
         pkce_redirect: std::env::var("RYOTUNES_TIDAL_PKCE_REDIRECT").ok(),
     });
 

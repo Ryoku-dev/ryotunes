@@ -441,6 +441,7 @@ impl Dispatch for Methods {
                     device_id: opt_arg::<String>(&params, "deviceId"),
                     device_secret: opt_arg::<String>(&params, "deviceSecret"),
                     pkce_id: opt_arg::<String>(&params, "pkceId"),
+                    pkce_secret: opt_arg::<String>(&params, "pkceSecret"),
                     pkce_redirect: opt_arg::<String>(&params, "pkceRedirect"),
                 };
                 match serde_json::to_string(&creds) {

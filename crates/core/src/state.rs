@@ -5048,6 +5048,8 @@ pub struct TidalCredentials {
     #[serde(default)]
     pub pkce_id: Option<String>,
     #[serde(default)]
+    pub pkce_secret: Option<String>,
+    #[serde(default)]
     pub pkce_redirect: Option<String>,
 }
 
@@ -5057,6 +5059,7 @@ impl From<TidalCredentials> for ryotunes_tidal::Credentials {
             device_id: c.device_id,
             device_secret: c.device_secret,
             pkce_id: c.pkce_id,
+            pkce_secret: c.pkce_secret,
             pkce_redirect: c.pkce_redirect,
         }
     }

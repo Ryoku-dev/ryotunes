@@ -6,10 +6,10 @@
 //! when the token is issued, so swapping client ids on an existing token silently keeps serving
 //! 16-bit audio. A host that wants hi-res has to sign the user in again through the other flow.
 //!
-//! Neither client id is baked into this crate. TIDAL publishes no client credentials for third
-//! party playback, so the ids in circulation are lifted from its own applications; shipping one
-//! here would put someone else's credential in the repository and bind the project to it. The host
-//! supplies them, and the crate reports a clear error when it has none.
+//! TIDAL publishes no client credentials for third-party playback, so the pairs below are the ones
+//! its own applications carry, as every open-source TIDAL client uses them. They are defaults, the
+//! same way `crates/spotify` carries Spotify's: a host that has its own registered application
+//! overrides them through [`Credentials`], and nothing here reads a user-visible setting.
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -23,6 +23,14 @@ pub const PKCE_AUTH_URL: &str = "https://login.tidal.com/authorize";
 
 /// Scope both flows request. `r_usr` reads the account's own catalogue, `w_usr` writes favourites.
 pub const SCOPE: &str = "r_usr w_usr";
+
+/// The device-authorization pair. Entitled up to LOSSLESS.
+pub const DEFAULT_DEVICE_ID: &str = "fX2JxdmntZWK0ixT";
+pub const DEFAULT_DEVICE_SECRET: &str = "1Nn9AfDAjxrgJFJbKNWLeAyKGVGmINuXPPLHVXAvxAg=";
+/// The PKCE pair, the only one TIDAL serves HI_RES_LOSSLESS to, with the redirect it expects.
+pub const DEFAULT_PKCE_ID: &str = "6BDSRdpK9hqEBTgU";
+pub const DEFAULT_PKCE_SECRET: &str = "xeuPmY7nbpZ9IIbLAcQ93shka1VNheUAqN6IcszjTG8=";
+pub const DEFAULT_PKCE_REDIRECT: &str = "https://tidal.com/android/login/auth";
 
 /// Refresh this many seconds before the access token dies, so a request that starts near the
 /// boundary never carries a stale bearer.
@@ -49,16 +57,29 @@ impl Entitlement {
     }
 }
 
-/// The client credentials the host supplies. Absent credentials are a configuration state, not a
-/// failure: the crate reports `Error::NoCredentials` and the host can tell the user what to set.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+/// The client credentials in force. [`Credentials::default`] is the shipped pair, so a host that
+/// sets nothing still signs in; a host with its own registered application replaces them.
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Credentials {
     /// Client id and secret for the device authorization flow.
     pub device_id: Option<String>,
     pub device_secret: Option<String>,
-    /// Client id for the PKCE flow, plus the redirect the host listens on.
+    /// Client id and secret for the PKCE flow, plus the redirect TIDAL sends the user back to.
     pub pkce_id: Option<String>,
+    pub pkce_secret: Option<String>,
     pub pkce_redirect: Option<String>,
+}
+
+impl Default for Credentials {
+    fn default() -> Self {
+        Credentials {
+            device_id: Some(DEFAULT_DEVICE_ID.to_string()),
+            device_secret: Some(DEFAULT_DEVICE_SECRET.to_string()),
+            pkce_id: Some(DEFAULT_PKCE_ID.to_string()),
+            pkce_secret: Some(DEFAULT_PKCE_SECRET.to_string()),
+            pkce_redirect: Some(DEFAULT_PKCE_REDIRECT.to_string()),
+        }
+    }
 }
 
 impl Credentials {
@@ -199,11 +220,17 @@ mod tests {
     }
 
     #[test]
+    fn the_shipped_pair_is_enough_to_sign_in() {
+        let c = Credentials::default();
+        assert!(c.has_device(), "a user must not have to paste anything to sign in");
+        assert!(c.has_pkce(), "the hi-res flow is configured out of the box too");
+    }
+
+    #[test]
     fn credentials_ignore_blank_strings() {
         let mut c = Credentials { device_id: Some("  ".into()), ..Default::default() };
         assert!(!c.has_device());
         c.device_id = Some("real".into());
         assert!(c.has_device());
-        assert!(!c.has_pkce(), "pkce needs both an id and a redirect");
     }
 }

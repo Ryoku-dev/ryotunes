@@ -170,19 +170,18 @@ impl Tidal {
         }
         let id = creds.pkce_id.unwrap_or_default();
         let redirect = creds.pkce_redirect.unwrap_or_default();
-        let res = self
-            .http
-            .post(TOKEN_URL)
-            .form(&[
-                ("client_id", id.as_str()),
-                ("code", code),
-                ("code_verifier", verifier),
-                ("grant_type", "authorization_code"),
-                ("redirect_uri", redirect.as_str()),
-                ("scope", SCOPE),
-            ])
-            .send()
-            .await?;
+        let mut form = vec![
+            ("client_id", id.as_str()),
+            ("code", code),
+            ("code_verifier", verifier),
+            ("grant_type", "authorization_code"),
+            ("redirect_uri", redirect.as_str()),
+            ("scope", SCOPE),
+        ];
+        if let Some(secret) = creds.pkce_secret.as_deref() {
+            form.push(("client_secret", secret));
+        }
+        let res = self.http.post(TOKEN_URL).form(&form).send().await?;
         let res = check(res, TOKEN_URL).await?;
         let token: TokenResponse = res.json().await?;
         self.adopt(token, Entitlement::HiRes)
@@ -336,7 +335,7 @@ impl Tidal {
                 if !creds.has_pkce() {
                     return Err(Error::NoCredentials("pkce"));
                 }
-                (creds.pkce_id.unwrap_or_default(), None)
+                (creds.pkce_id.unwrap_or_default(), creds.pkce_secret)
             }
         };
         let mut form = vec![
@@ -413,10 +412,24 @@ mod tests {
     }
 
     #[test]
-    fn a_call_without_credentials_says_so() {
+    fn a_fresh_client_is_already_configured() {
         let t = client();
-        assert!(matches!(t.pkce_start(), Err(Error::NoCredentials("pkce"))));
+        assert!(t.device_creds().is_ok(), "signing in must need no setup from the user");
+        assert!(t.pkce_start().is_ok());
+    }
+
+    #[test]
+    fn a_host_that_clears_the_pair_is_told_rather_than_left_guessing() {
+        let t = client();
+        t.set_credentials(Credentials {
+            device_id: None,
+            device_secret: None,
+            pkce_id: None,
+            pkce_secret: None,
+            pkce_redirect: None,
+        });
         assert!(matches!(t.device_creds(), Err(Error::NoCredentials("device"))));
+        assert!(matches!(t.pkce_start(), Err(Error::NoCredentials("pkce"))));
     }
 
     #[test]

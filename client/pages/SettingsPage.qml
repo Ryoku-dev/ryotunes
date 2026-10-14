@@ -1215,8 +1215,7 @@ Item {
                                 text: td.code ? ("Enter " + td.code + " at " + (td.url || "tidal.com/activate"))
                                     : td.signedIn ? ("Connected \u00b7 best reachable quality " + (td.quality || "unknown"))
                                     : td.error ? td.error
-                                    : td.hasCredentials ? "TIDAL has no guest catalogue \u00b7 sign in to browse and play."
-                                    : "Add a client id below first \u00b7 Ryotunes ships none."
+                                    : "TIDAL has no guest catalogue \u00b7 sign in to browse and play."
                                 color: (td.error && !td.signedIn) ? Style.accent : Tokens.inkMuted
                                 font.family: Style.fontUi; font.pixelSize: Style.fs.sm
                                 wrapMode: Text.WordWrap; Layout.fillWidth: true
@@ -1227,86 +1226,10 @@ Item {
                             label: td.signedIn ? "Sign out" : "Sign in to TIDAL"
                             icon: td.signedIn ? "close" : "tidal"
                             primary: !td.signedIn
-                            enabled: td.signedIn || td.hasCredentials
                             onClicked: {
                                 var out = !!(Playback.tidal && Playback.tidal.signedIn);
                                 var call = out ? Playback.tidalSignOut() : Playback.tidalSignIn();
                                 call.catch((e) => Playback.toast((e && e.message) ? e.message : String(e), "error"));
-                            }
-                        }
-                    }
-
-                    Text {
-                        Layout.fillWidth: true
-                        Layout.topMargin: Style.sp(1)
-                        text: "TIDAL publishes no client credentials for third-party playback, so Ryotunes carries none. Paste the pair you use, and the hi-res pair separately: only a PKCE sign-in is entitled to HI_RES_LOSSLESS, the device flow stops at LOSSLESS."
-                        color: Tokens.inkMuted; font.family: Style.fontUi; font.pixelSize: Style.fs.sm
-                        wrapMode: Text.WordWrap
-                    }
-
-                    ColumnLayout {
-                        Layout.fillWidth: true
-                        Layout.topMargin: Style.sp(1)
-                        spacing: Style.sp(1)
-
-                        Repeater {
-                            model: [
-                                { key: "deviceId", label: "Client id", hint: "the device-flow client" },
-                                { key: "deviceSecret", label: "Client secret", hint: "paired with the client id" },
-                                { key: "pkceId", label: "Hi-res client id", hint: "the PKCE client, for HI_RES_LOSSLESS" },
-                                { key: "pkceRedirect", label: "Hi-res redirect", hint: "http://127.0.0.1:8888/callback" }
-                            ]
-
-                            delegate: RowLayout {
-                                id: credRow
-                                required property var modelData
-                                Layout.fillWidth: true
-                                spacing: Style.sp(2)
-
-                                Text {
-                                    text: credRow.modelData.label
-                                    color: Tokens.inkMuted
-                                    font.family: Style.fontUi
-                                    font.pixelSize: Style.fs.sm
-                                    Layout.preferredWidth: Style.sp(22)
-                                }
-
-                                Rectangle {
-                                    Layout.fillWidth: true
-                                    Layout.maximumWidth: Style.sp(80)
-                                    implicitHeight: Style.sp(9)
-                                    radius: Style.radius
-                                    color: Tokens.paperLift
-                                    border.width: 1
-                                    border.color: credField.activeFocus ? Tokens.lineStrong : Tokens.line
-
-                                    TextInput {
-                                        id: credField
-                                        anchors.fill: parent
-                                        anchors.leftMargin: Style.sp(2)
-                                        anchors.rightMargin: Style.sp(2)
-                                        verticalAlignment: TextInput.AlignVCenter
-                                        clip: true
-                                        color: Tokens.ink
-                                        font.family: Style.fontUi
-                                        font.pixelSize: Style.fs.md
-                                        echoMode: credRow.modelData.key === "deviceSecret"
-                                            ? TextInput.Password : TextInput.Normal
-                                        onEditingFinished: {
-                                            var c = {};
-                                            c[credRow.modelData.key] = credField.text;
-                                            Playback.tidalSetCredentials(c).catch((e) => Playback.toast((e && e.message) ? e.message : String(e), "error"));
-                                        }
-
-                                        Text {
-                                            anchors.verticalCenter: parent.verticalCenter
-                                            visible: credField.text.length === 0
-                                            text: credRow.modelData.hint
-                                            color: Tokens.inkFaint
-                                            font: credField.font
-                                        }
-                                    }
-                                }
                             }
                         }
                     }
