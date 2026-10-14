@@ -511,7 +511,11 @@ Item {
             Hairline { Layout.fillWidth: true }
 
             // ── TIDAL ────────────────────────────────────────────────────────────────────
+            // Signed out this is one line, the action alone. The account line appears once there
+            // is an account to name, or while a device code is live and has to stay readable.
             RowLayout {
+                readonly property var td: Playback.tidal || ({})
+                visible: !!td.signedIn || !!td.code
                 Layout.fillWidth: true
                 Layout.margins: Style.sp(1)
                 spacing: Style.sp(2)
