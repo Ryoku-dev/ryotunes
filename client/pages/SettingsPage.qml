@@ -1197,7 +1197,7 @@ Item {
                         Layout.fillWidth: true
                         spacing: Style.sp(3)
                         Icon {
-                            name: "sound"
+                            name: "tidal"
                             size: Style.fs.hero
                             color: Playback.provider === "tidal" ? Style.providerColors.tidal : Tokens.inkMuted
                         }
@@ -1225,7 +1225,7 @@ Item {
                         Pill {
                             readonly property var td: Playback.tidal || ({})
                             label: td.signedIn ? "Sign out" : "Sign in to TIDAL"
-                            icon: td.signedIn ? "close" : "sound"
+                            icon: td.signedIn ? "close" : "tidal"
                             primary: !td.signedIn
                             enabled: td.signedIn || td.hasCredentials
                             onClicked: {

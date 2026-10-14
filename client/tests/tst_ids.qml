@@ -15,8 +15,8 @@ TestCase {
         compare(Ids.sourceGlyph("spotify:playlist:liked"), "spotify");
         compare(Ids.sourceGlyph("sc:playlist:123"), "soundcloud");
         compare(Ids.sourceGlyph("sc:system:weekly"), "soundcloud");
-        compare(Ids.sourceGlyph("tidal:track:12345"), "sound");
-        compare(Ids.sourceGlyph("tidal:playlist:1f-2e-3d"), "sound");
+        compare(Ids.sourceGlyph("tidal:track:12345"), "tidal");
+        compare(Ids.sourceGlyph("tidal:playlist:1f-2e-3d"), "tidal");
     }
 
     // A tidal id must not fall through to YouTube the way an unprefixed id does: the fallthrough

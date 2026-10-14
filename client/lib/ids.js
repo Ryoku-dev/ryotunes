@@ -54,7 +54,7 @@ function sourceGlyph(id) {
     case "soundcloud":
         return "soundcloud";
     case "tidal":
-        return "sound";
+        return "tidal";
     case "youtube":
         return isSmartPlaylistId(id) || id.indexOf("RYOTUNES_") === 0 ? "" : "youtube-music";
     default:
