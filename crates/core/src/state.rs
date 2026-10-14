@@ -51,6 +51,13 @@ pub const LIKED_SONGS_TITLE: &str = "Liked Songs";
 /// Deliberately NOT in [`UI_SETTINGS`]: like `session_cookie`, it is auth material the
 /// renderer must never see; only the daemon's sign-in/rotate paths write it.
 pub const SOUNDCLOUD_AUTH_KEY: &str = "soundcloud_auth";
+/// The TIDAL session blob. Outside `UI_SETTINGS` for the same reason as SoundCloud's: the renderer
+/// may neither read nor overwrite a bearer.
+pub const TIDAL_AUTH_KEY: &str = "tidal_auth";
+/// A TIDAL client pair the user supplies. Optional: the crate ships a working pair, and this one
+/// overrides it field by field, so someone with their own registered application can replace one
+/// half and keep the other.
+pub const TIDAL_CREDENTIALS_KEY: &str = "tidal_credentials";
 
 /// Settings the UI is allowed to read *and write*. Session/auth material (`session_cookie`,
 /// `selected_identity_json`, `data_sync_id`, `account_json`, `account_selection_pending`,
@@ -160,6 +167,10 @@ pub struct AppState {
     /// The SoundCloud provider (guest api-v2 client), cache dir `<data>/soundcloud`. SoundCloud
     /// tracks stream over plain HTTPS, so unlike `spotify_stream` there is no live handle to hold.
     pub soundcloud: Arc<ryotunes_soundcloud::SoundCloud>,
+    /// The TIDAL provider, cache dir `<data>/tidal`. Like SoundCloud it streams over plain HTTPS,
+    /// so there is no live handle to hold; unlike SoundCloud it has no guest catalogue, so every
+    /// call needs a session.
+    pub tidal: Arc<ryotunes_tidal::Tidal>,
     /// Play/like/genre for SoundCloud tracks seen by `resolve`, keyed by `sc:track:` id, so the
     /// now-playing snapshot can render the meta line without another round-trip. Bounded in
     /// `remember_sc_meta`.
@@ -447,6 +458,26 @@ impl AppState {
                 }
             }
         }));
+        let tidal = Arc::new(ryotunes_tidal::Tidal::new(paths.data_dir.join("tidal")));
+        // The crate ships a credential pair so signing in needs nothing but the button. A stored
+        // pair overrides it field by field, so someone supplying only their own device id keeps
+        // the shipped PKCE half rather than losing hi-res.
+        if let Some(raw) = db.get_setting(TIDAL_CREDENTIALS_KEY) {
+            if let Ok(creds) = serde_json::from_str::<TidalCredentials>(&raw) {
+                tidal.set_credentials(creds.into());
+            }
+        }
+        if let Some(raw) = db.get_setting(TIDAL_AUTH_KEY) {
+            match serde_json::from_str::<ryotunes_tidal::TidalAuth>(&raw) {
+                Ok(auth) => tidal.set_auth(Some(auth)),
+                Err(e) => tracing::warn!(error = %e, "tidal: stored session did not parse"),
+            }
+        }
+        let tidal_db = Arc::clone(&db);
+        tidal.set_on_rotate(move |auth| match serde_json::to_string(&auth) {
+            Ok(json) => tidal_db.set_setting(TIDAL_AUTH_KEY, &json),
+            Err(e) => tracing::error!(error = %e, "tidal: cannot serialize rotated auth"),
+        });
         AppState {
             it,
             clients,
@@ -462,6 +493,7 @@ impl AppState {
             lastfm,
             spotify,
             soundcloud,
+            tidal,
             sc_meta: parking_lot::Mutex::new(std::collections::HashMap::new()),
             last_visitor_try: AtomicU64::new(0),
             queue: Mutex::new(QueueState::default()),
@@ -496,6 +528,17 @@ impl AppState {
             Some("AUTO") => AudioQuality::Auto,
             _ => AudioQuality::High,
         }
+    }
+
+    /// The TIDAL tier to ask for. Clamped by the provider to whatever the session is actually
+    /// entitled to, so a hi-res setting on a device-flow token yields LOSSLESS rather than a
+    /// thirty second preview.
+    fn tidal_quality(&self) -> ryotunes_tidal::Quality {
+        self.db
+            .get_setting("tidal_quality")
+            .as_deref()
+            .and_then(ryotunes_tidal::Quality::parse)
+            .unwrap_or(ryotunes_tidal::Quality::Lossless)
     }
 
     /// User-disabled stream clients — comma-separated setting. Also the force-fail lever for the
@@ -1026,6 +1069,50 @@ impl AppState {
                 thumbnail: None,
                 is_video: Some(false),
                 stream_client: "soundcloud".to_owned(),
+            });
+        }
+        // A TIDAL track streams over plain HTTPS too, but in one of two shapes: a progressive file
+        // mpv opens directly, or a DASH presentation that arrives inline and has to be written out
+        // first. Neither is cached: the urls are short-lived and signed per request, and a stale
+        // one fails mid-track rather than at resolve time.
+        if let Some(id) = crate::spotify::tidal_track_id(video_id) {
+            let want = self.tidal_quality();
+            // A signed-out TIDAL is a sign-in prompt, not a dead row: flattening it into
+            // AllClientsFailed sends the queue handler down the skip path, and a whole TIDAL
+            // queue then walks itself to the tail one "Skipped" toast at a time.
+            let stream = self.tidal.stream(id, want).await.map_err(|e| match e {
+                ryotunes_tidal::Error::SignedOut => {
+                    ResolveError::SignInRequired("Sign in to TIDAL to play this".to_owned())
+                }
+                e => ResolveError::AllClientsFailed(format!("{video_id}: {e}")),
+            })?;
+            let url = match stream.source {
+                ryotunes_tidal::Source::Direct(url) => url,
+                ryotunes_tidal::Source::Presentation { xml } => {
+                    let path = self.paths.data_dir.join("tidal").join(format!("{id}.mpd"));
+                    if let Some(dir) = path.parent() {
+                        let _ = std::fs::create_dir_all(dir);
+                    }
+                    std::fs::write(&path, xml)
+                        .map_err(|e| ResolveError::AllClientsFailed(format!("{video_id}: {e}")))?;
+                    format!("file://{}", path.display())
+                }
+            };
+            return Ok(PlaybackData {
+                video_id: video_id.to_owned(),
+                stream_url: url,
+                itag: 0,
+                mpv_options: Vec::new(),
+                headers: Default::default(),
+                expires_in_seconds: 0,
+                loudness_db: None,
+                playback_ping: None,
+                title: None,
+                artists: None,
+                duration: None,
+                thumbnail: None,
+                is_video: Some(false),
+                stream_client: "tidal".to_owned(),
             });
         }
         let data = match self
@@ -4952,5 +5039,70 @@ mod tests {
         // 5. Let it end: the stream watcher closes the FIFO at librespot's EndOfTrack, mpv plays
         //    out its cache and EOFs, `on_track_ended` advances the queue.
         // 6. Play while signed out: `resolve` returns `SignInRequired` and the UI toasts it.
+    }
+}
+
+/// The client credentials as the renderer stores them, kept separate from the crate's own type so
+/// the settings blob can gain a field without touching the provider.
+#[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
+pub struct TidalCredentials {
+    #[serde(default)]
+    pub device_id: Option<String>,
+    #[serde(default)]
+    pub device_secret: Option<String>,
+    #[serde(default)]
+    pub pkce_id: Option<String>,
+    #[serde(default)]
+    pub pkce_secret: Option<String>,
+    #[serde(default)]
+    pub pkce_redirect: Option<String>,
+}
+
+impl From<TidalCredentials> for ryotunes_tidal::Credentials {
+    /// A stored blob overrides the shipped pair field by field, never wholesale: a host that set
+    /// one value, or a stale row left by an earlier build, must not blank the rest and leave the
+    /// provider unable to sign in.
+    fn from(c: TidalCredentials) -> Self {
+        fn pick(set: Option<String>, shipped: Option<String>) -> Option<String> {
+            match set {
+                Some(v) if !v.trim().is_empty() => Some(v),
+                _ => shipped,
+            }
+        }
+        let shipped = ryotunes_tidal::Credentials::default();
+        ryotunes_tidal::Credentials {
+            device_id: pick(c.device_id, shipped.device_id),
+            device_secret: pick(c.device_secret, shipped.device_secret),
+            pkce_id: pick(c.pkce_id, shipped.pkce_id),
+            pkce_secret: pick(c.pkce_secret, shipped.pkce_secret),
+            pkce_redirect: pick(c.pkce_redirect, shipped.pkce_redirect),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tidal_credentials_tests {
+    use super::TidalCredentials;
+
+    #[test]
+    fn an_empty_stored_blob_keeps_the_shipped_pair() {
+        let shipped = ryotunes_tidal::Credentials::default();
+        let merged: ryotunes_tidal::Credentials = TidalCredentials::default().into();
+        assert_eq!(merged, shipped, "a blank row must not disarm sign-in");
+        let blanks = TidalCredentials {
+            device_id: Some("   ".into()),
+            device_secret: Some(String::new()),
+            ..Default::default()
+        };
+        let merged: ryotunes_tidal::Credentials = blanks.into();
+        assert_eq!(merged, shipped);
+    }
+
+    #[test]
+    fn one_set_field_overrides_only_itself() {
+        let merged: ryotunes_tidal::Credentials =
+            TidalCredentials { device_id: Some("mine".into()), ..Default::default() }.into();
+        assert_eq!(merged.device_id.as_deref(), Some("mine"));
+        assert_eq!(merged.device_secret, ryotunes_tidal::Credentials::default().device_secret);
     }
 }

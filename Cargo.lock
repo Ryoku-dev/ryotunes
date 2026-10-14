@@ -4782,6 +4782,7 @@ dependencies = [
  "rustls 0.23.43",
  "ryotunes-soundcloud",
  "ryotunes-spotify",
+ "ryotunes-tidal",
  "serde",
  "serde_json",
  "sha2",
@@ -4843,6 +4844,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "ryotunes-tidal"
+version = "1.2.0"
+dependencies = [
+ "base64 0.22.1",
+ "parking_lot",
+ "rand 0.8.7",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "sha2",
+ "thiserror 2.0.20",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "ryotunesd"
 version = "1.2.0"
 dependencies = [
@@ -4865,6 +4882,7 @@ dependencies = [
  "ryotunes-core",
  "ryotunes-protocol",
  "ryotunes-soundcloud",
+ "ryotunes-tidal",
  "serde",
  "serde_json",
  "sha1",

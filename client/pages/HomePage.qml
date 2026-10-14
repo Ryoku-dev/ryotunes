@@ -41,6 +41,12 @@ Item {
 
     // Personal shelves, live off the shared store.
     readonly property var recents: Personal.recent(100).filter((item) => page.providerFor(item.id) === Playback.provider).slice(0, 6)
+
+    // TIDAL has no guest catalogue, so a signed-out TIDAL reaches this page with an empty feed
+    // rather than an error. Without this the empty state offers Google's sign-in, which signs the
+    // user into the wrong service entirely and leaves the selected provider exactly as dead.
+    readonly property bool tidalGate: Playback.provider === "tidal"
+        && !(Playback.tidal && Playback.tidal.signedIn)
     readonly property var forgottenList: page.forgottenSongs()
 
     // Familiar artists: the most-played artists (topArtistIds) resolved to round cards. Loaded once.
@@ -683,7 +689,9 @@ Item {
                         Layout.maximumWidth: Style.sp(90)
                         horizontalAlignment: Text.AlignHCenter
                         wrapMode: Text.WordWrap
-                        text: (Playback.auth && Playback.auth.signedIn)
+                        text: page.tidalGate
+                            ? "Sign in to TIDAL and home fills up with your playlists, albums and tracks."
+                            : (Playback.auth && Playback.auth.signedIn)
                             ? "Your home feed came back empty this time."
                             : "Sign in and home fills up with mixes and playlists built from what you listen to."
                         color: Tokens.inkMuted
@@ -692,9 +700,12 @@ Item {
                     }
                     Chip {
                         Layout.alignment: Qt.AlignHCenter
-                        text: (Playback.auth && Playback.auth.signedIn) ? "Try again" : "Sign in with Google"
-                        active: !(Playback.auth && Playback.auth.signedIn)
-                        onClicked: (Playback.auth && Playback.auth.signedIn)
+                        text: page.tidalGate ? "Sign in to TIDAL"
+                            : (Playback.auth && Playback.auth.signedIn) ? "Try again" : "Sign in with Google"
+                        active: page.tidalGate || !(Playback.auth && Playback.auth.signedIn)
+                        onClicked: page.tidalGate
+                            ? Playback.tidalSignIn().catch(() => {})
+                            : (Playback.auth && Playback.auth.signedIn)
                             ? page.load(page.selected)
                             : Daemon.call("sign_in").catch(() => {})
                     }

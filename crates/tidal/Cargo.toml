@@ -1,0 +1,21 @@
+[package]
+name = "ryotunes-tidal"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Ryotunes TIDAL provider: OAuth device and PKCE sign-in, catalogue, and stream resolution with an explicit refusal on protected manifests."
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+base64 = "0.22"
+thiserror = { workspace = true }
+tracing = { workspace = true }
+parking_lot = "0.12"
+tokio = { workspace = true, features = ["fs", "sync", "time"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "gzip", "brotli", "json"] }
+rand = { workspace = true }
+sha2 = "0.10"
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }

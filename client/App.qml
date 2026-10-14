@@ -507,6 +507,93 @@ Item {
                     }
                 }
             }
+
+            Hairline { Layout.fillWidth: true }
+
+            // ── TIDAL ────────────────────────────────────────────────────────────────────
+            // Signed out this is one line, the action alone. The account line appears once there
+            // is an account to name, or while a device code is live and has to stay readable.
+            RowLayout {
+                readonly property var td: Playback.tidal || ({})
+                visible: !!td.signedIn || !!td.code
+                Layout.fillWidth: true
+                Layout.margins: Style.sp(1)
+                spacing: Style.sp(2)
+                Icon {
+                    name: "tidal"
+                    size: Style.fs.lg
+                    color: (Playback.tidal && Playback.tidal.signedIn)
+                        ? Style.providerColors.tidal : Tokens.inkMuted
+                }
+                ColumnLayout {
+                    Layout.fillWidth: true
+                    spacing: 0
+                    Text {
+                        text: (Playback.tidal && Playback.tidal.signedIn && Playback.tidal.name)
+                            ? Playback.tidal.name : "Not signed in"
+                        color: Tokens.ink
+                        font.family: Style.fontUi
+                        font.pixelSize: Style.fs.md
+                        font.weight: Font.Medium
+                        elide: Text.ElideRight
+                        Layout.fillWidth: true
+                    }
+                    Text {
+                        // While a device code is live this is the only place the code is visible
+                        // from, so it takes priority over the quality line.
+                        readonly property var td: Playback.tidal || ({})
+                        text: td.code ? ("Enter " + td.code + " at " + (td.url || "link.tidal.com"))
+                            : td.signedIn ? ("TIDAL \u00b7 " + (td.quality || "LOSSLESS"))
+                            : "Subscription required"
+                        color: Tokens.inkMuted
+                        font.family: Style.fontUi
+                        font.pixelSize: Style.fs.sm
+                        elide: Text.ElideRight
+                        Layout.fillWidth: true
+                    }
+                }
+            }
+
+            Rectangle {
+                id: tdAction
+                Layout.fillWidth: true
+                implicitHeight: Style.sp(9)
+                radius: Style.radius
+                color: tdHover.hovered ? Tokens.tint5 : "transparent"
+                readonly property bool signedIn: !!(Playback.tidal && Playback.tidal.signedIn)
+                RowLayout {
+                    anchors.fill: parent
+                    anchors.leftMargin: Style.sp(2)
+                    anchors.rightMargin: Style.sp(2)
+                    spacing: Style.sp(2)
+                    Icon {
+                        name: tdAction.signedIn ? "close" : "tidal"
+                        size: Style.fs.md
+                        color: tdAction.signedIn ? Style.alert : Tokens.ink
+                    }
+                    Text {
+                        Layout.fillWidth: true
+                        text: tdAction.signedIn ? "Sign out" : "Sign in to TIDAL"
+                        color: tdAction.signedIn ? Style.alert : Tokens.ink
+                        font.family: Style.fontUi
+                        font.pixelSize: Style.fs.md
+                    }
+                }
+                HoverHandler { id: tdHover }
+                MouseArea {
+                    anchors.fill: parent
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: {
+                        // The code has to stay readable, so a sign-in leaves the menu open.
+                        if (tdAction.signedIn) {
+                            accountMenu.visible = false;
+                            Playback.tidalSignOut().catch(() => {});
+                        } else {
+                            Playback.tidalSignIn().catch(() => {});
+                        }
+                    }
+                }
+            }
         }
     }
 

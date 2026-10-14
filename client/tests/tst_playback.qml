@@ -91,6 +91,41 @@ TestCase {
     }
 
     // The SoundCloud browser flow drives its own mirror: waiting, sign-in, expiry, sign-out.
+    // The TIDAL device flow carries a code the user types elsewhere, so "waiting" has to keep it
+    // where the settings page can show it; every other state clears it again.
+    function test_tidal_device_flow_carries_its_code() {
+        var s = { tidal: { signedIn: false, hasCredentials: true } };
+        var waiting = PB.applyEvent(s, "tidal-auth",
+            { state: "waiting", code: "ABCD", url: "https://link.tidal.com/ABCD" });
+        compare(s.tidal.code, "ABCD");
+        compare(s.tidal.url, "https://link.tidal.com/ABCD");
+        verify(waiting && waiting.toast.indexOf("ABCD") >= 0);
+
+        // The ceiling rides along on the sign-in, because nothing re-reads it afterwards: without
+        // it the settings page says the best reachable quality is unknown for the whole session.
+        var done = PB.applyEvent(s, "tidal-auth",
+            { state: "signed_in", name: "vlad", quality: "LOSSLESS" });
+        compare(s.tidal.signedIn, true);
+        compare(s.tidal.name, "vlad");
+        compare(s.tidal.quality, "LOSSLESS");
+        compare(s.tidal.code, "");
+        verify(done && done.kind === "success");
+
+        PB.applyEvent(s, "tidal-auth", { state: "signed_out" });
+        compare(s.tidal.signedIn, false);
+        compare(s.tidal.hasCredentials, true, "signing out must not forget the client id");
+    }
+
+    // The expiry TIDAL declares itself has to read the same as the one the daemon times out on.
+    function test_tidal_expiry_reads_the_same_whoever_declares_it() {
+        var s = { tidal: { signedIn: false, hasCredentials: true } };
+        PB.applyEvent(s, "tidal-auth", { state: "waiting", code: "ABCD", url: "u" });
+        var gone = PB.applyEvent(s, "tidal-auth", { state: "expired" });
+        compare(s.tidal.code, "", "an expired code must not stay on screen");
+        compare(s.tidal.signedIn, false);
+        verify(gone && gone.toast.indexOf("expired") >= 0);
+    }
+
     function test_soundcloud_auth_events_mirror_the_browser_flow() {
         var s = freshState();
         s.soundcloud = { signedIn: false, name: null, error: "" };

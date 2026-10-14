@@ -344,6 +344,12 @@ var glyphs = {
     "cap": "round",
     "w": 1.5
   },
+  "tidal": {
+    "d": "M4 14L8 10L12 14L8 18Z M8 10L12 6L16 10L12 14Z M12 14L16 10L20 14L16 18Z",
+    "fill": false,
+    "cap": "round",
+    "w": 1.5
+  },
   "soundcloud": {
     "d": "M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z",
     "fill": false,

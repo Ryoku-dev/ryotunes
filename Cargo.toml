@@ -8,6 +8,7 @@ members = [
     "crates/core",
     "crates/spotify",
     "crates/soundcloud",
+    "crates/tidal",
     "crates/protocol",
     "crates/ryotunesd",
     "crates/ryotunes-cli",

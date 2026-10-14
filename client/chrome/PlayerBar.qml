@@ -137,12 +137,12 @@ Rectangle {
                 RowLayout {
                     Layout.fillWidth: true
                     spacing: Style.sp(1)
-                    // The provider tell for the playing track: spotify glyph for spotify: ids, the
-                    // YouTube Music glyph otherwise.
+                    // The provider tell for the playing track. Ids.sourceGlyph is the one place
+                    // that knows the id spaces, so a new provider does not need a fourth hand
+                    // written prefix chain here.
                     Icon {
-                        visible: !!root.now
-                        name: root.now ? (String(root.now.videoId).startsWith("sc:") ? "soundcloud"
-                            : String(root.now.videoId).startsWith("spotify:") ? "spotify" : "youtube-music") : "youtube-music"
+                        visible: !!root.now && name !== ""
+                        name: root.now ? Ids.sourceGlyph(String(root.now.videoId)) : ""
                         size: Style.sp(3.5)
                         color: Tokens.inkMuted
                     }

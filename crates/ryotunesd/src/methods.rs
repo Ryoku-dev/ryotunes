@@ -12,7 +12,8 @@ use innertube::{BrowseItem, PlaylistPage, PlaylistSort, Rating, SongItem, YouTub
 use ryotunes_core::db::LocalPlaylist;
 use ryotunes_core::soundcloud_bridge;
 use ryotunes_core::spotify::{
-    is_sc_id, sc_playlist_id, sc_system_id, sc_track_id, sc_user_id, spotify_track_id, Provider,
+    is_sc_id, is_tidal_id, sc_playlist_id, sc_system_id, sc_track_id, sc_user_id, spotify_track_id,
+    tidal_album_id, tidal_artist_id, tidal_playlist_id, Provider,
 };
 use ryotunes_core::spotify_bridge;
 use ryotunes_core::state::{
@@ -21,6 +22,7 @@ use ryotunes_core::state::{
     ON_REPEAT_WINDOW_SECS, RECENTLY_PLAYED_ID, RECENTLY_PLAYED_WINDOW_SECS, REDISCOVER_ID,
     REDISCOVER_OLDER_THAN_SECS, SMART_PLAYLIST_LIMIT, UI_SETTINGS,
 };
+use ryotunes_core::tidal_bridge;
 use ryotunes_core::{local, radio};
 use ryotunes_protocol::{ErrorBody, PROTOCOL_VERSION};
 use serde::de::DeserializeOwned;
@@ -37,6 +39,11 @@ pub struct Methods {
 fn arg<T: DeserializeOwned>(params: &Value, key: &str) -> Result<T, ErrorBody> {
     serde_json::from_value(params.get(key).cloned().unwrap_or(Value::Null))
         .map_err(|e| ErrorBody { code: "bad_params".into(), message: format!("{key}: {e}") })
+}
+
+/// Like [`arg`] but for a field the caller may legitimately omit or blank.
+fn opt_arg<T: DeserializeOwned>(params: &Value, key: &str) -> Option<T> {
+    serde_json::from_value(params.get(key).cloned().unwrap_or(Value::Null)).ok()
 }
 
 fn err(e: impl ToString) -> ErrorBody {
@@ -84,6 +91,16 @@ struct SoundcloudSignInGuard;
 impl Drop for SoundcloudSignInGuard {
     fn drop(&mut self) {
         SC_SIGNING_IN.store(false, Ordering::SeqCst);
+    }
+}
+
+/// The same one-at-a-time latch for the TIDAL device flow: a live code is useless twice over.
+static TIDAL_SIGNING_IN: AtomicBool = AtomicBool::new(false);
+
+struct TidalSignInGuard;
+impl Drop for TidalSignInGuard {
+    fn drop(&mut self) {
+        TIDAL_SIGNING_IN.store(false, Ordering::SeqCst);
     }
 }
 
@@ -183,6 +200,7 @@ impl Dispatch for Methods {
                     "provider": provider,
                     "spotify": spotify,
                     "soundcloud": soundcloud_status_json(st),
+                    "tidal": tidal_status_json(st),
                     "downloads": self.downloads.snapshot(),
                 }))
             }
@@ -204,7 +222,9 @@ impl Dispatch for Methods {
             "search" => ok(st.search(&arg::<String>(&params, "query")?).await.map_err(err)?),
             "search_page" => {
                 let query = arg::<String>(&params, "query")?;
-                if st.spotify.browsing_soundcloud() {
+                if st.spotify.browsing_tidal() {
+                    tidal_search_page(st, &query).await
+                } else if st.spotify.browsing_soundcloud() {
                     soundcloud_search_page(st, &query).await
                 } else if st.spotify.browsing_spotify().await {
                     spotify_search_page(st, &query).await
@@ -213,7 +233,10 @@ impl Dispatch for Methods {
                 }
             }
             "search_page_more" => {
-                if st.spotify.browsing_soundcloud() || st.spotify.browsing_spotify().await {
+                if st.spotify.browsing_tidal()
+                    || st.spotify.browsing_soundcloud()
+                    || st.spotify.browsing_spotify().await
+                {
                     ok(json!({ "items": [], "continuation": null }))
                 } else {
                     ok(st.search_page_more(&arg::<String>(&params, "token")?).await.map_err(err)?)
@@ -221,7 +244,9 @@ impl Dispatch for Methods {
             }
             "search_all" => {
                 let query = arg::<String>(&params, "query")?;
-                if st.spotify.browsing_soundcloud() {
+                if st.spotify.browsing_tidal() {
+                    tidal_search_all(st, &query).await
+                } else if st.spotify.browsing_soundcloud() {
                     soundcloud_search_all(st, &query).await
                 } else if st.spotify.browsing_spotify().await {
                     spotify_search_all(st, &query).await
@@ -235,7 +260,9 @@ impl Dispatch for Methods {
             "search_cards" => {
                 let query = arg::<String>(&params, "query")?;
                 let category = arg::<String>(&params, "category")?;
-                if st.spotify.browsing_soundcloud() {
+                if st.spotify.browsing_tidal() {
+                    tidal_search_cards(st, &query, &category).await
+                } else if st.spotify.browsing_soundcloud() {
                     soundcloud_search_cards(st, &query, &category).await
                 } else if st.spotify.browsing_spotify().await {
                     spotify_search_cards(st, &query, &category).await
@@ -402,6 +429,30 @@ impl Dispatch for Methods {
             "get_provider" => ok(json!({ "provider": st.spotify.selected().as_str() })),
             "spotify_status" => ok(spotify_status_json(st).await),
             "soundcloud_status" => ok(soundcloud_status_json(st)),
+            "tidal_status" => ok(tidal_status_json(st)),
+            "tidal_sign_out" => {
+                st.tidal.sign_out();
+                st.db.delete_setting(ryotunes_core::state::TIDAL_AUTH_KEY);
+                st.emit("tidal-auth", json!({ "state": "signed_out" }));
+                ok(json!({ "signedIn": false }))
+            }
+            "tidal_set_credentials" => {
+                let creds = ryotunes_core::state::TidalCredentials {
+                    device_id: opt_arg::<String>(&params, "deviceId"),
+                    device_secret: opt_arg::<String>(&params, "deviceSecret"),
+                    pkce_id: opt_arg::<String>(&params, "pkceId"),
+                    pkce_secret: opt_arg::<String>(&params, "pkceSecret"),
+                    pkce_redirect: opt_arg::<String>(&params, "pkceRedirect"),
+                };
+                match serde_json::to_string(&creds) {
+                    Ok(json) => {
+                        st.db.set_setting(ryotunes_core::state::TIDAL_CREDENTIALS_KEY, &json)
+                    }
+                    Err(e) => tracing::error!(error = %e, "tidal: cannot serialize credentials"),
+                }
+                st.tidal.set_credentials(creds.into());
+                ok(tidal_status_json(st))
+            }
             "spotify_sign_in" => {
                 if SPOTIFY_SIGNING_IN
                     .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
@@ -460,6 +511,11 @@ impl Dispatch for Methods {
                 // same page. A YouTube chip filter narrows the YouTube feed alone — the other
                 // providers have no equivalent filter — so a filtered page is YouTube-only.
                 let params = arg::<Option<String>>(&params, "params")?;
+                if st.spotify.browsing_tidal() {
+                    // TIDAL has no guest catalogue and no chip filter, so its home is its own
+                    // collection whatever the caller asked for.
+                    return tidal_home(st).await;
+                }
                 match params.as_deref() {
                     Some(p) => ok(st.home(Some(p)).await.map_err(err)?),
                     None => home_merged(st).await,
@@ -471,7 +527,7 @@ impl Dispatch for Methods {
                 ok(st.home_more(&arg::<String>(&params, "token")?).await.map_err(err)?)
             }
             "get_library" => {
-                if st.spotify.browsing_soundcloud() {
+                if st.spotify.browsing_tidal() || st.spotify.browsing_soundcloud() {
                     ok(Vec::<BrowseItem>::new())
                 } else if st.spotify.browsing_spotify().await {
                     spotify_library(st).await
@@ -480,7 +536,7 @@ impl Dispatch for Methods {
                 }
             }
             "get_library_albums" => {
-                if st.spotify.browsing_soundcloud() {
+                if st.spotify.browsing_tidal() || st.spotify.browsing_soundcloud() {
                     ok(Vec::<BrowseItem>::new())
                 } else if st.spotify.browsing_spotify().await {
                     spotify_library_albums(st).await
@@ -489,7 +545,7 @@ impl Dispatch for Methods {
                 }
             }
             "get_library_artists" => {
-                if st.spotify.browsing_soundcloud() {
+                if st.spotify.browsing_tidal() || st.spotify.browsing_soundcloud() {
                     ok(Vec::<BrowseItem>::new())
                 } else if st.spotify.browsing_spotify().await {
                     spotify_library_artists(st).await
@@ -515,6 +571,8 @@ impl Dispatch for Methods {
                     spotify_album(st, aid).await
                 } else if let Some(pid) = sc_playlist_id(&id) {
                     soundcloud_album(st, pid).await
+                } else if let Some(aid) = tidal_album_id(&id) {
+                    tidal_album(st, aid).await
                 } else {
                     ok(st.album(&id).await.map_err(err)?)
                 }
@@ -523,6 +581,8 @@ impl Dispatch for Methods {
                 let id = arg::<String>(&params, "id")?;
                 if let Some(aid) = id.strip_prefix("spotify:artist:") {
                     spotify_artist(st, aid).await
+                } else if let Some(aid) = tidal_artist_id(&id) {
+                    tidal_artist(st, aid).await
                 } else if let Some(uid) = sc_user_id(&id) {
                     soundcloud_artist(st, uid).await
                 } else {
@@ -619,6 +679,7 @@ impl Dispatch for Methods {
                 let no_youtube = radio::is_radio_id(&video_id)
                     || local::is_local_song(&video_id)
                     || is_sc_id(&video_id)
+                    || is_tidal_id(&video_id)
                     || !st.it.is_logged_in();
                 if no_youtube {
                     st.rate_locally(&video_id, matches!(rating, Rating::Like))
@@ -962,6 +1023,102 @@ impl Dispatch for Methods {
                         {
                             complete_soundcloud_sign_in(&task, auth).await;
                             return;
+                        }
+                    }
+                });
+                ok(json!({ "started": true }))
+            }
+            "tidal_sign_in" => {
+                // The device flow: TIDAL shows the user a short code, the daemon polls until it is
+                // approved. One flow at a time, so a second click while a code is live is a no-op.
+                if TIDAL_SIGNING_IN
+                    .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+                    .is_err()
+                {
+                    return ok(json!({ "started": false }));
+                }
+                let task = st.clone();
+                tokio::spawn(async move {
+                    let _guard = TidalSignInGuard;
+                    let login = match task.tidal.device_start().await {
+                        Ok(login) => login,
+                        Err(e) => {
+                            task.emit(
+                                "tidal-auth",
+                                json!({ "state": "error", "message": e.to_string() }),
+                            );
+                            return;
+                        }
+                    };
+                    task.emit(
+                        "tidal-auth",
+                        json!({
+                            "state": "waiting",
+                            "url": login.verification_uri_complete,
+                            "code": login.user_code,
+                        }),
+                    );
+                    let deadline = tokio::time::Instant::now()
+                        + std::time::Duration::from_secs(login.expires_in.max(0) as u64);
+                    loop {
+                        tokio::time::sleep(std::time::Duration::from_secs(login.interval)).await;
+                        match task.tidal.device_poll(&login.device_code).await {
+                            Ok(auth) => {
+                                // The token response names the account by its login, which is an
+                                // email. Ask once for the profile name so the status line can
+                                // show it; an account without one keeps the email.
+                                let auth = match task.tidal.load_profile_name().await {
+                                    Ok(filled) => filled,
+                                    Err(e) => {
+                                        tracing::debug!(error = %e, "tidal: no profile name");
+                                        auth
+                                    }
+                                };
+                                if let Ok(json) = serde_json::to_string(&auth) {
+                                    task.db
+                                        .set_setting(ryotunes_core::state::TIDAL_AUTH_KEY, &json);
+                                }
+                                task.emit(
+                                    "tidal-auth",
+                                    json!({
+                                        "state": "signed_in",
+                                        "name": auth.display_name(),
+                                        "quality": auth.entitlement.ceiling().as_str(),
+                                    }),
+                                );
+                                return;
+                            }
+                            Err(ryotunes_tidal::Error::Pending) => {
+                                if tokio::time::Instant::now() >= deadline {
+                                    task.emit(
+                                        "tidal-auth",
+                                        json!({
+                                            "state": "expired",
+                                            "message": "The TIDAL code expired before it was approved.",
+                                        }),
+                                    );
+                                    return;
+                                }
+                            }
+                            // TIDAL declares the code dead on its own schedule as well as ours,
+                            // and that is the same answer to the user, not a failure.
+                            Err(ryotunes_tidal::Error::LoginExpired) => {
+                                task.emit(
+                                    "tidal-auth",
+                                    json!({
+                                        "state": "expired",
+                                        "message": "The TIDAL code expired before it was approved.",
+                                    }),
+                                );
+                                return;
+                            }
+                            Err(e) => {
+                                task.emit(
+                                    "tidal-auth",
+                                    json!({ "state": "error", "message": e.to_string() }),
+                                );
+                                return;
+                            }
                         }
                     }
                 });
@@ -1409,6 +1566,9 @@ async fn get_playlist(st: &Arc<AppState>, params: &Value) -> Result<Value, Error
     }
     if let Some(permalink) = sc_system_id(&id) {
         return soundcloud_system_playlist(st, permalink).await;
+    }
+    if let Some(uuid) = tidal_playlist_id(&id) {
+        return tidal_playlist(st, uuid).await;
     }
     if let Some(pid) = sc_playlist_id(&id) {
         return soundcloud_playlist(st, pid).await;
@@ -2216,4 +2376,94 @@ mod tests {
             "four distinct covers form the 2x2 collage; duplicates and extras are ignored"
         );
     }
+}
+
+// --- TIDAL -------------------------------------------------------------------------------------
+
+/// A TIDAL crate error as the daemon's error body. The two refusals keep their own codes so the
+/// client can say what happened instead of showing a network failure: a protected asset is a
+/// deliberate refusal, and a preview means the account is not entitled to the tier that was asked
+/// for. Neither is retryable.
+fn tidal_err(e: ryotunes_tidal::Error) -> ErrorBody {
+    let code = match &e {
+        ryotunes_tidal::Error::Protected(_) => "tidal_protected",
+        ryotunes_tidal::Error::Preview(_) => "tidal_preview",
+        ryotunes_tidal::Error::SignedOut => "tidal_signed_out",
+        ryotunes_tidal::Error::NoCredentials(_) => "tidal_no_credentials",
+        _ => "tidal",
+    };
+    ErrorBody { code: code.into(), message: e.to_string() }
+}
+
+/// The `{signedIn, name, quality, hasCredentials}` block for `tidal_status` and the subscribe
+/// snapshot. `quality` is the ceiling the session can actually reach, not the one requested.
+fn tidal_status_json(st: &Arc<AppState>) -> Value {
+    let creds = st.tidal.credentials();
+    match st.tidal.auth() {
+        Some(auth) => json!({
+            "signedIn": true,
+            "name": auth.display_name(),
+            "quality": auth.entitlement.ceiling().as_str(),
+            "hasCredentials": creds.has_device() || creds.has_pkce(),
+        }),
+        None => json!({
+            "signedIn": false,
+            "name": null,
+            "quality": null,
+            "hasCredentials": creds.has_device() || creds.has_pkce(),
+        }),
+    }
+}
+
+async fn tidal_search_all(st: &Arc<AppState>, query: &str) -> Result<Value, ErrorBody> {
+    let results = st.tidal.search(query, 40).await.map_err(tidal_err)?;
+    ok(tidal_bridge::search_all(&results))
+}
+
+async fn tidal_search_page(st: &Arc<AppState>, query: &str) -> Result<Value, ErrorBody> {
+    let results = st.tidal.search(query, 40).await.map_err(tidal_err)?;
+    ok(json!({ "items": tidal_bridge::search_songs(&results), "continuation": null }))
+}
+
+async fn tidal_search_cards(
+    st: &Arc<AppState>,
+    query: &str,
+    category: &str,
+) -> Result<Value, ErrorBody> {
+    let results = st.tidal.search(query, 40).await.map_err(tidal_err)?;
+    ok(json!({ "items": tidal_bridge::search_cards(&results, category), "continuation": null }))
+}
+
+async fn tidal_album(st: &Arc<AppState>, id: u64) -> Result<Value, ErrorBody> {
+    let album = st.tidal.album(id).await.map_err(tidal_err)?;
+    let tracks = st.tidal.album_tracks(id, 100).await.map_err(tidal_err)?;
+    ok(tidal_bridge::album_page(&album, &tracks.items))
+}
+
+async fn tidal_artist(st: &Arc<AppState>, id: u64) -> Result<Value, ErrorBody> {
+    let artist = st.tidal.artist(id).await.map_err(tidal_err)?;
+    let top = st.tidal.artist_top_tracks(id, 10).await.map_err(tidal_err)?;
+    let albums = st.tidal.artist_albums(id, 20).await.map_err(tidal_err)?;
+    ok(tidal_bridge::artist_page(&artist, &top.items, &albums.items))
+}
+
+async fn tidal_playlist(st: &Arc<AppState>, uuid: &str) -> Result<Value, ErrorBody> {
+    let pl = st.tidal.playlist(uuid).await.map_err(tidal_err)?;
+    let tracks = st.tidal.playlist_tracks(uuid, 100).await.map_err(tidal_err)?;
+    ok(tidal_bridge::playlist_page(&pl, &tracks.items))
+}
+
+/// TIDAL's home is the account's own collection: it has no guest catalogue, so a signed-out
+/// session gets an empty page rather than an error, and the client renders its sign-in prompt.
+async fn tidal_home(st: &Arc<AppState>) -> Result<Value, ErrorBody> {
+    if !st.tidal.signed_in() {
+        return ok(json!({ "chips": [], "sections": [], "continuation": null }));
+    }
+    let playlists = st.tidal.my_playlists(20).await.map_err(tidal_err)?;
+    let tracks = st.tidal.my_tracks(20).await.map_err(tidal_err)?;
+    let albums = st.tidal.my_albums(20).await.map_err(tidal_err)?;
+    let tracks: Vec<_> = tracks.items.into_iter().map(|f| f.item).collect();
+    let albums: Vec<_> = albums.items.into_iter().map(|f| f.item).collect();
+    let sections = tidal_bridge::library_sections(&tracks, &albums, &playlists.items);
+    ok(json!({ "chips": [], "sections": sections, "continuation": null }))
 }

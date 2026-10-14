@@ -1190,6 +1190,50 @@ Item {
                         }
                     }
 
+                    // ── TIDAL ───────────────────────────────────────────────────────────
+                    SectionHeading { Layout.fillWidth: true; Layout.topMargin: Style.sp(3); title: "TIDAL"; mark: "潮" }
+
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: Style.sp(3)
+                        Icon {
+                            name: "tidal"
+                            size: Style.fs.hero
+                            color: Playback.provider === "tidal" ? Style.providerColors.tidal : Tokens.inkMuted
+                        }
+                        ColumnLayout {
+                            Layout.fillWidth: true
+                            spacing: 1
+                            Text {
+                                readonly property var td: Playback.tidal || ({})
+                                text: (td.signedIn && td.name) ? td.name : (td.signedIn ? "Signed in" : "Not signed in")
+                                color: Tokens.ink; font.family: Style.fontUi; font.pixelSize: Style.fs.lg; font.weight: Font.DemiBold
+                                elide: Text.ElideRight; Layout.fillWidth: true
+                            }
+                            Text {
+                                readonly property var td: Playback.tidal || ({})
+                                text: td.code ? ("Enter " + td.code + " at " + (td.url || "link.tidal.com"))
+                                    : td.signedIn ? ("Connected \u00b7 best reachable quality " + (td.quality || "unknown"))
+                                    : td.error ? td.error
+                                    : "TIDAL has no guest catalogue \u00b7 sign in to browse and play."
+                                color: (td.error && !td.signedIn) ? Style.accent : Tokens.inkMuted
+                                font.family: Style.fontUi; font.pixelSize: Style.fs.sm
+                                wrapMode: Text.WordWrap; Layout.fillWidth: true
+                            }
+                        }
+                        Pill {
+                            readonly property var td: Playback.tidal || ({})
+                            label: td.signedIn ? "Sign out" : "Sign in to TIDAL"
+                            icon: td.signedIn ? "close" : "tidal"
+                            primary: !td.signedIn
+                            onClicked: {
+                                var out = !!(Playback.tidal && Playback.tidal.signedIn);
+                                var call = out ? Playback.tidalSignOut() : Playback.tidalSignIn();
+                                call.catch((e) => Playback.toast((e && e.message) ? e.message : String(e), "error"));
+                            }
+                        }
+                    }
+
                     // switch account
                     SectionHeading { Layout.fillWidth: true; Layout.topMargin: Style.sp(3); title: "Channels"; mark: "選択"; visible: page.identities.length > 0 }
                     ColumnLayout {
