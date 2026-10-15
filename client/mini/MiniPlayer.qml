@@ -460,7 +460,7 @@ Item {
                         IconButton {
                             icon: "shuffle"; iconSize: 16; diameter: 32
                             active: !!(Playback.queue && Playback.queue.shuffle)
-                            iconColor: active ? Tokens.bone : Tokens.inkMuted
+                            iconColor: active ? Style.accent : Tokens.inkMuted
                             onClicked: Playback.toggleShuffle()
                         }
                         IconButton { icon: "previous"; iconSize: 16; diameter: 32; onClicked: Playback.prev() }
@@ -470,7 +470,7 @@ Item {
                             icon: (Playback.queue && Playback.queue.repeat === "one") ? "repeat-one" : "repeat"
                             iconSize: 16; diameter: 32
                             active: !!(Playback.queue && Playback.queue.repeat && Playback.queue.repeat !== "off")
-                            iconColor: active ? Tokens.bone : Tokens.inkMuted
+                            iconColor: active ? Style.accent : Tokens.inkMuted
                             onClicked: Playback.cycleRepeat()
                         }
                     }

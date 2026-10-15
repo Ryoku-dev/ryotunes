@@ -969,9 +969,7 @@ pub async fn play_playlist(
     // id as radio_seed would make queue exhaustion try a YouTube /next request with that id.
     let source_id = source_id.filter(|id| !is_local_playlist_id(id));
     let state = state.inner().clone();
-    state
-        .play_tracks(items, start, source_id, source_name, shuffle.unwrap_or(false), continuation)
-        .await;
+    state.play_tracks(items, start, source_id, source_name, shuffle, continuation).await;
     Ok(())
 }
 

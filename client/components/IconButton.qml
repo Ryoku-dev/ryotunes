@@ -18,7 +18,7 @@ Item {
     property string tip: ""
     property color iconColor: root.primary ? Tokens.inkOnBone
         : !root.enabled ? Tokens.inkFaint
-        : root.active ? Tokens.ink
+        : root.active ? Style.accent
         : Tokens.inkMuted
 
     readonly property alias hovered: hover.hovered

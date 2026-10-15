@@ -209,7 +209,8 @@ Item {
             start: at === -1 ? null : at,
             sourceId: page.isSmart ? undefined : page.playlistId,
             sourceName: page.pl.title,
-            continuation: page.pl.continuation
+            continuation: page.pl.continuation,
+            shuffle: start === null ? false : undefined
         }).then(() => Personal.noteRecent(recent))
             .catch((e) => Playback.toast((e && e.message) ? e.message : "Could not play", "error"));
     }

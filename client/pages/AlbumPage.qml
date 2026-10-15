@@ -110,7 +110,8 @@ Item {
             items: page.album.items,
             start: at === -1 ? null : at,
             sourceId: page.album.playlistId ? page.album.playlistId : undefined,
-            sourceName: page.album.title
+            sourceName: page.album.title,
+            shuffle: start === null ? false : undefined
         }).then(() => Personal.noteRecent(recent))
             .catch((e) => Playback.toast((e && e.message) ? e.message : "Could not play", "error"));
     }

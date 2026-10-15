@@ -1136,7 +1136,8 @@ impl AppState {
             crate::radio::count_click(&uuid).await;
         });
 
-        self.play_tracks(vec![item], Some(0), None, Some("Live Radio".into()), false, None).await;
+        self.play_tracks(vec![item], Some(0), None, Some("Live Radio".into()), Some(false), None)
+            .await;
         Ok(())
     }
 
@@ -1243,7 +1244,7 @@ impl AppState {
         start: Option<usize>,
         source_id: Option<String>,
         source_name: Option<String>,
-        shuffle: bool,
+        shuffle: Option<bool>,
         continuation: Option<String>,
     ) {
         if items.is_empty() {
@@ -1259,7 +1260,18 @@ impl AppState {
         {
             let mut q = self.queue.lock().await;
             // Sticky across queues, or explicitly requested by a page Shuffle button.
-            let keep_shuffled = q.shuffle_orig.is_some() || shuffle;
+            // When playing an entire collection without specifying a track, default to sequential (turn off shuffle).
+            let keep_shuffled = match shuffle {
+                Some(true) => true,
+                Some(false) => false,
+                None => {
+                    if start.is_some() {
+                        q.shuffle_orig.is_some()
+                    } else {
+                        false
+                    }
+                }
+            };
             let start = match start {
                 Some(i) => i.min(items.len() - 1),
                 None if keep_shuffled => {
@@ -1284,6 +1296,8 @@ impl AppState {
                 q.shuffle_orig = Some(q.items.clone());
                 let start = q.current;
                 q.current = shuffle_new_queue(&mut q.items, start);
+            } else {
+                q.shuffle_orig = None;
             }
             // Whatever the queue starts on is where the played run starts: the tracks in front of
             // a playlist opened at track 7 were never heard.
@@ -1378,7 +1392,7 @@ impl AppState {
             .as_ref()
             .and_then(|v| items.iter().position(|i| &i.video_id == v))
             .unwrap_or(0);
-        self.play_tracks(items, Some(start), Some(seed), title, false, None).await;
+        self.play_tracks(items, Some(start), Some(seed), title, Some(false), None).await;
         self.queue.lock().await.radio = true;
         Ok(())
     }
@@ -4761,6 +4775,33 @@ mod tests {
         let (items, idx) = unshuffled(with_adds, &heard(&["a"]), "a", 9);
         assert_eq!(ids(&items), ["a", "mine1", "mine2", "b", "c"]);
         assert_eq!(idx, 0);
+    }
+
+    #[test]
+    fn play_collection_defaults_to_sequential_unless_explicitly_shuffled() {
+        // Explicit shuffle: false disables shuffle even if a queue was previously shuffled
+        let resolve =
+            |shuffle: Option<bool>, start: Option<usize>, was_shuffled: bool| match shuffle {
+                Some(true) => true,
+                Some(false) => false,
+                None => {
+                    if start.is_some() {
+                        was_shuffled
+                    } else {
+                        false
+                    }
+                }
+            };
+        // Clicking Play on a collection (start=None, shuffle=Some(false) or None) -> sequential
+        assert!(!resolve(Some(false), None, true));
+        assert!(!resolve(None, None, true));
+        assert!(!resolve(Some(false), None, false));
+        // Clicking Shuffle on a collection -> shuffled
+        assert!(resolve(Some(true), None, false));
+        assert!(resolve(Some(true), None, true));
+        // Clicking track #3 without specifying shuffle -> preserves active shuffle
+        assert!(resolve(None, Some(2), true));
+        assert!(!resolve(None, Some(2), false));
     }
 
     #[test]

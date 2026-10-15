@@ -95,7 +95,8 @@ Item {
         var at = start === null ? null : root.pl.items.indexOf(root.shown[start]);
         Daemon.call("play_playlist", {
             items: root.pl.items, start: at === -1 ? null : at,
-            sourceName: root.sourceName, continuation: root.pl.continuation
+            sourceName: root.sourceName, continuation: root.pl.continuation,
+            shuffle: start === null ? false : undefined
         }).catch((e) => Playback.toast((e && e.message) ? e.message : "Could not play", "error"));
     }
     function shuffle() {

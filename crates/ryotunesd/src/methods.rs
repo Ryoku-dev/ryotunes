@@ -566,7 +566,7 @@ impl Dispatch for Methods {
                 let source_id = arg::<Option<String>>(&params, "sourceId")?
                     .filter(|id| !is_local_playlist_id(id));
                 let source_name = arg::<Option<String>>(&params, "sourceName")?;
-                let shuffle = arg::<Option<bool>>(&params, "shuffle")?.unwrap_or(false);
+                let shuffle = arg::<Option<bool>>(&params, "shuffle")?;
                 let continuation = arg::<Option<String>>(&params, "continuation")?;
                 st.clone()
                     .play_tracks(items, start, source_id, source_name, shuffle, continuation)
