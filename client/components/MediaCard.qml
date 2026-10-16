@@ -60,10 +60,20 @@ Item {
         }
     }
 
+    signal menuRequested(real sx, real sy)
+
     MouseArea {
         anchors.fill: parent
         cursorShape: Qt.PointingHandCursor
-        onClicked: root.open()
+        acceptedButtons: Qt.LeftButton | Qt.RightButton
+        onClicked: (mouse) => {
+            if (mouse.button === Qt.RightButton) {
+                let p = mapToItem(null, mouse.x, mouse.y);
+                root.menuRequested(p.x, p.y);
+                return;
+            }
+            root.open();
+        }
     }
 
     ColumnLayout {

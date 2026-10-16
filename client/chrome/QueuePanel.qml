@@ -70,6 +70,19 @@ Item {
         Daemon.call("play_index", { index: i })
             .catch((e) => Playback.toast((e && e.message) ? e.message : "Could not play", "error"));
     }
+    // One menu for the panel, opened on a right-click anywhere in it. `backend` is the index the
+    // removal acts on, or -1 for the playing track, which the queue cannot drop out from under
+    // itself.
+    function openRowMenu(song, backend, sx, sy) {
+        if (!song)
+            return;
+        var p = queueMenu.mapFromItem(null, sx, sy);
+        queueMenu.song = song;
+        queueMenu.canRemove = backend >= 0;
+        queueMenu._backend = backend;
+        queueMenu.openAt(p.x, p.y);
+    }
+
     function removeBackend(i) {
         Daemon.call("remove_from_queue", { index: i })
             .catch((e) => Playback.toast((e && e.message) ? e.message : "Could not remove", "error"));
@@ -152,6 +165,7 @@ Item {
         readonly property bool dragging: root.dragFrom === qr.rowIndex && qr.rowIndex >= 0
         signal play()
         signal remove()
+        signal menuRequested(real sx, real sy)
 
         readonly property string dur: (song && song.duration && /^[\d:]+$/.test(song.duration)) ? song.duration : ""
 
@@ -280,6 +294,11 @@ Item {
 
         HoverHandler { id: rowHover; cursorShape: Qt.PointingHandCursor }
         TapHandler { onTapped: qr.play() }
+        TapHandler {
+            acceptedButtons: Qt.RightButton
+            gesturePolicy: TapHandler.ReleaseWithinBounds
+            onTapped: (eventPoint) => qr.menuRequested(eventPoint.scenePosition.x, eventPoint.scenePosition.y)
+        }
     }
 
     ColumnLayout {
@@ -371,6 +390,7 @@ Item {
                     removable: true
                     onPlay: root.playBackend(root.matches[sRow.index].i)
                     onRemove: root.removeBackend(root.matches[sRow.index].i)
+                    onMenuRequested: (sx, sy) => root.openRowMenu(sRow.modelData, root.matches[sRow.index].i, sx, sy)
                 }
             }
             Text {
@@ -408,6 +428,7 @@ Item {
                 now: true
                 song: root.nowItem
                 onPlay: root.playBackend(root.currentIndex)
+                onMenuRequested: (sx, sy) => root.openRowMenu(root.nowItem, -1, sx, sy)
             }
 
             Eyebrow {
@@ -459,6 +480,7 @@ Item {
                             opacity: root.dragFrom === wrap.index ? 0.35 : 1
                             onPlay: root.playBackend(root.currentIndex + 1 + wrap.index)
                             onRemove: root.removeBackend(root.currentIndex + 1 + wrap.index)
+                            onMenuRequested: (sx, sy) => root.openRowMenu(wrap.modelData, root.currentIndex + 1 + wrap.index, sx, sy)
                         }
                     }
                 }
@@ -528,4 +550,16 @@ Item {
             }
         }
     }
+
+    Menu {
+        id: queueMenu
+        property int _backend: -1
+        canAdd: true
+        removeLabel: "Remove from queue"
+        onRemoveRequested: {
+            if (queueMenu._backend >= 0)
+                root.removeBackend(queueMenu._backend);
+        }
+    }
+
 }

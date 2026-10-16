@@ -36,6 +36,8 @@ Item {
             width: grid.cellWidth
             height: grid.cellHeight
             MediaCard {
+                id: card
+                onMenuRequested: (sx, sy) => root.openCardMenu(card, sx, sy)
                 anchors.horizontalCenter: parent.horizontalCenter
                 item: parent.modelData
                 cardWidth: grid.cellWidth - Style.sp(4)
@@ -51,4 +53,20 @@ Item {
         font.family: Style.fontUi
         font.pixelSize: Style.fs.md
     }
+
+
+    ItemMenu {
+        id: cardMenu
+        playItem: (it) => cardMenu.card ? cardMenu.card.playNow() : undefined
+        openItem: (it) => cardMenu.card ? cardMenu.card.open() : undefined
+        property var card: null
+    }
+
+    function openCardMenu(card, sx, sy) {
+        if (!card || !card.item)
+            return;
+        cardMenu.card = card;
+        cardMenu.openFor(card.item, sx, sy);
+    }
+
 }

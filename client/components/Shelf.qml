@@ -63,6 +63,8 @@ ColumnLayout {
                         id: entrance
                         index: cell.index
                         MediaCard {
+                            id: card
+                            onMenuRequested: (sx, sy) => root.openCardMenu(card, sx, sy)
                             item: cell.modelData
                             cardWidth: Style.cardW
                         }
@@ -71,4 +73,20 @@ ColumnLayout {
             }
         }
     }
+
+
+    ItemMenu {
+        id: cardMenu
+        playItem: (it) => cardMenu.card ? cardMenu.card.playNow() : undefined
+        openItem: (it) => cardMenu.card ? cardMenu.card.open() : undefined
+        property var card: null
+    }
+
+    function openCardMenu(card, sx, sy) {
+        if (!card || !card.item)
+            return;
+        cardMenu.card = card;
+        cardMenu.openFor(card.item, sx, sy);
+    }
+
 }

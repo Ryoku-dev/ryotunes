@@ -31,6 +31,13 @@ Item {
     property int preMute: 100
 
     readonly property var now: Playback.now
+    // Menu wants a song row; the queue holds the playing track in that shape.
+    readonly property var nowSong: {
+        var q = Playback.queue;
+        if (!q || !q.items || q.currentIndex < 0 || q.currentIndex >= q.items.length)
+            return null;
+        return q.items[q.currentIndex];
+    }
     readonly property bool hasYouTubeTrack: !!Playback.now
         && !Ids.isLocalId(Playback.now.videoId) && !Ids.isRadioId(Playback.now.videoId)
     readonly property var nextUp: {
@@ -169,6 +176,17 @@ Item {
             // move the widget.
             HoverHandler { cursorShape: Qt.PointingHandCursor }
             TapHandler { enabled: !!root.now; onTapped: Playback.togglePause() }
+            TapHandler {
+                acceptedButtons: Qt.RightButton
+                gesturePolicy: TapHandler.ReleaseWithinBounds
+                onTapped: (eventPoint) => {
+                    if (!root.nowSong)
+                        return;
+                    var p = miniMenu.mapFromItem(null, eventPoint.scenePosition.x, eventPoint.scenePosition.y);
+                    miniMenu.song = root.nowSong;
+                    miniMenu.openAt(p.x, p.y);
+                }
+            }
             DragHandler {
                 target: root.dragTarget
                 xAxis.minimum: 0
@@ -515,4 +533,7 @@ Item {
             border.color: Qt.rgba(Tokens.ink.r, Tokens.ink.g, Tokens.ink.b, 0.14)
         }
     }
+
+    Menu { id: miniMenu }
+
 }

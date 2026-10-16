@@ -145,6 +145,12 @@ ColumnLayout {
                     }
                     HoverHandler { id: recHover }
                     TapHandler { onTapped: root.openRecent(recRow.modelData) }
+                    TapHandler {
+                        acceptedButtons: Qt.RightButton
+                        gesturePolicy: TapHandler.ReleaseWithinBounds
+                        onTapped: (eventPoint) => recentMenu.openFor(recRow.modelData,
+                            eventPoint.scenePosition.x, eventPoint.scenePosition.y)
+                    }
                 }
             }
         }
@@ -476,4 +482,11 @@ ColumnLayout {
             }
         }
     }
+
+    ItemMenu {
+        id: recentMenu
+        playItem: (it) => root.playRecent(it)
+        openItem: (it) => root.openRecent(it)
+    }
+
 }

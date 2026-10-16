@@ -1,5 +1,6 @@
 pragma ComponentBehavior: Bound
 import QtQuick
+import QtQuick.Window
 import QtQuick.Layouts
 import Quickshell
 import Ryoku.Ui.Singletons
@@ -15,6 +16,11 @@ import "../lib/ids.js" as Ids
 Item {
     id: root
 
+    // The menu lives on the window, not inside the list that opened it: its dismiss layer has to
+    // cover everything a click can land on, and a list that clips its children would otherwise cut
+    // the panel off. Callers map the press into this item's space with mapFromItem(null, ...),
+    // which stays correct because the window's content item is the scene.
+    parent: root.Window.contentItem ? root.Window.contentItem : undefined
     anchors.fill: parent
     z: 150
 
@@ -35,20 +41,32 @@ Item {
     readonly property bool open: panel.visible
     readonly property bool noYouTubeTrack: !!root.song
         && (Ids.isLocalId(root.song.video_id) || Ids.isRadioId(root.song.video_id))
+    // The track this menu is about is the one playing. "Play next" and "Add to queue" are a no-op
+    // on it, so they are left out rather than offered and ignored.
+    readonly property bool isNowPlaying: !!root.song && !!Playback.now
+        && Playback.now.videoId === root.song.video_id
+    // A host can force the queue actions back on (the same song sitting twice in a queue).
+    property bool canQueue: !root.isNowPlaying
+
     readonly property string rated: {
         if (root.song && Playback.now && Playback.now.videoId === root.song.video_id)
             return Playback.rating;
         return (root.song && root.song.rating) ? root.song.rating : "indifferent";
     }
 
+    // Where the press landed, in this item's space. The placement is a binding on the panel rather
+    // than a calculation here, because the panel's height follows the items the song produces and
+    // is not known yet at the moment it is asked for: reading it here placed a menu opened near the
+    // bottom of the window half off-screen.
+    property real askedX: 0
+    property real askedY: 0
+
     function openAt(sx, sy) {
         if (!root.song && !root.customItems)
             return;
+        root.askedX = sx;
+        root.askedY = sy;
         panel.visible = true;
-        var w = panel.width;
-        var h = panel.height;
-        panel.x = Math.max(Style.sp(2), Math.min(sx, root.width - w - Style.sp(2)));
-        panel.y = (sy + h > root.height - Style.sp(2)) ? Math.max(Style.sp(2), sy - h) : sy;
     }
     function close() { panel.visible = false; }
 
@@ -85,8 +103,10 @@ Item {
         if (!s)
             return [];
         var out = [];
-        out.push({ icon: "arrow-up", label: "Play next", danger: false, act: () => root.enqueue(true) });
-        out.push({ icon: "queue", label: "Add to queue", danger: false, act: () => root.enqueue(false) });
+        if (root.canQueue) {
+            out.push({ icon: "arrow-up", label: "Play next", danger: false, act: () => root.enqueue(true) });
+            out.push({ icon: "queue", label: "Add to queue", danger: false, act: () => root.enqueue(false) });
+        }
         if (!root.noYouTubeTrack)
             out.push({ icon: "radio", label: "Start radio", danger: false, act: () => root.startRadio() });
         if (!root.noYouTubeTrack)
@@ -114,6 +134,18 @@ Item {
         visible: root.open
         acceptedButtons: Qt.LeftButton | Qt.RightButton
         onClicked: root.close()
+
+        // The menu sits on the window, so a list scrolling underneath would leave it hanging over
+        // a row it no longer belongs to. The wheel closes it instead.
+        WheelHandler {
+            enabled: root.open
+            // WheelHandler is the one handler Qt narrows to PointerDevice.Mouse, and the Wayland
+            // plugin stamps wheel events with the seat's primary pointing device, which is reported
+            // as a touchpad on machines that have no touchpad at all. Left on the default this
+            // never fires, with no warning to say so.
+            acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
+            onWheel: root.close()
+        }
     }
 
     Rectangle {
@@ -122,6 +154,10 @@ Item {
         width: Style.sp(54)
         implicitHeight: col.implicitHeight + Style.sp(2)
         height: implicitHeight
+        x: Math.max(Style.sp(2), Math.min(root.askedX, root.width - panel.width - Style.sp(2)))
+        y: (root.askedY + panel.height > root.height - Style.sp(2))
+            ? Math.max(Style.sp(2), root.askedY - panel.height)
+            : root.askedY
         radius: Style.radius
         color: Tokens.paperLift
         border.width: 1

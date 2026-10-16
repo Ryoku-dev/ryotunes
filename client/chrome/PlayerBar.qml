@@ -31,6 +31,14 @@ Rectangle {
     property int preMute: 100
 
     readonly property var now: Playback.now
+    // Menu wants a song row (video_id, …), which is the shape the queue holds. Playback.now is the
+    // player's own camelCase view of the same track, so the queue entry is the one to hand over.
+    readonly property var nowSong: {
+        var q = Playback.queue;
+        if (!q || !q.items || q.currentIndex < 0 || q.currentIndex >= q.items.length)
+            return null;
+        return q.items[q.currentIndex];
+    }
     readonly property bool live: !Playback.paused && !!Playback.now
     readonly property bool hasYouTubeTrack: !!Playback.now
         && !Ids.isLocalId(Playback.now.videoId) && !Ids.isRadioId(Playback.now.videoId)
@@ -95,9 +103,23 @@ Rectangle {
 
         // now playing (left, 280)
         RowLayout {
+            id: nowZone
             Layout.preferredWidth: root.zoneW
             Layout.fillWidth: false
             spacing: Style.sp(3)
+
+            // The playing track answers a right-click like any row in a list does.
+            TapHandler {
+                acceptedButtons: Qt.RightButton
+                gesturePolicy: TapHandler.ReleaseWithinBounds
+                onTapped: (eventPoint) => {
+                    if (!root.nowSong)
+                        return;
+                    var p = nowMenu.mapFromItem(null, eventPoint.scenePosition.x, eventPoint.scenePosition.y);
+                    nowMenu.song = root.nowSong;
+                    nowMenu.openAt(p.x, p.y);
+                }
+            }
 
             Artwork {
                 url: root.now && root.now.thumbnail ? root.now.thumbnail : ""
@@ -342,4 +364,7 @@ Rectangle {
             }
         }
     }
+
+    Menu { id: nowMenu }
+
 }
