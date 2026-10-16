@@ -26,6 +26,9 @@ Rectangle {
 
     implicitHeight: Style.titleBarH
     color: Tokens.paper
+    // Above the page below it, so a hover label that hangs under the bar is not
+    // painted over by the sibling drawn after it.
+    z: 10
 
     Component.onCompleted: root.discordOn = !!(Playback.settings && Playback.settings.discord_rpc === "true")
     Connections {
@@ -48,6 +51,8 @@ Rectangle {
             icon: "sidebar"
             iconSize: Style.fs.lg
             diameter: Style.sp(8)
+            tip: root.sidebarOpen ? "Hide the rail" : "Show the rail"
+            tipBelow: true
             active: root.sidebarOpen
             onClicked: root.sidebarToggleClicked()
         }
@@ -58,6 +63,8 @@ Rectangle {
             icon: "arrow-left"
             iconSize: Style.fs.lg
             diameter: Style.sp(8)
+            tip: "Back"
+            tipBelow: true
             enabled: Router.canGoBack
             onClicked: Router.pop()
         }
@@ -65,6 +72,8 @@ Rectangle {
             icon: "arrow-right"
             iconSize: Style.fs.lg
             diameter: Style.sp(8)
+            tip: "Forward"
+            tipBelow: true
             enabled: false
         }
 
@@ -173,6 +182,8 @@ Rectangle {
                     icon: "close"
                     iconSize: Style.fs.sm
                     diameter: Style.sp(6)
+                    tip: "Clear the search"
+                    tipBelow: true
                     onClicked: searchInput.text = ""
                 }
             }
@@ -223,6 +234,8 @@ Rectangle {
             icon: "group"
             iconSize: Style.fs.lg
             diameter: Style.sp(8)
+            tip: "Listen Together"
+            tipBelow: true
             active: !!(Playback.lt && Playback.lt.role && Playback.lt.role !== "none")
             onClicked: root.listenTogetherClicked()
         }
@@ -230,6 +243,8 @@ Rectangle {
             icon: "discord"
             iconSize: Style.fs.lg
             diameter: Style.sp(8)
+            tip: root.discordOn ? "Discord rich presence is on" : "Discord rich presence is off"
+            tipBelow: true
             active: root.discordOn
             onClicked: {
                 root.discordOn = !root.discordOn;
@@ -244,6 +259,8 @@ Rectangle {
             icon: "panel"
             iconSize: Style.fs.lg
             diameter: Style.sp(8)
+            tip: root.panelOpen ? "Hide the panel" : "Show the panel"
+            tipBelow: true
             active: root.panelOpen
             onClicked: root.panelToggleClicked()
         }
@@ -251,12 +268,16 @@ Rectangle {
             icon: "sound"
             iconSize: Style.fs.lg
             diameter: Style.sp(8)
+            tip: "Sound"
+            tipBelow: true
             onClicked: root.soundClicked()
         }
         IconButton {
             icon: "minimize"
             iconSize: Style.fs.lg
             diameter: Style.sp(8)
+            tip: "Mini player"
+            tipBelow: true
             onClicked: root.miniClicked()
         }
     }
