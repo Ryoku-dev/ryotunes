@@ -2466,7 +2466,7 @@ dependencies = [
 
 [[package]]
 name = "innertube"
-version = "1.2.3"
+version = "1.2.5"
 dependencies = [
  "hex",
  "reqwest 0.12.28",
@@ -2972,7 +2972,7 @@ checksum = "32a66949e030da00e8c7d4434b251670a91556f4144941d37452769c25d58a53"
 
 [[package]]
 name = "listen-protocol"
-version = "1.2.3"
+version = "1.2.5"
 dependencies = [
  "serde",
  "serde_json",
@@ -3817,7 +3817,7 @@ checksum = "f6b464fbc74e149a392436b17d523f769e057cb6877f6a5c4618bc6f11800548"
 
 [[package]]
 name = "player"
-version = "1.2.3"
+version = "1.2.5"
 dependencies = [
  "libc",
  "libmpv2",
@@ -4741,7 +4741,7 @@ dependencies = [
 
 [[package]]
 name = "ryotunes"
-version = "1.2.3"
+version = "1.2.5"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -4771,7 +4771,7 @@ dependencies = [
 
 [[package]]
 name = "ryotunes-cli"
-version = "1.2.3"
+version = "1.2.5"
 dependencies = [
  "ryotunes-protocol",
  "serde",
@@ -4780,7 +4780,7 @@ dependencies = [
 
 [[package]]
 name = "ryotunes-core"
-version = "1.2.3"
+version = "1.2.5"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -4819,7 +4819,7 @@ dependencies = [
 
 [[package]]
 name = "ryotunes-protocol"
-version = "1.2.3"
+version = "1.2.5"
 dependencies = [
  "serde",
  "serde_json",
@@ -4827,7 +4827,7 @@ dependencies = [
 
 [[package]]
 name = "ryotunes-soundcloud"
-version = "1.2.3"
+version = "1.2.5"
 dependencies = [
  "base64 0.22.1",
  "parking_lot",
@@ -4842,7 +4842,7 @@ dependencies = [
 
 [[package]]
 name = "ryotunes-spotify"
-version = "1.2.3"
+version = "1.2.5"
 dependencies = [
  "anyhow",
  "bytes",
@@ -4866,7 +4866,7 @@ dependencies = [
 
 [[package]]
 name = "ryotunes-tidal"
-version = "1.2.3"
+version = "1.2.5"
 dependencies = [
  "base64 0.22.1",
  "parking_lot",
@@ -4882,7 +4882,7 @@ dependencies = [
 
 [[package]]
 name = "ryotunesd"
-version = "1.2.3"
+version = "1.2.5"
 dependencies = [
  "aes",
  "anyhow",
@@ -5655,7 +5655,7 @@ dependencies = [
 
 [[package]]
 name = "sync-server"
-version = "1.2.3"
+version = "1.2.5"
 dependencies = [
  "futures-util",
  "listen-protocol",

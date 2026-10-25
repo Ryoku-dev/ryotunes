@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## v1.2.5 - 2026-10-25
+
 - TIDAL sign-in now opens its approval page in the browser while keeping the code visible (`client/lib/playback.js`, `client/tests/tst_playback.qml`).
 - Playlist and album Play actions now start in sequence, while clicking a track preserves the current shuffle mode. Active shuffle and repeat controls follow the live Ryoku accent.
 - Icon buttons now show their labels on hover and expose the same labels to assistive technology.
