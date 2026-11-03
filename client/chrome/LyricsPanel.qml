@@ -31,6 +31,16 @@ Item {
     property int offsetMs: 0
 
     readonly property bool synced: !!(root.lyrics && root.lyrics.synced)
+    // Any line carries a Latin reading: lines then read as pairs, so they get more air between them.
+    readonly property bool hasReadings: {
+        if (!root.lyrics || !root.lyrics.lines)
+            return false;
+        for (var i = 0; i < root.lyrics.lines.length; i++) {
+            if (root.lyrics.lines[i].romanized)
+                return true;
+        }
+        return false;
+    }
     readonly property bool instrumental: !!(root.lyrics && root.lyrics.instrumental)
     readonly property bool hasWordTiming: {
         if (!root.synced || !root.lyrics.lines)
@@ -309,7 +319,7 @@ Item {
                 required property var modelData
                 required property int index
                 width: view.width
-                implicitHeight: lineCol.implicitHeight + Style.sp(2)
+                implicitHeight: lineCol.implicitHeight + (root.hasReadings ? Style.sp(4) : Style.sp(2))
 
                 readonly property bool isActive: root.synced && lineWrap.index === root.activeIndex
                 readonly property bool isPast: root.synced && lineWrap.index < root.activeIndex
@@ -391,12 +401,16 @@ Item {
                         }
                     }
 
-                    // Latin reading (lyrics_romanize), between the line and its translation.
+                    // Latin reading (lyrics_romanize), tucked under its line: it shares the line's
+                    // state colour (active, upcoming, past) a step softer, and the plain line's
+                    // trailing leading is taken back so the two read as one cue.
                     Text {
                         Layout.fillWidth: true
+                        Layout.topMargin: lineWrap.wordMode ? 0 : -Math.round(lineWrap.lineFs * 0.2)
                         visible: !!lineWrap.modelData.romanized
                         text: lineWrap.modelData.romanized ? lineWrap.modelData.romanized : ""
-                        color: Tokens.inkMuted
+                        color: lineWrap.lineColor
+                        opacity: 0.72
                         font.family: Style.fontUi
                         font.pixelSize: root.compact ? Style.fs.xs : Style.fs.sm
                         wrapMode: Text.WordWrap

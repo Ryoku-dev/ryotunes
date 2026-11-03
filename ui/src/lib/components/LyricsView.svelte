@@ -367,7 +367,7 @@
 
 					
 					{#if line.romanized}
-						<p class="mt-1 text-sm font-normal tracking-wide opacity-80 transition-opacity">
+						<p class="-mt-0.5 text-sm font-normal leading-snug opacity-70 transition-opacity">
 							{line.romanized}
 						</p>
 					{/if}
@@ -392,7 +392,7 @@
 					<div>
 						<p>{line.text}</p>
 						{#if line.romanized}
-							<p class="text-xs text-muted-foreground">{line.romanized}</p>
+							<p class="-mt-0.5 text-xs leading-snug text-muted-foreground">{line.romanized}</p>
 						{/if}
 						{#if line.translation}
 							<p class="text-xs italic text-muted-foreground">{line.translation}</p>
