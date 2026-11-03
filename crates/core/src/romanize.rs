@@ -1,7 +1,8 @@
 //! Lyrics romanization: a Latin reading under each line for scripts the listener may not read.
 //!
-//! Ported from PeekMusic's `LyricsUtils.kt` (itself built on Metrolist's), both GPL-3.0. Korean,
-//! Cyrillic, Devanagari and Gurmukhi are table- and rule-based; Chinese uses the `pinyin` crate.
+//! Ported from PeekMusic/PeekMusic (`app/src/main/kotlin/com/metrolist/music/lyrics/LyricsUtils.kt`,
+//! GPL-3.0), commit 83217188a, itself a fork of MetrolistGroup/Metrolist. Korean, Cyrillic,
+//! Devanagari and Gurmukhi are table- and rule-based; Chinese uses the MIT-licensed `pinyin` crate.
 //! Japanese is deliberately not handled yet (it needs a morphological dictionary), so a Japanese
 //! song is left untouched rather than read as Chinese.
 //!
