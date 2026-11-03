@@ -677,6 +677,8 @@ export interface LyricLine {
 	text: string;
 	words?: LyricWord[];
 	translation?: string;
+	/** Latin reading of `text`, present when the `lyrics_romanize` setting is on. */
+	romanized?: string;
 }
 export interface Lyrics {
 	/** Attribution for the panel footer ("LRCLIB", "Source: Musixmatch", …). */

@@ -63,7 +63,7 @@ fn normalize_ui_setting(key: &str, raw: &str) -> Result<String, String> {
             .then(|| raw.to_owned())
             .ok_or_else(|| "Unknown audio quality.".into()),
         "enable_history" | "discord_rpc" | "close_to_tray" | "autostart" | "autoplay"
-        | "prevent_duplicates" | "lyrics_boidu" | "low_resource_mode" => {
+        | "prevent_duplicates" | "lyrics_boidu" | "lyrics_romanize" | "low_resource_mode" => {
             matches!(raw, "true" | "false")
                 .then(|| raw.to_owned())
                 .ok_or_else(|| format!("{key} must be true or false."))
@@ -1787,11 +1787,12 @@ pub async fn get_lyrics(
     if crate::radio::is_radio_id(&video_id) {
         return Ok(None);
     }
-    Ok(crate::lyrics::get_lyrics(
+    let lyrics = crate::lyrics::get_lyrics(
         state.inner(),
         crate::lyrics::LyricsRequest { video_id, title, artists, album, duration },
     )
-    .await)
+    .await;
+    Ok(ryotunes_core::romanize::for_client(state.inner(), lyrics))
 }
 
 /// Open a link from the UI in the real browser. An `<a href>` inside the webview would navigate

@@ -910,12 +910,13 @@ impl Dispatch for Methods {
                         return null();
                     };
                     let lyrics = client.lyrics(tid).await.map_err(spotify_err)?;
-                    return ok(lyrics.as_ref().map(spotify_bridge::lyrics_to_lyrics));
+                    let lyrics = lyrics.as_ref().map(spotify_bridge::lyrics_to_lyrics);
+                    return ok(ryotunes_core::romanize::for_client(st, lyrics));
                 }
                 if radio::is_radio_id(&video_id) {
                     return null();
                 }
-                ok(ryotunes_core::lyrics::get_lyrics(
+                let lyrics = ryotunes_core::lyrics::get_lyrics(
                     st,
                     ryotunes_core::lyrics::LyricsRequest {
                         video_id,
@@ -925,7 +926,8 @@ impl Dispatch for Methods {
                         duration: arg::<Option<f64>>(&params, "duration")?,
                     },
                 )
-                .await)
+                .await;
+                ok(ryotunes_core::romanize::for_client(st, lyrics))
             }
             "open_external" => {
                 ryotunes_core::lastfm::open_browser(&arg::<String>(&params, "url")?)
@@ -2241,7 +2243,7 @@ fn normalize_ui_setting(key: &str, raw: &str) -> Result<String, String> {
             .then(|| raw.to_owned())
             .ok_or_else(|| "Unknown audio quality.".into()),
         "enable_history" | "discord_rpc" | "close_to_tray" | "autostart" | "autoplay"
-        | "prevent_duplicates" | "lyrics_boidu" | "low_resource_mode" => {
+        | "prevent_duplicates" | "lyrics_boidu" | "lyrics_romanize" | "low_resource_mode" => {
             matches!(raw, "true" | "false")
                 .then(|| raw.to_owned())
                 .ok_or_else(|| format!("{key} must be true or false."))

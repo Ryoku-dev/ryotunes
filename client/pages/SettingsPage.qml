@@ -935,6 +935,12 @@ Item {
                         value: page.settings.lyrics_boidu !== "false"
                         onFlipped: (on) => page.setSetting("lyrics_boidu", on ? "true" : "false")
                     }
+                    ToggleRow {
+                        title: "Romanized lyrics"
+                        desc: "Shows a Latin reading under Korean, Chinese, Cyrillic, Hindi and Punjabi lyrics. Worked out on this device. Applies from the next track."
+                        value: page.settings.lyrics_romanize === "true"
+                        onFlipped: (on) => page.setSetting("lyrics_romanize", on ? "true" : "false")
+                    }
 
                     // Stream clients --------------------------------------------------------
                     SectionHeading { Layout.fillWidth: true; Layout.topMargin: Style.sp(3); title: "Stream clients"; mark: "詳細" }

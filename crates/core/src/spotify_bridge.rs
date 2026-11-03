@@ -364,6 +364,7 @@ fn synced_line(line: &LyricsLine) -> LyricLine {
                 .collect()
         }),
         translation: None,
+        romanized: None,
     }
 }
 

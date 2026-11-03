@@ -332,6 +332,17 @@ Item {
                         }
                     }
 
+                    // Latin reading (lyrics_romanize), between the line and its translation.
+                    Text {
+                        Layout.fillWidth: true
+                        visible: !!lineWrap.modelData.romanized
+                        text: lineWrap.modelData.romanized ? lineWrap.modelData.romanized : ""
+                        color: Tokens.inkMuted
+                        font.family: Style.fontUi
+                        font.pixelSize: root.compact ? Style.fs.xs : Style.fs.sm
+                        wrapMode: Text.WordWrap
+                    }
+
                     // Translation, if the provider supplied one.
                     Text {
                         Layout.fillWidth: true

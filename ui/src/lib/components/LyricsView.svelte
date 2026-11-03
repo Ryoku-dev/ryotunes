@@ -342,6 +342,11 @@
 					{/if}
 
 					
+					{#if line.romanized}
+						<p class="mt-1 text-sm font-normal tracking-wide opacity-80 transition-opacity">
+							{line.romanized}
+						</p>
+					{/if}
 					{#if line.translation}
 						<p class="mt-1 text-sm font-normal italic tracking-wide opacity-80 transition-opacity">
 							{line.translation}
@@ -362,6 +367,9 @@
 				{#if line.text}
 					<div>
 						<p>{line.text}</p>
+						{#if line.romanized}
+							<p class="text-xs text-muted-foreground">{line.romanized}</p>
+						{/if}
 						{#if line.translation}
 							<p class="text-xs italic text-muted-foreground">{line.translation}</p>
 						{/if}
