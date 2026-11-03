@@ -23,6 +23,8 @@ Item {
     property var lyrics: null
     property bool loading: false
     property string requestedId: ""
+    // A `lyrics-changed` event arrived while hidden: refetch the same track when shown again.
+    property bool stale: false
 
     // Per-track manual timing correction (ms; positive = lyrics appear later). Kept in memory and
     // reset on every track change — a listening preference, not YouTube metadata.
@@ -100,8 +102,12 @@ Item {
             }
             return;
         }
-        if (!force && now.videoId === root.requestedId)
+        if (!force && now.videoId === root.requestedId) {
+            if (root.stale)
+                root.refreshInPlace();
             return;
+        }
+        root.stale = false;
         var id = now.videoId;
         root.requestedId = id;
         root.offsetMs = 0;
@@ -122,12 +128,65 @@ Item {
             root.loading = false;
             root.hasScrolled = false;
             root.manualScroll = false;
+            if (root.stale)
+                root.refreshInPlace();
         }).catch(() => {
             if (root.requestedId !== id)
                 return;
             root.lyrics = null;
             root.loading = false;
         });
+    }
+
+    // Same track, new reading (the romanize setting flipped): swap the document without the
+    // loading state, the offset reset or the scroll jump a track change brings.
+    function refreshInPlace() {
+        var now = Playback.now;
+        if (!now || now.videoId !== root.requestedId)
+            return;
+        // A fetch in flight may predate the change; refresh once it has landed.
+        if (root.loading) {
+            root.stale = true;
+            return;
+        }
+        root.stale = false;
+        var id = now.videoId;
+        var q = Playback.queue;
+        var cur = (q && q.items) ? q.items[q.currentIndex] : null;
+        Daemon.call("get_lyrics", {
+            videoId: id,
+            title: now.title,
+            artists: now.artists,
+            album: (cur && cur.album) ? cur.album : undefined,
+            duration: PB.durationToSeconds(now.duration)
+        }).then((l) => {
+            if (root.requestedId !== id)
+                return;
+            // A new model rebuilds the list at the top; land back where the reader was before
+            // the frame is drawn, on the active line unless they are scrolling by hand.
+            var keepY = view.contentY;
+            root.lyrics = l;
+            Qt.callLater(() => {
+                if (root.synced && !root.manualScroll && root.activeIndex >= 0) {
+                    root.follow(root.activeIndex, false);
+                } else {
+                    var maxY = view.originY + Math.max(0, view.contentHeight - view.height);
+                    view.contentY = Math.max(view.originY, Math.min(keepY, maxY));
+                }
+            });
+        }).catch(() => {});
+    }
+
+    Connections {
+        target: Daemon
+        function onEvent(name, data) {
+            if (name !== "lyrics-changed")
+                return;
+            if (root.visible)
+                root.refreshInPlace();
+            else
+                root.stale = true;
+        }
     }
 
     onVisibleChanged: root.maybeFetch(false)

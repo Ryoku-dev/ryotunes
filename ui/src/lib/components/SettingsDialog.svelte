@@ -570,7 +570,7 @@
 						<div class="min-w-0">
 							<div class="font-medium">{t('Romanized lyrics')}</div>
 							<p class="mt-0.5 text-sm text-muted-foreground">
-								{t("Shows a Latin reading under lyrics written in Korean, Chinese, Cyrillic, Hindi or Punjabi script. Worked out on this device, nothing is sent anywhere. Applies from the next track.")}
+								{t("Shows a Latin reading under lyrics written in Korean, Chinese, Cyrillic, Hindi or Punjabi script. Worked out on this device, nothing is sent anywhere.")}
 							</p>
 						</div>
 						<Switch checked={romanizeOn} onCheckedChange={setRomanize} />

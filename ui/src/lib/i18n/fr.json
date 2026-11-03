@@ -188,7 +188,7 @@
   "Up next": "À suivre",
   "Word-by-word lyrics": "Paroles mot à mot",
   "Romanized lyrics": "Paroles romanisées",
-  "Shows a Latin reading under lyrics written in Korean, Chinese, Cyrillic, Hindi or Punjabi script. Worked out on this device, nothing is sent anywhere. Applies from the next track.": "Affiche une lecture en alphabet latin sous les paroles écrites en coréen, chinois, cyrillique, hindi ou pendjabi. Calculée sur cet appareil, rien n'est envoyé. S'applique à partir du prochain morceau.",
+  "Shows a Latin reading under lyrics written in Korean, Chinese, Cyrillic, Hindi or Punjabi script. Worked out on this device, nothing is sent anywhere.": "Affiche une lecture en alphabet latin sous les paroles écrites en coréen, chinois, cyrillique, hindi ou pendjabi. Calculée sur cet appareil, rien n'est envoyé.",
   "a Ryoku-native music instrument built around Rust, mpv and WebKitGTK.": "un instrument de musique natif Ryoku construit autour de Rust, mpv et WebKitGTK.",
   "http://host:port (blank = none)": "http://host:port (vide = aucun)",
   "Item options": "Options de l'élément",

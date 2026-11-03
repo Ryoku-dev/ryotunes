@@ -1504,6 +1504,11 @@ fn set_setting(st: &Arc<AppState>, params: &Value) -> Result<Value, ErrorBody> {
     if key == "lyrics_boidu" {
         st.db.clear_lyrics_cache();
     }
+    // Romanization is added on the way out of get_lyrics, so open lyrics views refetch (from the
+    // cache) to show or drop the reading without waiting for the next track.
+    if key == "lyrics_romanize" {
+        st.emit("lyrics-changed", json!({}));
+    }
     null()
 }
 

@@ -937,7 +937,7 @@ Item {
                     }
                     ToggleRow {
                         title: "Romanized lyrics"
-                        desc: "Shows a Latin reading under Korean, Chinese, Cyrillic, Hindi and Punjabi lyrics. Worked out on this device. Applies from the next track."
+                        desc: "Shows a Latin reading under Korean, Chinese, Cyrillic, Hindi and Punjabi lyrics. Worked out on this device."
                         value: page.settings.lyrics_romanize === "true"
                         onFlipped: (on) => page.setSetting("lyrics_romanize", on ? "true" : "false")
                     }

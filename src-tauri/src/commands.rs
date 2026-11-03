@@ -425,6 +425,11 @@ pub async fn set_setting(
     if key == "lyrics_boidu" {
         state.db.clear_lyrics_cache();
     }
+    // Romanization is added on the way out of get_lyrics, so open lyrics views refetch (from the
+    // cache) to show or drop the reading without waiting for the next track.
+    if key == "lyrics_romanize" {
+        state.emit("lyrics-changed", serde_json::json!({}));
+    }
     Ok(())
 }
 
