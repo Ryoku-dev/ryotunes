@@ -12,7 +12,8 @@ epoch=1
 pkgdesc="Ryoku's main music app — discover, stream, and enjoy your music collection"
 url='https://github.com/ryoku-dev/ryotunes'
 arch=('x86_64')
-license=('GPL-3.0-or-later')
+# The Japanese romanization dictionary (mecab-ipadic, below) carries NAIST's own permissive license.
+license=('GPL-3.0-or-later' 'LicenseRef-IPADIC')
 depends=(
   'webkit2gtk-4.1'
   'libappindicator-gtk3'
@@ -43,8 +44,11 @@ install=ryotunes.install
 # !debug: the release ships exactly the one contracted asset (ryotunes-<ver>-1-x86_64.pkg.tar.zst),
 # never a second ryotunes-debug-* package, regardless of the builder's makepkg.conf.
 options=(!lto !debug)
-source=()
-sha256sums=()
+# The Japanese lyrics-romanization dictionary: mecab-ipadic 2.7.0 compiled for vibrato (~7.7 MiB),
+# read by ryotunesd only while it romanizes a Japanese song. Fetched and verified by makepkg so the
+# build itself needs no network and the binary does not embed it.
+source=("ipadic-mecab-2_7_0.tar.xz::https://github.com/daac-tools/vibrato/releases/download/v0.5.0/ipadic-mecab-2_7_0.tar.xz")
+sha256sums=('4764f983b7c3a9e1cb6a5ee945e00558efd812980e0dad61224f63ee3b0475d9')
 
 prepare() {
   local root
@@ -60,6 +64,7 @@ prepare() {
     --exclude='./packaging/arch/pkg' \
     --exclude='./packaging/arch/src' \
     --exclude='./packaging/arch/*.pkg.tar.*' \
+    --exclude='./packaging/arch/ipadic-mecab-*.tar.xz' \
     -C "$root" -cf - . | tar -C "$srcdir/ryotunes" -xf -
 }
 
@@ -101,6 +106,8 @@ package() {
   find "$pkgdir/usr/share/ryotunes/skins" -type d -exec chmod 755 {} +
   find "$pkgdir/usr/share/ryotunes/skins" -type f -exec chmod 644 {} +
   install -Dm644 matugen/ryotunes.json "$pkgdir/usr/share/ryotunes/matugen/ryotunes.json"
+  # Japanese romanization dictionary (crates/core/src/romanize/japanese.rs reads this path).
+  install -Dm644 "$srcdir/ipadic-mecab-2_7_0/system.dic.zst" "$pkgdir/usr/share/ryotunes/dict/ipadic/system.dic.zst"
   install -Dm644 packaging/linux/ryotunesd.socket "$pkgdir/usr/lib/systemd/user/ryotunesd.socket"
   install -Dm644 packaging/linux/ryotunesd.service "$pkgdir/usr/lib/systemd/user/ryotunesd.service"
   install -Dm644 packaging/linux/90-ryotunes.preset "$pkgdir/usr/lib/systemd/user-preset/90-ryotunes.preset"
@@ -113,6 +120,8 @@ package() {
   install -Dm644 src-tauri/icons/icon.png "$pkgdir/usr/share/icons/hicolor/512x512/apps/ryotunes.png"
   install -Dm755 scripts/diagnostics.sh "$pkgdir/usr/bin/ryotunes-diagnostics"
   install -Dm644 LICENSE "$pkgdir/usr/share/licenses/ryotunes/LICENSE"
+  install -Dm644 "$srcdir/ipadic-mecab-2_7_0/COPYING" "$pkgdir/usr/share/licenses/ryotunes/IPADIC-COPYING"
+  install -Dm644 "$srcdir/ipadic-mecab-2_7_0/NOTICE" "$pkgdir/usr/share/licenses/ryotunes/IPADIC-NOTICE"
   install -Dm644 README.md "$pkgdir/usr/share/doc/ryotunes/README.md"
   install -Dm644 UPSTREAM.md "$pkgdir/usr/share/doc/ryotunes/UPSTREAM.md"
 }

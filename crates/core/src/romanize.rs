@@ -3,13 +3,15 @@
 //! Ported from PeekMusic/PeekMusic (`app/src/main/kotlin/com/metrolist/music/lyrics/LyricsUtils.kt`,
 //! GPL-3.0), commit 83217188a, itself a fork of MetrolistGroup/Metrolist. Korean, Cyrillic,
 //! Devanagari and Gurmukhi are table- and rule-based; Chinese uses the MIT-licensed `pinyin` crate.
-//! Japanese is deliberately not handled yet (it needs a morphological dictionary), so a Japanese
-//! song is left untouched rather than read as Chinese.
+//! Japanese needs a morphological dictionary and lives in [`japanese`]; without the dictionary
+//! file a Japanese song is left untouched rather than read as Chinese.
 //!
 //! The script is decided once for the whole song, not per line: a line of only kanji inside a
 //! Japanese song must not become pinyin, and a short Cyrillic line carries too few letters to
 //! tell Russian from Ukrainian. Romanization runs when lyrics are handed to a client, never on
 //! the cached or downloaded copy.
+
+mod japanese;
 
 use pinyin::ToPinyin;
 
@@ -17,12 +19,18 @@ use crate::lyrics::Lyrics;
 use crate::state::AppState;
 
 /// The `get_lyrics` reply as a client should see it: romanized when `lyrics_romanize` is on.
-pub fn for_client(state: &AppState, lyrics: Option<Lyrics>) -> Option<Lyrics> {
+/// Runs on the blocking pool, since a Japanese song may load its dictionary (~190 ms).
+pub async fn for_client(state: &AppState, lyrics: Option<Lyrics>) -> Option<Lyrics> {
     let mut lyrics = lyrics?;
-    if state.db.get_setting("lyrics_romanize").as_deref() == Some("true") {
-        romanize_lyrics(&mut lyrics);
+    if state.db.get_setting("lyrics_romanize").as_deref() != Some("true") {
+        return Some(lyrics);
     }
-    Some(lyrics)
+    tokio::task::spawn_blocking(move || {
+        romanize_lyrics(&mut lyrics);
+        lyrics
+    })
+    .await
+    .ok()
 }
 
 /// Fill `romanized` on every line that has a reading different from its text.
@@ -32,6 +40,17 @@ pub fn romanize_lyrics(lyrics: &mut Lyrics) {
     let Some(script) = detect(&all) else {
         return;
     };
+    if script == Script::Japanese {
+        let texts: Vec<&str> = lyrics.lines.iter().map(|line| line.text.as_str()).collect();
+        let Some(readings) = japanese::romanize_lines(&texts) else {
+            return;
+        };
+        for (line, reading) in lyrics.lines.iter_mut().zip(readings.iter()) {
+            line.romanized =
+                (!reading.is_empty() && !same_text(reading, &line.text)).then(|| reading.clone());
+        }
+        return;
+    }
     for line in &mut lyrics.lines {
         let romanized = romanize_line(script, &line.text);
         line.romanized = (!romanized.trim().is_empty() && !same_text(&romanized, &line.text))
@@ -43,6 +62,7 @@ pub fn romanize_lyrics(lyrics: &mut Lyrics) {
 enum Script {
     Korean,
     Chinese,
+    Japanese,
     Cyrillic(Cyrillic),
     Devanagari,
     Gurmukhi,
@@ -106,8 +126,8 @@ fn detect(text: &str) -> Option<Script> {
     }
     if best == cjk {
         // Chinese below 10% kana among the CJK characters, as PeekMusic decides it; anything with
-        // more kana is Japanese, which this module does not romanize yet.
-        return (kana * 10 < cjk).then_some(Script::Chinese);
+        // more kana is Japanese, so its kanji are read as Japanese words, never as pinyin.
+        return Some(if kana * 10 < cjk { Script::Chinese } else { Script::Japanese });
     }
     Some(if best == hangul {
         Script::Korean
@@ -146,6 +166,8 @@ fn romanize_line(script: Script, text: &str) -> String {
     match script {
         Script::Korean => romanize_korean(text),
         Script::Chinese => romanize_chinese(text),
+        // Read per song with the dictionary in `romanize_lyrics`, never line by line.
+        Script::Japanese => text.to_owned(),
         Script::Cyrillic(language) => romanize_cyrillic(language, text),
         Script::Devanagari => romanize_indic(text, &DEVANAGARI),
         Script::Gurmukhi => romanize_indic(text, &GURMUKHI),
@@ -1177,10 +1199,11 @@ mod tests {
     }
 
     #[test]
-    fn japanese_songs_are_left_alone_even_on_kanji_only_lines() {
+    fn japanese_songs_never_get_pinyin_even_on_kanji_only_lines() {
         // "東京" alone would read as Chinese; the kana elsewhere in the song marks it Japanese.
-        let lines = ["君の名は", "東京", "ありがとう"];
-        assert_eq!(romanized(&lines), vec![None, None, None]);
+        assert_eq!(detect("君の名は\n東京\nありがとう"), Some(Script::Japanese));
+        assert_eq!(detect("月亮代表我的心"), Some(Script::Chinese));
+        assert_eq!(romanize_line(Script::Japanese, "東京"), "東京");
     }
 
     #[test]
