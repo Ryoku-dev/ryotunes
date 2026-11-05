@@ -13,48 +13,82 @@
 
 mod japanese;
 
+use std::sync::Arc;
+
 use pinyin::ToPinyin;
 
 use crate::lyrics::Lyrics;
 use crate::state::AppState;
 
 /// The `get_lyrics` reply as a client should see it: romanized when `lyrics_romanize` is on.
-/// Runs on the blocking pool, since a Japanese song may load its dictionary (~190 ms).
 pub async fn for_client(state: &AppState, lyrics: Option<Lyrics>) -> Option<Lyrics> {
     let mut lyrics = lyrics?;
     if state.db.get_setting("lyrics_romanize").as_deref() != Some("true") {
         return Some(lyrics);
     }
-    tokio::task::spawn_blocking(move || {
-        romanize_lyrics(&mut lyrics);
-        lyrics
+    let Some(script) = detect(&song_text(&lyrics)) else {
+        return Some(lyrics);
+    };
+    if script != Script::Japanese {
+        apply_local(&mut lyrics, script);
+        return Some(lyrics);
+    }
+    // Only Japanese blocks (it may load its dictionary), so only it goes to the blocking pool. A
+    // failed or panicking task leaves the lyrics without a reading instead of dropping them.
+    let texts: Vec<String> = lyrics.lines.iter().map(|line| line.text.clone()).collect();
+    let readings = tokio::task::spawn_blocking(move || {
+        let texts: Vec<&str> = texts.iter().map(String::as_str).collect();
+        japanese::romanize_lines(&texts)
     })
     .await
     .ok()
+    .flatten();
+    if let Some(readings) = readings {
+        apply_readings(&mut lyrics, &readings);
+    }
+    Some(lyrics)
 }
 
 /// Fill `romanized` on every line that has a reading different from its text.
 pub fn romanize_lyrics(lyrics: &mut Lyrics) {
-    let all: String =
-        lyrics.lines.iter().map(|line| line.text.as_str()).collect::<Vec<_>>().join("\n");
-    let Some(script) = detect(&all) else {
+    romanize_lyrics_with(lyrics, japanese::romanize_lines);
+}
+
+fn romanize_lyrics_with(
+    lyrics: &mut Lyrics,
+    read_japanese: impl FnOnce(&[&str]) -> Option<Arc<Vec<String>>>,
+) {
+    let Some(script) = detect(&song_text(lyrics)) else {
         return;
     };
-    if script == Script::Japanese {
-        let texts: Vec<&str> = lyrics.lines.iter().map(|line| line.text.as_str()).collect();
-        let Some(readings) = japanese::romanize_lines(&texts) else {
-            return;
-        };
-        for (line, reading) in lyrics.lines.iter_mut().zip(readings.iter()) {
-            line.romanized =
-                (!reading.is_empty() && !same_text(reading, &line.text)).then(|| reading.clone());
-        }
+    if script != Script::Japanese {
+        apply_local(lyrics, script);
         return;
     }
+    let texts: Vec<&str> = lyrics.lines.iter().map(|line| line.text.as_str()).collect();
+    if let Some(readings) = read_japanese(&texts) {
+        apply_readings(lyrics, &readings);
+    }
+}
+
+fn song_text(lyrics: &Lyrics) -> String {
+    lyrics.lines.iter().map(|line| line.text.as_str()).collect::<Vec<_>>().join("\n")
+}
+
+/// Rule-based scripts, one line at a time.
+fn apply_local(lyrics: &mut Lyrics, script: Script) {
     for line in &mut lyrics.lines {
         let romanized = romanize_line(script, &line.text);
         line.romanized = (!romanized.trim().is_empty() && !same_text(&romanized, &line.text))
             .then(|| romanized.trim().to_owned());
+    }
+}
+
+/// Readings computed for the whole song (Japanese), one per line in order.
+fn apply_readings(lyrics: &mut Lyrics, readings: &[String]) {
+    for (line, reading) in lyrics.lines.iter_mut().zip(readings) {
+        line.romanized =
+            (!reading.is_empty() && !same_text(reading, &line.text)).then(|| reading.clone());
     }
 }
 
@@ -104,7 +138,7 @@ fn is_gurmukhi(c: char) -> bool {
 }
 
 /// The song's dominant non-Latin script, or `None` when there is nothing to romanize (Latin-only
-/// lyrics, or Japanese).
+/// lyrics).
 fn detect(text: &str) -> Option<Script> {
     let (mut hangul, mut kana, mut han, mut cyrillic, mut devanagari, mut gurmukhi) =
         (0usize, 0usize, 0usize, 0usize, 0usize, 0usize);
@@ -166,8 +200,8 @@ fn romanize_line(script: Script, text: &str) -> String {
     match script {
         Script::Korean => romanize_korean(text),
         Script::Chinese => romanize_chinese(text),
-        // Read per song with the dictionary in `romanize_lyrics`, never line by line.
-        Script::Japanese => text.to_owned(),
+        // Read for the whole song with the dictionary (`apply_readings`); callers branch before this.
+        Script::Japanese => unreachable!("Japanese is romanized per song, not per line"),
         Script::Cyrillic(language) => romanize_cyrillic(language, text),
         Script::Devanagari => romanize_indic(text, &DEVANAGARI),
         Script::Gurmukhi => romanize_indic(text, &GURMUKHI),
@@ -1201,9 +1235,21 @@ mod tests {
     #[test]
     fn japanese_songs_never_get_pinyin_even_on_kanji_only_lines() {
         // "東京" alone would read as Chinese; the kana elsewhere in the song marks it Japanese.
-        assert_eq!(detect("君の名は\n東京\nありがとう"), Some(Script::Japanese));
+        let lines = ["君の名は", "東京", "ありがとう"];
+        assert_eq!(detect(&lines.join("\n")), Some(Script::Japanese));
         assert_eq!(detect("月亮代表我的心"), Some(Script::Chinese));
-        assert_eq!(romanize_line(Script::Japanese, "東京"), "東京");
+        // Without a dictionary every line stays without a reading.
+        let mut lyrics = song(&lines);
+        romanize_lyrics_with(&mut lyrics, |_| None);
+        assert!(lyrics.lines.iter().all(|line| line.romanized.is_none()));
+        // With one, readings land on their own lines; one equal to its line is dropped.
+        let mut lyrics = song(&["君の名は", "OK", "東京"]);
+        romanize_lyrics_with(&mut lyrics, |lines| {
+            assert_eq!(lines, ["君の名は", "OK", "東京"]);
+            Some(Arc::new(vec!["kimi no na wa".into(), "ok".into(), "toukyou".into()]))
+        });
+        let got: Vec<_> = lyrics.lines.into_iter().map(|line| line.romanized).collect();
+        assert_eq!(got, vec![Some("kimi no na wa".into()), None, Some("toukyou".into())]);
     }
 
     #[test]
