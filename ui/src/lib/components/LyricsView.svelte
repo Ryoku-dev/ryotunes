@@ -61,12 +61,15 @@
 
 	// videoId of the fetch whose result is (or will be) shown — guards stale responses.
 	let requested = '';
+	let refreshQueued = false;
+	let refreshRunning = false;
 
 	async function requestLyrics(force = false) {
 		const now = playback.now;
 		if (!now) {
 			requested = '';
 			lyrics = null;
+			refreshQueued = false;
 			loading = false;
 			return;
 		}
@@ -90,7 +93,10 @@
 			if (requested !== id) return;
 			lyrics = null;
 		} finally {
-			if (requested === id) loading = false;
+			if (requested === id) {
+				loading = false;
+				if (refreshQueued) void refreshInPlace();
+			}
 		}
 	}
 
@@ -103,7 +109,14 @@
 	// loading state or the scroll reset a track change brings.
 	async function refreshInPlace() {
 		const now = playback.now;
-		if (!now || now.videoId !== requested || loading) return;
+		if (!now || now.videoId !== requested) {
+			refreshQueued = false;
+			return;
+		}
+		refreshQueued = true;
+		if (loading || refreshRunning) return;
+		refreshQueued = false;
+		refreshRunning = true;
 		const id = now.videoId;
 		const album = playback.queue.items[playback.queue.currentIndex]?.album;
 		try {
@@ -115,7 +128,11 @@
 				duration: durationSecs(now.duration)
 			});
 			if (requested === id) lyrics = l;
-		} catch {}
+		} catch {
+		} finally {
+			refreshRunning = false;
+			if (refreshQueued) void refreshInPlace();
+		}
 	}
 
 	$effect(() => {
