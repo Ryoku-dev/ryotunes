@@ -61,12 +61,15 @@
 
 	// videoId of the fetch whose result is (or will be) shown — guards stale responses.
 	let requested = '';
+	let refreshQueued = false;
+	let refreshRunning = false;
 
 	async function requestLyrics(force = false) {
 		const now = playback.now;
 		if (!now) {
 			requested = '';
 			lyrics = null;
+			refreshQueued = false;
 			loading = false;
 			return;
 		}
@@ -90,13 +93,51 @@
 			if (requested !== id) return;
 			lyrics = null;
 		} finally {
-			if (requested === id) loading = false;
+			if (requested === id) {
+				loading = false;
+				if (refreshQueued) void refreshInPlace();
+			}
 		}
 	}
 
 	$effect(() => {
 		playback.now?.videoId;
 		void requestLyrics();
+	});
+
+	// Same track, new reading (the romanize setting flipped): swap the lines in place, without the
+	// loading state or the scroll reset a track change brings.
+	async function refreshInPlace() {
+		const now = playback.now;
+		if (!now || now.videoId !== requested) {
+			refreshQueued = false;
+			return;
+		}
+		refreshQueued = true;
+		if (loading || refreshRunning) return;
+		refreshQueued = false;
+		refreshRunning = true;
+		const id = now.videoId;
+		const album = playback.queue.items[playback.queue.currentIndex]?.album;
+		try {
+			const l = await api.getLyrics({
+				videoId: id,
+				title: now.title,
+				artists: now.artists,
+				album: album ?? undefined,
+				duration: durationSecs(now.duration)
+			});
+			if (requested === id) lyrics = l;
+		} catch {
+		} finally {
+			refreshRunning = false;
+			if (refreshQueued) void refreshInPlace();
+		}
+	}
+
+	$effect(() => {
+		const unlisten = api.onLyricsChanged(() => void refreshInPlace());
+		return () => void unlisten.then((off) => off());
 	});
 
 	$effect(() => {
@@ -342,6 +383,11 @@
 					{/if}
 
 					
+					{#if line.romanized}
+						<p class="-mt-0.5 text-sm font-normal leading-snug opacity-70 transition-opacity">
+							{line.romanized}
+						</p>
+					{/if}
 					{#if line.translation}
 						<p class="mt-1 text-sm font-normal italic tracking-wide opacity-80 transition-opacity">
 							{line.translation}
@@ -362,6 +408,9 @@
 				{#if line.text}
 					<div>
 						<p>{line.text}</p>
+						{#if line.romanized}
+							<p class="-mt-0.5 text-xs leading-snug text-muted-foreground">{line.romanized}</p>
+						{/if}
 						{#if line.translation}
 							<p class="text-xs italic text-muted-foreground">{line.translation}</p>
 						{/if}

@@ -14,6 +14,7 @@ pub mod media;
 pub mod orchestrator;
 pub mod potoken;
 pub mod radio;
+pub mod romanize;
 pub mod session;
 pub mod soundcloud_bridge;
 pub mod spotify;
