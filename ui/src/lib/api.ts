@@ -598,6 +598,9 @@ export const onPosition = (cb: (p: number) => void): Promise<UnlistenFn> =>
 	listen<{ position: number }>('position', (e) => cb(e.payload.position));
 export const onDuration = (cb: (d: number) => void): Promise<UnlistenFn> =>
 	listen<{ duration: number }>('duration', (e) => cb(e.payload.duration));
+/** A setting that shapes `get_lyrics` replies changed (romanization): refetch the open lyrics. */
+export const onLyricsChanged = (cb: () => void): Promise<UnlistenFn> =>
+	listen('lyrics-changed', () => cb());
 /** Echo of every `set_volume`, so a second window's slider can't drift from what you hear. */
 export const onVolume = (cb: (v: number) => void): Promise<UnlistenFn> =>
 	listen<number>('volume', (e) => cb(e.payload));
@@ -677,6 +680,8 @@ export interface LyricLine {
 	text: string;
 	words?: LyricWord[];
 	translation?: string;
+	/** Latin reading of `text`, present when the `lyrics_romanize` setting is on. */
+	romanized?: string;
 }
 export interface Lyrics {
 	/** Attribution for the panel footer ("LRCLIB", "Source: Musixmatch", …). */

@@ -153,6 +153,7 @@
 	const historyOn = $derived(settings.enable_history !== 'false');
 	const autoplayOn = $derived(settings.autoplay !== 'false');
 	const boiduOn = $derived(settings.lyrics_boidu !== 'false');
+	const romanizeOn = $derived(settings.lyrics_romanize === 'true');
 	const preventDuplicatesOn = $derived(settings.prevent_duplicates === 'true');
 	const discordOn = $derived(settings.discord_rpc === 'true');
 	const trayOn = $derived(settings.close_to_tray !== 'false');
@@ -205,6 +206,11 @@
 	async function setBoidu(on: boolean) {
 		settings.lyrics_boidu = on ? 'true' : 'false';
 		await api.setSetting('lyrics_boidu', settings.lyrics_boidu);
+	}
+
+	async function setRomanize(on: boolean) {
+		settings.lyrics_romanize = on ? 'true' : 'false';
+		await api.setSetting('lyrics_romanize', settings.lyrics_romanize);
 	}
 
 	async function setPreventDuplicates(on: boolean) {
@@ -559,6 +565,15 @@
 							</p>
 						</div>
 						<Switch checked={boiduOn} onCheckedChange={setBoidu} />
+					</div>
+					<div class="flex items-start justify-between gap-4 border-b py-3">
+						<div class="min-w-0">
+							<div class="font-medium">{t('Romanized lyrics')}</div>
+							<p class="mt-0.5 text-sm text-muted-foreground">
+								{t("Shows a Latin reading under lyrics written in Korean, Chinese, Cyrillic, Hindi or Punjabi script. Worked out on this device, nothing is sent anywhere.")}
+							</p>
+						</div>
+						<Switch checked={romanizeOn} onCheckedChange={setRomanize} />
 					</div>
 					<div class="py-3">
 						<div class="font-medium">{t('Stream clients')}</div>

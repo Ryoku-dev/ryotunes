@@ -63,7 +63,7 @@ fn normalize_ui_setting(key: &str, raw: &str) -> Result<String, String> {
             .then(|| raw.to_owned())
             .ok_or_else(|| "Unknown audio quality.".into()),
         "enable_history" | "discord_rpc" | "close_to_tray" | "autostart" | "autoplay"
-        | "prevent_duplicates" | "lyrics_boidu" | "low_resource_mode" => {
+        | "prevent_duplicates" | "lyrics_boidu" | "lyrics_romanize" | "low_resource_mode" => {
             matches!(raw, "true" | "false")
                 .then(|| raw.to_owned())
                 .ok_or_else(|| format!("{key} must be true or false."))
@@ -424,6 +424,11 @@ pub async fn set_setting(
     // would keep its word timings (and one fetched while off would never gain them) forever.
     if key == "lyrics_boidu" {
         state.db.clear_lyrics_cache();
+    }
+    // Romanization is added on the way out of get_lyrics, so open lyrics views refetch (from the
+    // cache) to show or drop the reading without waiting for the next track.
+    if key == "lyrics_romanize" {
+        state.emit("lyrics-changed", serde_json::json!({}));
     }
     Ok(())
 }
@@ -1787,11 +1792,12 @@ pub async fn get_lyrics(
     if crate::radio::is_radio_id(&video_id) {
         return Ok(None);
     }
-    Ok(crate::lyrics::get_lyrics(
+    let lyrics = crate::lyrics::get_lyrics(
         state.inner(),
         crate::lyrics::LyricsRequest { video_id, title, artists, album, duration },
     )
-    .await)
+    .await;
+    Ok(ryotunes_core::romanize::for_client(state.inner(), lyrics))
 }
 
 /// Open a link from the UI in the real browser. An `<a href>` inside the webview would navigate

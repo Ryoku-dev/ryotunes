@@ -46,11 +46,14 @@ pub struct LyricLine {
     pub words: Option<Vec<LyricWord>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub translation: Option<String>,
+    /// Latin reading of `text` (`romanize.rs`). Only filled on the way to a client, never cached.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub romanized: Option<String>,
 }
 
 impl LyricLine {
     pub fn simple(time_ms: Option<u64>, text: String) -> Self {
-        Self { time_ms, end_time_ms: None, text, words: None, translation: None }
+        Self { time_ms, end_time_ms: None, text, words: None, translation: None, romanized: None }
     }
 }
 
@@ -920,6 +923,7 @@ fn parse_lrc_or_ttml(text: &str) -> Vec<LyricLine> {
                             text: line_text,
                             words: if !words.is_empty() { Some(words) } else { None },
                             translation: None,
+                            romanized: None,
                         });
                     }
                 }
@@ -1019,6 +1023,7 @@ fn parse_ttml_aaml(xml: &str) -> Vec<LyricLine> {
                 text: full_text,
                 words: words_opt,
                 translation: None,
+                romanized: None,
             });
         }
     }
@@ -1328,6 +1333,7 @@ mod tests {
             text: "Hello world".into(),
             words: Some(vec![LyricWord { text: "Hello ".into(), start_ms: 10100, end_ms: 12000 }]),
             translation: Some("Halo dunia".into()),
+            romanized: None,
         }];
         let muxed = lrc_mux(primary, word_source);
         assert_eq!(muxed.len(), 1);

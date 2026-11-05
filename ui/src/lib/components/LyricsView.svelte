@@ -99,6 +99,30 @@
 		void requestLyrics();
 	});
 
+	// Same track, new reading (the romanize setting flipped): swap the lines in place, without the
+	// loading state or the scroll reset a track change brings.
+	async function refreshInPlace() {
+		const now = playback.now;
+		if (!now || now.videoId !== requested || loading) return;
+		const id = now.videoId;
+		const album = playback.queue.items[playback.queue.currentIndex]?.album;
+		try {
+			const l = await api.getLyrics({
+				videoId: id,
+				title: now.title,
+				artists: now.artists,
+				album: album ?? undefined,
+				duration: durationSecs(now.duration)
+			});
+			if (requested === id) lyrics = l;
+		} catch {}
+	}
+
+	$effect(() => {
+		const unlisten = api.onLyricsChanged(() => void refreshInPlace());
+		return () => void unlisten.then((off) => off());
+	});
+
 	$effect(() => {
 		const id = playback.now?.videoId;
 		offsetMs = id ? Number(readOffsets()[id] ?? 0) : 0;
@@ -342,6 +366,11 @@
 					{/if}
 
 					
+					{#if line.romanized}
+						<p class="-mt-0.5 text-sm font-normal leading-snug opacity-70 transition-opacity">
+							{line.romanized}
+						</p>
+					{/if}
 					{#if line.translation}
 						<p class="mt-1 text-sm font-normal italic tracking-wide opacity-80 transition-opacity">
 							{line.translation}
@@ -362,6 +391,9 @@
 				{#if line.text}
 					<div>
 						<p>{line.text}</p>
+						{#if line.romanized}
+							<p class="-mt-0.5 text-xs leading-snug text-muted-foreground">{line.romanized}</p>
+						{/if}
 						{#if line.translation}
 							<p class="text-xs italic text-muted-foreground">{line.translation}</p>
 						{/if}

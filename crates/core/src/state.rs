@@ -65,7 +65,7 @@ pub const TIDAL_CREDENTIALS_KEY: &str = "tidal_credentials";
 /// into the renderer: they'd otherwise ship the login credential out on every open, and the
 /// renderer can't overwrite them either. Lives here so `settings_snapshot`, the Tauri host and the
 /// daemon share one list.
-pub const UI_SETTINGS: [&str; 14] = [
+pub const UI_SETTINGS: [&str; 15] = [
     "volume",
     "proxy",
     "quality",
@@ -78,6 +78,7 @@ pub const UI_SETTINGS: [&str; 14] = [
     "autoplay",
     "prevent_duplicates",
     "lyrics_boidu",
+    "lyrics_romanize",
     "ui_scale",
     "low_resource_mode",
 ];
