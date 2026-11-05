@@ -1797,7 +1797,7 @@ pub async fn get_lyrics(
         crate::lyrics::LyricsRequest { video_id, title, artists, album, duration },
     )
     .await;
-    Ok(ryotunes_core::romanize::for_client(state.inner(), lyrics))
+    Ok(ryotunes_core::romanize::for_client(state.inner(), lyrics).await)
 }
 
 /// Open a link from the UI in the real browser. An `<a href>` inside the webview would navigate
