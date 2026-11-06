@@ -310,6 +310,7 @@ Item {
                     return;
                 }
                 return Daemon.call("create_playlist", { title: transfer.title }).then((id) => {
+                    LibraryEdits.noteCreated(id, transfer.title);
                     var chain = Promise.resolve();
                     var added = 0;
                     for (var i = 0; i < transfer.items.length; i++) {

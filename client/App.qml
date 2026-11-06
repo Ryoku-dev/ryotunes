@@ -92,6 +92,14 @@ Item {
     // One accent sampler per window (Canvas paints only inside a rendering window).
     ArtAccent {}
 
+    // Any route change (title-bar search, its suggestions, Ctrl+K, a menu's go-to-artist, back)
+    // closes the Now Playing stage, which would otherwise cover the page just opened. Clicks onto
+    // the current page change no route; the sidebar raises `navigated` for those.
+    Connections {
+        target: Router
+        function onStackChanged(): void { app.npClose(); }
+    }
+
     Connections {
         target: Playback
         function onNowPlayingRequested(tab: string): void { app.npOpenTab(tab); }
@@ -137,6 +145,7 @@ Item {
                 Layout.fillHeight: true
                 open: app.sidebarOpen
                 onCollapseRequested: app.sidebarOpen = false
+                onNavigated: app.npClose()
             }
 
             // The content area: the single cover Backdrop, a paper glass over it so the bloom reads

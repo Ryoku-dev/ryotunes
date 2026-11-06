@@ -15,7 +15,10 @@ import "../components"
 Item {
     id: page
 
-    property var playlists: []
+    // get_library's answer; `playlists` lays the creates and deletes YouTube has not caught up
+    // with over it (LibraryEdits).
+    property var rawPlaylists: []
+    readonly property var playlists: LibraryEdits.overlay(page.rawPlaylists)
     property var albums: []
     property var artists: []
     property bool loading: true
@@ -99,7 +102,7 @@ Item {
     function load() {
         // Gated: no daemon call, the sign-in card carries the page.
         if (page.spotifyGate) {
-            page.playlists = [];
+            page.rawPlaylists = [];
             page.albums = [];
             page.artists = [];
             page.errorMsg = "";
@@ -113,7 +116,8 @@ Item {
             Daemon.call("get_library_albums").catch(() => []),
             Daemon.call("get_library_artists").catch(() => [])
         ]).then((res) => {
-            page.playlists = res[0] || [];
+            page.rawPlaylists = res[0] || [];
+            LibraryEdits.reconcile(page.rawPlaylists);
             page.albums = res[1] || [];
             page.artists = res[2] || [];
             page.loading = false;
@@ -123,11 +127,16 @@ Item {
         });
     }
 
+    Connections {
+        target: LibraryEdits
+        function onRefreshRequested(): void { page.refreshPlaylists(); }
+    }
+
     function refreshPlaylists() {
         if (page.spotifyGate)
             return;
         Daemon.call("get_library")
-            .then((r) => { page.playlists = r || []; })
+            .then((r) => { page.rawPlaylists = r || []; LibraryEdits.reconcile(page.rawPlaylists); })
             .catch(() => {});
     }
 
@@ -137,7 +146,7 @@ Item {
             return;
         page.creating = true;
         Daemon.call("create_playlist", { title: title })
-            .then(() => { page.creating = false; page.newName = ""; newDialog.visible = false; page.load(); Playback.toast("Playlist created", "success"); })
+            .then((id) => { LibraryEdits.noteCreated(id, title); page.creating = false; page.newName = ""; newDialog.visible = false; page.load(); Playback.toast("Playlist created", "success"); })
             .catch((e) => { page.creating = false; Playback.toast((e && e.message) ? e.message : "Could not create", "error"); });
     }
 
@@ -156,6 +165,7 @@ Item {
                 if (!transfer || !transfer.items || !transfer.items.length)
                     return;
                 return Daemon.call("create_playlist", { title: transfer.title }).then((id) => {
+                    LibraryEdits.noteCreated(id, transfer.title);
                     var chain = Promise.resolve();
                     for (var i = 0; i < transfer.items.length; i++) {
                         (function (song) {
