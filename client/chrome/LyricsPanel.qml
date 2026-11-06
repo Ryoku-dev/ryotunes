@@ -94,6 +94,31 @@ Item {
     // --- auto-follow / manual scroll --------------------------------------------------------
     property bool manualScroll: false
     property bool hasScrolled: false
+    // Fresh lines still owe their first jump to the active line. They land while the list is
+    // hidden behind the loading state, and the layout gives it a height only a pass later; a
+    // follow before that centres in a zero-high view and stays at the top until the next line.
+    // The height and the real line heights then settle over a few passes, so the view re-centres
+    // on each change for a short while (landSettle) before normal following takes over.
+    property bool landPending: false
+    function land() {
+        if (view.height <= 0 || view.count === 0)
+            return;
+        if (root.landPending) {
+            root.landPending = false;
+            landSettle.restart();
+        } else if (!landSettle.running) {
+            return;
+        }
+        if (root.landing || !root.synced || root.manualScroll || root.activeIndex < 0)
+            return;
+        // follow() can itself change contentHeight; do not re-enter from that signal.
+        root.landing = true;
+        root.follow(root.activeIndex, false);
+        root.landing = false;
+        root.hasScrolled = true;
+    }
+    property bool landing: false
+    Timer { id: landSettle; interval: 400 }
 
     function fmtOffset(ms) {
         if (!ms)
@@ -138,6 +163,8 @@ Item {
             root.loading = false;
             root.hasScrolled = false;
             root.manualScroll = false;
+            root.landPending = true;
+            root.land();
             if (root.stale)
                 root.refreshInPlace();
         }).catch(() => {
@@ -257,6 +284,10 @@ Item {
         }
     }
     onActiveIndexChanged: {
+        if (root.landPending || landSettle.running) {
+            root.land();
+            return;
+        }
         if (root.manualScroll || root.activeIndex < 0)
             return;
         root.follow(root.activeIndex, root.hasScrolled);
@@ -272,6 +303,7 @@ Item {
         }
     }
     function pauseFollow() {
+        landSettle.stop();
         root.manualScroll = true;
         manualTimer.restart();
     }
@@ -313,6 +345,9 @@ Item {
             model: (root.lyrics && root.lyrics.lines) ? root.lyrics.lines : []
 
             onMovementStarted: root.pauseFollow()
+            onHeightChanged: root.land()
+            onCountChanged: root.land()
+            onContentHeightChanged: root.land()
 
             delegate: Item {
                 id: lineWrap
