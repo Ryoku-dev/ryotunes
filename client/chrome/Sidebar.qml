@@ -5,6 +5,7 @@ import Ryoku.Ui as RU
 import Ryoku.Ui.Singletons
 import "../"
 import "../components"
+import "../lib/ids.js" as Ids
 
 // The navigation rail (spec section 3, eye-candy pass): a bordered brand card (力 tile + RYOTUNES /
 // RYOKU // MUSIC eyebrow + a collapse button), the three route groups (Discover / Collection /
@@ -60,7 +61,7 @@ Rectangle {
                 root.loadPlaylists();
                 Playback.toast("Playlist created", "success");
                 if (id) {
-                    Router.push("playlist", { id: id, title: "New playlist" });
+                    Router.push("playlist", { id: Ids.playlistBrowseId(id), title: "New playlist" });
                     root.navigated();
                 }
             })
