@@ -16,12 +16,15 @@ import "../components"
 // route is read from Router.current; a click routes there. `open` collapses the rail: the layout
 // slot animates to zero while a fixed-width glass body anchored to the right slides off to the left,
 // so the content never reflows mid-slide. The collapse button raises `collapseRequested` (App owns
-// the sidebarOpen truth), the same door the title bar's rail toggle opens.
+// the sidebarOpen truth), the same door the title bar's rail toggle opens. Every row click and a
+// new playlist raise `navigated`, even onto the current page, so App can close the Now Playing stage
+// that would otherwise cover the page the user just picked.
 Rectangle {
     id: root
 
     property bool open: true
     signal collapseRequested()
+    signal navigated()
 
     readonly property string activePage: Router.current ? Router.current.page : "home"
     readonly property string activeTab: (Router.current && Router.current.params && Router.current.params.tab)
@@ -56,7 +59,10 @@ Rectangle {
             .then((id) => {
                 root.loadPlaylists();
                 Playback.toast("Playlist created", "success");
-                if (id) Router.push("playlist", { id: id, title: "New playlist" });
+                if (id) {
+                    Router.push("playlist", { id: id, title: "New playlist" });
+                    root.navigated();
+                }
             })
             .catch((e) => Playback.toast((e && e.message) ? e.message : "Could not create", "error"));
     }
@@ -405,33 +411,33 @@ Rectangle {
 
                     // DISCOVER
                     SectionLabel { num: "01"; label: "DISCOVER"; seal: "聴" }
-                    NavRow { label: "Home"; icon: "home"; kana: "聴"; current: root.activePage === "home"; onActivated: if (root.activePage !== "home") Router.push("home") }
-                    NavRow { label: "Search"; icon: "search"; kana: "探"; current: root.activePage === "search"; onActivated: if (root.activePage !== "search") Router.push("search") }
-                    NavRow { label: "Radio"; icon: "radio"; kana: "波"; current: root.activePage === "radio"; onActivated: if (root.activePage !== "radio") Router.push("radio") }
+                    NavRow { label: "Home"; icon: "home"; kana: "聴"; current: root.activePage === "home"; onActivated: { root.navigated(); if (root.activePage !== "home") Router.push("home"); } }
+                    NavRow { label: "Search"; icon: "search"; kana: "探"; current: root.activePage === "search"; onActivated: { root.navigated(); if (root.activePage !== "search") Router.push("search"); } }
+                    NavRow { label: "Radio"; icon: "radio"; kana: "波"; current: root.activePage === "radio"; onActivated: { root.navigated(); if (root.activePage !== "radio") Router.push("radio"); } }
 
                     // COLLECTION
                     SectionLabel { num: "02"; label: "COLLECTION"; seal: "蔵" }
-                    NavRow { label: "Library"; icon: "library"; kana: "蔵"; current: root.activePage === "library"; onActivated: if (root.activePage !== "library") Router.push("library", { tab: "songs" }) }
+                    NavRow { label: "Library"; icon: "library"; kana: "蔵"; current: root.activePage === "library"; onActivated: { root.navigated(); if (root.activePage !== "library") Router.push("library", { tab: "songs" }); } }
                     ColumnLayout {
                         Layout.fillWidth: true
                         spacing: Style.sp(0.5)
                         visible: root.activePage === "library"
-                        SubRow { label: "Songs"; tab: "songs"; current: root.activeTab === "songs"; onActivated: Router.replace("library", { tab: "songs" }) }
-                        SubRow { label: "Albums"; tab: "albums"; current: root.activeTab === "albums"; onActivated: Router.replace("library", { tab: "albums" }) }
-                        SubRow { label: "Artists"; tab: "artists"; current: root.activeTab === "artists"; onActivated: Router.replace("library", { tab: "artists" }) }
-                        SubRow { label: "Playlists"; tab: "playlists"; current: root.activeTab === "playlists"; onActivated: Router.replace("library", { tab: "playlists" }) }
-                        SubRow { label: "Local"; tab: "local"; current: root.activeTab === "local"; onActivated: Router.replace("library", { tab: "local" }) }
+                        SubRow { label: "Songs"; tab: "songs"; current: root.activeTab === "songs"; onActivated: { root.navigated(); Router.replace("library", { tab: "songs" }); } }
+                        SubRow { label: "Albums"; tab: "albums"; current: root.activeTab === "albums"; onActivated: { root.navigated(); Router.replace("library", { tab: "albums" }); } }
+                        SubRow { label: "Artists"; tab: "artists"; current: root.activeTab === "artists"; onActivated: { root.navigated(); Router.replace("library", { tab: "artists" }); } }
+                        SubRow { label: "Playlists"; tab: "playlists"; current: root.activeTab === "playlists"; onActivated: { root.navigated(); Router.replace("library", { tab: "playlists" }); } }
+                        SubRow { label: "Local"; tab: "local"; current: root.activeTab === "local"; onActivated: { root.navigated(); Router.replace("library", { tab: "local" }); } }
                     }
                     NavRow {
                         label: "Downloads"; icon: "download"; kana: "保"
                         badge: Downloads.activeCount + Downloads.queuedCount
                         current: root.activePage === "downloads"
-                        onActivated: if (root.activePage !== "downloads") Router.push("downloads")
+                        onActivated: { root.navigated(); if (root.activePage !== "downloads") Router.push("downloads"); }
                     }
 
                     // SYSTEM
                     SectionLabel { num: "03"; label: "SYSTEM"; seal: "設" }
-                    NavRow { label: "Settings"; icon: "settings"; kana: "設"; current: root.activePage === "settings"; onActivated: if (root.activePage !== "settings") Router.push("settings") }
+                    NavRow { label: "Settings"; icon: "settings"; kana: "設"; current: root.activePage === "settings"; onActivated: { root.navigated(); if (root.activePage !== "settings") Router.push("settings"); } }
 
                     // PLAYLISTS
                     SectionLabel { num: "04"; label: "PLAYLISTS"; seal: "列" }
@@ -450,6 +456,7 @@ Rectangle {
                             required property var modelData
                             item: plRow.modelData
                             onActivated: {
+                                root.navigated();
                                 if (!plRow.modelData)
                                     return;
                                 Router.push("playlist", { id: plRow.modelData.id, title: plRow.modelData.title });
