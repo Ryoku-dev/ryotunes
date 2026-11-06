@@ -37,8 +37,9 @@ Rectangle {
     property var libPlaylists: []
     readonly property var playlists: {
         var seen = ({}), out = [];
-        for (var i = 0; i < root.libPlaylists.length; i++) {
-            var p = root.libPlaylists[i];
+        var lib = LibraryEdits.overlay(root.libPlaylists);
+        for (var i = 0; i < lib.length; i++) {
+            var p = lib[i];
             if (p && p.id && !seen[p.id]) { seen[p.id] = true; out.push(p); }
         }
         var picks = Personal.picks;
@@ -50,7 +51,10 @@ Rectangle {
     }
     function loadPlaylists() {
         Daemon.call("get_library")
-            .then((r) => { root.libPlaylists = (r || []).filter((i) => i && i.kind === "playlist"); })
+            .then((r) => {
+                root.libPlaylists = (r || []).filter((i) => i && i.kind === "playlist");
+                LibraryEdits.reconcile(root.libPlaylists);
+            })
             .catch(() => { root.libPlaylists = []; });
     }
     // create_playlist exists in crates/ryotunesd/src/methods.rs (returns the new id); make one and
@@ -58,6 +62,7 @@ Rectangle {
     function newPlaylist() {
         Daemon.call("create_playlist", { title: "New playlist" })
             .then((id) => {
+                LibraryEdits.noteCreated(id, "New playlist");
                 root.loadPlaylists();
                 Playback.toast("Playlist created", "success");
                 if (id) {
@@ -68,6 +73,10 @@ Rectangle {
             .catch((e) => Playback.toast((e && e.message) ? e.message : "Could not create", "error"));
     }
     Component.onCompleted: if (Daemon.connected) root.loadPlaylists();
+    Connections {
+        target: LibraryEdits
+        function onRefreshRequested(): void { root.loadPlaylists(); }
+    }
     Connections {
         target: Daemon
         function onSnapshot(snap): void { root.loadPlaylists(); }

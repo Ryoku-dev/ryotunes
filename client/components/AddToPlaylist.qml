@@ -94,6 +94,7 @@ Item {
             return;
         Daemon.call("create_playlist", { title: title })
             .then((id) => {
+                LibraryEdits.noteCreated(id, title);
                 root.showCreate = false;
                 root.createName = "";
                 root.pick({ id: id, title: title });

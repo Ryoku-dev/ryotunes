@@ -257,7 +257,7 @@ Item {
     }
     function doDelete() {
         Daemon.call("delete_playlist", { playlistId: page.playlistId })
-            .then(() => { Playback.toast("Playlist deleted", "success"); Router.pop(); })
+            .then(() => { LibraryEdits.noteDeleted(page.playlistId); Playback.toast("Playlist deleted", "success"); Router.pop(); })
             .catch((e) => Playback.toast((e && e.message) ? e.message : "Could not delete", "error"));
     }
     function share() {
