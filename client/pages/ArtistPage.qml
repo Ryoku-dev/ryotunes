@@ -46,7 +46,9 @@ Item {
     readonly property var scPlaylists: (page.artist && page.artist.playlists) || []
     readonly property var scLikes: (page.artist && page.artist.likes) || []
 
-    onParamsChanged: page.load()
+    // Deferred: the handler can run before the id bindings above see the new params, and would
+    // then reload the page being left. callLater also folds repeat calls into one.
+    onParamsChanged: Qt.callLater(page.load)
     Component.onCompleted: page.load()
 
     function asItem() {

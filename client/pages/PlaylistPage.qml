@@ -56,7 +56,9 @@ Item {
             || (t.album && t.album.toLowerCase().indexOf(q) >= 0)));
     }
 
-    onParamsChanged: page.load()
+    // Deferred: the handler can run before the id bindings above see the new params, and would
+    // then reload the page being left. callLater also folds repeat calls into one.
+    onParamsChanged: Qt.callLater(page.load)
     Component.onCompleted: page.load()
 
     // 80 ms filter debounce (clearing is instant).
