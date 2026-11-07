@@ -337,8 +337,8 @@ export const moveInQueue = (from: number, to: number) =>
 export const playNext = (items: SongItem[], from?: string) =>
 	invoke<void>('play_next', { items, from });
 /**
- * "Add to queue": the tracks go at the *back* of the same block — after everything already queued
- * by hand, ahead of the playing context and anything the app generated behind it.
+ * "Add to queue": the tracks go after the rest of the queued context and earlier manual adds,
+ * before generated autoplay filler.
  * `continuation` is the source page's next-page token — the backend walks the rest of a long
  * playlist into the queue in the background.
  */
