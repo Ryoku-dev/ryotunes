@@ -61,6 +61,8 @@ pub struct PlaybackPing {
 pub enum ResolveError {
     #[error("no client could resolve a playable stream for {0}")]
     AllClientsFailed(String),
+    #[error("network unavailable while resolving {0}")]
+    TransientNetwork(String),
     /// Like [`Self::AllClientsFailed`], but at least one client answered with YouTube's
     /// "confirm you're not a bot" gate — the session has no (fresh) `visitorData`. Not terminal:
     /// `AppState::resolve` re-bootstraps the visitorData and retries once. Never surfaces to a
@@ -76,6 +78,12 @@ pub enum ResolveError {
     /// A local-library file that no longer exists on disk.
     #[error("this file is no longer on your disk: {0}")]
     LocalMissing(String),
+}
+
+impl ResolveError {
+    pub fn is_transient_network(&self) -> bool {
+        matches!(self, Self::TransientNetwork(_))
+    }
 }
 
 /// Client keys that need the `n`-transform applied to their stream URLs. stream selection.
@@ -181,9 +189,16 @@ impl Orchestrator {
         let session_pot = session_pot_owned.as_deref();
 
         // 3. Main request as WEB_REMIX (metadata source even when a fallback wins the stream).
+        let mut transient_network = false;
         let mut main_resp = match main_client {
             Some(c) if !disabled.contains(MAIN_CLIENT) => {
-                self.it.player(c, video_id, playlist_id, sts, session_pot).await.ok()
+                match self.it.player(c, video_id, playlist_id, sts, session_pot).await {
+                    Ok(response) => Some(response),
+                    Err(error) => {
+                        transient_network |= transient_innertube_error(&error);
+                        None
+                    }
+                }
             }
             _ => None,
         };
@@ -199,9 +214,12 @@ impl Orchestrator {
                 let cc_pot = if cc.use_web_po_tokens { session_pot } else { None };
                 let cc_sts = if cc.use_signature_timestamp { sts } else { None };
                 tracing::info!(video_id, "WEB_REMIX age/login-gated → retrying WEB_CREATOR");
-                if let Ok(r) = self.it.player(cc, video_id, playlist_id, cc_sts, cc_pot).await {
-                    main_resp = Some(r);
-                    main_key = "WEB_CREATOR";
+                match self.it.player(cc, video_id, playlist_id, cc_sts, cc_pot).await {
+                    Ok(r) => {
+                        main_resp = Some(r);
+                        main_key = "WEB_CREATOR";
+                    }
+                    Err(e) => transient_network |= transient_innertube_error(&e),
                 }
             }
         }
@@ -256,6 +274,7 @@ impl Orchestrator {
                         continue;
                     }
                     Err(e) => {
+                        transient_network |= transient_innertube_error(&e);
                         tracing::warn!(client = key, error = %e, "player call failed");
                         continue;
                     }
@@ -321,7 +340,18 @@ impl Orchestrator {
             // A privately-owned upload URL is session-bound. A HEAD request can 403 even when
             // mpv's authenticated GET plays correctly, so accepting the first authenticated upload
             // client is safer than rejecting a valid stream based on a non-predictive probe.
-            if is_upload || self.validate_head(&url, client.map(|c| c.user_agent.as_str())).await {
+            let validated = if is_upload {
+                true
+            } else {
+                match self.validate_head(&url, client.map(|c| c.user_agent.as_str())).await {
+                    Ok(valid) => valid,
+                    Err(error) => {
+                        transient_network |= transient_reqwest_error(&error);
+                        false
+                    }
+                }
+            };
+            if validated {
                 return Ok(self.build(
                     video_id,
                     format,
@@ -370,6 +400,9 @@ impl Orchestrator {
         // Privately-owned uploads are visible only to authenticated clients; anonymous rustypipe
         // cannot help and would only add latency before producing a misleading generic error.
         if is_upload {
+            if transient_network {
+                return Err(ResolveError::TransientNetwork(video_id.to_owned()));
+            }
             tracing::warn!(video_id, "no authenticated client could stream this upload");
             return Err(ResolveError::UploadUnavailable(video_id.to_owned()));
         }
@@ -394,6 +427,9 @@ impl Orchestrator {
             }),
             Err(e) => {
                 tracing::error!(video_id, error = %e, "rustypipe fallback failed");
+                if transient_network || transient_fallback_error(&e) {
+                    return Err(ResolveError::TransientNetwork(video_id.to_owned()));
+                }
                 // Surface WHY the chain died when the reason is repairable: every InnerTube
                 // client answered the anti-bot gate and rustypipe found nothing either — our
                 // anonymous session identity (visitorData) is missing or stale, and the caller
@@ -416,7 +452,7 @@ impl Orchestrator {
     }
 
     /// HEAD validation (stream selection §validateStatus). Success = 2xx. False on any error.
-    async fn validate_head(&self, url: &str, ua: Option<&str>) -> bool {
+    async fn validate_head(&self, url: &str, ua: Option<&str>) -> Result<bool, reqwest::Error> {
         // The 10s budget used to live on a client of its own; it is a property of this one
         // probe, not of the app's HTTP.
         let mut req = crate::http::client().head(url).timeout(Duration::from_secs(10));
@@ -426,7 +462,11 @@ impl Orchestrator {
         if let Some(cookie) = self.it.cookie() {
             req = req.header("Cookie", cookie.as_str());
         }
-        matches!(req.send().await, Ok(r) if r.status().is_success())
+        let response = req.send().await?;
+        if response.status().is_server_error() || response.status().as_u16() == 429 {
+            return Err(response.error_for_status().unwrap_err());
+        }
+        Ok(response.status().is_success())
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -518,4 +558,34 @@ fn best_thumbnail(resp: &PlayerResponse) -> Option<String> {
         .and_then(|v| v.thumbnail.as_ref())
         .and_then(|t| t.thumbnails.last())
         .map(|t| t.url.clone())
+}
+
+pub(crate) fn transient_reqwest_error(error: &reqwest::Error) -> bool {
+    error.is_timeout()
+        || error.is_connect()
+        || error.is_request()
+        || error.status().is_some_and(|status| status.is_server_error() || status.as_u16() == 429)
+}
+
+fn transient_innertube_error(error: &innertube::Error) -> bool {
+    matches!(error, innertube::Error::Http(error) if transient_reqwest_error(error))
+}
+
+fn transient_fallback_error(error: &innertube::FallbackError) -> bool {
+    let message = error.to_string().to_ascii_lowercase();
+    ["timeout", "timed out", "connection", "network", "dns", "socket"]
+        .iter()
+        .any(|needle| message.contains(needle))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ResolveError;
+
+    #[test]
+    fn transient_network_failure_is_not_treated_as_unavailable_media() {
+        assert!(ResolveError::TransientNetwork("offline".into()).is_transient_network());
+        assert!(!ResolveError::AllClientsFailed("unavailable track".into()).is_transient_network());
+        assert!(!ResolveError::UploadUnavailable("upload".into()).is_transient_network());
+    }
 }
