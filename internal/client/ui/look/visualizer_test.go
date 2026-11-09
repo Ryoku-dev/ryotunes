@@ -74,7 +74,7 @@ func TestVisualizerSettlesWithoutRequestingFrames(t *testing.T) {
 	}
 }
 
-func TestPlaybackMotionSchedulesAtSixtyFPS(t *testing.T) {
+func TestPlaybackMotionCadence(t *testing.T) {
 	reduced := anim.Reduced()
 	anim.SetReduce(false)
 	defer anim.SetReduce(reduced)
@@ -82,7 +82,7 @@ func TestPlaybackMotionSchedulesAtSixtyFPS(t *testing.T) {
 	roles := palette.Signature(true)
 	theme := NewTheme(roles, libtheme.Comfortable)
 	now := time.Unix(400, 0)
-	assertNextFrame := func(t *testing.T, draw func(layout.Context)) {
+	assertNextFrame := func(t *testing.T, minimum, maximum time.Duration, draw func(layout.Context)) {
 		t.Helper()
 		var operations op.Ops
 		var router input.Router
@@ -97,14 +97,14 @@ func TestPlaybackMotionSchedulesAtSixtyFPS(t *testing.T) {
 		if !ok {
 			t.Fatal("live motion did not request another frame")
 		}
-		if delta := wake.Sub(now); delta < 16*time.Millisecond || delta > 18*time.Millisecond {
-			t.Fatalf("next frame scheduled after %v, want about 16.7ms", delta)
+		if delta := wake.Sub(now); delta < minimum || delta > maximum {
+			t.Fatalf("next frame scheduled after %v, want %v to %v", delta, minimum, maximum)
 		}
 	}
 
 	t.Run("visualizer", func(t *testing.T) {
 		var visualizer Visualizer
-		assertNextFrame(t, func(gtx layout.Context) {
+		assertNextFrame(t, 16*time.Millisecond, 18*time.Millisecond, func(gtx layout.Context) {
 			visualizer.Layout(gtx, theme, []float32{0, .5, 1}, true, VisualizerStyle{
 				Ink: roles.Fg, Bar: 6, Gap: 3, Floor: 2,
 			})
@@ -112,7 +112,15 @@ func TestPlaybackMotionSchedulesAtSixtyFPS(t *testing.T) {
 	})
 	t.Run("wave", func(t *testing.T) {
 		var wave WaveState
-		assertNextFrame(t, func(gtx layout.Context) {
+		wave.ready = true
+		wave.amplitude.Snap(3)
+		assertNextFrame(t, 32*time.Millisecond, 35*time.Millisecond, func(gtx layout.Context) {
+			DrawWave(gtx, theme, &wave, image.Rect(0, 0, 180, 24), .5, roles.Fg, roles.Fg3, 4, 3, 20, true)
+		})
+	})
+	t.Run("wave amplitude", func(t *testing.T) {
+		var wave WaveState
+		assertNextFrame(t, 16*time.Millisecond, 18*time.Millisecond, func(gtx layout.Context) {
 			DrawWave(gtx, theme, &wave, image.Rect(0, 0, 180, 24), .5, roles.Fg, roles.Fg3, 4, 3, 20, true)
 		})
 	})

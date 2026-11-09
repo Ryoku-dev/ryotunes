@@ -19,6 +19,7 @@ import (
 const (
 	wavePeriod                  = 1200 * time.Millisecond
 	playbackMotionFrameInterval = time.Second / 60
+	wavePhaseFrameInterval      = time.Second / 30
 )
 
 // WaveState retains the wave amplitude and phase between frames.
@@ -174,8 +175,13 @@ func DrawWave(gtx layout.Context, th *Theme, state *WaveState, rect image.Rectan
 	} else {
 		state.phaseAt = time.Time{}
 	}
-	if phaseMoving || state.amplitude.Moving() {
-		gtx.Execute(op.InvalidateCmd{At: gtx.Now.Add(playbackMotionFrameInterval)})
+	amplitudeMoving := state.amplitude.Moving()
+	if phaseMoving || amplitudeMoving {
+		interval := wavePhaseFrameInterval
+		if amplitudeMoving {
+			interval = playbackMotionFrameInterval
+		}
+		gtx.Execute(op.InvalidateCmd{At: gtx.Now.Add(interval)})
 	}
 
 	fraction = clampFraction(fraction)

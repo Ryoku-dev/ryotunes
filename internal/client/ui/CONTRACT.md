@@ -328,8 +328,9 @@ changes debounce 80 ms into `set_audio_fx`; a quiet "Reset" plaque at the end.
 next. A wave progress (2 thick) across the bar's top edge shows progress in
 `Src.Ink`. Tapping the art or text opens the now playing view.
 
-Progress drawing: while the wave moves, the bar asks for its next frame 1/60 s
-ahead. When the wave is flat (paused, reduced motion, wave turned off) it asks
+Progress drawing: while the wave travels it asks for its next frame 1/30 s ahead
+(1/60 s while its amplitude eases in or out; a visible visualizer drives 60 a
+second anyway). When the wave is flat (paused, reduced motion, wave turned off) it asks
 for its next frame only when the fill would move by one pixel
 (`duration / trackPx`, at least 250 ms) and when the elapsed second changes.
 Paused or hidden, it asks for none.
