@@ -74,6 +74,7 @@ type Sidebar struct {
 	loaded                bool
 	loading               bool
 	loadedProvider        model.Provider
+	loadedSignedIn        bool
 	libraryRev            uint64
 	request               uint64
 }
@@ -119,12 +120,20 @@ func (sidebar *Sidebar) refresh(e *env.Env, snapshot state.State) {
 	if sidebar.loading {
 		return
 	}
-	sidebar.loading = true
+	signedIn := providerSignedIn(snapshot, snapshot.Provider)
 	sidebar.loaded = true
 	sidebar.loadedProvider = snapshot.Provider
+	sidebar.loadedSignedIn = signedIn
 	sidebar.libraryRev = snapshot.LibraryRevision
 	sidebar.request++
 	sidebar.likedCountFromLibrary = false
+	if !signedIn {
+		// signed out there is no library to load, and Home already offers sign in
+		sidebar.playlists = sidebar.playlists[:0]
+		sidebar.likedCount = 0
+		return
+	}
+	sidebar.loading = true
 	request := sidebar.request
 	pending := 1
 	likedID := sidebarLikedPlaylist(snapshot.Provider)
@@ -741,7 +750,8 @@ func (sidebar *Sidebar) Layout(gtx layout.Context, e *env.Env, class look.Class,
 	}
 	sidebar.initialize()
 	snapshot := e.Store.Snapshot()
-	if !sidebar.loaded || sidebar.loadedProvider != snapshot.Provider || sidebar.libraryRev != snapshot.LibraryRevision {
+	if !sidebar.loaded || sidebar.loadedProvider != snapshot.Provider || sidebar.libraryRev != snapshot.LibraryRevision ||
+		sidebar.loadedSignedIn != providerSignedIn(snapshot, snapshot.Provider) {
 		sidebar.refresh(e, snapshot)
 	}
 	return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
