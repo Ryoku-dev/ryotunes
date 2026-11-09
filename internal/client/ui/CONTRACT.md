@@ -1,4 +1,4 @@
-# Client UI contract, v2
+# Client UI contract, v3
 
 Ryotunes is a music player. Its window is laid out like one: navigation on the
 left, the music you browse in the middle, what plays next on the right, and the
@@ -91,39 +91,68 @@ client preferences. No hex value appears outside `look/brand.go`.
 | stone3 | hover plane of tiles and rows; field and track backgrounds |
 | stone4 | popovers, menus, sheets, the card play plate |
 | sel / onSel | where you are: current nav row, selected row, active tab blade, a toggle that is on (shuffle, repeat, open panel) |
-| gold / onGold | play. The player bar's play/pause is the window's standing gold action; a page may spend one more gold on the action that plays it (hero Play, top search result Play). Nothing else is gold: not radio, not download, not navigation. |
-| goldInk | line plaques that accompany a gold action |
+| gold / onGold | play. The theme points these roles at the **accent** (below), so every gold plaque is the colour of the music. The player bar's play/pause is the window's standing gold action; a page may spend one more gold on the action that plays it (hero Play, top search result Play). Nothing else is gold: not radio, not download, not navigation. |
+| goldInk | line plaques that accompany a gold action (the accent's ink) |
 | jade lapis amber jasper | state, always with a shape and a word: downloading (lapis), saved (jade), paused (amber), failed (jasper), live stream (jade) |
 | fg fg2 fg3 vein | ink and hairlines |
 
-**Source colour.** The active provider has a brand colour. It is identity,
-not state, so it may stand without a word. `look/brand.go` holds the fixed
-brand fills of YouTube Music, Spotify, SoundCloud and TIDAL and the Ryoku mark
-orange, the same values 1.x used. `look.Theme.Src` carries
-the active provider's colours, tweened over `Motion.Field` (320 ms) when the
-provider changes:
+**Accent.** One hue belongs to the music, and everything that means "this is
+playing" or "play" wears it: the play plaques, the progress wave, the
+visualizer, the playing row, liked hearts, the sung lyric words and the header
+fields. `look.Theme.Accent` carries it:
 
-- `Src.Fill` the brand colour, for planes;
-- `Src.Ink` the brand re-toned along HSL lightness to 4.5:1 on stone2 (the
-  same rule the library applies to goldInk and jasper), for type, glyphs and
-  fills;
-- `Src.Field` `palette.Mix(R.Stone2, Src.Fill, tokens.AlphaMineral)`, the
+- `Accent.Fill` the face of a gold plaque; `Accent.On` the ink on it
+  (`palette.InkOn(Fill)`);
+- `Accent.Ink` the fill re-toned along HSL lightness to 4.5:1 on stone2
+  (lighter in dark mode, darker in light), for type, glyphs, the wave, the
+  visualizer and hearts;
+- `Accent.Field` `palette.Mix(R.Stone2, Accent.Fill, tokens.AlphaMineral)`, the
   header field plane.
 
-Where the source colour shows (and nowhere else):
+The theme writes Fill, On and Ink into `R.Gold`, `R.OnGold` and `R.GoldInk`
+every frame, so library gold plaques follow without a wrapper. Where the accent
+comes from is the **Accent colour** preference (`ClientPreferences.Accent`):
 
-1. the provider switcher's active cell (field plate, 1 dp `Src.Ink` hairline at
-   alpha .55, glyph in `Src.Ink`);
-2. the header field behind every page title and hero, and behind the now
-   playing view;
-3. the progress fill of the seek scrubber while playing (fg2 while paused);
-4. a liked heart (filled, `Src.Ink`);
-5. the playing track: its title and index glyph in track tables, the queue's
-   now-playing row, the sidebar row of the collection that is playing;
-6. the active lyric line's sung words.
+1. **Album art** (default). The loaded track's cover, sampled off the frame
+   goroutine by the art cache: a 24 × 24 downsample, pixels with alpha under
+   128 or saturation under .12 skipped, colours bucketed by 3 bits per
+   channel, each pixel scoring `saturation × (1 − |max − .65|)`, the bucket
+   with the best total wins and its average is the sample (1.x's rule). The
+   sample keeps its hue; saturation is clamped to .55–.85 and lightness set to
+   .70 in dark mode and .42 in light, so it reads on every stone. A cover that
+   is still loading keeps the previous accent; a track without a cover, a grey
+   cover (no bucket) or nothing loaded uses the desktop accent.
+2. **Source.** The active provider's brand (`look/brand.go`), as v2 did for
+   everything but play.
+3. **Desktop.** The Ryoku palette's gold roles as loaded.
 
-Local files and radio have no brand: when local or radio is the active
-provider the source colour is `R.Lapis` (fill) and its re-toned ink.
+Every accent change (a new track, a provider switch in Source mode, the
+preference itself) tweens all four colours over `Motion.Field` (320) with the
+chisel ease; a palette or mode change snaps. Album, playlist and artist heroes
+tint only their own field (and its visualizer lane) with their own cover's
+sample, tweening in when it arrives; their Play plaque stays the global accent.
+
+**Source colour.** The active provider's brand is identity, not state, so it
+may stand without a word, and since v3 it lives in one place: the provider
+switcher. `look/brand.go` holds the fixed brand fills of YouTube Music,
+Spotify, SoundCloud and TIDAL and the Ryoku mark orange. `look.Theme.Src`
+carries the active provider's `Fill`, `Ink` (re-toned to 4.5:1 on stone2) and
+`Field`, tweened over `Motion.Field` when the provider changes. It draws the
+switcher's active cell (field plate, 1 dp `Src.Ink` hairline at alpha .55,
+glyph in `Src.Ink`), the compact switcher's glyph, and the small provider
+glyph beside the artists in the player bar. Local files and radio have no
+brand: their source colour is `R.Lapis` and its re-toned ink.
+
+**Corners.** Every pane cuts its two top corners by `th.Cut.Large`, and the
+**Corners** preference (`ClientPreferences.Corners`, `CornerDp`) sets it:
+Desktop (the Ryoku window corners: the `rounding` of the first
+`desktop.appOverrides` entry whose `class` matches `ryotunes` with a value of 0
+or more, else `desktop.appearance.rounding`, from
+`$XDG_CONFIG_HOME/ryoku/desktop.json`; 16 when absent; watched while chosen, so
+a change in Ryoku Hub reaches open windows), Square 0, Fine 8, Chisel 16
+(default), Deep 24, or Custom 0–32 in whole dp. `Theme.SetCorner` snaps the
+first value and tweens later ones over `Motion.Select` (240), so the panes
+re-cut in place. Dialogs and empty-state frames share the same cut.
 
 ## Frame geometry (dp)
 
@@ -168,9 +197,9 @@ Crossing into compact closes a docked panel (it would otherwise cover the
 page) and remembers it; crossing back out restores it. A sheet never opens by
 itself on a class change.
 
-Panes cut their two top corners at 16 (`th.Cut.Large`) and keep the bottom
-square. Each pane pushes its own clip. The window minimum is 480 × 560; the
-default is 1280 × 800.
+Panes cut their two top corners by `th.Cut.Large` (the Corners preference,
+16 by default) and keep the bottom square. Each pane pushes its own clip. The
+window minimum is 480 × 560; the default is 1280 × 800.
 
 ### Top bar (chrome/topbar.go)
 
@@ -187,6 +216,13 @@ double click toggles maximise).
   minimise: niri and Hyprland have no minimised state, and Gio cannot read
   the compositor's capabilities to show it only where it works.
 - **Medium:** the mark alone, centred over the 72 rail; the rest as expanded.
+- **Sidebar toggle** (expanded and medium): a small quiet icon plaque 4 left
+  of Back, so toggle, Back and Forward ride the content's left edge together.
+  Its glyph is drawn in `look` (a cut frame with its left column filled while
+  the sidebar is open, hollow while folded) and morphs over `Motion.Notch`.
+  Tip: "Collapse sidebar · Ctrl B", "Expand sidebar · Ctrl B", or in the
+  medium class "Show sidebar · Ctrl B". While the sidebar is folded the word
+  "Ryotunes" fades out and the mark glides to the rail's centre.
 - **Compact:** mark at x 13; a search icon plaque that opens the field across
   the bar (Escape or blur with an empty field closes it); the provider
   switcher collapses to one 40 icon plaque showing the active provider glyph in
@@ -234,16 +270,33 @@ stone1 pane. **Expanded (240):**
 3. The playlist list fills the remaining height and scrolls (look.Scroller).
    Rows are 48 high: cover 36 (cut 3), 13, title `T.Label` `fg` and a caption
    `fg3` ("Playlist", "Album", "Liked songs · 128" with the count in mono).
-   Order: Liked songs (a heart glyph on a `Src.Field` tile), then pins
+   Order: Liked songs (a heart glyph on an `Accent.Field` tile), then pins
    (`state.Personal.Pins`), then library playlists. The open collection's row
    is the sel slab; the playing collection shows a static `volume_up` glyph in
-   `Src.Ink` at the row's right. Right click opens the item menu.
+   `Accent.Ink` at the row's right. Right click opens the item menu.
 4. Settings is a 40 row pinned 13 above the bottom, under a 1 dp vein hairline
    inset 8.
 
 **Medium (72):** the same order with 56 × 48 icon tiles (`look.Tip` carries the
 label), playlist covers 40 (cut 3) centred with tips, the "+" plaque
 centred, Settings at the bottom.
+
+**Folding (expanded class).** The sidebar folds to the 72 rail and back: the
+top bar's sidebar toggle or Ctrl B, remembered in
+`ClientPreferences.SidebarCollapsed` and applied only in the expanded class.
+The pane's width tweens 240 ↔ 72 over `Motion.Unfold` (200) with the chisel
+ease, and everything to its right (content, a docked panel, the top bar's
+toggle, Back, Forward and search) lays out from the tweened width each frame.
+Labels, captions, the Playlists group word and the Downloads count clip at the
+pane edge and fade out over the first half of a fold (in over the second half
+of an unfold); icons and covers glide to their rail places, and the sel slab
+morphs from row to tile with them. Folded, the pane is exactly the medium
+rail. The panel docking rule reads the target width, so a fold never makes a
+docked panel flicker. In the medium class the toggle opens the labelled
+sidebar as a 240 sheet over the content's left edge (stone1, the pane's top
+cuts, entering like a popover with `Motion.MenuIn` and 6 dp travel from the
+left); Escape, an outside press (swallowed), Ctrl B or choosing a destination
+closes it. Compact has no toggle.
 
 **Compact:** no sidebar. `chrome/bottomnav.go` draws a stone1 bar 56 high across
 the full width: Home, Library, Radio, Downloads, Settings in five equal columns,
@@ -260,7 +313,7 @@ stone1, 88 high, x 8 to W-8, top corners cut 16, side insets 21. Three zones:
   album, or the now playing view when there is no album), then 2 below a line
   with the provider glyph 14 in its brand ink, 4, artists `T.Caption` `fg2`
   ellipsis (click opens the first artist) │ 8 │ like (small quiet icon plaque;
-  liked = filled heart in `Src.Ink`) │ 4 │ download (small quiet icon plaque;
+  liked = filled heart in `Accent.Ink`) │ 4 │ download (small quiet icon plaque;
   downloading shows a lapis progress ring and its tip says
   "Downloading 42%"; saved shows `download_done` in jade with the tip "Saved").
   No provider word, no time, no badge in this zone. Local files and radio hide
@@ -328,7 +381,7 @@ changes debounce 80 ms into `set_audio_fx`; a quiet "Reset" plaque at the end.
 **Compact player** (64, stone1, cut 16 top corners, above the bottom nav): art 44
 │ 13 │ title and artist (flexed) │ 8 │ like │ 8 │ play/pause (gold 40) │ 4 │
 next. A wave progress (1.5 thick) across the bar's top edge shows progress in
-`Src.Ink`. Tapping the art or text opens the now playing view.
+`Accent.Ink`. Tapping the art or text opens the now playing view.
 
 Progress drawing: while the wave travels it asks for its next frame 1/30 s ahead
 (1/60 s while its amplitude eases in or out; a visible visualizer drives 60 a
@@ -346,7 +399,7 @@ as a sheet it enters like a popover (`Motion.MenuIn`, 6 dp travel) and closes
 on Escape or an outside press, which it swallows.
 
 - **Queue:** sections with `kit.GroupHeader`: "Now playing" (the current track
-  row: art 40, title `T.Row` in `Src.Ink`, artists, and a caption "From
+  row: art 40, title `T.Row` in `Accent.Ink`, artists, and a caption "From
   <collection>"), "Up next" with its count and a quiet "Clear" plaque, then
   "Autoplay" for the continuation in `fg2`. Rows 56: art 40, title, artists,
   duration `T.Mono` `fg3`; hover reveals a drag grip on the left and a remove
@@ -357,7 +410,7 @@ on Escape or an outside press, which it swallows.
   playlist, Clear. Empty: `kit.Empty` "Nothing queued" / "Play something and
   the next tracks show here."
 - **Lyrics:** synced lines, the active one `T.Section` `fg` with sung words in
-  `Src.Ink`, others `T.Proof` `fg3`, romanized line under each in
+  `Accent.Ink`, others `T.Proof` `fg3`, romanized line under each in
   `T.Caption`. The active line sits one third from the top. Following moves
   the list's anchor (`layout.Position.First`) next to the active line at once,
   so the line is laid out on the first frame, and springs only the remaining
@@ -376,7 +429,7 @@ on Escape or an outside press, which it swallows.
 
 Opened by the player bar's now playing plaque or the compact player. It
 replaces the sidebar, content and panel area with one stone2 pane (x 8 to
-W-8, top corners cut 16) whose whole plane is `Src.Field`. The top bar and
+W-8, top corners cut by `Cut.Large`) whose whole plane is `Accent.Field`. The top bar and
 player bar stay. Escape, Back or the plaque closes it. It enters over
 `Motion.Navigate` (fade, 8 rise).
 
@@ -397,66 +450,122 @@ player bar stay. Escape, Back or the plaque closes it. It enters over
 - Facts appear only when they exist. Never print "Plays -", "Unknown", an
   empty album or a lone provider word.
 - The art crossfades over `Motion.Field` when the track changes.
+- The art is the play and pause control (`widgets.PlayArt`): hovering lays a
+  stone4 plate (cut 6, alpha .9) with the action's glyph over its centre; a
+  click toggles playback, the glyph morphs to the next action and the plate
+  stays 700 ms more so a click without hover still answers. Home's now
+  playing card and the mini share it.
 
 ### Mini window (chrome/mini.go)
 
-Title "Ryotunes Mini", its own window, asked for at 360 × 420 dp times the
-zoom; the niri rule opens it at 360 × 420. A 48 strip on top keeps 24 square
-expand and close controls 12 from the top and right edges, 6 apart. Their icons
-are 16, their cut is 4, their resting plane is clear, hover steps to stone3,
-press follows the plaque recipe, and keyboard focus draws the shared ring.
-Only the strip's blank part drags the window. Then title `T.Row` and artists
-`T.Caption` centred, the seek row, the transport row (13 apart) and a 48
-bottom row (like, lyrics toggle; volume icon and scrubber at the right), 13
-apart with 13 side and bottom insets. The art (cut 7) takes what is left:
-`clamp(availableH - fixedRows, 96, 200)` square, centred. Below 96 the art
-goes and the lyrics toggle with it. The window's content always fits at any
-size the compositor gives and any zoom; nothing is ever cut at an edge.
-Expand returns to the main window (re-creating it if it was closed) and
-closes the mini.
+Title "Ryotunes Mini", its own window, asked for at 520 × 176 dp times the
+zoom; the niri rule opens it at 520 × 176. It is a landscape strip whenever
+its width is at least 1.4 times its height or its height is below the portrait
+layout's 251 dp fixed rows:
+
+- The cover is a square as tall as the window, flush with its top, left and
+  bottom edges (the compositor rounds the window; the art has no cut of its
+  own on those sides and a `Cut.Mid` cut on its top-right corner), drawn by
+  `widgets.PlayArt`.
+- The column to its right has 13 insets (12 at the top for the controls). Row
+  one: title `T.Row` `fg` (one line, ellipsis) and, at its right, the 24 square
+  expand and close controls 6 apart (icons 16, cut 4, clear at rest, stone3 on
+  hover, the plaque press recipe, the shared focus ring). Row two: artists
+  `T.Caption` `fg2`. The rest of the column bottom-aligns: the seek row
+  (elapsed and duration in `T.Mono` `fg3`, the wave scrubber between), 8,
+  then the transport (`widgets.Transport`, 8 apart) at the left and like,
+  lyrics and volume at the right. Volume is the icon plaque (click mutes, the
+  wheel steps ±5, its bubble shows the percentage) plus a 72 scrubber when the
+  column is at least 360 wide.
+- At narrower forced-landscape sizes, the seek and action controls appear only
+  when their complete row fits; the cover remains the play and pause control.
+- Lyrics: the toggle crossfades the title and artists rows into the active
+  synced line (`T.Label` `fg`, sung words in `Accent.Ink`) and the next line
+  (`T.Caption` `fg3`) over `Motion.Field`; the controls stay.
+- Every blank part of the strip drags the window.
+
+A taller window that can fit those fixed rows keeps the v2 portrait layout: a
+48 strip with the controls, title and artists centred, the seek row, the
+transport (13 apart),
+and a 48 bottom row (like, lyrics; volume at the right), with the art taking
+what is left (`clamp(availableH - fixedRows, 96, 200)`, cut 7, centred) and
+going, with the lyrics toggle, below 96. The two layouts crossfade when a
+resize crosses the ratio. The window's content always fits at any size the
+compositor gives and any zoom; nothing is ever cut at an edge. Expand returns
+to the main window (re-creating it if it was closed) and closes the mini.
 
 ### Visualizer (look/visualizer.go, internal/client/spectrum)
 
-Bars that move with the music, carved from the source field. They show only
-while something plays, the visualizer setting is on and motion is not
-reduced or in low resource mode.
+Music made visible, carved from the field it sits on. It shows only while
+something plays, the visualizer setting is on and motion is neither reduced
+nor in low resource mode. **Visualizer style** (`ClientPreferences.Style()`,
+`env.Fx.Style`) chooses how every visualizer draws: Bars (default), Curve,
+Oscilloscope or Vectorscope. Changing it crossfades the old drawing into the
+new over `Motion.Field`.
 
-- **Feed.** `internal/client/spectrum` runs `cava` (the same analyser the
-  Ryoku shell and Ryotunes 1.x use) while a visible visualizer wants it and
-  playback is playing: 64 bands at 60 frames a second, mono, raw ASCII on
-  stdout, `method = pipewire`. Its `source` is the sink the daemon's playback
-  stream links into, found with `pw-dump` (the Stream/Output/Audio node whose
-  `application.process.binary` is `ryotunesd`, then its link's input node),
-  so filter sinks such as Easy Effects still feed it; `auto` when that cannot
-  be found. The process stops within a second of the last visualizer leaving
-  the screen or playback pausing, restarts after 1.2 s if it dies, and gives
-  up until the next play after three failures in 30 s. Without `cava` the
-  bars never show and Settings says why. A frame older than 250 ms counts as
-  silence.
+- **Spectrum feed.** `internal/client/spectrum` runs `cava` (the same analyser
+  the Ryoku shell and Ryotunes 1.x use) while a visible Bars or Curve
+  visualizer wants it and playback is playing: 64 bands at 60 frames a second,
+  mono, raw ASCII on stdout, `method = pipewire`. Its `source` is the sink the
+  daemon's playback stream links into, found with `pw-dump` (the
+  Stream/Output/Audio node whose `application.process.binary` is `ryotunesd`,
+  then its link's input node), so filter sinks such as Easy Effects still feed
+  it; `auto` when that cannot be found. The process stops within a second of
+  the last visualizer leaving the screen or playback pausing, restarts after
+  1.2 s if it dies, and gives up until the next play after three failures in
+  30 s. Without `cava` the spectrum styles never show and Settings says why. A
+  frame older than 250 ms counts as silence.
+- **Sample feed** (`spectrum.Scope`, `env.Scope`). The Oscilloscope and
+  Vectorscope read real stereo samples: `pw-record` capturing the same sink's
+  monitor (`--target <sink>` with `stream.capture.sink = true`), 48 kHz, two
+  channels, f32, raw on stdout, into a ring of 8192 frames. It follows the
+  spectrum feed's lifecycle rules exactly (wanted by a visible scope style
+  while playing, stopped within a second after, the same restart and give-up
+  rules, `Available()` false without `pw-record`), never writes to disk, and
+  only one of the two feeds runs for a given style.
 - **Bars** (`look.Visualizer`). Vertical blades rising from the bottom of
   their lane: square at the bottom, the top-right corner cut at 45° by
   `min(barWidth, height)`. Pitch 12 (bar 9, gap 3) in the now playing band, 9
   (bar 6, gap 3) in headers. The 64 bands are resampled to the bar count.
   Each bar follows its band with a spring that rises fast (ω = 4 / 70 ms) and
   falls slowly (ω = 4 / 220 ms). While playing a bar is at least 2 high, so
-  the lane reads as a floor in a quiet passage. One path, one paint. Ink:
-  `Src.Ink` at alpha .55 in dark mode and .45 in light.
-- **Frames.** While any bar moves the visualizer asks for its next frame 1/60
-  s ahead (60 a second even on faster screens; the feed only wakes a resting
-  visualizer). Paused, the bars fall to nothing and then ask for none; nothing
-  is drawn at rest.
-- **Where.** Page headers (`widgets.Header`, `widgets.Hero`, the Home
-  greeting): a lane along the field's bottom edge, the field's full width,
-  inside the bottom padding (header bottom padding 40, lane 32; compact 24 and
-  18), drawn after the field and before the text, so text never sits on bars.
-  The now playing band as above.
+  the lane reads as a floor in a quiet passage. One path, one paint.
+- **Curve.** The same springs, drawn as one line through the band tops across
+  the lane (monotone cubic, so it never dips under the floor), 2 thick with
+  square ends, and the area under it filled at a third of the line's alpha.
+  One fill and one stroke.
+- **Oscilloscope.** The mono mix `(L + R) / 2` over a 2048-sample window
+  starting at a rising zero crossing (with a little hysteresis) so a steady
+  tone stands still; one point per 2 px; height follows a peak meter that
+  rises at once and falls over 600 ms (floor −40 dB) so quiet passages still
+  read. A 2 thick polyline about the lane's middle, over a 1 dp vein centre
+  line.
+- **Vectorscope.** Each sample plotted at `X = (L − R) / √2`,
+  `Y = (L + R) / √2`: mono stands vertical, wide stereo spreads sideways. In a
+  square slot it sits in a diamond (a square turned 45°, 1 dp vein, with its
+  two axes) and draws at most 768 decimated samples as 1.5 dp squares, the two
+  previous frames kept at alpha .45 and .18 for persistence. In a lane wider
+  than tall it folds `Y` upward into a half diamond 2 × lane height wide,
+  centred. Header lanes are too short for it and draw Bars instead.
+- **Ink.** `Accent.Ink` at alpha .45 in dark mode and .35 in light (lanes on a
+  field), full alpha on the Home card's instrument.
+- **Frames.** While anything moves a visualizer asks for its next frame 1/60
+  s ahead (60 a second even on faster screens; the feeds only wake a resting
+  visualizer). Paused, bars and curve fall to nothing, the scope traces flatten
+  over `Motion.Field`, and then they ask for none; nothing is drawn at rest.
+- **Where.** Page headers (`widgets.Header`, `widgets.Hero`): a lane along the
+  field's bottom edge, the field's full width, inside the bottom padding
+  (header bottom padding 40, lane 32; compact 24 and 18), drawn after the field
+  and before the text, so text never sits on it. The now playing band as
+  above. The Home now playing card's instrument (see Pages); the Home greeting
+  has no lane of its own.
 
 ## Pages
 
 Every page fills its pane. Grids and shelves use the full content width; a
 table spans it; nothing is a narrow column in a wide empty pane except reading
 text (lyrics ≤ 560, empty-state body ≤ 420) and Settings (the Lithic settings
-archetype). The header field (`Src.Field`) sits behind the title or hero and
+archetype). The header field (`Accent.Field`) sits behind the title or hero and
 scrolls with the page.
 
 - **Home:** greeting `T.Sentence` by time of day ("Good evening") and one proof
@@ -473,6 +582,44 @@ scrolls with the page.
   here yet" for an empty answer, and on failure a placard "Could not load
   <chip>" with the selection back on the previous chip. The page consumes the
   filter's change right after laying it out, in the same frame.
+
+  **Now playing card** (`pages/home`). While a track is loaded (playing,
+  paused, loading, or finished but still in the player, exactly when the
+  player bar shows it), the greeting's field grows a card under the proof
+  line, so greeting and card share the accent field and scroll with the page.
+  With nothing loaded there is no card and no placeholder. The card unfolds
+  (its height over `Motion.Unfold`, its contents rising 8 and fading in over
+  `Motion.Navigate`) when a track first loads and folds away when the player
+  empties.
+
+  - A stone1 slab across the content width, 13 padding, its top-left and
+    bottom-right corners cut by `Cut.Mid`.
+  - Content width ≥ 720: art 144 (`widgets.PlayArt`, cut 7) │ 21 │ text column
+    (flexed) │ 21 │ instrument. The text column's top: a state line (a flake
+    and a word: "Playing" with an `Accent.Ink` flake, "Paused" amber, "Loading"
+    lapis; then " · From <collection>" in `fg3`, a link, when the queue names
+    its source), 8, the title `T.Sentence` `fg` (one line, ellipsis; click
+    opens the now playing view), the artists `T.Proof` `fg2` (each a link) and
+    the album `T.Caption` `fg3`. Its bottom: the seek row (mono times and the
+    wave scrubber, at most 420 wide), 8, the act row: `widgets.Transport{Basic:
+    true}` (previous, play in gold 40, next), 21, then like, queue (`PlaqueOn`
+    while the queue panel is open), lyrics (`PlaqueOn` while lyrics are open)
+    and now playing, small quiet icon plaques 4 apart. At the tight edge of
+    this layout, the now playing plaque goes first and then lyrics rather than
+    clipping the act row.
+  - The instrument: `widgets.Visualizer` in a slot as tall as the art and
+    `clamp(cardW × .3, 200, 360)` wide, a square of the art's height for the
+    Vectorscope, on a stone2 plate (cut 6, 1 dp vein); the style's short name
+    ("Bars", "Curve", "Scope", "Stereo") in `T.Mono` `fg3` at its top-left.
+    Clicking it cycles the style and saves it like the Settings row; its tip
+    is "Visualizer: Bars · click to change". With the visualizer off,
+    unavailable or motion reduced, the slot goes and the text column takes
+    the room.
+  - Content width 600–719: art 112, no instrument. Narrower: art 72, title,
+    artists and the gold play plaque only.
+  - A track change crossfades the art (`Motion.Field`), swaps title and
+    artists with an 8 rise (`Motion.Navigate`), and the accent retints the
+    field and the play plaque.
 - **Search results** (`RouteSearch`): "Results for “q”" `T.Section`, 13,
   `kit.Filters` All, Songs, Albums, Artists, Playlists with counts. All: at
   content width ≥ 1000 the top result tile (art 120, name `T.Section`, kind
@@ -508,7 +655,7 @@ scrolls with the page.
   56, name `T.Label`, country and codec/bitrate in mono `fg3`); a field that
   narrows stations by name lives in the filter row (it filters this
   catalogue, it is not search). The playing station shows the `volume_up`
-  glyph in `Src.Ink`.
+  glyph in `Accent.Ink`.
 - **Downloads:** "Downloads" and a sentence ("3 downloading, 120 saved");
   `kit.Filters` All, Active, Saved, Failed with counts; `kit.Tablet` rows with
   art in the tablet's 32 mark, title and artists, claim (lapis Downloading with `kit.BladeProgress`,
@@ -521,6 +668,64 @@ scrolls with the page.
   **Discord rich presence** under Integrations. About carries the Ryoku mark,
   version in mono and a line plaque to Diagnostics.
 - **Diagnostics:** reached from Settings → About only.
+- **Equalizer** (`RouteEqualizer`, from the Sound popover and Settings →
+  Sound): a parametric equalizer of up to 20 bands, after the one the
+  listener asked for (Astra's): a response graph with draggable nodes over a
+  strip of faders. Model, presets, the Equalizer APO format and the response
+  maths live in `internal/model/equalizer.go` and `internal/eq`.
+
+  - Title row: "Equalizer" `T.Section`; at its right a `kit.Toggle` whose word
+    is "On" or "Bypassed", the preset plaque (a line plaque with the preset's
+    name or "Custom" and a chevron, opening a `look.Overlays` `kit.Menu`: the
+    built-ins, a vein, the saved presets, then "Save as preset"), and quiet
+    plaques Import, Export and Reset.
+  - Graph: a stone1 slab (cut 6) `clamp(H × .4, 220, 360)` high. Verticals at
+    20, 50, 100, 200, 500, 1k, 2k, 5k, 10k and 20k Hz (vein; labels `T.Mono`
+    `fg3` under), horizontals at +12, +6, 0, −6 and −12 dB (0 in `fg3`, the
+    rest vein; labels at the left). The summed response (`eq.Curve` over 384
+    log-spaced frequencies) is a 2 thick line in `Accent.Ink` with the area
+    between it and 0 dB filled at alpha .18. Bypassed, the line is `fg3` at .6
+    with no fill and the slab's top-right says "Bypassed" with an amber flake.
+    While playing, the spectrum feed's bands lie behind on the log axis as
+    `fg3` blades at alpha .1.
+  - Nodes: a 12 diamond per band at its frequency and gain (shapes without
+    gain sit on the curve), `Accent.Fill` with a 1.5 stone1 rim; disabled
+    bands are hollow `fg3`; the selected band's node is sel. Hover shows a
+    bubble "1.2 kHz · +3.5 dB · Q 1.40" in mono. Dragging (with a pointer
+    grab) moves frequency on the log axis and gain within ±12; the wheel over
+    a node or the selected band steps Q by ×1.1 a notch (trackpad deltas
+    accumulate); a double click on empty graph adds a peak band there while
+    fewer than 20 exist; right click opens the band's menu: the seven shapes,
+    Enable or Disable, Remove.
+  - Strip (look.HScroller when it overflows): Preamp first (a vertical fader
+    −24 to +12 dB, its value in mono above, "Pre" under), a vein, then a 56
+    column per band: gain in mono above (an en space for shapes without
+    gain), a vertical fader (2 track, a 14 × 3 blade handle; double click
+    resets the gain to 0), the frequency in mono ("1.2k"), a small quiet shape
+    plaque (glyphs drawn in `look`: bell, the two shelves, the two passes,
+    notch, band) that opens the shape menu, and "Q 1.40" in mono that steps
+    with the wheel or a vertical drag. The selected column stands on a sel
+    slab that glides over `Motion.Select`. A last "+" tile adds a peak band in
+    the widest gap; at 20 bands it is disabled with the tip "Twenty bands is
+    the most".
+  - Headroom: when the curve's peak is above 0 dB, an amber claim "May clip"
+    with the proof "Peaks reach +3.2 dB" and a line plaque "Lower preamp" that
+    lowers the preamp by that much. No claim otherwise.
+  - Keys with the graph focused: ← → move the selected band a sixth of an
+    octave, ↑ ↓ change its gain by 0.5 dB (Shift 0.1), [ and ] change Q,
+    Delete removes it, Tab selects the next band.
+  - Edits change a local working copy at once, so the curve never lags the
+    pointer, and reach the daemon as complete `set_equalizer` states at most
+    every 80 ms while dragging and once on release. An `equalizer` event
+    replaces the working copy unless a drag is in flight. Any edit clears the
+    preset name.
+  - Import opens a `kit.Dialog` with a multi-line field ("Paste an AutoEQ or
+    Equalizer APO parametric profile") and an optional "Save as" name;
+    `import_equalizer` applies it and its warnings show in a placard
+    ("Imported 10 bands. Skipped 1 line."). Export copies the Equalizer APO
+    text to the clipboard (placard "Copied the profile"). Save as preset asks
+    for a name in a dialog. Choosing a preset tweens every node and the curve
+    to it over `Motion.Field`.
 
 Page states: `widgets.Loading` (kit.Skeleton shaped like the page), `widgets.
 Failed` (kit.Empty with the daemon's message and a Retry line plaque),
@@ -543,7 +748,7 @@ func (t *TrackTable) Row(gtx layout.Context, e *env.Env, items []model.Track, i 
 ```
 
 Rows are `th.RowHeight()` high (56 comfortable, 48 compact). Columns: index
-48 (number at rest; play icon on hover; static `volume_up` in `Src.Ink` when
+48 (number at rest; play icon on hover; static `volume_up` in `Accent.Ink` when
 playing, pause icon when hovering the playing row) │ Title flexed (art 40 when
 `ColArt`, 13, title `T.Row` with an `E` mark for explicit, and the like heart
 inline after the title: shown when liked or hovered) │ Artist 21 % │ Album
@@ -598,6 +803,32 @@ item; clicking the card opens it; right click opens the item menu. Card widths:
 Quick tile: 56 high, stone1, cut 6 on the top-left corner, art 56 flush left,
 13, title `T.Label` two lines; hover steps the plane to stone3 and fades in a
 32 play plate at the right, 12 inset.
+
+Shared playback pieces, one implementation each:
+
+```go
+// Transport: shuffle, previous, play (gold, morphing), next, repeat; Basic keeps
+// previous, play and next. Gap defaults to 13.
+type Transport struct{ Basic bool; Gap unit.Dp }
+func (t *Transport) Layout(gtx layout.Context, e *env.Env, snapshot state.State) layout.Dimensions
+func PlayPlaque(gtx layout.Context, th *look.Theme, plaque *kit.IconPlaque, morph *look.Morph, icon *widget.Icon, description string) layout.Dimensions
+
+// Seek: elapsed, the wave scrubber and the duration; previews while dragging,
+// commits on release and holds until the daemon passes it. Radio shows "Live".
+type Seek struct{}
+func (s *Seek) Layout(gtx layout.Context, e *env.Env, snapshot state.State, track model.Track) layout.Dimensions
+func (s *Seek) Reconcile(gtx layout.Context, e *env.Env, snapshot state.State, trackID string)
+func ProgressFrame(gtx layout.Context, e *env.Env, duration float64, trackPixels int, paused bool)
+func PlaybackDuration(reported float64, value *string) float64
+
+// PlayArt: the loaded track's cover as its play and pause control.
+type PlayArt struct{ View look.ArtView }
+func (p *PlayArt) Layout(gtx layout.Context, e *env.Env, url string, size image.Point, shape look.Shape, fade time.Duration) layout.Dimensions
+
+// Header: Below lays out under the title row inside the field; NoLane drops
+// the visualizer lane.
+type Header struct{ Sentence, NoLane bool; Below layout.Widget }
+```
 
 ## look
 
@@ -697,7 +928,7 @@ func (m *Morph) Layout(gtx layout.Context, th *Theme, icon *widget.Icon, ink col
 type Fill struct{ ... }    // a glyph filling from its centre outward as a clip grows (Motion.Notch): the liked heart
 func (f *Fill) Layout(gtx layout.Context, th *Theme, on bool, off, onW layout.Widget) layout.Dimensions
 func Bubble(gtx layout.Context, th *Theme, at image.Point, text string, alpha float32) // deferred overlay
-func Field(gtx layout.Context, th *Theme, cuts [4]int, body layout.Widget) layout.Dimensions // Src.Field plane
+func Field(gtx layout.Context, th *Theme, cuts [4]int, body layout.Widget) layout.Dimensions // Accent.Field plane
 
 // Overlays places popovers, menus, tips and choices in WINDOW coordinates.
 // The shell owns one instance, lays out the frame, then calls Layout last
@@ -760,7 +991,7 @@ instant.
 | press any plaque | cut deepens 4, content sinks 1 (library) | press 90 |
 | hover a control, row, tile or card | plane or ink fades in, out | hover in 160 / out 100 |
 | play ↔ pause | `look.Morph`: icon scales from .85 and crossfades | notch 200 |
-| like | `look.Fill`: the heart fills from its centre in `Src.Ink`; unliking empties it | notch 200 |
+| like | `look.Fill`: the heart fills from its centre in `Accent.Ink`; unliking empties it | notch 200 |
 | track changes | player-bar art crossfades; title and artists rise 8 and fade in | navigate 200 |
 | track changes in the now playing view | art crossfades | field 320 |
 | hover a scrubber | blade handle and bubble fade in; only the volume track thickens 2 → 3 | hover in / out |
@@ -780,6 +1011,17 @@ instant.
 | shelf arrows | glide one page | wheel 140 |
 | placard | rises 8, blade drains (library) | placard in 300 / life 5000 |
 | now playing view opens / closes | fade with an 8 rise / fade | navigate 200 / hover out 100 |
+| accent changes (new cover, source, preference) | fill, on, ink and field tween together | field 320 |
+| corners preference changes | every pane re-cuts in place | select 240 |
+| sidebar folds / unfolds | width tweens, labels clip and fade, icons glide to the rail | unfold 200 |
+| medium sidebar sheet | slides 6 in from the left and fades / retreats | menu in 160 / out 100 |
+| visualizer style changes | the old drawing crossfades into the new | field 320 |
+| Home now playing card appears / leaves | height unfolds, contents rise 8 / folds | unfold 200, navigate 200 |
+| hover or click the playing art | plate fades in; the glyph morphs; the plate lingers 700 ms after a click | hover in 160, notch 200 |
+| equalizer preset chosen or reset | nodes and curve tween to it | field 320 |
+| equalizer band added / removed | node grows from nothing, its column unfolds / shrinks and collapses | notch 200, unfold 200 |
+| equalizer bypassed / on | curve fades to fg3 and its fill out / back | field 320 |
+| mini resized across landscape and portrait | the two layouts crossfade | field 320 |
 
 Nothing moves at rest: no pulsing, no idle frames. A paused, idle window draws
 zero frames. While music plays, the wave progress and the visible visualizers
@@ -799,7 +1041,12 @@ storage, Diagnostics, About. Rows that were missing in 2.0.0 and come back:
   Off, Connecting, Connected, Discord is not running), then the Discord title
   row and its save action; also reachable from the top-bar quick toggle.
 - Sound: an "Open sound" line plaque (opens the same overlay as the player
-  bar, anchored to that plaque) and the current preset as proof.
+  bar, anchored to that plaque) and the current preset as proof; then
+  **Equalizer**, its state as proof ("On · Bass boost", "On · Custom",
+  "Bypassed") and an "Open equalizer" line plaque. The Sound popover ends with
+  the same row as a click target: the word, the state, and the curve drawn 48
+  high (`look` draws it for both); choosing it opens the page and closes the
+  popover.
 - Local music: the watched folders as rows (path, track count in mono, Rescan,
   Remove) and "Add folder".
 - Playlists: Import a playlist (link or file) and Export the queue.
@@ -814,9 +1061,18 @@ Appearance section offers Colours (Follow Ryoku, Dark, Light), Palette file
 (choose a palette JSON, or none), Density, Motion, UI scale, Low resource
 mode, **Visualizer** (on by default; its detail says "Bars that move with the
 music in page headers and the now playing view" or, without cava, "Install
-cava to see the visualizer" with the toggle disabled) and **Wave progress**
-(on by default). Reduced motion and low resource mode turn both off without
-changing the stored settings.
+cava to see the visualizer" with the toggle disabled), **Visualizer style**
+(`kit.Filters` Bars, Curve, Oscilloscope, Vectorscope, disabled while the
+visualizer is off; without `pw-record` the last two are disabled and the
+detail says "Install pw-record to see the waveform and stereo field"),
+**Wave progress** (on by default), **Accent colour** (`kit.Filters` Album art,
+Source, Desktop; details "The colour of the cover that is playing", "The
+colour of the service you are listening on", "Your Ryoku palette's accent")
+and **Corners** (`kit.Filters` Desktop, Square, Fine, Chisel, Deep, Custom;
+Custom adds a `kit.Slider` 0 to 32 with the value in mono; Desktop's detail
+names what it follows, "Ryoku window corners: 18 dp"). Every change applies
+live with its motion. Reduced motion and low resource mode turn the
+visualizer and the wave off without changing the stored settings.
 
 ## Sign in
 
@@ -851,14 +1107,15 @@ watch; Spotify uses the `spotify-auth` `url` event, and TIDAL's `tidal-auth`
 - Keys: Space play/pause (unless a field has focus), Ctrl ← / → previous /
   next, Alt ← / → back / forward, / and Ctrl K search, Ctrl F filter the
   current list, Ctrl L like, Ctrl R refresh, Ctrl , settings, Ctrl Q quit,
-  F11 full screen, Escape closes the topmost thing: overlay or menu, sheet,
-  search suggestions, now playing view, then nothing.
+  F11 full screen, Ctrl B fold or show the sidebar, Escape closes the topmost
+  thing: overlay or menu, sheet, search suggestions, now playing view, then
+  nothing.
 
 ## Windows and lifetime (shell)
 
 - app id `ryotunes`, title "Ryotunes", min 480 × 560, default 1280 × 800,
   decorations per preference (default: the client draws its own). The niri
-  provider floats `^ryotunes$` at 1280 × 800 and "Ryotunes Mini" at 360 × 420;
+  provider floats `^ryotunes$` at 1280 × 800 and "Ryotunes Mini" at 520 × 176;
   Hyprland already floats `^ryotunes$`.
 - Single instance: the client holds an exclusive `flock` on
   `$XDG_RUNTIME_DIR/ryotunes/client.lock` for its lifetime. A second

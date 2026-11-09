@@ -8,25 +8,48 @@ import (
 	"gioui.org/unit"
 
 	"github.com/ryoku-dev/ryoku/docs/lithic/library/go/palette"
+	"github.com/ryoku-dev/ryotunes/internal/client/state"
 	"github.com/ryoku-dev/ryotunes/internal/client/ui/env"
 	"github.com/ryoku-dev/ryotunes/internal/client/ui/look"
 )
 
-// Visualizer connects a retained visualizer to playback and spectrum state.
+// Visualizer connects a retained visualizer to playback and the selected feed.
 func Visualizer(gtx layout.Context, e *env.Env, v *look.Visualizer, st look.VisualizerStyle) layout.Dimensions {
 	if e == nil || e.Th == nil || v == nil {
 		return layout.Dimensions{}
 	}
-	if !e.Fx.Visualizer || e.Store == nil || e.Spectrum == nil {
-		return v.Layout(gtx, e.Th, nil, false, st)
+	kind := e.Fx.Style
+	playing := false
+	if e.Store != nil {
+		snapshot := e.Store.Snapshot()
+		playing = e.Fx.Visualizer && snapshot.Playback.Now != nil && !snapshot.Playback.Paused
 	}
-	snapshot := e.Store.Snapshot()
-	if snapshot.Playback.Now == nil || snapshot.Playback.Paused {
-		return v.Layout(gtx, e.Th, nil, false, st)
+	switch kind {
+	case state.VisualizerOscilloscope, state.VisualizerVectorscope:
+		var samples []float32
+		live := false
+		if e.Scope != nil {
+			if playing {
+				e.Scope.Want(gtx.Now)
+			}
+			buffer := v.ScopeBuffer()
+			frames, feedLive := e.Scope.Read(buffer)
+			samples = buffer[:frames*2]
+			live = playing && feedLive
+		}
+		return v.Layout(gtx, e.Th, nil, samples, live, kind, st)
+	default:
+		var levels []float32
+		live := false
+		if e.Spectrum != nil {
+			if playing {
+				e.Spectrum.Want(gtx.Now)
+			}
+			levels, live = e.Spectrum.Levels(gtx.Now)
+			live = playing && live
+		}
+		return v.Layout(gtx, e.Th, levels, nil, live, kind, st)
 	}
-	e.Spectrum.Want(gtx.Now)
-	levels, live := e.Spectrum.Levels(gtx.Now)
-	return v.Layout(gtx, e.Th, levels, live, st)
 }
 
 func headerLaneMetrics(class look.Class) (bottom, height unit.Dp) {
@@ -42,10 +65,11 @@ func headerVisualizerStyle(e *env.Env) look.VisualizerStyle {
 		alpha = .45
 	}
 	return look.VisualizerStyle{
-		Ink:   palette.WithAlpha(e.Th.Src.Ink, alpha),
-		Bar:   6,
-		Gap:   3,
-		Floor: 2,
+		Ink:        palette.WithAlpha(e.Th.Accent.Ink, alpha),
+		Bar:        6,
+		Gap:        3,
+		Floor:      2,
+		HeaderLane: true,
 	}
 }
 

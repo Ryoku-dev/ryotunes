@@ -559,7 +559,7 @@ func (lyrics *Lyrics) layoutWords(gtx layout.Context, e *env.Env, style libtheme
 			}
 			ink := e.Th.R.Fg
 			if index <= activeWord {
-				ink = e.Th.Src.Ink
+				ink = e.Th.Accent.Ink
 			}
 			return kit.Text(e.Th.Theme, style, ink, word)(gtx)
 		}))

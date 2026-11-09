@@ -1,7 +1,10 @@
 package shell
 
 import (
+	"image"
 	"testing"
+
+	"gioui.org/layout"
 
 	"github.com/ryoku-dev/ryotunes/internal/client/state"
 	"github.com/ryoku-dev/ryotunes/internal/client/ui/env"
@@ -57,18 +60,94 @@ func TestNavigatorBackClosesNowPlayingFirst(t *testing.T) {
 	}
 }
 
-func TestPanelDockingBoundary(t *testing.T) {
-	if panelDockEligible(955, look.Medium) {
+func TestPanelDockingBoundaryUsesTargetSidebarWidth(t *testing.T) {
+	if panelDockEligible(955, look.Medium, false) {
 		t.Fatal("955 dp medium frame docked below the content minimum")
 	}
-	if !panelDockEligible(956, look.Medium) {
+	if !panelDockEligible(956, look.Medium, false) {
 		t.Fatal("956 dp medium frame did not dock at the exact content minimum")
 	}
-	if panelDockEligible(1280, look.Compact) {
+	if panelDockEligible(1280, look.Compact, false) {
 		t.Fatal("compact frame allowed a docked panel")
 	}
-	if !panelDockEligible(1280, look.Expanded) {
+	if !panelDockEligible(1280, look.Expanded, false) {
 		t.Fatal("expanded default frame did not dock the panel")
+	}
+	if panelDockEligible(1100, look.Expanded, false) {
+		t.Fatal("expanded open target docked below the content minimum")
+	}
+	if !panelDockEligible(1100, look.Expanded, true) {
+		t.Fatal("expanded folded target did not use the rail width")
+	}
+}
+
+func TestNavigatorSidebarToggleFoldsExpandedAndSheetsMedium(t *testing.T) {
+	nav := newNavigator(env.Route{Kind: env.RouteHome}, env.PanelNone, false, nil)
+	nav.setSidebarClass(look.Expanded)
+	nav.ToggleSidebar()
+	if !nav.SidebarCollapsed() || nav.SidebarSheetOpen() {
+		t.Fatal("expanded toggle did not fold only the persistent sidebar")
+	}
+	nav.setSidebarClass(look.Medium)
+	nav.ToggleSidebar()
+	if !nav.SidebarCollapsed() || !nav.SidebarSheetOpen() {
+		t.Fatal("medium toggle changed the fold preference or failed to open the sheet")
+	}
+	nav.ToggleSidebar()
+	if nav.SidebarSheetOpen() {
+		t.Fatal("second medium toggle did not close the sheet")
+	}
+}
+
+func TestMiniSidebarShortcutDoesNotChangePersistentFold(t *testing.T) {
+	nav := newNavigator(env.Route{Kind: env.RouteHome}, env.PanelNone, false, nil)
+	nav.setSidebarClass(look.Expanded)
+	shell := &uiShell{nav: nav, currentMini: true}
+	shell.toggleSidebar(&env.Env{Nav: nav})
+	if nav.SidebarCollapsed() {
+		t.Fatal("mini sidebar shortcut changed the main window fold preference")
+	}
+
+	shell.currentMini = false
+	shell.toggleSidebar(&env.Env{Nav: nav})
+	if !nav.SidebarCollapsed() {
+		t.Fatal("main window sidebar shortcut did not change the fold preference")
+	}
+}
+
+func TestFoldFrameGeometryNeverOverlaps(t *testing.T) {
+	size := image.Pt(1280, 800)
+	const margin, gap, panel = 8, 8, 340
+	for _, progress := range []float32{0, .5, 1} {
+		sidebar := 240 + int(float32(72-240)*progress+.5)
+		rects := resolveFrameRects(size, 56, 696, margin, gap, sidebar, panel)
+		if !rects.Sidebar.Intersect(rects.Content).Empty() || !rects.Content.Intersect(rects.Panel).Empty() {
+			t.Fatalf("progress %.1f overlaps: sidebar=%v content=%v panel=%v", progress, rects.Sidebar, rects.Content, rects.Panel)
+		}
+		if rects.Content.Min.X-rects.Sidebar.Max.X != gap || rects.Panel.Min.X-rects.Content.Max.X != gap {
+			t.Fatalf("progress %.1f gaps = (%d, %d), want %d", progress, rects.Content.Min.X-rects.Sidebar.Max.X, rects.Panel.Min.X-rects.Content.Max.X, gap)
+		}
+		if rects.Content.Dx() < int(look.ContentMinWithPanel) {
+			t.Fatalf("progress %.1f content width = %d, want at least %d", progress, rects.Content.Dx(), int(look.ContentMinWithPanel))
+		}
+	}
+}
+
+func TestEscapeClosesMediumSidebarSheetBeforeOtherSheets(t *testing.T) {
+	nav := newNavigator(env.Route{Kind: env.RouteHome}, env.PanelQueue, false, nil)
+	nav.ToggleNowPlaying()
+	nav.setSidebarClass(look.Medium)
+	nav.ToggleSidebar()
+	shell := &uiShell{nav: nav}
+	e := &env.Env{Nav: nav, Overlays: new(look.Overlays)}
+
+	shell.escape(layout.Context{}, e)
+
+	if nav.SidebarSheetOpen() {
+		t.Fatal("Escape left the medium sidebar sheet open")
+	}
+	if nav.Panel() != env.PanelQueue || !nav.NowPlaying() {
+		t.Fatal("Escape closed content below the medium sidebar sheet")
 	}
 }
 

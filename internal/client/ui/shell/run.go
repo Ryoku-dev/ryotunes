@@ -11,9 +11,7 @@ import (
 
 	gioapp "gioui.org/app"
 
-	"github.com/ryoku-dev/ryoku/docs/lithic/library/go/anim"
 	"github.com/ryoku-dev/ryoku/docs/lithic/library/go/palette"
-	libtheme "github.com/ryoku-dev/ryoku/docs/lithic/library/go/theme"
 	"github.com/ryoku-dev/ryotunes/internal/client/art"
 	"github.com/ryoku-dev/ryotunes/internal/client/conn"
 	"github.com/ryoku-dev/ryotunes/internal/client/spectrum"
@@ -125,6 +123,7 @@ type clientRuntime struct {
 	store    *state.Store
 	art      *art.Cache
 	spectrum *spectrum.Feed
+	scope    *spectrum.Scope
 	hub      invalidationHub
 	themeMu  sync.Mutex
 	theme    *look.Theme
@@ -188,8 +187,10 @@ func startRuntime(options Options) (*clientRuntime, error) {
 	runtime.art = art.New(art.Options{Invalidate: runtime.hub.Invalidate})
 	if options.Demo {
 		runtime.spectrum = spectrum.NewStatic(demo.SpectrumLevels())
+		runtime.scope = spectrum.NewStaticScope(demo.ScopeSamples())
 	} else {
 		runtime.spectrum = spectrum.New(runtime.hub.Invalidate)
+		runtime.scope = spectrum.NewScope(runtime.hub.Invalidate)
 	}
 	snapshot := runtime.store.Snapshot()
 	preferences := snapshot.Client
@@ -220,63 +221,14 @@ func (r *clientRuntime) Close() {
 	if r.spectrum != nil {
 		r.spectrum.Close()
 	}
+	if r.scope != nil {
+		r.scope.Close()
+	}
 	if r.art != nil {
 		r.art.Close()
 	}
 	if r.tempDir != "" {
 		_ = os.RemoveAll(r.tempDir)
-	}
-}
-
-func (r *clientRuntime) modeValue(preferences state.ClientPreferences) string {
-	if r.mode != "" {
-		return r.mode
-	}
-	switch preferences.Appearance {
-	case "dark", "light":
-		return preferences.Appearance
-	default:
-		return "follow"
-	}
-}
-
-func clientDensity(preferences state.ClientPreferences) libtheme.Density {
-	if preferences.Density == "compact" {
-		return libtheme.Compact
-	}
-	return libtheme.Comfortable
-}
-
-func (r *clientRuntime) applyClientTheme(preferences state.ClientPreferences) *look.Theme {
-	appearance, file := r.modeValue(preferences), preferences.PaletteFile
-	var roles *palette.Roles
-	if appearance != r.paletteAppearance || file != r.paletteFile {
-		resolved := look.Roles(appearance, file)
-		roles = &resolved
-	}
-
-	r.themeMu.Lock()
-	if roles != nil {
-		r.theme.SetRoles(*roles)
-		r.paletteAppearance, r.paletteFile = appearance, file
-		r.pendingRoles = nil
-	} else if r.pendingRoles != nil {
-		r.theme.SetRoles(*r.pendingRoles)
-		r.pendingRoles = nil
-	}
-	r.theme.Density = clientDensity(preferences)
-	theme := r.theme
-	r.themeMu.Unlock()
-	anim.SetReduce(preferences.ReduceMotion)
-	return theme
-}
-
-func parseMode(value string) error {
-	switch value {
-	case "", "follow", "dark", "light":
-		return nil
-	default:
-		return fmt.Errorf("invalid palette mode %q: use follow, dark, or light", value)
 	}
 }
 

@@ -56,17 +56,18 @@ type sidebarCollection struct {
 
 // Sidebar owns expanded and medium destination and collection navigation.
 type Sidebar struct {
-	destinations [4]sidebarDestination
-	settings     sidebarDestination
-	add          kit.IconPlaque
-	addTip       look.Tip
-	newPlaylist  widgets.NewPlaylistDialog
-	scroll       look.Scroller
-	rows         map[string]*sidebarCollectionRow
+	destinations         [4]sidebarDestination
+	settings             sidebarDestination
+	add                  kit.IconPlaque
+	addTip               look.Tip
+	newPlaylist          widgets.NewPlaylistDialog
+	newPlaylistRequested bool
+	scroll               look.Scroller
+	rows                 map[string]*sidebarCollectionRow
 
-	destinationSelection anim.Tween
-	collectionSelection  anim.Tween
-
+	destinationSelection  anim.Tween
+	collectionSelection   anim.Tween
+	navigated             bool
 	playlists             []model.BrowseItem
 	likedCount            int
 	likedCountFromLibrary bool
@@ -287,6 +288,30 @@ func sidebarIcon(gtx layout.Context, icon *widget.Icon, ink color.NRGBA, size un
 	return icon.Layout(gtx, ink)
 }
 
+func sidebarAt(gtx layout.Context, rectangle image.Rectangle, widget layout.Widget) layout.Dimensions {
+	if rectangle.Empty() {
+		return layout.Dimensions{}
+	}
+	move := op.Offset(rectangle.Min).Push(gtx.Ops)
+	child := gtx
+	child.Constraints = layout.Exact(rectangle.Size())
+	dimensions := widget(child)
+	move.Pop()
+	return dimensions
+}
+
+func sidebarProgress(value float32) float32 {
+	return min(max(value, 0), 1)
+}
+
+func sidebarLerp(from, to int, progress float32) int {
+	return from + int(float32(to-from)*sidebarProgress(progress)+.5)
+}
+
+func sidebarLabelAlpha(progress float32) float32 {
+	return max(0, 1-2*sidebarProgress(progress))
+}
+
 func sidebarFlake(gtx layout.Context, e *env.Env, size unit.Dp) layout.Dimensions {
 	pixels := gtx.Dp(size)
 	width := max(1, int(float32(pixels)*1.4+0.5))
@@ -317,17 +342,15 @@ func sidebarNavigate(e *env.Env, route env.Route) {
 	e.Nav.Push(route)
 }
 
-func (sidebar *Sidebar) layoutDestination(gtx layout.Context, e *env.Env, destination *sidebarDestination, index, selectedIndex int, class look.Class, snapshot state.State) layout.Dimensions {
+func (sidebar *Sidebar) layoutDestination(gtx layout.Context, e *env.Env, destination *sidebarDestination, index, selectedIndex int, rail float32, snapshot state.State) layout.Dimensions {
 	if destination.click.Clicked(gtx) {
+		sidebar.navigated = true
 		sidebarNavigate(e, env.Route{Kind: destination.kind, Title: destination.label})
 	}
+	rail = sidebarProgress(rail)
 	selected := index == selectedIndex
-	height := gtx.Dp(40)
-	width := gtx.Constraints.Max.X
-	if class == look.Medium {
-		height, width = gtx.Dp(48), gtx.Dp(56)
-	}
-	size := image.Pt(width, height)
+	height := sidebarLerp(gtx.Dp(40), gtx.Dp(48), rail)
+	size := image.Pt(gtx.Constraints.Max.X, height)
 	gtx.Constraints = layout.Exact(size)
 	body := func(gtx layout.Context) layout.Dimensions {
 		return destination.click.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
@@ -340,45 +363,49 @@ func (sidebar *Sidebar) layoutDestination(gtx layout.Context, e *env.Env, destin
 				if selected {
 					ink = e.Th.R.OnSel
 				}
-				if class == look.Medium {
-					dimensions := layout.Center.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-						return sidebarIcon(gtx, destination.icon, ink, 20)
-					})
-					if destination.kind == env.RouteDownloads && snapshot.Downloads.ActiveCount+snapshot.Downloads.QueuedCount > 0 {
-						offset := op.Offset(image.Pt(dimensions.Size.X-gtx.Dp(18), gtx.Dp(6))).Push(gtx.Ops)
-						sidebarFlake(gtx, e, 9)
-						offset.Pop()
-					}
-					return dimensions
-				}
-				return layout.Inset{Left: 13, Right: 13}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-					children := []layout.FlexChild{
-						layout.Rigid(func(gtx layout.Context) layout.Dimensions { return sidebarIcon(gtx, destination.icon, ink, 20) }),
-						layout.Rigid(layout.Spacer{Width: unit.Dp(13)}.Layout),
-						layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-							gtx.Constraints.Min.Y = 0
-							return layout.W.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-								return kit.Label{Style: e.Th.T.Label, Color: ink, MaxLines: 1}.Layout(gtx, e.Th.Theme, destination.label)
-							})
-						}),
-					}
-					if destination.kind == env.RouteDownloads {
-						count := snapshot.Downloads.ActiveCount + snapshot.Downloads.QueuedCount
-						if count > 0 {
-							children = append(children,
-								layout.Rigid(func(gtx layout.Context) layout.Dimensions { return sidebarFlake(gtx, e, 9) }),
-								layout.Rigid(layout.Spacer{Width: unit.Dp(4)}.Layout),
-								layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-									gtx.Constraints.Min.Y = 0
-									return layout.W.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-										return kit.Label{Style: e.Th.T.Mono, Color: e.Th.R.Fg2, MaxLines: 1, Align: text.End}.Layout(gtx, e.Th.Theme, fmt.Sprint(count))
-									})
-								}),
-							)
-						}
-					}
-					return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx, children...)
+				iconSize := gtx.Dp(20)
+				iconX := sidebarLerp(gtx.Dp(13), (size.X-iconSize)/2, rail)
+				sidebarAt(gtx, image.Rect(iconX, (height-iconSize)/2, iconX+iconSize, (height+iconSize)/2), func(gtx layout.Context) layout.Dimensions {
+					return sidebarIcon(gtx, destination.icon, ink, 20)
 				})
+				alpha := sidebarLabelAlpha(rail)
+				if alpha > 0 {
+					labelX := iconX + iconSize + gtx.Dp(13)
+					opacity := paint.PushOpacity(gtx.Ops, alpha)
+					sidebarAt(gtx, image.Rect(labelX, 0, max(labelX, size.X-gtx.Dp(13)), height), func(gtx layout.Context) layout.Dimensions {
+						return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
+							layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+								gtx.Constraints.Min.Y = 0
+								return kit.Label{Style: e.Th.T.Label, Color: ink, MaxLines: 1}.Layout(gtx, e.Th.Theme, destination.label)
+							}),
+						)
+					})
+					opacity.Pop()
+				}
+				if destination.kind == env.RouteDownloads {
+					count := snapshot.Downloads.ActiveCount + snapshot.Downloads.QueuedCount
+					if count > 0 {
+						if alpha > 0 {
+							opacity := paint.PushOpacity(gtx.Ops, alpha)
+							sidebarAt(gtx, image.Rect(max(0, size.X-gtx.Dp(34)), 0, size.X-gtx.Dp(13), height), func(gtx layout.Context) layout.Dimensions {
+								return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
+									layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+										gtx.Constraints.Min.Y = 0
+										return kit.Label{Style: e.Th.T.Mono, Color: e.Th.R.Fg2, MaxLines: 1, Align: text.End}.Layout(gtx, e.Th.Theme, fmt.Sprint(count))
+									}),
+								)
+							})
+							opacity.Pop()
+						}
+						flakeAlpha := max(rail, 1-alpha)
+						opacity := paint.PushOpacity(gtx.Ops, flakeAlpha)
+						sidebarAt(gtx, image.Rect(size.X-gtx.Dp(18), gtx.Dp(6), size.X, height), func(gtx layout.Context) layout.Dimensions {
+							return sidebarFlake(gtx, e, 9)
+						})
+						opacity.Pop()
+					}
+				}
+				return layout.Dimensions{Size: size}
 			})
 			content := record.Stop()
 			area := clip.Rect(image.Rectangle{Max: dimensions.Size}).Push(gtx.Ops)
@@ -398,13 +425,13 @@ func (sidebar *Sidebar) layoutDestination(gtx layout.Context, e *env.Env, destin
 			return dimensions
 		})
 	}
-	if class == look.Medium {
+	if rail >= .999 {
 		return destination.tip.Layout(gtx, e.Th, e.Overlays, destination.label, body)
 	}
 	return body(gtx)
 }
 
-func (sidebar *Sidebar) layoutDestinations(gtx layout.Context, e *env.Env, class look.Class, snapshot state.State) layout.Dimensions {
+func (sidebar *Sidebar) layoutDestinations(gtx layout.Context, e *env.Env, rail float32, snapshot state.State) layout.Dimensions {
 	selected := sidebarDestinationIndex(e.Nav.Current())
 	rowWidth := gtx.Constraints.Max.X - gtx.Dp(16)
 	return layout.Inset{Top: 13, Left: 8, Right: 8}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
@@ -413,7 +440,7 @@ func (sidebar *Sidebar) layoutDestinations(gtx layout.Context, e *env.Env, class
 			index := index
 			children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 				gtx.Constraints.Max.X = rowWidth
-				return sidebar.layoutDestination(gtx, e, &sidebar.destinations[index], index, selected, class, snapshot)
+				return sidebar.layoutDestination(gtx, e, &sidebar.destinations[index], index, selected, rail, snapshot)
 			}))
 			if index+1 < len(sidebar.destinations) {
 				children = append(children, layout.Rigid(layout.Spacer{Height: unit.Dp(4)}.Layout))
@@ -423,28 +450,38 @@ func (sidebar *Sidebar) layoutDestinations(gtx layout.Context, e *env.Env, class
 	})
 }
 
-func (sidebar *Sidebar) layoutGroup(gtx layout.Context, e *env.Env, class look.Class) layout.Dimensions {
+func (sidebar *Sidebar) layoutGroup(gtx layout.Context, e *env.Env, rail float32) layout.Dimensions {
 	if sidebar.add.Clicked(gtx) {
-		sidebar.newPlaylist.Open = true
+		sidebar.newPlaylistRequested = true
 	}
 	sidebar.add.Kind, sidebar.add.Icon, sidebar.add.Description, sidebar.add.Small = kit.PlaqueQuiet, look.Icon.Add, "New playlist", true
-	if class == look.Medium {
-		return layout.Inset{Top: 13, Bottom: 8}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-			return layout.Center.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-				return sidebar.addTip.Layout(gtx, e.Th, e.Overlays, "New playlist", func(gtx layout.Context) layout.Dimensions {
-					return sidebar.add.Layout(gtx, e.Th.Theme)
-				})
+	rail = sidebarProgress(rail)
+	width := gtx.Constraints.Max.X
+	top := sidebarLerp(gtx.Dp(21), gtx.Dp(13), rail)
+	height := top + gtx.Dp(32) + gtx.Dp(8)
+	gtx.Constraints = layout.Exact(image.Pt(width, height))
+	alpha := sidebarLabelAlpha(rail)
+	if alpha > 0 {
+		opacity := paint.PushOpacity(gtx.Ops, alpha)
+		sidebarAt(gtx, image.Rect(gtx.Dp(21), top, max(gtx.Dp(21), width-gtx.Dp(48)), top+gtx.Dp(32)), func(gtx layout.Context) layout.Dimensions {
+			return layout.W.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+				return kit.Label{Style: e.Th.T.Group, Color: e.Th.R.Fg3, MaxLines: 1}.Layout(gtx, e.Th.Theme, "Playlists")
 			})
 		})
+		opacity.Pop()
 	}
-	return layout.Inset{Top: 21, Left: 21, Right: 8, Bottom: 8}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-		return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
-			layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-				return kit.Label{Style: e.Th.T.Group, Color: e.Th.R.Fg3, MaxLines: 1}.Layout(gtx, e.Th.Theme, "Playlists")
-			}),
-			layout.Rigid(func(gtx layout.Context) layout.Dimensions { return sidebar.add.Layout(gtx, e.Th.Theme) }),
-		)
+	expandedX := width - gtx.Dp(8) - gtx.Dp(32)
+	railX := (width - gtx.Dp(32)) / 2
+	x := sidebarLerp(expandedX, railX, rail)
+	sidebarAt(gtx, image.Rect(x, top, x+gtx.Dp(32), top+gtx.Dp(32)), func(gtx layout.Context) layout.Dimensions {
+		if rail >= .999 {
+			return sidebar.addTip.Layout(gtx, e.Th, e.Overlays, "New playlist", func(gtx layout.Context) layout.Dimensions {
+				return sidebar.add.Layout(gtx, e.Th.Theme)
+			})
+		}
+		return sidebar.add.Layout(gtx, e.Th.Theme)
 	})
+	return layout.Dimensions{Size: image.Pt(width, height)}
 }
 
 func sidebarItemKey(item sidebarCollection, index int) string {
@@ -529,8 +566,10 @@ func (sidebar *Sidebar) layoutCollectionArt(gtx layout.Context, e *env.Env, row 
 	gtx.Constraints = layout.Exact(image.Pt(size, size))
 	if item.liked {
 		bounds := image.Rectangle{Max: image.Pt(size, size)}
-		kit.FillCut(gtx.Ops, bounds, gtx.Dp(3), e.Th.Src.Field)
-		return layout.Center.Layout(gtx, func(gtx layout.Context) layout.Dimensions { return sidebarIcon(gtx, look.Icon.Heart, e.Th.Src.Ink, 18) })
+		kit.FillCut(gtx.Ops, bounds, gtx.Dp(3), e.Th.Accent.Field)
+		return layout.Center.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+			return sidebarIcon(gtx, look.Icon.Heart, e.Th.Accent.Ink, 18)
+		})
 	}
 	thumbnail := ""
 	if item.card.Thumbnail != nil {
@@ -547,7 +586,7 @@ func (sidebar *Sidebar) openCollectionMenu(e *env.Env, row *sidebarCollectionRow
 	row.menu.OpenAt(e, env.MenuTarget{Card: &card}, e.Overlays.Press())
 }
 
-func (sidebar *Sidebar) layoutCollection(gtx layout.Context, e *env.Env, item sidebarCollection, index, selectedIndex int, class look.Class, snapshot state.State) layout.Dimensions {
+func (sidebar *Sidebar) layoutCollection(gtx layout.Context, e *env.Env, item sidebarCollection, index, selectedIndex int, rail float32, snapshot state.State) layout.Dimensions {
 	key := sidebarItemKey(item, index)
 	row := sidebar.collectionRow(key)
 	if row.click.Clicked(gtx) {
@@ -562,6 +601,7 @@ func (sidebar *Sidebar) layoutCollection(gtx layout.Context, e *env.Env, item si
 			sidebar.openCollectionMenu(e, row, item)
 		}
 	}
+	rail = sidebarProgress(rail)
 	selected := index == selectedIndex
 	playing := sidebarPlaying(snapshot, item)
 	height := gtx.Dp(48)
@@ -571,53 +611,60 @@ func (sidebar *Sidebar) layoutCollection(gtx layout.Context, e *env.Env, item si
 		return row.click.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 			record := op.Record(gtx.Ops)
 			dimensions, hover := row.hover.Layout(gtx, e.Th, func(gtx layout.Context) layout.Dimensions {
-				if class == look.Medium {
-					return layout.Center.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-						return sidebar.layoutCollectionArt(gtx, e, row, item, gtx.Dp(40))
-					})
+				ink := e.Th.R.Fg
+				if selected {
+					ink = e.Th.R.OnSel
 				}
-				return layout.Inset{Left: 8, Right: 8, Top: 6, Bottom: 6}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-					ink := e.Th.R.Fg
-					if selected {
-						ink = e.Th.R.OnSel
-					}
+				if playing {
+					ink = e.Th.Accent.Ink
+				}
+				artSize := sidebarLerp(gtx.Dp(36), gtx.Dp(40), rail)
+				artX := sidebarLerp(gtx.Dp(8), (size.X-artSize)/2, rail)
+				sidebarAt(gtx, image.Rect(artX, (height-artSize)/2, artX+artSize, (height+artSize)/2), func(gtx layout.Context) layout.Dimensions {
+					return sidebar.layoutCollectionArt(gtx, e, row, item, artSize)
+				})
+				alpha := sidebarLabelAlpha(rail)
+				if alpha > 0 {
+					labelX := artX + artSize + gtx.Dp(13)
+					labelRight := size.X - gtx.Dp(8)
 					if playing {
-						ink = e.Th.Src.Ink
+						labelRight -= gtx.Dp(22)
 					}
-					children := []layout.FlexChild{
-						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-							return sidebar.layoutCollectionArt(gtx, e, row, item, gtx.Dp(36))
-						}),
-						layout.Rigid(layout.Spacer{Width: unit.Dp(13)}.Layout),
-						layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+					opacity := paint.PushOpacity(gtx.Ops, alpha)
+					sidebarAt(gtx, image.Rect(labelX, 0, max(labelX, labelRight), height), func(gtx layout.Context) layout.Dimensions {
+						return layout.W.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 							return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
 								layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 									return kit.Label{Style: e.Th.T.Label, Color: ink, MaxLines: 1}.Layout(gtx, e.Th.Theme, item.card.Title)
 								}),
 								layout.Rigid(sidebarCaption(e, item, sidebar.likedCount, selected)),
 							)
-						}),
-					}
+						})
+					})
 					if playing {
-						children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-							return sidebarIcon(gtx, look.Icon.VolumeUp, e.Th.Src.Ink, 18)
-						}))
+						sidebarAt(gtx, image.Rect(size.X-gtx.Dp(26), 0, size.X-gtx.Dp(8), height), func(gtx layout.Context) layout.Dimensions {
+							return layout.Center.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+								return sidebarIcon(gtx, look.Icon.VolumeUp, e.Th.Accent.Ink, 18)
+							})
+						})
 					}
-					return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx, children...)
-				})
+					opacity.Pop()
+				}
+				return layout.Dimensions{Size: size}
 			})
 			content := record.Stop()
 			area := clip.Rect(image.Rectangle{Max: dimensions.Size}).Push(gtx.Ops)
+			inset := sidebarLerp(0, gtx.Dp(8), rail)
 			if selectedIndex >= 0 {
 				sidebar.collectionSelection.Duration = e.Th.Motion.Select
 				sidebar.collectionSelection.Ease = anim.EaseChisel
 				sidebar.collectionSelection.Set(gtx, float32(selectedIndex))
 				at := sidebar.collectionSelection.Value(gtx)
 				y := int(math.Round(float64((at - float32(index)) * float32(height))))
-				kit.FillCut(gtx.Ops, image.Rect(0, y, dimensions.Size.X, y+height), gtx.Dp(6), e.Th.R.Sel)
+				kit.FillCut(gtx.Ops, image.Rect(inset, y, dimensions.Size.X-inset, y+height), gtx.Dp(6), e.Th.R.Sel)
 			}
 			if hover > 0 && !selected {
-				kit.FillCut(gtx.Ops, image.Rectangle{Max: dimensions.Size}, gtx.Dp(6), palette.WithAlpha(e.Th.R.Stone3, hover))
+				kit.FillCut(gtx.Ops, image.Rect(inset, 0, dimensions.Size.X-inset, dimensions.Size.Y), gtx.Dp(6), palette.WithAlpha(e.Th.R.Stone3, hover))
 			}
 			content.Add(gtx.Ops)
 			area.Pop()
@@ -629,13 +676,13 @@ func (sidebar *Sidebar) layoutCollection(gtx layout.Context, e *env.Env, item si
 			return dimensions
 		})
 	}
-	if class == look.Medium {
+	if rail >= .999 {
 		return row.tip.Layout(gtx, e.Th, e.Overlays, item.card.Title, body)
 	}
 	return body(gtx)
 }
 
-func (sidebar *Sidebar) layoutCollections(gtx layout.Context, e *env.Env, class look.Class, snapshot state.State) layout.Dimensions {
+func (sidebar *Sidebar) layoutCollections(gtx layout.Context, e *env.Env, rail float32, snapshot state.State) layout.Dimensions {
 	items := sidebar.collections(snapshot)
 	selected := -1
 	for index, item := range items {
@@ -645,11 +692,11 @@ func (sidebar *Sidebar) layoutCollections(gtx layout.Context, e *env.Env, class 
 		}
 	}
 	return sidebar.scroll.Layout(gtx, e.Th, len(items), func(gtx layout.Context, index int) layout.Dimensions {
-		return sidebar.layoutCollection(gtx, e, items[index], index, selected, class, snapshot)
+		return sidebar.layoutCollection(gtx, e, items[index], index, selected, rail, snapshot)
 	})
 }
 
-func (sidebar *Sidebar) layoutFooter(gtx layout.Context, e *env.Env, class look.Class, snapshot state.State) layout.Dimensions {
+func (sidebar *Sidebar) layoutFooter(gtx layout.Context, e *env.Env, rail float32, snapshot state.State) layout.Dimensions {
 	selected := -1
 	if e.Nav.Current().Kind == env.RouteSettings {
 		selected = 0
@@ -658,13 +705,37 @@ func (sidebar *Sidebar) layoutFooter(gtx layout.Context, e *env.Env, class look.
 		width := gtx.Constraints.Max.X
 		paint.FillShape(gtx.Ops, e.Th.R.Vein, clip.Rect(image.Rect(0, 0, width, max(1, gtx.Dp(1)))).Op())
 		return layout.Inset{Top: 9}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-			return sidebar.layoutDestination(gtx, e, &sidebar.settings, 0, selected, class, snapshot)
+			return sidebar.layoutDestination(gtx, e, &sidebar.settings, 0, selected, rail, snapshot)
 		})
 	})
 }
 
+// ConsumeNavigation reports and clears a destination activation from this view.
+func (sidebar *Sidebar) ConsumeNavigation() bool {
+	navigated := sidebar.navigated
+	sidebar.navigated = false
+	return navigated
+}
+
+// ConsumeNewPlaylistRequest reports and clears an add-plaque activation.
+func (sidebar *Sidebar) ConsumeNewPlaylistRequest() bool {
+	requested := sidebar.newPlaylistRequested
+	sidebar.newPlaylistRequested = false
+	return requested
+}
+
+// OpenNewPlaylistDialog opens the sidebar-owned dialog for window-level layout.
+func (sidebar *Sidebar) OpenNewPlaylistDialog() {
+	sidebar.newPlaylist.Open = true
+}
+
+// LayoutDialogs draws sidebar dialogs once with the window's constraints.
+func (sidebar *Sidebar) LayoutDialogs(gtx layout.Context, e *env.Env) layout.Dimensions {
+	return sidebar.newPlaylist.Layout(gtx, e)
+}
+
 // Layout draws navigation for expanded and medium classes inside the shell-painted pane.
-func (sidebar *Sidebar) Layout(gtx layout.Context, e *env.Env, class look.Class) layout.Dimensions {
+func (sidebar *Sidebar) Layout(gtx layout.Context, e *env.Env, class look.Class, rail float32) layout.Dimensions {
 	if e == nil || e.Th == nil || e.Nav == nil || e.Store == nil || class == look.Compact {
 		return layout.Dimensions{}
 	}
@@ -673,12 +744,10 @@ func (sidebar *Sidebar) Layout(gtx layout.Context, e *env.Env, class look.Class)
 	if !sidebar.loaded || sidebar.loadedProvider != snapshot.Provider || sidebar.libraryRev != snapshot.LibraryRevision {
 		sidebar.refresh(e, snapshot)
 	}
-	dimensions := layout.Flex{Axis: layout.Vertical}.Layout(gtx,
-		layout.Rigid(func(gtx layout.Context) layout.Dimensions { return sidebar.layoutDestinations(gtx, e, class, snapshot) }),
-		layout.Rigid(func(gtx layout.Context) layout.Dimensions { return sidebar.layoutGroup(gtx, e, class) }),
-		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions { return sidebar.layoutCollections(gtx, e, class, snapshot) }),
-		layout.Rigid(func(gtx layout.Context) layout.Dimensions { return sidebar.layoutFooter(gtx, e, class, snapshot) }),
+	return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions { return sidebar.layoutDestinations(gtx, e, rail, snapshot) }),
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions { return sidebar.layoutGroup(gtx, e, rail) }),
+		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions { return sidebar.layoutCollections(gtx, e, rail, snapshot) }),
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions { return sidebar.layoutFooter(gtx, e, rail, snapshot) }),
 	)
-	sidebar.newPlaylist.Layout(gtx, e)
-	return dimensions
 }

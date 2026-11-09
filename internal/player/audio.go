@@ -5,6 +5,7 @@ import (
 	"math"
 	"strings"
 
+	"github.com/ryoku-dev/ryotunes/internal/eq"
 	"github.com/ryoku-dev/ryotunes/internal/model"
 )
 
@@ -41,14 +42,20 @@ func loudnessGain(loudness *float64) *float64 {
 	return &gain
 }
 
-func afChain(gain *float64, fx model.AudioFx) string {
-	chain := make([]string, 0, 5)
+func afChain(gain *float64, fx model.AudioFx, equalizer model.Equalizer) string {
+	chain := make([]string, 0, 6+len(equalizer.Bands))
 	if gain != nil {
 		chain = append(chain, "lavfi=[volume="+formatFloat(*gain)+"dB]")
 	}
 	if fx.Semitones != 0 {
 		pitch := math.Pow(2, float64(fx.Semitones)/12)
 		chain = append(chain, "rubberband=pitch-scale="+formatFloat(pitch))
+	}
+	if equalizer.Enabled {
+		chain = append(chain, "lavfi=[aresample=48000]")
+	}
+	if equalizerChain := eq.Chain(equalizer); equalizerChain != "" {
+		chain = append(chain, equalizerChain)
 	}
 	if fx.Reverb > 0 {
 		chain = append(chain, "lavfi=[aecho=0.8:0.9:40|80|120:"+
@@ -64,6 +71,18 @@ func afChain(gain *float64, fx model.AudioFx) string {
 			formatFloat(1-0.6*fx.Width)+"]")
 	}
 	return strings.Join(chain, ",")
+}
+
+func equalizerAudioEqual(a, b model.Equalizer) bool {
+	if a.Enabled != b.Enabled || a.Preamp != b.Preamp || len(a.Bands) != len(b.Bands) {
+		return false
+	}
+	for index := range a.Bands {
+		if a.Bands[index] != b.Bands[index] {
+			return false
+		}
+	}
+	return true
 }
 
 func perceptualVolume(percent int) float64 {

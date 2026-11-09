@@ -22,6 +22,7 @@ var globalKeyFilters = []event.Filter{
 	key.Filter{Name: "F", Required: key.ModShortcut},
 	key.Filter{Name: "L", Required: key.ModShortcut},
 	key.Filter{Name: "R", Required: key.ModShortcut},
+	key.Filter{Name: "B", Required: key.ModShortcut},
 	key.Filter{Name: ",", Required: key.ModShortcut},
 	key.Filter{Name: "Q", Required: key.ModShortcut},
 	key.Filter{Name: "F11"},
@@ -65,6 +66,8 @@ func (s *uiShell) handleKeys(gtx layout.Context, e *env.Env) {
 			if page, ok := s.page(e.Nav.Current()).(env.Refresher); ok {
 				page.Refresh(e)
 			}
+		case pressed.Name == "B" && pressed.Modifiers == key.ModShortcut:
+			s.toggleSidebar(e)
 		case pressed.Name == "," && pressed.Modifiers == key.ModShortcut:
 			e.Nav.Push(env.Route{Kind: env.RouteSettings, Title: "Settings"})
 		case pressed.Name == "Q" && pressed.Modifiers == key.ModShortcut:
@@ -77,6 +80,13 @@ func (s *uiShell) handleKeys(gtx layout.Context, e *env.Env) {
 	}
 }
 
+func (s *uiShell) toggleSidebar(e *env.Env) {
+	if s.currentMini {
+		return
+	}
+	e.Nav.ToggleSidebar()
+}
+
 func (s *uiShell) escape(gtx layout.Context, e *env.Env) {
 	if s.confirmReq != nil {
 		s.confirm.Dialog.Dismiss(gtx)
@@ -85,6 +95,9 @@ func (s *uiShell) escape(gtx layout.Context, e *env.Env) {
 	}
 	if tag, ok := e.Overlays.Top(); ok {
 		e.Overlays.Close(tag)
+		return
+	}
+	if s.nav.CloseSidebarSheet() {
 		return
 	}
 	if e.Nav.Panel() != env.PanelNone && !s.lastDocked {

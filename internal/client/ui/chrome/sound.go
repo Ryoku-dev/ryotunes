@@ -2,12 +2,14 @@ package chrome
 
 import (
 	"fmt"
+	"image"
 	"math"
 	"strconv"
 	"time"
 
 	"gioui.org/layout"
 	"gioui.org/op"
+	"gioui.org/unit"
 
 	"github.com/ryoku-dev/ryoku/docs/lithic/library/go/kit"
 	"github.com/ryoku-dev/ryotunes/internal/client/ui/env"
@@ -36,6 +38,7 @@ type Sound struct {
 	bass         kit.Slider
 	width        kit.Slider
 	reset        kit.Plaque
+	equalizer    kit.Click
 
 	initialized bool
 	target      model.AudioFx
@@ -48,6 +51,12 @@ type Sound struct {
 func (sound *Sound) Layout(gtx layout.Context, e *env.Env) layout.Dimensions {
 	sound.reconcile(e)
 	sound.configure()
+	if sound.equalizer.Clicked(gtx) {
+		e.Nav.Push(env.Route{Kind: env.RouteEqualizer, Title: "Equalizer"})
+		if tag, ok := e.Overlays.Top(); ok {
+			e.Overlays.Close(tag)
+		}
+	}
 	sound.presets.Labels = soundPresetLabels
 	if index := soundPresetIndex(sound.target); index >= 0 {
 		sound.presets.Selected = index
@@ -100,6 +109,10 @@ func (sound *Sound) Layout(gtx layout.Context, e *env.Env) layout.Dimensions {
 			sound.reset.Small = true
 			return sound.reset.Layout(gtx, e.Th.Theme)
 		}),
+		layout.Rigid(layout.Spacer{Height: 13}.Layout),
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			return sound.layoutEqualizer(gtx, e, e.Store.Snapshot().Equalizer)
+		}),
 	)
 
 	if selected, ok := sound.presets.Changed(); ok && selected >= 0 && selected < len(soundPresets) {
@@ -126,6 +139,41 @@ func (sound *Sound) Layout(gtx layout.Context, e *env.Env) layout.Dimensions {
 		}
 	}
 	return dimensions
+}
+
+func (sound *Sound) layoutEqualizer(gtx layout.Context, e *env.Env, equalizer model.Equalizer) layout.Dimensions {
+	return sound.equalizer.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+		size := image.Pt(gtx.Constraints.Max.X, gtx.Dp(64))
+		size = gtx.Constraints.Constrain(size)
+		if sound.equalizer.Hovered() {
+			kit.FillCut(gtx.Ops, image.Rectangle{Max: size}, gtx.Dp(6), e.Th.R.Stone3)
+		}
+		return layout.Inset{Top: unit.Dp(8), Right: unit.Dp(8), Bottom: unit.Dp(8), Left: unit.Dp(8)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+			return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
+				layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+					return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+						layout.Rigid(kit.Text(e.Th.Theme, e.Th.T.Label, e.Th.R.Fg, "Equalizer")),
+						layout.Rigid(kit.Text(e.Th.Theme, e.Th.T.Caption, e.Th.R.Fg3, equalizerState(equalizer))),
+					)
+				}),
+				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+					gtx.Constraints = layout.Exact(image.Pt(gtx.Dp(120), gtx.Dp(48)))
+					return look.EqualizerPreview(gtx, e.Th, equalizer, 48)
+				}),
+			)
+		})
+	})
+}
+
+func equalizerState(equalizer model.Equalizer) string {
+	if !equalizer.Enabled {
+		return "Bypassed"
+	}
+	preset := equalizer.Preset
+	if preset == "" {
+		preset = "Custom"
+	}
+	return "On · " + preset
 }
 
 func (sound *Sound) configure() {

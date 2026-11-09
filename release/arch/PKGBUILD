@@ -26,7 +26,10 @@ depends=(
   'vulkan-icd-loader'
   'mesa'
 )
-optdepends=('cava: playback visualizer')
+optdepends=(
+  'cava: spectrum visualizer styles (bars and curve)'
+  'pipewire-audio: pw-record for the oscilloscope and vectorscope'
+)
 makedepends=('go' 'vulkan-headers')
 install=ryotunes.install
 options=(!debug)

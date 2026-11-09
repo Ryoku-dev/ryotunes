@@ -2,25 +2,22 @@ package chrome
 
 import (
 	"image"
-	"math"
-	"time"
+	"strconv"
+	"strings"
 
 	"gioui.org/io/system"
 	"gioui.org/layout"
-	"gioui.org/op"
 	"gioui.org/op/clip"
 	"gioui.org/op/paint"
 	"gioui.org/text"
 
 	"github.com/ryoku-dev/ryoku/docs/lithic/library/go/kit"
-	"github.com/ryoku-dev/ryoku/docs/lithic/library/go/palette"
 	"github.com/ryoku-dev/ryotunes/internal/client/state"
 	"github.com/ryoku-dev/ryotunes/internal/client/ui/act"
 	"github.com/ryoku-dev/ryotunes/internal/client/ui/env"
 	"github.com/ryoku-dev/ryotunes/internal/client/ui/look"
 	"github.com/ryoku-dev/ryotunes/internal/client/ui/widgets"
 	"github.com/ryoku-dev/ryotunes/internal/model"
-	"github.com/ryoku-dev/ryotunes/internal/protocol"
 )
 
 // Mini owns the complete Ryotunes Mini window content.
@@ -30,15 +27,31 @@ type Mini struct {
 	close     look.WindowControl
 	closeTip  look.Tip
 
-	artClick   kit.Click
-	art        look.ArtView
-	titleSwap  look.Swap
-	artistSwap look.Swap
-	lyrics     Lyrics
-	showLyrics bool
+	art                 widgets.PlayArt
+	layoutSwap          look.Swap
+	titleSwap           look.Swap
+	artistSwap          look.Swap
+	landscapeTitleSwap  look.Swap
+	landscapeArtistSwap look.Swap
+	lyrics              Lyrics
+	showLyrics          bool
 
-	seek      look.Scrubber
-	transport transport
+	landscapeTrackID     string
+	landscapeTrackKey    string
+	landscapeLyricID     string
+	landscapeLyricIndex  int
+	landscapeLyricKey    string
+	landscapeLyricReady  bool
+	landscapeWordsID     string
+	landscapeWordsLine   int
+	landscapeWordsActive int
+	landscapeWordsReady  bool
+	landscapeWordsAll    string
+	landscapeWordsSung   string
+	landscapeWordsNext   string
+
+	seek      widgets.Seek
+	transport widgets.Transport
 	like      kit.IconPlaque
 	likeFill  look.Fill
 	likeTip   look.Tip
@@ -46,24 +59,67 @@ type Mini struct {
 	lyricsTip look.Tip
 	volume    volumeControl
 
-	trackID      string
-	seekTarget   float64
-	seekOrigin   float64
-	seekUntil    time.Time
-	seekHold     bool
-	seekDragging bool
-
 	pendingAction system.Action
 	hasAction     bool
 }
 
-// Layout renders the 360 by 420 mini player window.
+type miniFit struct {
+	Landscape        bool
+	ArtSide          int
+	ColumnWidth      int
+	ColumnInset      int
+	InnerWidth       int
+	CompactTransport bool
+	ShowSeek         bool
+	ShowTransport    bool
+	ShowLike         bool
+	ShowLyrics       bool
+	ShowVolume       bool
+	VolumeScrubber   int
+}
+
+// Layout renders the responsive mini player window.
 func (mini *Mini) Layout(gtx layout.Context, e *env.Env) layout.Dimensions {
 	size := gtx.Constraints.Max
+	windowClip := clip.Rect(image.Rectangle{Max: size}).Push(gtx.Ops)
 	paint.FillShape(gtx.Ops, e.Th.R.Stone1, clip.Rect(image.Rectangle{Max: size}).Op())
-	snapshot := e.Store.Snapshot()
-	mini.reconcileSeek(gtx, e, snapshot.Playback.Position, playbackTrackID(snapshot.Playback.Now))
 
+	snapshot := e.Store.Snapshot()
+	mini.seek.Reconcile(gtx, e, snapshot, playbackTrackID(snapshot.Playback.Now))
+	layoutKey := "portrait"
+	if miniUsesLandscape(size.X, size.Y, gtx.Dp(251)) {
+		layoutKey = "landscape"
+	}
+	dimensions := mini.layoutSwap.Layout(gtx, e.Th, layoutKey, 0, e.Th.Motion.Field, func(gtx layout.Context, key string) layout.Dimensions {
+		gtx.Constraints = layout.Exact(size)
+		if key == "landscape" {
+			return mini.layoutLandscape(gtx, e, snapshot)
+		}
+		return mini.layoutPortrait(gtx, e, snapshot)
+	})
+
+	if snapshot.Playback.Now != nil {
+		mini.handleTrackActions(gtx, e, snapshot)
+	}
+	if mini.expand.Clicked(gtx) {
+		e.Nav.ToggleMini()
+	}
+	if mini.close.Clicked(gtx) {
+		mini.pendingAction, mini.hasAction = system.ActionClose, true
+	}
+	windowClip.Pop()
+	dimensions.Size = size
+	return dimensions
+}
+
+// WindowAction returns and clears a pending mini window-control action.
+func (mini *Mini) WindowAction() (system.Action, bool) {
+	action, ok := mini.pendingAction, mini.hasAction
+	mini.pendingAction, mini.hasAction = 0, false
+	return action, ok
+}
+
+func (mini *Mini) layoutPortrait(gtx layout.Context, e *env.Env, snapshot state.State) layout.Dimensions {
 	if snapshot.Playback.Now == nil {
 		return layout.Flex{Axis: layout.Vertical, Alignment: layout.Middle}.Layout(gtx,
 			layout.Rigid(func(gtx layout.Context) layout.Dimensions { return mini.layoutStrip(gtx, e) }),
@@ -75,11 +131,11 @@ func (mini *Mini) Layout(gtx layout.Context, e *env.Env) layout.Dimensions {
 
 	const detailsHeight = 40 + 13 + 18 + 13 + 40 + 5 + 48
 	fixed := gtx.Dp(48 + 13 + detailsHeight + 13)
-	stageSide, showStage := fitMiniStage(size.Y-fixed, size.X-2*gtx.Dp(13), gtx.Dp(96), gtx.Dp(200))
+	stageSide, showStage := fitMiniStage(gtx.Constraints.Max.Y-fixed, gtx.Constraints.Max.X-2*gtx.Dp(13), gtx.Dp(96), gtx.Dp(200))
 	if !showStage {
 		mini.showLyrics = false
 	}
-	dimensions := layout.Flex{Axis: layout.Vertical, Alignment: layout.Middle}.Layout(gtx,
+	return layout.Flex{Axis: layout.Vertical, Alignment: layout.Middle}.Layout(gtx,
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions { return mini.layoutStrip(gtx, e) }),
 		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
 			if !showStage {
@@ -95,32 +151,179 @@ func (mini *Mini) Layout(gtx layout.Context, e *env.Env) layout.Dimensions {
 			})
 		}),
 	)
-	if mini.artClick.Clicked(gtx) {
-		e.Nav.ToggleNowPlaying()
-	}
-	return dimensions
 }
 
-// WindowAction returns and clears a pending mini window-control action.
-func (mini *Mini) WindowAction() (system.Action, bool) {
-	action, ok := mini.pendingAction, mini.hasAction
-	mini.pendingAction, mini.hasAction = 0, false
-	return action, ok
+func (mini *Mini) layoutLandscape(gtx layout.Context, e *env.Env, snapshot state.State) layout.Dimensions {
+	size := gtx.Constraints.Max
+	fit := fitMini(
+		size.X, size.Y, gtx.Dp(251), gtx.Dp(13), gtx.Dp(54),
+		gtx.Dp(120), gtx.Dp(112), gtx.Dp(32), gtx.Dp(4),
+		gtx.Dp(360), gtx.Dp(72),
+	)
+	var url string
+	if snapshot.Playback.Now != nil {
+		url = optionalString(snapshot.Playback.Now.Thumbnail)
+	}
+	return layout.Flex{Axis: layout.Horizontal}.Layout(gtx,
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			side := fit.ArtSide
+			gtx.Constraints = layout.Exact(image.Pt(side, side))
+			return mini.art.Layout(
+				gtx, e, url, image.Pt(side, side),
+				look.Shape{Cut: e.Th.Cut.Mid, Corners: [4]bool{false, true, false, false}},
+				e.Th.Motion.Field,
+			)
+		}),
+		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+			columnInset := gtx.Metric.PxToDp(fit.ColumnInset)
+			return layout.Stack{}.Layout(gtx,
+				layout.Expanded(miniMoveArea),
+				layout.Stacked(func(gtx layout.Context) layout.Dimensions {
+					return layout.Inset{Top: 12, Right: columnInset, Bottom: 13, Left: columnInset}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+						return mini.layoutLandscapeColumn(gtx, e, snapshot, fit)
+					})
+				}),
+			)
+		}),
+	)
+}
+
+func (mini *Mini) layoutLandscapeColumn(gtx layout.Context, e *env.Env, snapshot state.State, fit miniFit) layout.Dimensions {
+	title, artists, key := "Nothing playing", "", "empty"
+	track := model.Track{}
+	provider := model.Provider("")
+	if snapshot.Playback.Now != nil {
+		track = trackFromPlayback(snapshot.Playback.Now, e.Store.CurrentTrack())
+		title, artists = track.Title, track.Artists
+		key = mini.landscapeHeadingKey(track.VideoID, false, 0)
+		provider = model.ProviderOf(track.VideoID)
+		if mini.showLyrics && provider != model.ProviderRadio {
+			mini.lyrics.ensure(gtx, e)
+			key = mini.landscapeHeadingKey(track.VideoID, true, mini.lyrics.active)
+		}
+	}
+
+	mini.expand.Icon, mini.expand.Description = look.Icon.Expand, "Expand"
+	mini.close.Icon, mini.close.Description = look.Icon.Close, "Close"
+	mini.transport.Basic = true
+	if fit.CompactTransport {
+		mini.transport.Gap = 4
+	} else {
+		mini.transport.Gap = 8
+	}
+
+	return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+		layout.Rigid(miniFixedHeight(gtx.Dp(24), func(gtx layout.Context) layout.Dimensions {
+			return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
+				layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+					return mini.landscapeTitleSwap.Layout(gtx, e.Th, key, 0, e.Th.Motion.Field, func(gtx layout.Context, swapKey string) layout.Dimensions {
+						return mini.layoutLandscapePrimary(gtx, e, swapKey, title)
+					})
+				}),
+				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+					return mini.expandTip.Layout(gtx, e.Th, e.Overlays, "Expand", func(gtx layout.Context) layout.Dimensions {
+						return mini.expand.Layout(gtx, e.Th)
+					})
+				}),
+				layout.Rigid(layout.Spacer{Width: 6}.Layout),
+				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+					return mini.closeTip.Layout(gtx, e.Th, e.Overlays, "Close", func(gtx layout.Context) layout.Dimensions {
+						return mini.close.Layout(gtx, e.Th)
+					})
+				}),
+			)
+		})),
+		layout.Rigid(layout.Spacer{Height: 2}.Layout),
+		layout.Rigid(miniFixedHeight(gtx.Dp(18), func(gtx layout.Context) layout.Dimensions {
+			return mini.landscapeArtistSwap.Layout(gtx, e.Th, key, 0, e.Th.Motion.Field, func(gtx layout.Context, swapKey string) layout.Dimensions {
+				return mini.layoutLandscapeSecondary(gtx, e, swapKey, artists)
+			})
+		})),
+		layout.Flexed(1, layout.Spacer{}.Layout),
+		layout.Rigid(miniFixedHeight(gtx.Dp(18), func(gtx layout.Context) layout.Dimensions {
+			if !fit.ShowSeek || snapshot.Playback.Now == nil {
+				return layout.Dimensions{}
+			}
+			return mini.seek.Layout(gtx, e, snapshot, track)
+		})),
+		layout.Rigid(layout.Spacer{Height: 8}.Layout),
+		layout.Rigid(miniFixedHeight(gtx.Dp(40), func(gtx layout.Context) layout.Dimensions {
+			return mini.layoutLandscapeActions(gtx, e, snapshot, track, provider, fit)
+		})),
+	)
+}
+
+func (mini *Mini) layoutLandscapePrimary(gtx layout.Context, e *env.Env, key, title string) layout.Dimensions {
+	if index, ok := miniLyricIndex(key); ok {
+		if mini.lyrics.lyrics == nil {
+			return (kit.Label{Style: e.Th.T.Label, Color: e.Th.R.Fg, MaxLines: 1}).Layout(gtx, e.Th.Theme, "Resolving lyrics")
+		}
+		if index < 0 || index >= len(mini.lyrics.lyrics.Lines) {
+			return (kit.Label{Style: e.Th.T.Label, Color: e.Th.R.Fg, MaxLines: 1}).Layout(gtx, e.Th.Theme, "No synced lyrics")
+		}
+		line := mini.lyrics.lyrics.Lines[index]
+		if len(line.Words) > 0 {
+			return mini.layoutMiniLyricWords(gtx, e, index, line.Words)
+		}
+		return (kit.Label{Style: e.Th.T.Label, Color: e.Th.R.Fg, MaxLines: 1}).Layout(gtx, e.Th.Theme, strings.TrimSpace(line.Text))
+	}
+	return (kit.Label{Style: e.Th.T.Row, Color: e.Th.R.Fg, MaxLines: 1}).Layout(gtx, e.Th.Theme, title)
+}
+
+func (mini *Mini) layoutLandscapeSecondary(gtx layout.Context, e *env.Env, key, artists string) layout.Dimensions {
+	if index, ok := miniLyricIndex(key); ok {
+		if mini.lyrics.lyrics == nil || index+1 < 0 || index+1 >= len(mini.lyrics.lyrics.Lines) {
+			return layout.Dimensions{}
+		}
+		next := strings.TrimSpace(mini.lyrics.lyrics.Lines[index+1].Text)
+		return (kit.Label{Style: e.Th.T.Caption, Color: e.Th.R.Fg3, MaxLines: 1}).Layout(gtx, e.Th.Theme, next)
+	}
+	return (kit.Label{Style: e.Th.T.Caption, Color: e.Th.R.Fg2, MaxLines: 1}).Layout(gtx, e.Th.Theme, artists)
+}
+
+func (mini *Mini) layoutMiniLyricWords(gtx layout.Context, e *env.Env, lineIndex int, words []model.LyricsWord) layout.Dimensions {
+	active := activeLyricWord(words, mini.lyrics.positionMS(gtx, e))
+	if !mini.landscapeWordsReady || mini.landscapeWordsID != mini.lyrics.trackID ||
+		mini.landscapeWordsLine != lineIndex || mini.landscapeWordsActive != active {
+		mini.landscapeWordsID = mini.lyrics.trackID
+		mini.landscapeWordsLine = lineIndex
+		mini.landscapeWordsActive = active
+		mini.landscapeWordsReady = true
+		mini.landscapeWordsAll = lyricWordsText(words)
+		mini.landscapeWordsSung = ""
+		mini.landscapeWordsNext = mini.landscapeWordsAll
+		if active >= len(words)-1 {
+			mini.landscapeWordsSung = mini.landscapeWordsAll
+			mini.landscapeWordsNext = ""
+		} else if active >= 0 {
+			mini.landscapeWordsSung = lyricWordsText(words[:active+1]) + " "
+			mini.landscapeWordsNext = lyricWordsText(words[active+1:])
+		}
+	}
+	if mini.landscapeWordsSung == "" {
+		return (kit.Label{Style: e.Th.T.Label, Color: e.Th.R.Fg, MaxLines: 1}).Layout(gtx, e.Th.Theme, mini.landscapeWordsAll)
+	}
+	if mini.landscapeWordsNext == "" {
+		return (kit.Label{Style: e.Th.T.Label, Color: e.Th.Accent.Ink, MaxLines: 1}).Layout(gtx, e.Th.Theme, mini.landscapeWordsAll)
+	}
+	total := max(1, len(mini.landscapeWordsSung)+len(mini.landscapeWordsNext))
+	return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Baseline}.Layout(gtx,
+		layout.Flexed(float32(len(mini.landscapeWordsSung))/float32(total), func(gtx layout.Context) layout.Dimensions {
+			return (kit.Label{Style: e.Th.T.Label, Color: e.Th.Accent.Ink, MaxLines: 1}).Layout(gtx, e.Th.Theme, mini.landscapeWordsSung)
+		}),
+		layout.Flexed(float32(len(mini.landscapeWordsNext))/float32(total), func(gtx layout.Context) layout.Dimensions {
+			return (kit.Label{Style: e.Th.T.Label, Color: e.Th.R.Fg, MaxLines: 1}).Layout(gtx, e.Th.Theme, mini.landscapeWordsNext)
+		}),
+	)
 }
 
 func (mini *Mini) layoutStrip(gtx layout.Context, e *env.Env) layout.Dimensions {
 	gtx.Constraints.Min.Y, gtx.Constraints.Max.Y = gtx.Dp(48), gtx.Dp(48)
 	mini.expand.Icon, mini.expand.Description = look.Icon.Expand, "Expand"
 	mini.close.Icon, mini.close.Description = look.Icon.Close, "Close"
-	dimensions := layout.Inset{Left: 12, Right: 12}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+	return layout.Inset{Left: 12, Right: 12}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 		return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
-			layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-				size := gtx.Constraints.Max
-				area := clip.Rect(image.Rectangle{Max: size}).Push(gtx.Ops)
-				system.ActionInputOp(system.ActionMove).Add(gtx.Ops)
-				area.Pop()
-				return layout.Dimensions{Size: size}
-			}),
+			layout.Flexed(1, miniMoveArea),
 			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 				return mini.expandTip.Layout(gtx, e.Th, e.Overlays, "Expand", func(gtx layout.Context) layout.Dimensions {
 					return mini.expand.Layout(gtx, e.Th)
@@ -134,13 +337,14 @@ func (mini *Mini) layoutStrip(gtx layout.Context, e *env.Env) layout.Dimensions 
 			}),
 		)
 	})
-	if mini.expand.Clicked(gtx) {
-		e.Nav.ToggleMini()
-	}
-	if mini.close.Clicked(gtx) {
-		mini.pendingAction, mini.hasAction = system.ActionClose, true
-	}
-	return dimensions
+}
+
+func miniMoveArea(gtx layout.Context) layout.Dimensions {
+	size := gtx.Constraints.Max
+	area := clip.Rect(image.Rectangle{Max: size}).Push(gtx.Ops)
+	system.ActionInputOp(system.ActionMove).Add(gtx.Ops)
+	area.Pop()
+	return layout.Dimensions{Size: size}
 }
 
 func (mini *Mini) layoutStage(gtx layout.Context, e *env.Env, now *model.PlaybackTrack, side int) layout.Dimensions {
@@ -148,9 +352,7 @@ func (mini *Mini) layoutStage(gtx layout.Context, e *env.Env, now *model.Playbac
 	if mini.showLyrics {
 		return mini.lyrics.Layout(gtx, e, LyricsCompact)
 	}
-	return mini.artClick.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-		return mini.art.Layout(gtx, e.Th, e.Art, optionalString(now.Thumbnail), image.Pt(side, side), look.Shape{Cut: 7}, e.Th.Motion.Navigate)
-	})
+	return mini.art.Layout(gtx, e, optionalString(now.Thumbnail), image.Pt(side, side), look.Shape{Cut: 7}, e.Th.Motion.Navigate)
 }
 
 func (mini *Mini) layoutDetails(gtx layout.Context, e *env.Env, snapshot state.State, showStage bool) layout.Dimensions {
@@ -159,6 +361,7 @@ func (mini *Mini) layoutDetails(gtx layout.Context, e *env.Env, snapshot state.S
 	track := trackFromPlayback(now, e.Store.CurrentTrack())
 	provider := model.ProviderOf(track.VideoID)
 	canRate := provider != model.ProviderLocal && provider != model.ProviderRadio
+	mini.transport.Basic, mini.transport.Gap = false, 13
 	return layout.Flex{Axis: layout.Vertical, Alignment: layout.Middle}.Layout(gtx,
 		layout.Rigid(miniFixedHeight(gtx.Dp(40), func(gtx layout.Context) layout.Dimensions {
 			return layout.Flex{Axis: layout.Vertical, Alignment: layout.Middle}.Layout(gtx,
@@ -177,7 +380,7 @@ func (mini *Mini) layoutDetails(gtx layout.Context, e *env.Env, snapshot state.S
 		})),
 		layout.Rigid(layout.Spacer{Height: 13}.Layout),
 		layout.Rigid(miniFixedHeight(gtx.Dp(18), func(gtx layout.Context) layout.Dimensions {
-			return mini.layoutSeek(gtx, e, snapshot, track, provider)
+			return mini.seek.Layout(gtx, e, snapshot, track)
 		})),
 		layout.Rigid(layout.Spacer{Height: 13}.Layout),
 		layout.Rigid(miniFixedHeight(gtx.Dp(40), func(gtx layout.Context) layout.Dimensions {
@@ -185,116 +388,22 @@ func (mini *Mini) layoutDetails(gtx layout.Context, e *env.Env, snapshot state.S
 		})),
 		layout.Rigid(layout.Spacer{Height: 5}.Layout),
 		layout.Rigid(miniFixedHeight(gtx.Dp(48), func(gtx layout.Context) layout.Dimensions {
-			return mini.layoutBottom(gtx, e, snapshot, track, canRate, showStage)
+			return mini.layoutBottom(gtx, e, snapshot, canRate, showStage)
 		})),
 	)
 }
 
-func (mini *Mini) layoutSeek(gtx layout.Context, e *env.Env, snapshot state.State, track model.Track, provider model.Provider) layout.Dimensions {
-	if provider == model.ProviderRadio {
-		return layout.Center.Layout(gtx, kit.Claim(e.Th.Theme, palette.Alive, "Live"))
-	}
-	duration := playbackDisplayDuration(snapshot.Playback.Duration, track.Duration)
-	knownDuration := duration > 0
-	position := 0.0
-	end := "--:--"
-	if knownDuration {
-		position = e.Store.PositionAt(gtx.Now)
-		end = widgets.Duration(duration)
-	}
-	value := float32(0)
-	if knownDuration {
-		value = float32(min(max(position/duration, 0), 1))
-	}
-	return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
-		layout.Rigid(playerTimeBox(e, widgets.Duration(position), text.End)),
-		layout.Rigid(layout.Spacer{Width: 8}.Layout),
-		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-			fill := e.Th.R.Fg2
-			if !snapshot.Playback.Paused {
-				fill = e.Th.Src.Ink
-			}
-			scrubGTX := gtx
-			if !knownDuration {
-				scrubGTX = gtx.Disabled()
-			}
-			dimensions := mini.seek.Layout(scrubGTX, e.Th, value, look.ScrubberStyle{
-				Fill: fill,
-				Bubble: func(fraction float32) string {
-					if !knownDuration {
-						return "--:--"
-					}
-					return widgets.Duration(float64(fraction) * duration)
-				},
-				WheelStep: float32(min(1, 5/max(1, duration))),
-				Wave:      e.Fx.Wave,
-				Live:      !snapshot.Playback.Paused,
-			})
-			if !knownDuration {
-				if mini.seekDragging {
-					e.Store.SetSeekDrag(nil)
-				}
-				mini.seekDragging = false
-				return dimensions
-			}
-			fraction, dragging := mini.seek.Dragging()
-			if dragging {
-				preview := float64(fraction) * duration
-				e.Store.SetSeekDrag(&preview)
-			}
-			committedFraction, committed := mini.seek.Committed()
-			if committed {
-				mini.seekTarget = float64(committedFraction) * duration
-				mini.seekOrigin = snapshot.Playback.Position
-				mini.seekUntil = gtx.Now.Add(seekSafetyTimeout)
-				mini.seekHold = true
-				e.Store.SetSeekDrag(&mini.seekTarget)
-				callVoid(e, protocol.MethodSeek, protocol.SeekParams{Position: mini.seekTarget})
-				gtx.Execute(op.InvalidateCmd{At: mini.seekUntil})
-			} else if mini.seekDragging && !dragging {
-				e.Store.SetSeekDrag(nil)
-			}
-			mini.seekDragging = dragging
-			if !e.Fx.Wave || dragging {
-				mini.requestProgressFrame(gtx, e, duration, dimensions.Size.X, snapshot.Playback.Paused)
-			}
-			return dimensions
-		}),
-		layout.Rigid(layout.Spacer{Width: 8}.Layout),
-		layout.Rigid(playerTimeBox(e, end, text.Start)),
-	)
-}
-
-func (mini *Mini) layoutBottom(gtx layout.Context, e *env.Env, snapshot state.State, track model.Track, canRate, showLyrics bool) layout.Dimensions {
-	mini.lyricsAct.Small, mini.lyricsAct.Icon, mini.lyricsAct.Description = true, look.Icon.Lyrics, "Lyrics"
-	mini.lyricsAct.Kind = kit.PlaqueQuiet
-	if mini.showLyrics {
-		mini.lyricsAct.Kind = kit.PlaqueOn
-	}
+func (mini *Mini) layoutBottom(gtx layout.Context, e *env.Env, snapshot state.State, canRate, showLyrics bool) layout.Dimensions {
 	scrubberWidth := fitMiniScrubber(
 		gtx.Constraints.Max.X, gtx.Dp(32), gtx.Dp(13),
 		gtx.Dp(100), gtx.Dp(72), canRate, showLyrics,
 	)
-	dimensions := layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
+	return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			if !canRate {
 				return layout.Dimensions{}
 			}
-			mini.like.Small, mini.like.Kind, mini.like.Icon, mini.like.Description = true, kit.PlaqueQuiet, nil, "Like"
-			liked := snapshot.Rating == model.RatingLike
-			return mini.likeTip.Layout(gtx, e.Th, e.Overlays, "Like", func(gtx layout.Context) layout.Dimensions {
-				return layout.Stack{Alignment: layout.Center}.Layout(gtx,
-					layout.Stacked(func(gtx layout.Context) layout.Dimensions { return mini.like.Layout(gtx, e.Th.Theme) }),
-					layout.Expanded(func(gtx layout.Context) layout.Dimensions {
-						return layout.Center.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-							return mini.likeFill.Layout(gtx, e.Th, liked,
-								func(gtx layout.Context) layout.Dimensions { return look.Icon.HeartOutline.Layout(gtx, e.Th.R.Fg2) },
-								func(gtx layout.Context) layout.Dimensions { return look.Icon.Heart.Layout(gtx, e.Th.Src.Ink) },
-							)
-						})
-					}),
-				)
-			})
+			return mini.layoutLike(gtx, e, snapshot)
 		}),
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			if !canRate || !showLyrics {
@@ -306,24 +415,187 @@ func (mini *Mini) layoutBottom(gtx layout.Context, e *env.Env, snapshot state.St
 			if !showLyrics {
 				return layout.Dimensions{}
 			}
-			return mini.lyricsTip.Layout(gtx, e.Th, e.Overlays, "Lyrics", func(gtx layout.Context) layout.Dimensions {
-				return mini.lyricsAct.Layout(gtx, e.Th.Theme)
-			})
+			return mini.layoutLyricsAction(gtx, e)
 		}),
 		layout.Flexed(1, layout.Spacer{}.Layout),
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions { return mini.volume.Layout(gtx, e, scrubberWidth) }),
 	)
-	if canRate && mini.like.Clicked(gtx) {
+}
+
+func (mini *Mini) layoutLandscapeActions(gtx layout.Context, e *env.Env, snapshot state.State, track model.Track, provider model.Provider, fit miniFit) layout.Dimensions {
+	canRate := provider != model.ProviderLocal && provider != model.ProviderRadio
+	canLyrics := provider != model.ProviderRadio
+	return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			if !fit.ShowTransport {
+				return layout.Dimensions{}
+			}
+			return mini.transport.Layout(gtx, e, snapshot)
+		}),
+		layout.Flexed(1, layout.Spacer{}.Layout),
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			if !fit.ShowLike || !canRate {
+				return layout.Dimensions{}
+			}
+			return mini.layoutLike(gtx, e, snapshot)
+		}),
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			if !fit.ShowLyrics || !canLyrics {
+				return layout.Dimensions{}
+			}
+			return layout.Inset{Left: 4}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+				return mini.layoutLyricsAction(gtx, e)
+			})
+		}),
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			if !fit.ShowVolume {
+				return layout.Dimensions{}
+			}
+			return layout.Inset{Left: 4}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+				return mini.volume.Layout(gtx, e, fit.VolumeScrubber)
+			})
+		}),
+	)
+}
+
+func (mini *Mini) layoutLike(gtx layout.Context, e *env.Env, snapshot state.State) layout.Dimensions {
+	mini.like.Small, mini.like.Kind, mini.like.Icon, mini.like.Description = true, kit.PlaqueQuiet, nil, "Like"
+	liked := snapshot.Rating == model.RatingLike
+	return mini.likeTip.Layout(gtx, e.Th, e.Overlays, "Like", func(gtx layout.Context) layout.Dimensions {
+		return layout.Stack{Alignment: layout.Center}.Layout(gtx,
+			layout.Stacked(func(gtx layout.Context) layout.Dimensions { return mini.like.Layout(gtx, e.Th.Theme) }),
+			layout.Expanded(func(gtx layout.Context) layout.Dimensions {
+				return layout.Center.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+					return mini.likeFill.Layout(gtx, e.Th, liked,
+						func(gtx layout.Context) layout.Dimensions { return look.Icon.HeartOutline.Layout(gtx, e.Th.R.Fg2) },
+						func(gtx layout.Context) layout.Dimensions { return look.Icon.Heart.Layout(gtx, e.Th.Accent.Ink) },
+					)
+				})
+			}),
+		)
+	})
+}
+
+func (mini *Mini) layoutLyricsAction(gtx layout.Context, e *env.Env) layout.Dimensions {
+	mini.lyricsAct.Small, mini.lyricsAct.Icon, mini.lyricsAct.Description = true, look.Icon.Lyrics, "Lyrics"
+	mini.lyricsAct.Kind = kit.PlaqueQuiet
+	if mini.showLyrics {
+		mini.lyricsAct.Kind = kit.PlaqueOn
+	}
+	return mini.lyricsTip.Layout(gtx, e.Th, e.Overlays, "Lyrics", func(gtx layout.Context) layout.Dimensions {
+		return mini.lyricsAct.Layout(gtx, e.Th.Theme)
+	})
+}
+
+func (mini *Mini) handleTrackActions(gtx layout.Context, e *env.Env, snapshot state.State) {
+	track := trackFromPlayback(snapshot.Playback.Now, e.Store.CurrentTrack())
+	provider := model.ProviderOf(track.VideoID)
+	if provider != model.ProviderLocal && provider != model.ProviderRadio && mini.like.Clicked(gtx) {
 		rating := model.RatingLike
 		if snapshot.Rating == model.RatingLike {
 			rating = model.RatingIndifferent
 		}
 		act.Rate(e, track, rating)
 	}
-	if showLyrics && mini.lyricsAct.Clicked(gtx) {
+	if provider != model.ProviderRadio && mini.lyricsAct.Clicked(gtx) {
 		mini.showLyrics = !mini.showLyrics
 	}
-	return dimensions
+}
+
+func miniUsesLandscape(width, height, portraitMinHeight int) bool {
+	return miniIsLandscape(width, height) || height < portraitMinHeight
+}
+
+func miniIsLandscape(width, height int) bool {
+	return height > 0 && int64(width)*10 >= int64(height)*14
+}
+
+func (mini *Mini) landscapeHeadingKey(trackID string, lyrics bool, lyricIndex int) string {
+	if !lyrics {
+		if mini.landscapeTrackID != trackID {
+			mini.landscapeTrackID = trackID
+			mini.landscapeTrackKey = "track:" + trackID
+		}
+		return mini.landscapeTrackKey
+	}
+	if !mini.landscapeLyricReady || mini.landscapeLyricID != trackID || mini.landscapeLyricIndex != lyricIndex {
+		mini.landscapeLyricID = trackID
+		mini.landscapeLyricIndex = lyricIndex
+		mini.landscapeLyricKey = "lyrics:" + strconv.Itoa(lyricIndex) + ":" + trackID
+		mini.landscapeLyricReady = true
+	}
+	return mini.landscapeLyricKey
+}
+
+func fitMini(width, height, portraitMinHeight, inset, windowControls, transportWide, transportNarrow, plaque, gap, volumeThreshold, volumeWidth int) miniFit {
+	fit := miniFit{Landscape: miniUsesLandscape(width, height, portraitMinHeight)}
+	if !fit.Landscape {
+		return fit
+	}
+	fit.ArtSide = min(max(height, 0), max(width, 0))
+	fit.ColumnWidth = max(0, width-fit.ArtSide)
+	fit.ColumnInset = min(inset, max(0, (fit.ColumnWidth-windowControls)/2))
+	fit.InnerWidth = max(0, fit.ColumnWidth-2*fit.ColumnInset)
+	fit.ShowSeek = fit.InnerWidth >= 3*plaque+gap
+
+	transport := 0
+	switch {
+	case fit.InnerWidth >= transportWide:
+		fit.ShowTransport = true
+		transport = transportWide
+	case fit.InnerWidth >= transportNarrow:
+		fit.ShowTransport = true
+		fit.CompactTransport = true
+		transport = transportNarrow
+	}
+	volumeControlWidth := plaque + gap
+	fit.ShowVolume = fit.InnerWidth >= transport+volumeControlWidth
+	fit.ShowLyrics = fit.ShowVolume && fit.InnerWidth >= transport+plaque+gap+volumeControlWidth
+	fit.ShowLike = fit.ShowLyrics && fit.InnerWidth >= transport+2*plaque+2*gap+volumeControlWidth
+
+	rightWidth := 0
+	if fit.ShowLike {
+		rightWidth += plaque
+	}
+	if fit.ShowLyrics {
+		if rightWidth > 0 {
+			rightWidth += gap
+		}
+		rightWidth += plaque
+	}
+	if fit.ShowVolume {
+		if rightWidth > 0 {
+			rightWidth += gap
+		}
+		rightWidth += volumeControlWidth
+	}
+	if fit.ColumnWidth >= volumeThreshold && fit.ShowVolume && fit.InnerWidth >= transport+rightWidth+volumeWidth {
+		fit.VolumeScrubber = volumeWidth
+	}
+	return fit
+}
+
+func miniLyricIndex(key string) (int, bool) {
+	value, ok := strings.CutPrefix(key, "lyrics:")
+	if !ok {
+		return 0, false
+	}
+	if separator := strings.IndexByte(value, ':'); separator >= 0 {
+		value = value[:separator]
+	}
+	index, err := strconv.Atoi(value)
+	return index, err == nil
+}
+
+func lyricWordsText(words []model.LyricsWord) string {
+	var text strings.Builder
+	for index, word := range words {
+		if index > 0 {
+			text.WriteByte(' ')
+		}
+		text.WriteString(strings.TrimSpace(word.Text))
+	}
+	return strings.TrimSpace(text.String())
 }
 
 func miniFixedHeight(height int, content layout.Widget) layout.Widget {
@@ -354,44 +626,6 @@ func fitMiniScrubber(available, plaque, gap, preferred, minimum int, showLike, s
 		return preferred
 	}
 	return max(0, min(minimum, remaining))
-}
-
-func (mini *Mini) reconcileSeek(gtx layout.Context, e *env.Env, position float64, trackID string) {
-	if mini.trackID != trackID {
-		mini.trackID = trackID
-		mini.seekHold = false
-		e.Store.SetSeekDrag(nil)
-		return
-	}
-	if !mini.seekHold {
-		return
-	}
-	passed := math.Abs(position-mini.seekTarget) <= .5
-	if mini.seekTarget > mini.seekOrigin {
-		passed = passed || position >= mini.seekTarget
-	} else if mini.seekTarget < mini.seekOrigin {
-		passed = passed || position <= mini.seekTarget
-	}
-	if passed || !gtx.Now.Before(mini.seekUntil) {
-		mini.seekHold = false
-		e.Store.SetSeekDrag(nil)
-	}
-}
-
-func (mini *Mini) requestProgressFrame(gtx layout.Context, e *env.Env, duration float64, trackPixels int, paused bool) {
-	if paused || duration <= 0 || trackPixels <= 0 {
-		return
-	}
-	pixelDelay := time.Duration(duration / float64(trackPixels) * float64(time.Second))
-	if pixelDelay < 250*time.Millisecond {
-		pixelDelay = 250 * time.Millisecond
-	}
-	position := e.Store.PositionAt(gtx.Now)
-	secondDelay := time.Duration((1 - (position - math.Floor(position))) * float64(time.Second))
-	if secondDelay <= 0 {
-		secondDelay = time.Second
-	}
-	gtx.Execute(op.InvalidateCmd{At: gtx.Now.Add(min(pixelDelay, secondDelay))})
 }
 
 func playbackTrackID(now *model.PlaybackTrack) string {

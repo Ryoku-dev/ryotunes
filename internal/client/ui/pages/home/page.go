@@ -49,26 +49,32 @@ type page struct {
 	pickedWidget    layout.Widget
 	projectionReady bool
 
-	feedFilters kit.Filters
-	retry       kit.Plaque
-	signIn      kit.Plaque
-	header      widgets.Header
-	tiles       map[string]*widgets.QuickTile
-	recent      widgets.Shelf
-	picked      widgets.Shelf
-	shelves     map[string]*widgets.Shelf
-	insights    insightsView
+	feedFilters   kit.Filters
+	retry         kit.Plaque
+	signIn        kit.Plaque
+	header        widgets.Header
+	nowPlaying    nowPlayingCard
+	nowPlayingEnv *env.Env
+	tiles         map[string]*widgets.QuickTile
+	recent        widgets.Shelf
+	picked        widgets.Shelf
+	shelves       map[string]*widgets.Shelf
+	insights      insightsView
 }
 
 // New returns a retained Home page for the route.
 func New(r env.Route) env.Page {
-	return &page{
+	p := &page{
 		initialParams: strings.TrimSpace(r.Params),
 		pendingChip:   -1,
-		header:        widgets.Header{Sentence: true},
+		header:        widgets.Header{Sentence: true, NoLane: true},
 		tiles:         make(map[string]*widgets.QuickTile),
 		shelves:       make(map[string]*widgets.Shelf),
 	}
+	p.header.Below = func(gtx layout.Context) layout.Dimensions {
+		return p.nowPlaying.Layout(gtx, p.nowPlayingEnv)
+	}
+	return p
 }
 
 func (p *page) Title() string { return "Home" }
@@ -84,6 +90,7 @@ func (p *page) Refresh(e *env.Env) {
 }
 
 func (p *page) Layout(gtx layout.Context, e *env.Env) layout.Dimensions {
+	p.nowPlayingEnv = e
 	snapshot := e.Store.Snapshot()
 	session := homeSession(snapshot)
 	if !p.started {

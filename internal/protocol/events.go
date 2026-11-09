@@ -31,6 +31,8 @@ const (
 	EventVolume = "volume"
 	// EventAudioFx updates playback effects.
 	EventAudioFx = "audio-fx"
+	// EventEqualizer updates the parametric equalizer.
+	EventEqualizer = "equalizer"
 	// EventShow asks the subscribed client to raise its window.
 	EventShow = "show"
 	// EventQuit asks subscribed clients to close before the daemon exits.
@@ -121,6 +123,7 @@ var Events = []EventDef{
 	eventDef[bool](EventStopAfterCurrent),
 	eventDef[int](EventVolume),
 	eventDef[model.AudioFx](EventAudioFx),
+	eventDef[model.Equalizer](EventEqualizer),
 	eventDef[Null](EventShow),
 	eventDef[model.Account](EventAuthChanged),
 	eventDef[model.SpotifyAuthEvent](EventSpotifyAuth),

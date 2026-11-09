@@ -13,6 +13,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/ryoku-dev/ryotunes/internal/eq"
 	"github.com/ryoku-dev/ryotunes/internal/model"
 	"github.com/ryoku-dev/ryotunes/internal/protocol"
 )
@@ -122,6 +123,42 @@ func (s *demoServer) result(method string, params json.RawMessage) any {
 		return protocol.ProviderResult{Provider: s.data.snapshot.Provider}
 	case protocol.MethodGetAudioFx:
 		return s.data.snapshot.AudioFx
+	case protocol.MethodGetEqualizer:
+		return s.data.snapshot.Equalizer
+	case protocol.MethodSetEqualizer:
+		var equalizer model.Equalizer
+		if json.Unmarshal(params, &equalizer) == nil {
+			s.data.snapshot.Equalizer = equalizer
+		}
+		return s.data.snapshot.Equalizer
+	case protocol.MethodListEqualizerPresets:
+		return append([]model.EQPreset(nil), s.data.equalizerPresets...)
+	case protocol.MethodSaveEqualizerPreset:
+		var request protocol.EqualizerPresetParams
+		if json.Unmarshal(params, &request) == nil {
+			s.saveEqualizerPreset(request.Name)
+		}
+		return append([]model.EQPreset(nil), s.data.equalizerPresets...)
+	case protocol.MethodDeleteEqualizerPreset:
+		var request protocol.EqualizerPresetParams
+		if json.Unmarshal(params, &request) == nil {
+			s.deleteEqualizerPreset(request.Name)
+		}
+		return append([]model.EQPreset(nil), s.data.equalizerPresets...)
+	case protocol.MethodImportEqualizer:
+		var request protocol.ImportEqualizerParams
+		if json.Unmarshal(params, &request) != nil {
+			return protocol.ImportEqualizerResult{Equalizer: s.data.snapshot.Equalizer}
+		}
+		preamp, bands, warnings, err := eq.Parse(request.Text)
+		if err != nil {
+			return protocol.ImportEqualizerResult{Equalizer: s.data.snapshot.Equalizer, Warnings: []string{err.Error()}}
+		}
+		s.data.snapshot.Equalizer = model.Equalizer{Enabled: true, Preamp: preamp, Bands: bands, Preset: request.Name}
+		if request.Name != "" {
+			s.saveEqualizerPreset(request.Name)
+		}
+		return protocol.ImportEqualizerResult{Equalizer: s.data.snapshot.Equalizer, Warnings: warnings}
 	case protocol.MethodGetDownloads:
 		return s.data.snapshot.Downloads
 	case protocol.MethodGetDownloadSettings:
@@ -205,6 +242,29 @@ func (s *demoServer) result(method string, params json.RawMessage) any {
 		return model.LastfmStatus{Configured: true, Connected: true, Username: new("nero")}
 	default:
 		return nil
+	}
+}
+
+func (s *demoServer) saveEqualizerPreset(name string) {
+	if name == "" {
+		return
+	}
+	preset := model.EQPreset{Name: name, Preamp: s.data.snapshot.Equalizer.Preamp, Bands: append([]model.EQBand(nil), s.data.snapshot.Equalizer.Bands...)}
+	for index := range s.data.equalizerPresets {
+		if s.data.equalizerPresets[index].Name == name && !s.data.equalizerPresets[index].Builtin {
+			s.data.equalizerPresets[index] = preset
+			return
+		}
+	}
+	s.data.equalizerPresets = append(s.data.equalizerPresets, preset)
+}
+
+func (s *demoServer) deleteEqualizerPreset(name string) {
+	for index := range s.data.equalizerPresets {
+		if s.data.equalizerPresets[index].Name == name && !s.data.equalizerPresets[index].Builtin {
+			s.data.equalizerPresets = append(s.data.equalizerPresets[:index], s.data.equalizerPresets[index+1:]...)
+			return
+		}
 	}
 }
 

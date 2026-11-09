@@ -8,20 +8,24 @@ import (
 
 	"github.com/ryoku-dev/ryotunes/internal/client/ui/demo"
 	"github.com/ryoku-dev/ryotunes/internal/client/ui/env"
+	"github.com/ryoku-dev/ryotunes/internal/client/ui/look"
 )
 
 type navigator struct {
-	mu          sync.RWMutex
-	stack       []env.Route
-	forward     []env.Route
-	panel       env.Panel
-	nowPlaying  bool
-	mini        bool
-	focusSearch bool
-	invalidate  func()
-	onChange    func()
-	onMini      func(bool)
-	onSound     func(image.Rectangle)
+	mu           sync.RWMutex
+	stack        []env.Route
+	forward      []env.Route
+	panel        env.Panel
+	nowPlaying   bool
+	mini         bool
+	focusSearch  bool
+	collapsed    bool
+	sidebarClass look.Class
+	sidebarSheet bool
+	invalidate   func()
+	onChange     func()
+	onMini       func(bool)
+	onSound      func(image.Rectangle)
 }
 
 func newNavigator(initial env.Route, panel env.Panel, mini bool, invalidate func()) *navigator {
@@ -227,6 +231,62 @@ func (n *navigator) OpenSound(anchor image.Rectangle) {
 	}
 }
 
+func (n *navigator) SidebarCollapsed() bool {
+	n.mu.RLock()
+	defer n.mu.RUnlock()
+	return n.collapsed
+}
+
+func (n *navigator) setSidebarClass(class look.Class) {
+	n.mu.Lock()
+	closed := n.sidebarSheet && class != look.Medium
+	n.sidebarClass = class
+	if class != look.Medium {
+		n.sidebarSheet = false
+	}
+	n.mu.Unlock()
+	if closed {
+		n.redraw()
+	}
+}
+
+func (n *navigator) SidebarSheetOpen() bool {
+	n.mu.RLock()
+	defer n.mu.RUnlock()
+	return n.sidebarSheet
+}
+
+func (n *navigator) CloseSidebarSheet() bool {
+	n.mu.Lock()
+	wasOpen := n.sidebarSheet
+	n.sidebarSheet = false
+	n.mu.Unlock()
+	if wasOpen {
+		n.redraw()
+	}
+	return wasOpen
+}
+
+func (n *navigator) ToggleSidebar() {
+	n.mu.Lock()
+	class := n.sidebarClass
+	switch class {
+	case look.Expanded:
+		n.collapsed = !n.collapsed
+	case look.Medium:
+		n.sidebarSheet = !n.sidebarSheet
+	default:
+		n.mu.Unlock()
+		return
+	}
+	n.mu.Unlock()
+	if class == look.Expanded {
+		n.changed()
+	} else {
+		n.redraw()
+	}
+}
+
 func (n *navigator) miniOpen() bool {
 	n.mu.RLock()
 	defer n.mu.RUnlock()
@@ -275,7 +335,7 @@ func parseRoute(value string) env.Route {
 		if found {
 			route.Params = data
 		}
-	case env.RouteLibrary, env.RouteRadio, env.RouteDownloads, env.RouteDiagnostics:
+	case env.RouteLibrary, env.RouteRadio, env.RouteDownloads, env.RouteDiagnostics, env.RouteEqualizer:
 	default:
 		return env.Route{Kind: env.RouteHome}
 	}

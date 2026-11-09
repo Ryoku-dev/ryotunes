@@ -52,6 +52,17 @@ func exactArtContext(gtx layout.Context, size image.Point) layout.Context {
 	return gtx
 }
 
+var artRequestSizes = [...]int{32, 48, 64, 96, 128, 192, 256, 384, 512, 768, 1024, 1536, 2048}
+
+func artRequestSize(size int) int {
+	for _, candidate := range artRequestSizes {
+		if size <= candidate {
+			return candidate
+		}
+	}
+	return artRequestSizes[len(artRequestSizes)-1]
+}
+
 // Art draws a centre-cropped cached cover or a quiet Lithic hatch.
 func Art(gtx layout.Context, th *Theme, cache *art.Cache, url string, size image.Point, shape Shape) layout.Dimensions {
 	size.X = min(max(size.X, 0), max(gtx.Constraints.Max.X, 0))
@@ -62,7 +73,7 @@ func Art(gtx layout.Context, th *Theme, cache *art.Cache, url string, size image
 	var source paint.ImageOp
 	loaded := false
 	if cache != nil {
-		source, loaded = cache.Get(url, max(size.X, size.Y))
+		source, loaded = cache.Get(url, artRequestSize(max(size.X, size.Y)))
 	}
 	if loaded {
 		widget.Image{Src: source, Fit: widget.Cover, Position: layout.Center}.Layout(exactArtContext(gtx, size))

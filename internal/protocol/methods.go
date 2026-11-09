@@ -27,6 +27,8 @@ const (
 	MethodClearQueued = "clear_queued"
 	// MethodCreatePlaylist creates a provider or device playlist.
 	MethodCreatePlaylist = "create_playlist"
+	// MethodDeleteEqualizerPreset removes a saved equalizer preset.
+	MethodDeleteEqualizerPreset = "delete_equalizer_preset"
 	// MethodDeletePlaylist deletes a playlist.
 	MethodDeletePlaylist = "delete_playlist"
 	// MethodDiscordStatus returns Discord RPC state.
@@ -55,6 +57,8 @@ const (
 	MethodGetDownloads = "get_downloads"
 	// MethodGetDownloadSettings returns download settings.
 	MethodGetDownloadSettings = "get_download_settings"
+	// MethodGetEqualizer returns the parametric equalizer.
+	MethodGetEqualizer = "get_equalizer"
 	// MethodGetHome returns the provider home feed.
 	MethodGetHome = "get_home"
 	// MethodGetHomeMore continues a home feed.
@@ -93,6 +97,8 @@ const (
 	MethodGetWaveform = "get_waveform"
 	// MethodHello performs the protocol handshake.
 	MethodHello = "hello"
+	// MethodImportEqualizer reads an Equalizer APO or AutoEQ parametric profile.
+	MethodImportEqualizer = "import_equalizer"
 	// MethodImportPlaylistFile reads a portable playlist file.
 	MethodImportPlaylistFile = "import_playlist_file"
 	// MethodInstallUpdate installs a checked packaged release.
@@ -103,6 +109,8 @@ const (
 	MethodLastfmDisconnect = "lastfm_disconnect"
 	// MethodLastfmStatus returns Last.fm state.
 	MethodLastfmStatus = "lastfm_status"
+	// MethodListEqualizerPresets returns the built-in and saved equalizer presets.
+	MethodListEqualizerPresets = "list_equalizer_presets"
 	// MethodListeningStats returns period listening aggregates.
 	MethodListeningStats = "listening_stats"
 	// MethodLogClientError records one client diagnostic.
@@ -179,6 +187,8 @@ const (
 	MethodRetryDownload = "retry_download"
 	// MethodRyokuThemeTokens is a client-side compatibility method.
 	MethodRyokuThemeTokens = "ryoku_theme_tokens"
+	// MethodSaveEqualizerPreset saves the current equalizer curve under a name.
+	MethodSaveEqualizerPreset = "save_equalizer_preset"
 	// MethodSearch searches tracks.
 	MethodSearch = "search"
 	// MethodSearchAll searches mixed result categories.
@@ -205,6 +215,8 @@ const (
 	MethodSetAudioFx = "set_audio_fx"
 	// MethodSetDownloadSettings replaces download policy.
 	MethodSetDownloadSettings = "set_download_settings"
+	// MethodSetEqualizer replaces the parametric equalizer.
+	MethodSetEqualizer = "set_equalizer"
 	// MethodSetPersonal replaces renderer-owned personalization.
 	MethodSetPersonal = "set_personal"
 	// MethodSetPlaybackParams changes tempo and pitch.
@@ -283,6 +295,7 @@ var Methods = []Method{
 	def[Null, Null](MethodClearDownloadHistory, "Remove terminal download history."),
 	def[Null, Null](MethodClearQueued, "Remove manually queued tracks."),
 	def[CreatePlaylistParams, PlaylistIDResult](MethodCreatePlaylist, "Create a playlist."),
+	def[EqualizerPresetParams, []model.EQPreset](MethodDeleteEqualizerPreset, "Remove a saved equalizer preset."),
 	def[PlaylistIDParams, Null](MethodDeletePlaylist, "Delete a playlist."),
 	def[Null, model.DiscordStatus](MethodDiscordStatus, "Return Discord RPC state."),
 	def[EditPlaylistDetailsParams, Null](MethodEditPlaylistDetails, "Edit playlist metadata."),
@@ -297,6 +310,7 @@ var Methods = []Method{
 	def[BrowseGridParams, []model.BrowseItem](MethodGetBrowseGrid, "Return a browse grid."),
 	def[Null, model.DownloadSnapshot](MethodGetDownloads, "Return the download snapshot."),
 	def[Null, model.DownloadSettings](MethodGetDownloadSettings, "Return download settings."),
+	def[Null, model.Equalizer](MethodGetEqualizer, "Return the parametric equalizer."),
 	def[HomeParams, model.Feed](MethodGetHome, "Return the provider home feed."),
 	def[TokenParams, model.Feed](MethodGetHomeMore, "Continue a home feed."),
 	def[Null, []model.BrowseItem](MethodGetLibrary, "Return playlist library cards."),
@@ -316,11 +330,13 @@ var Methods = []Method{
 	def[Null, []model.StreamClient](MethodGetStreamClients, "Return YouTube stream clients."),
 	def[IDParams, model.Waveform](MethodGetWaveform, "Return a normalized SoundCloud waveform."),
 	def[Null, Hello](MethodHello, "Perform the protocol handshake."),
+	def[ImportEqualizerParams, ImportEqualizerResult](MethodImportEqualizer, "Read an Equalizer APO or AutoEQ parametric profile."),
 	def[PathParams, ImportPlaylistFileResult](MethodImportPlaylistFile, "Read a portable playlist file."),
 	def[InstallUpdateParams, model.UpdateResult](MethodInstallUpdate, "Install a checked packaged release."),
 	def[Null, Null](MethodLastfmConnect, "Begin Last.fm authorization."),
 	def[Null, Null](MethodLastfmDisconnect, "Clear Last.fm authorization."),
 	def[Null, model.LastfmStatus](MethodLastfmStatus, "Return Last.fm state."),
+	def[Null, []model.EQPreset](MethodListEqualizerPresets, "Return the built-in and saved equalizer presets."),
 	def[ListeningStatsParams, model.ListeningStats](MethodListeningStats, "Return period listening aggregates."),
 	def[LogClientErrorParams, Null](MethodLogClientError, "Record one client diagnostic."),
 	def[LTUserParams, Null](MethodLTApproveJoin, "Approve a pending room join."),
@@ -359,6 +375,7 @@ var Methods = []Method{
 	def[PathParams, model.LocalLibrary](MethodRemoveLocalFolder, "Remove a local scan root."),
 	def[DownloadIDParams, model.DownloadEntry](MethodRetryDownload, "Retry a terminal download."),
 	def[Null, Null](MethodRyokuThemeTokens, "Report that palette tokens are client-owned."),
+	def[EqualizerPresetParams, []model.EQPreset](MethodSaveEqualizerPreset, "Save the current equalizer curve under a name."),
 	def[QueryParams, []model.Track](MethodSearch, "Search tracks."),
 	def[QueryParams, model.SearchAll](MethodSearchAll, "Search mixed result categories."),
 	def[TokenParams, model.SearchAll](MethodSearchAllMore, "Continue mixed search."),
@@ -372,6 +389,7 @@ var Methods = []Method{
 	def[SetArtistSubscribedParams, SetArtistSubscribedResult](MethodSetArtistSubscribed, "Change an artist channel subscription."),
 	def[model.AudioFx, Null](MethodSetAudioFx, "Replace playback effects."),
 	def[SetDownloadSettingsParams, model.DownloadSettings](MethodSetDownloadSettings, "Replace download policy."),
+	def[model.Equalizer, model.Equalizer](MethodSetEqualizer, "Replace the parametric equalizer."),
 	def[SetPersonalParams, Null](MethodSetPersonal, "Replace renderer-owned personalization."),
 	def[model.PlaybackParams, Null](MethodSetPlaybackParams, "Change tempo and pitch."),
 	def[SetPlaylistCoverParams, SetPlaylistCoverResult](MethodSetPlaylistCover, "Select or clear playlist art."),

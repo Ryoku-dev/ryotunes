@@ -92,8 +92,10 @@ internal/
   bus/          EventSink: Emit(name, payload) fan-out to subscribers
   store/        sqlite (modernc) and the json files: settings, personal, device playlists,
                 history, caches; every table and key documented in docs/PERSISTENCE.md
-  player/       libmpv: load, pause, seek, volume, gapless prefetch, audio fx, params,
-                events to the bus, friendly error mapping
+  player/       libmpv: load, pause, seek, volume, gapless prefetch, audio fx, the
+                equalizer chain, params, events to the bus, friendly error mapping
+  eq/           the parametric equalizer: limits, presets, Equalizer APO and AutoEQ
+                text, the mpv filter chain and the response maths the client draws
   queue/        the queue: manual items, continuation, shuffle, repeat, stop after current,
                 restore; asks a Resolver for streams and a Continuer for more
   provider/     the Provider interface and Registry
@@ -184,20 +186,25 @@ internal/client/
                lyrics, listen together; one Store with Invalidate hooks; the
                client lock and preferences
   art/         image loading: http, decode off the UI goroutine, downscale, LRU,
-               collage for device playlists
+               collage for device playlists, the cover colour sample behind the
+               accent
+  spectrum/    the visualizer feeds: cava bands and pw-record stereo samples,
+               each running only while a visible visualizer wants it
   ui/
-    look/      the app theme on the library: source colour, Ryoku mark,
-               provider glyphs, icons, frame geometry, overlay host, tips,
-               choices, scrolling, scrubbers, artwork, playback motion
+    look/      the app theme on the library: accent and source colours, pane
+               corners, Ryoku mark, provider glyphs, icons, frame geometry,
+               overlay host, tips, choices, scrolling, scrubbers, artwork,
+               visualizer styles, equalizer graph and faders, playback motion
     env/       what every surface receives: theme, store, connection, router,
-               artwork, overlays, toasts
+               artwork, feeds, overlays, toasts
     act/       daemon actions shared by every surface
     widgets/   track table, cards, shelves, grids, quick tiles, hero, menus,
-               playlist dialogs, page states
+               playlist dialogs, page states, transport, seek row, playing art
     chrome/    top bar, provider switcher, sidebar, bottom bar, player bar,
                sound, side panel (queue, lyrics, together), now playing, mini
-    pages/     one package per page
-    shell/     windows, frame, router, overlays and keys, single instance
+    pages/     one package per page (equalizer included)
+    shell/     windows, frame, router, overlays and keys, theme reconciling,
+               single instance
 ```
 
 - One `Store` holds the daemon snapshot plus client-only state. Reducers are

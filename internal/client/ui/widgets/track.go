@@ -450,7 +450,7 @@ func drawIcon(gtx layout.Context, icon *widget.Icon, ink paletteColor, size unit
 
 func (t *TrackTable) indexCell(gtx layout.Context, e *env.Env, row *trackRow, index int, selected, playing, hot bool) layout.Dimensions {
 	gtx.Constraints = layout.Exact(image.Pt(gtx.Dp(48), gtx.Constraints.Max.Y))
-	quiet, active := e.Th.R.Fg3, e.Th.Src.Ink
+	quiet, active := e.Th.R.Fg3, e.Th.Accent.Ink
 	if selected {
 		quiet, active = e.Th.R.OnSel2, e.Th.R.OnSel
 	}
@@ -479,7 +479,7 @@ func (t *TrackTable) titleCell(gtx layout.Context, e *env.Env, row *trackRow, tr
 		ink, quiet = e.Th.R.OnSel, e.Th.R.OnSel2
 	}
 	if playing && !selected {
-		ink = e.Th.Src.Ink
+		ink = e.Th.Accent.Ink
 	}
 	liked := trackLiked(track)
 	likeAlpha := float32(0)
@@ -548,7 +548,7 @@ func (t *TrackTable) titleCell(gtx layout.Context, e *env.Env, row *trackRow, tr
 					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 						opacity := paint.PushOpacity(gtx.Ops, likeAlpha)
 						dims := row.like.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-							likedInk := e.Th.Src.Ink
+							likedInk := e.Th.Accent.Ink
 							if selected {
 								likedInk = e.Th.R.OnSel
 							}

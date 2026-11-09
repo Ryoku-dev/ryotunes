@@ -23,7 +23,9 @@ import (
 )
 
 type topBarTestNav struct {
-	current env.Route
+	current   env.Route
+	collapsed bool
+	toggles   int
 }
 
 func (nav *topBarTestNav) Push(route env.Route)    { nav.current = route }
@@ -42,6 +44,11 @@ func (*topBarTestNav) ToggleNowPlaying()           {}
 func (*topBarTestNav) ToggleMini()                 {}
 func (*topBarTestNav) FocusSearch()                {}
 func (*topBarTestNav) OpenSound(image.Rectangle)   {}
+func (nav *topBarTestNav) SidebarCollapsed() bool  { return nav.collapsed }
+func (nav *topBarTestNav) ToggleSidebar() {
+	nav.collapsed = !nav.collapsed
+	nav.toggles++
+}
 
 func TestTopBarControlsAreNotWindowMoveAreas(t *testing.T) {
 	const width, height = 1280, 56
@@ -50,7 +57,7 @@ func TestTopBarControlsAreNotWindowMoveAreas(t *testing.T) {
 	theme := look.NewTheme(palette.Signature(true), libtheme.Comfortable)
 	nav := &topBarTestNav{current: env.Route{Kind: env.RouteHome}}
 	e := &env.Env{Th: theme, Overlays: new(look.Overlays), Store: store, Nav: nav}
-	frame := Frame{Class: look.Expanded, Sidebar: 240, Content: image.Rect(248, 56, width-8, 700), Decorated: false}
+	frame := Frame{Class: look.Expanded, Sidebar: 248, Content: image.Rect(256, 56, width-8, 700), Decorated: false}
 
 	var top TopBar
 	var operations op.Ops
@@ -80,10 +87,11 @@ func TestTopBarControlsAreNotWindowMoveAreas(t *testing.T) {
 	layoutFrame()
 	spotify := f32.Pt(1074, 28)
 	discord := f32.Pt(977, 28)
-	blank := f32.Pt(880, 28)
+	blank := f32.Pt(930, 28)
 	controlPoints := map[string]f32.Point{
-		"Back":       f32.Pt(264, 28),
-		"Forward":    f32.Pt(300, 28),
+		"Sidebar":    f32.Pt(272, 28),
+		"Back":       f32.Pt(308, 28),
+		"Forward":    f32.Pt(344, 28),
 		"Search":     f32.Pt(500, 28),
 		"Discord":    discord,
 		"YouTube":    f32.Pt(1030, 28),
@@ -100,6 +108,10 @@ func TestTopBarControlsAreNotWindowMoveAreas(t *testing.T) {
 	}
 	if action, ok := router.ActionAt(blank); !ok || action != system.ActionMove {
 		t.Fatalf("blank top-bar area action = %v, %v; want ActionMove", action, ok)
+	}
+	click(controlPoints["Sidebar"])
+	if nav.toggles != 1 || !nav.collapsed {
+		t.Fatalf("sidebar toggle state = (%d, %v), want (1, true)", nav.toggles, nav.collapsed)
 	}
 
 	click(spotify)

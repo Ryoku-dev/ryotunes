@@ -35,6 +35,7 @@ const (
 	RouteAlbum       RouteKind = "album"
 	RoutePlaylist    RouteKind = "playlist"
 	RouteList        RouteKind = "list" // a generic browse grid: id + params
+	RouteEqualizer   RouteKind = "equalizer"
 )
 
 // Route is one entry of the navigation stack.
@@ -85,12 +86,18 @@ type Nav interface {
 	ToggleMini()
 	FocusSearch()
 	OpenSound(anchor image.Rectangle)
+	// SidebarCollapsed reports the wide-window sidebar folded to its rail.
+	SidebarCollapsed() bool
+	// ToggleSidebar folds or unfolds the sidebar and remembers the choice.
+	ToggleSidebar()
 }
 
 // Fx are the motion-sensitive playback effects enabled for this frame.
 type Fx struct {
 	Visualizer bool
 	Wave       bool
+	// Style is how every visualizer draws.
+	Style state.VisualizerStyle
 }
 
 // Env is passed to every Layout call. Pages keep their own widget state
@@ -103,8 +110,10 @@ type Env struct {
 	Nav      Nav
 	Art      *art.Cache
 	Spectrum *spectrum.Feed
-	Fx       Fx
-	Now      time.Time
+	// Scope is the stereo sample feed behind the oscilloscope and vectorscope.
+	Scope *spectrum.Scope
+	Fx    Fx
+	Now   time.Time
 	// Toast shows a placard; the shell owns the stack.
 	Toast func(message string, kind ToastKind)
 	// Go runs fn off the UI goroutine and invalidates the window when it

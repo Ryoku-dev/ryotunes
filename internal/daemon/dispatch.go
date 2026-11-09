@@ -19,6 +19,7 @@ import (
 	"github.com/ryoku-dev/ryotunes/internal/integrations/mpris"
 	"github.com/ryoku-dev/ryotunes/internal/integrations/tray"
 	"github.com/ryoku-dev/ryotunes/internal/lyrics"
+	"github.com/ryoku-dev/ryotunes/internal/model"
 	"github.com/ryoku-dev/ryotunes/internal/player"
 	"github.com/ryoku-dev/ryotunes/internal/protocol"
 	"github.com/ryoku-dev/ryotunes/internal/provider"
@@ -72,6 +73,13 @@ type App struct {
 
 	mu       sync.Mutex
 	provider string // the selected catalogue provider
+
+	equalizerMu             sync.Mutex
+	equalizerPlayer         equalizerPlayer
+	equalizerStore          provider.KV
+	equalizerPresets        []model.EQPreset
+	equalizerActiveBlocked  bool
+	equalizerPresetsBlocked bool
 }
 
 // Handler answers one method. params is the raw JSON (null when absent).

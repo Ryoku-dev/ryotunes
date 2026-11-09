@@ -8,7 +8,9 @@ import (
 	"gioui.org/op"
 	"gioui.org/unit"
 
+	"github.com/ryoku-dev/ryoku/docs/lithic/library/go/anim"
 	"github.com/ryoku-dev/ryoku/docs/lithic/library/go/kit"
+	"github.com/ryoku-dev/ryoku/docs/lithic/library/go/palette"
 	"github.com/ryoku-dev/ryoku/docs/lithic/library/go/theme"
 	"github.com/ryoku-dev/ryotunes/internal/client/ui/env"
 	"github.com/ryoku-dev/ryotunes/internal/client/ui/look"
@@ -25,13 +27,19 @@ type HeroContent struct {
 	Acts             layout.Widget
 }
 
-// Hero is a retained source-tinted page header.
+// Hero is a retained cover-tinted page header.
 type Hero struct {
 	art        look.ArtView
 	meta       kit.Click
 	visualizer look.Visualizer
 	facts      []heroFact
 	factCalls  []op.CallOp
+
+	tintFrom, tintTo look.Accent
+	tint             look.Accent
+	tintTween        anim.Tween
+	tintRoles        palette.Roles
+	tintSet          bool
 }
 
 func heroArtSize(width unit.Dp) unit.Dp {
@@ -180,6 +188,85 @@ func heroNameStyle(width unit.Dp, th *look.Theme) theme.TextStyle {
 	return th.T.Name
 }
 
+func (h *Hero) resolveTint(gtx layout.Context, e *env.Env, rawURL string) look.Accent {
+	roles := e.Th.LoadedRoles()
+	if h.tintRoles != roles {
+		h.tintRoles = roles
+		h.tintSet = false
+	}
+	rawURL = strings.TrimSpace(rawURL)
+	if rawURL == "" || e.Art == nil {
+		h.tintSet = false
+		h.tint = e.Th.Accent
+		return h.tint
+	}
+	sample, ready := e.Art.Sample(rawURL)
+	if !ready {
+		if !h.tintSet {
+			h.tint = e.Th.Accent
+			h.tintFrom, h.tintTo = h.tint, h.tint
+			h.tintTween = anim.Tween{Duration: e.Th.Motion.Field, Ease: anim.EaseChisel}
+			h.tintSet = true
+		}
+		return h.advanceTint(gtx)
+	}
+	target := e.Th.Accent
+	if sample.A != 0 {
+		target = e.Th.ArtAccent(sample)
+	}
+	if !h.tintSet {
+		h.tint, h.tintFrom, h.tintTo = target, target, target
+		h.tintTween = anim.Tween{Duration: e.Th.Motion.Field, Ease: anim.EaseChisel}
+		h.tintSet = true
+		return h.tint
+	}
+	h.advanceTint(gtx)
+	if h.tintTo == target {
+		return h.tint
+	}
+	h.tintFrom, h.tintTo = h.tint, target
+	h.tintTween = anim.Tween{Duration: e.Th.Motion.Field, Ease: anim.EaseChisel}
+	h.tintTween.Set(gtx, 0)
+	h.tintTween.Set(gtx, 1)
+	return h.advanceTint(gtx)
+}
+
+func (h *Hero) advanceTint(gtx layout.Context) look.Accent {
+	progress := h.tintTween.Value(gtx)
+	h.tint = look.Accent{
+		Fill:  palette.Mix(h.tintFrom.Fill, h.tintTo.Fill, progress),
+		On:    palette.Mix(h.tintFrom.On, h.tintTo.On, progress),
+		Ink:   palette.Mix(h.tintFrom.Ink, h.tintTo.Ink, progress),
+		Field: palette.Mix(h.tintFrom.Field, h.tintTo.Field, progress),
+	}
+	return h.tint
+}
+
+func (h *Hero) field(gtx layout.Context, e *env.Env, tint look.Accent, cuts [4]int, body layout.Widget) layout.Dimensions {
+	return look.FieldAccent(gtx, e.Th, tint, cuts, func(gtx layout.Context) layout.Dimensions {
+		record := op.Record(gtx.Ops)
+		dimensions := body(gtx)
+		content := record.Stop()
+		_, laneHeight := headerLaneMetrics(e.Th.Class)
+		height := min(gtx.Dp(laneHeight), dimensions.Size.Y)
+		if dimensions.Size.X > 0 && height > 0 {
+			stack := op.Offset(image.Pt(0, dimensions.Size.Y-height)).Push(gtx.Ops)
+			laneGTX := gtx
+			laneGTX.Constraints = layout.Exact(image.Pt(dimensions.Size.X, height))
+			alpha := float32(.35)
+			if e.Th.R.Dark {
+				alpha = .45
+			}
+			Visualizer(laneGTX, e, &h.visualizer, look.VisualizerStyle{
+				Ink: palette.WithAlpha(tint.Ink, alpha), Bar: 6, Gap: 3, Floor: 2, HeaderLane: true,
+			})
+			stack.Pop()
+		}
+		content.Add(gtx.Ops)
+		return dimensions
+	})
+}
+
 func (h *Hero) copy(gtx layout.Context, e *env.Env, content HeroContent) layout.Dimensions {
 	for h.meta.Clicked(gtx) {
 		if content.MetaAction != nil {
@@ -216,22 +303,24 @@ func (h *Hero) copy(gtx layout.Context, e *env.Env, content HeroContent) layout.
 	return layout.Flex{Axis: layout.Vertical, Alignment: layout.Start}.Layout(gtx, children...)
 }
 
-// Layout draws a responsive bottom-aligned hero over the provider field.
+// Layout draws a responsive bottom-aligned hero over its cover field.
 func (h *Hero) Layout(gtx layout.Context, e *env.Env, content HeroContent) layout.Dimensions {
 	if e == nil || e.Th == nil {
 		return layout.Dimensions{}
 	}
+	artURL := heroArtURL(content)
+	tint := h.resolveTint(gtx, e, artURL)
 	artDp := heroArtSize(gtx.Metric.PxToDp(gtx.Constraints.Max.X))
 	artPixels := gtx.Dp(artDp)
 	inset := look.ContentInset(e.Th.Class)
 	bottom, _ := headerLaneMetrics(e.Th.Class)
 	cut := gtx.Dp(e.Th.Cut.Large)
-	return headerField(gtx, e, &h.visualizer, [4]int{cut, cut, 0, 0}, func(gtx layout.Context) layout.Dimensions {
+	return h.field(gtx, e, tint, [4]int{cut, cut, 0, 0}, func(gtx layout.Context) layout.Dimensions {
 		return layout.Inset{Top: inset, Right: inset, Bottom: bottom, Left: inset}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 			shape := look.Shape{Cut: 7, Octagon: content.Octagon}
 			return layout.Flex{Axis: layout.Horizontal, Alignment: layout.End}.Layout(gtx,
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					return h.art.Layout(gtx, e.Th, e.Art, heroArtURL(content), image.Pt(artPixels, artPixels), shape, e.Th.Motion.Field)
+					return h.art.Layout(gtx, e.Th, e.Art, artURL, image.Pt(artPixels, artPixels), shape, e.Th.Motion.Field)
 				}),
 				layout.Rigid(layout.Spacer{Width: unit.Dp(21)}.Layout),
 				layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
@@ -325,8 +414,12 @@ func (actions *HeroActions) Layout(gtx layout.Context, widgets []layout.Widget) 
 }
 
 // Header is a retained source-field page title with optional proof and actions.
+// Below lays out under the title row inside the field; NoLane drops the
+// visualizer lane along the field's bottom edge.
 type Header struct {
 	Sentence   bool
+	NoLane     bool
+	Below      layout.Widget
 	visualizer look.Visualizer
 	copy       [3]layout.FlexChild
 	children   [3]layout.FlexChild
@@ -339,35 +432,51 @@ func (h *Header) Layout(gtx layout.Context, e *env.Env, title, sentence string, 
 	cut := gtx.Dp(e.Th.Cut.Large)
 	inset := look.ContentInset(e.Th.Class)
 	bottom, _ := headerLaneMetrics(e.Th.Class)
-	return headerField(gtx, e, &h.visualizer, [4]int{cut, cut, 0, 0}, func(gtx layout.Context) layout.Dimensions {
+	lane := &h.visualizer
+	if h.NoLane {
+		bottom, lane = inset, nil
+	}
+	return headerField(gtx, e, lane, [4]int{cut, cut, 0, 0}, func(gtx layout.Context) layout.Dimensions {
 		return layout.Inset{Top: inset, Right: inset, Bottom: bottom, Left: inset}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-			style := e.Th.T.Section
-			if h.Sentence {
-				style = e.Th.T.Sentence
+			if h.Below == nil {
+				return h.titleRow(gtx, e, title, sentence, trailing)
 			}
-			copy := h.copy[:1]
-			copy[0] = layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-				return kit.Label{Style: style, Color: e.Th.R.Fg, MaxLines: 2}.Layout(gtx, e.Th.Theme, title)
-			})
-			if strings.TrimSpace(sentence) != "" {
-				copy = append(copy,
-					layout.Rigid(layout.Spacer{Height: unit.Dp(4)}.Layout),
-					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-						return kit.Label{Style: e.Th.T.Proof, Color: e.Th.R.Fg2, MaxLines: 2}.Layout(gtx, e.Th.Theme, sentence)
-					}),
-				)
-			}
-			children := h.children[:1]
-			children[0] = layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-				return layout.Flex{Axis: layout.Vertical, Alignment: layout.Start}.Layout(gtx, copy...)
-			})
-			if trailing != nil {
-				children = append(children,
-					layout.Rigid(layout.Spacer{Width: unit.Dp(21)}.Layout),
-					layout.Rigid(trailing),
-				)
-			}
-			return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx, children...)
+			return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+					return h.titleRow(gtx, e, title, sentence, trailing)
+				}),
+				layout.Rigid(h.Below),
+			)
 		})
 	})
+}
+
+func (h *Header) titleRow(gtx layout.Context, e *env.Env, title, sentence string, trailing layout.Widget) layout.Dimensions {
+	style := e.Th.T.Section
+	if h.Sentence {
+		style = e.Th.T.Sentence
+	}
+	copy := h.copy[:1]
+	copy[0] = layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+		return kit.Label{Style: style, Color: e.Th.R.Fg, MaxLines: 2}.Layout(gtx, e.Th.Theme, title)
+	})
+	if strings.TrimSpace(sentence) != "" {
+		copy = append(copy,
+			layout.Rigid(layout.Spacer{Height: unit.Dp(4)}.Layout),
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				return kit.Label{Style: e.Th.T.Proof, Color: e.Th.R.Fg2, MaxLines: 2}.Layout(gtx, e.Th.Theme, sentence)
+			}),
+		)
+	}
+	children := h.children[:1]
+	children[0] = layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+		return layout.Flex{Axis: layout.Vertical, Alignment: layout.Start}.Layout(gtx, copy...)
+	})
+	if trailing != nil {
+		children = append(children,
+			layout.Rigid(layout.Spacer{Width: unit.Dp(21)}.Layout),
+			layout.Rigid(trailing),
+		)
+	}
+	return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx, children...)
 }

@@ -99,6 +99,10 @@ func (r *clientRuntime) renderPNG(options Options) error {
 		if err := window.Frame(&operations); err != nil {
 			return fmt.Errorf("render PNG frame: %w", err)
 		}
+		if options.DemoPlaying && time.Since(started) < 600*time.Millisecond {
+			time.Sleep(time.Second / 60)
+			dirty.Store(true)
+		}
 	}
 
 	frame := image.NewRGBA(image.Rect(0, 0, options.Width, options.Height))

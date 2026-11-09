@@ -33,19 +33,23 @@ func TestPlayerOptions(t *testing.T) {
 }
 
 func TestAFChain(t *testing.T) {
-	if got := afChain(nil, model.DefaultAudioFx()); got != "" {
+	if got := afChain(nil, model.DefaultAudioFx(), model.Equalizer{}); got != "" {
 		t.Fatalf("neutral chain = %q", got)
 	}
 	gain := -6.0
 	fx := model.AudioFx{Speed: 1, Semitones: -12, Reverb: 1, Bass: -6, Width: 0.5}
-	want := "lavfi=[volume=-6dB],rubberband=pitch-scale=0.5," +
+	equalizer := model.Equalizer{Enabled: true, Preamp: -3, Bands: []model.EQBand{{
+		Type: model.EQPeak, Frequency: 1000, Gain: 2, Q: 1, Enabled: true,
+	}}}
+	want := "lavfi=[volume=-6dB],rubberband=pitch-scale=0.5,lavfi=[aresample=48000]," +
+		"@rteq00:lavfi=[volume=volume=-3dB],@rteq01:lavfi=[equalizer=f=1000:t=q:w=1:g=2]," +
 		"lavfi=[aecho=0.8:0.9:40|80|120:0.4|0.3|0.2]," +
 		"lavfi=[bass=g=-6:f=110:w=0.6]," +
 		"lavfi=[stereowiden=delay=20:feedback=0.3:crossfeed=0.3:drymix=0.7]"
-	if got := afChain(&gain, fx); got != want {
+	if got := afChain(&gain, fx, equalizer); got != want {
 		t.Fatalf("full chain = %q, want %q", got, want)
 	}
-	oneSemitone := afChain(nil, model.AudioFx{Speed: 1, Semitones: 1})
+	oneSemitone := afChain(nil, model.AudioFx{Speed: 1, Semitones: 1}, model.Equalizer{})
 	if oneSemitone != "rubberband=pitch-scale=1.0594630943592953" {
 		t.Fatalf("one-semitone chain = %q", oneSemitone)
 	}

@@ -68,7 +68,7 @@ func (t *stationTile) layout(gtx layout.Context, e *env.Env, page *Page, station
 					if playing {
 						children = append(children,
 							layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
-							layout.Rigid(iconLayout(look.Icon.VolumeUp, e.Th.Src.Ink, unit.Dp(20))),
+							layout.Rigid(iconLayout(look.Icon.VolumeUp, e.Th.Accent.Ink, unit.Dp(20))),
 						)
 					}
 					if favourite || t.reveal > 0 {
@@ -85,7 +85,7 @@ func (t *stationTile) layout(gtx layout.Context, e *env.Env, page *Page, station
 									return layout.Center.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 										return t.fill.Layout(gtx, e.Th, favourite,
 											iconLayout(look.Icon.HeartOutline, e.Th.R.Fg2, unit.Dp(18)),
-											iconLayout(look.Icon.Heart, e.Th.Src.Ink, unit.Dp(18)),
+											iconLayout(look.Icon.Heart, e.Th.Accent.Ink, unit.Dp(18)),
 										)
 									})
 								})

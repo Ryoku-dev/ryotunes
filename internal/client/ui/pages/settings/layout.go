@@ -196,19 +196,20 @@ func (p *page) settingRows(gtx layout.Context, rows ...layout.Widget) layout.Dim
 }
 
 type settingRowDescriptor struct {
-	th           *look.Theme
-	title        string
-	detail       string
-	description  string
-	control      layout.Widget
-	controlWidth int
-
-	widget         layout.Widget
-	copyBlock      layout.Widget
-	detailBlock    layout.Widget
-	controlBlock   layout.Widget
-	controlColumn  layout.Widget
-	alignedControl layout.Widget
+	th              *look.Theme
+	title           string
+	detail          string
+	description     string
+	control         layout.Widget
+	controlWidth    int
+	maxControlWidth unit.Dp
+	wideControl     bool
+	widget          layout.Widget
+	copyBlock       layout.Widget
+	detailBlock     layout.Widget
+	controlBlock    layout.Widget
+	controlColumn   layout.Widget
+	alignedControl  layout.Widget
 }
 
 func newSettingRowDescriptor() *settingRowDescriptor {
@@ -223,6 +224,14 @@ func newSettingRowDescriptor() *settingRowDescriptor {
 }
 
 func (p *page) settingRow(th *look.Theme, title, detail string, control layout.Widget) layout.Widget {
+	return p.settingRowWidth(th, title, detail, control, 320, false)
+}
+
+func (p *page) settingRowWide(th *look.Theme, title, detail string, control layout.Widget) layout.Widget {
+	return p.settingRowWidth(th, title, detail, control, 520, true)
+}
+
+func (p *page) settingRowWidth(th *look.Theme, title, detail string, control layout.Widget, maxControlWidth unit.Dp, wide bool) layout.Widget {
 	rows := p.rowDescriptors[p.rowSection]
 	if p.rowCursor == len(rows) {
 		rows = append(rows, newSettingRowDescriptor())
@@ -231,6 +240,7 @@ func (p *page) settingRow(th *look.Theme, title, detail string, control layout.W
 	row := rows[p.rowCursor]
 	p.rowCursor++
 	row.th, row.control = th, control
+	row.maxControlWidth, row.wideControl = maxControlWidth, wide
 	if row.title != title || row.detail != detail {
 		row.title, row.detail = title, detail
 		row.description = title
@@ -245,14 +255,18 @@ func (row *settingRowDescriptor) layout(gtx layout.Context) layout.Dimensions {
 	if row.control == nil {
 		return row.copyBlock(gtx)
 	}
-	if gtx.Constraints.Max.X < gtx.Dp(440) {
+	if gtx.Constraints.Max.X < gtx.Dp(440) || row.wideControl && gtx.Constraints.Max.X < gtx.Dp(620) {
 		return layout.Flex{Axis: layout.Vertical, Alignment: layout.Start}.Layout(gtx,
 			layout.Rigid(row.copyBlock),
 			layout.Rigid(layout.Spacer{Height: unit.Dp(8)}.Layout),
 			layout.Rigid(row.alignedControl),
 		)
 	}
-	row.controlWidth = min(gtx.Dp(320), gtx.Constraints.Max.X*45/100)
+	controlShare := 45
+	if row.wideControl {
+		controlShare = 58
+	}
+	row.controlWidth = min(gtx.Dp(row.maxControlWidth), gtx.Constraints.Max.X*controlShare/100)
 	return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Start}.Layout(gtx,
 		layout.Flexed(1, row.copyBlock),
 		layout.Rigid(layout.Spacer{Width: unit.Dp(21)}.Layout),
@@ -275,7 +289,7 @@ func (row *settingRowDescriptor) layoutDetail(gtx layout.Context) layout.Dimensi
 func (row *settingRowDescriptor) layoutControl(gtx layout.Context) layout.Dimensions {
 	semantic.DescriptionOp(row.description).Add(gtx.Ops)
 	gtx.Constraints.Min = image.Point{}
-	gtx.Constraints.Max.X = min(gtx.Constraints.Max.X, gtx.Dp(320))
+	gtx.Constraints.Max.X = min(gtx.Constraints.Max.X, gtx.Dp(row.maxControlWidth))
 	return row.control(gtx)
 }
 

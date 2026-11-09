@@ -23,6 +23,12 @@ type ClientPreferences struct {
 	MiniOpen     bool   `json:"miniOpen"`
 	Visualizer   *bool  `json:"visualizer,omitempty"`
 	WaveProgress *bool  `json:"waveProgress,omitempty"`
+	// SidebarCollapsed folds the wide-window sidebar to its rail.
+	SidebarCollapsed bool   `json:"sidebarCollapsed,omitempty"`
+	Accent           string `json:"accent,omitempty"`
+	VisualizerStyle  string `json:"visualizerStyle,omitempty"`
+	Corners          string `json:"corners,omitempty"`
+	CornerDp         int    `json:"cornerDp,omitempty"`
 }
 
 // VisualizerOn reports the stored visualizer preference; missing means on.
@@ -33,6 +39,89 @@ func (p ClientPreferences) VisualizerOn() bool {
 // WaveOn reports the stored wave-progress preference; missing means on.
 func (p ClientPreferences) WaveOn() bool {
 	return p.WaveProgress == nil || *p.WaveProgress
+}
+
+// The accent sources: the playing cover, the provider's brand, or the
+// desktop palette.
+const (
+	AccentArt     = "art"
+	AccentSource  = "source"
+	AccentDesktop = "desktop"
+)
+
+// AccentMode returns the stored accent source; missing or unknown means art.
+func (p ClientPreferences) AccentMode() string {
+	switch p.Accent {
+	case AccentSource, AccentDesktop:
+		return p.Accent
+	default:
+		return AccentArt
+	}
+}
+
+// VisualizerStyle is how the visualizer draws the music.
+type VisualizerStyle string
+
+// The visualizer styles: spectrum blades, a spectrum curve, the waveform,
+// and the stereo field.
+const (
+	VisualizerBars         VisualizerStyle = "bars"
+	VisualizerCurve        VisualizerStyle = "curve"
+	VisualizerOscilloscope VisualizerStyle = "oscilloscope"
+	VisualizerVectorscope  VisualizerStyle = "vectorscope"
+)
+
+// VisualizerStyles lists the styles in their cycling order.
+var VisualizerStyles = []VisualizerStyle{VisualizerBars, VisualizerCurve, VisualizerOscilloscope, VisualizerVectorscope}
+
+// Style returns the stored visualizer style; missing or unknown means bars.
+func (p ClientPreferences) Style() VisualizerStyle {
+	for _, style := range VisualizerStyles {
+		if string(style) == p.VisualizerStyle {
+			return style
+		}
+	}
+	return VisualizerBars
+}
+
+// The pane corner presets. CornersDesktop follows the Ryoku window corners;
+// CornersCustom uses CornerDp.
+const (
+	CornersSquare  = "square"
+	CornersFine    = "fine"
+	CornersChisel  = "chisel"
+	CornersDeep    = "deep"
+	CornersDesktop = "desktop"
+	CornersCustom  = "custom"
+)
+
+// CornerMaxDp is the deepest pane cut a listener can choose.
+const CornerMaxDp = 32
+
+// CornerPresetDp returns a fixed preset's cut in dp.
+func CornerPresetDp(preset string) (int, bool) {
+	switch preset {
+	case CornersSquare:
+		return 0, true
+	case CornersFine:
+		return 8, true
+	case CornersChisel:
+		return 16, true
+	case CornersDeep:
+		return 24, true
+	default:
+		return 0, false
+	}
+}
+
+// CornerPreset returns the stored corner preset; missing or unknown means chisel.
+func (p ClientPreferences) CornerPreset() string {
+	switch p.Corners {
+	case CornersSquare, CornersFine, CornersDeep, CornersDesktop, CornersCustom:
+		return p.Corners
+	default:
+		return CornersChisel
+	}
 }
 
 // DefaultClientPreferences returns safe defaults for malformed or absent state.
@@ -91,6 +180,7 @@ func LoadClientPreferences() (ClientPreferences, error) {
 	default:
 		preferences.Density = defaults.Density
 	}
+	preferences.CornerDp = min(max(preferences.CornerDp, 0), CornerMaxDp)
 	return preferences, nil
 }
 

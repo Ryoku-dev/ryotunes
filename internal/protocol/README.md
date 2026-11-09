@@ -15,8 +15,17 @@
 - `add_to_queue`, `play_next`, `remove_from_queue`, `move_in_queue`, `clear_queued`: manual queue editing.
 - `toggle_shuffle`, `set_repeat`, `set_stop_after_current`: queue modes.
 - `set_volume`, `set_playback_params`, `set_audio_fx`, `get_audio_fx`: volume, tempo/pitch, and effects.
+- `get_equalizer`, `set_equalizer`: read or atomically replace the complete parametric equalizer. A successful set emits `equalizer` with the accepted normalized state.
+- `list_equalizer_presets`, `save_equalizer_preset`, `delete_equalizer_preset`: built-in and user preset management. Built-in names cannot be replaced or deleted. Saving names the active curve and emits `equalizer`; deleting emits it when the active preset name is cleared.
+- `import_equalizer`: apply Equalizer APO or AutoEQ text and return any clamp or compatibility warnings; a non-empty name also saves it as a user preset. Every successful import emits `equalizer`.
 - `get_playback`, `get_queue`, `prefetch_stream`: state and stream warm-up.
 - `start_radio`, `radio_stations`, `play_radio_station`, `get_waveform`: provider radio, internet radio, and SoundCloud waveform.
+
+The subscribe snapshot carries the complete `equalizer`. Its `preset` member is
+omitted when the active curve is custom. Equalizer bands are labelled in mpv's
+audio-filter chain. mpv 0.41 does not forward `af-command` through its `lavfi`
+wrapper on the shipped build, so the player uses asynchronous complete-chain
+replacement.
 
 ## Browse, search, and library
 

@@ -24,10 +24,12 @@ func (s *uiShell) layout(gtx layout.Context, e *env.Env, widthDP float32) layout
 	paint.Fill(gtx.Ops, e.Th.R.Ground)
 	class := look.ClassFor(widthDP)
 	e.Th.Class = class
+	s.nav.setSidebarClass(class)
 	s.reconcileProvider(gtx, e)
 
+	collapsedTarget := class == look.Expanded && e.Nav.SidebarCollapsed()
 	panel := e.Nav.Panel()
-	dockEligible := panelDockEligible(widthDP, class)
+	dockEligible := panelDockEligible(widthDP, class, collapsedTarget)
 	panel = s.reconcileFramePanel(class, panel, dockEligible)
 	docked := panel != env.PanelNone && dockEligible && !e.Nav.NowPlaying()
 
@@ -52,29 +54,31 @@ func (s *uiShell) layout(gtx layout.Context, e *env.Env, widthDP float32) layout
 	playerY := max(topHeight, size.Y-margin-playerHeight-bottomNavHeight)
 	panesBottom := max(topHeight, playerY-gap)
 
-	sidebarPaneWidth := 0
-	if class == look.Expanded {
-		sidebarPaneWidth = gtx.Dp(look.SidebarExpanded)
-	} else if class == look.Medium {
-		sidebarPaneWidth = gtx.Dp(look.SidebarMedium)
-	}
-	sidebarColumn := 0
-	contentX := margin
-	if sidebarPaneWidth > 0 {
-		sidebarColumn = margin + sidebarPaneWidth
-		contentX = sidebarColumn + gap
+	sidebarPaneWidth, sidebarProgress := 0, float32(0)
+	switch class {
+	case look.Expanded:
+		target := float32(0)
+		if collapsedTarget {
+			target = 1
+		}
+		s.sidebarMotion.Duration = e.Th.Motion.Unfold
+		s.sidebarMotion.Ease = anim.EaseChisel
+		if !s.sidebarMotionReady {
+			s.sidebarMotion.Set(gtx, target)
+			s.sidebarMotionReady = true
+		}
+		s.sidebarMotion.Set(gtx, target)
+		sidebarProgress = s.sidebarMotion.Value(gtx)
+		expanded, rail := gtx.Dp(look.SidebarExpanded), gtx.Dp(look.SidebarMedium)
+		sidebarPaneWidth = expanded + int(float32(rail-expanded)*sidebarProgress+.5)
+	case look.Medium:
+		sidebarPaneWidth, sidebarProgress = gtx.Dp(look.SidebarMedium), 1
 	}
 
-	panelWidth := int(float32(gtx.Dp(look.Panel)) * panelProgress)
-	panelGap := 0
-	if panelWidth > 0 {
-		panelGap = gap
-	}
-	contentRight := max(contentX, size.X-margin-panelWidth-panelGap)
-	contentRect := image.Rect(contentX, topHeight, contentRight, panesBottom)
-	frameContentRect := contentRect
-	sidebarRect := image.Rect(margin, topHeight, margin+sidebarPaneWidth, panesBottom)
-	panelRect := image.Rect(size.X-margin-panelWidth, topHeight, size.X-margin, panesBottom)
+	panelWidth := int(float32(gtx.Dp(look.Panel))*panelProgress + .5)
+	rects := resolveFrameRects(size, topHeight, panesBottom, margin, gap, sidebarPaneWidth, panelWidth)
+	frameContentRect := rects.Content
+	contentRect, sidebarRect, panelRect := rects.Content, rects.Sidebar, rects.Panel
 
 	if e.Nav.NowPlaying() {
 		contentRect = image.Rect(margin, topHeight, size.X-margin, panesBottom)
@@ -84,8 +88,9 @@ func (s *uiShell) layout(gtx layout.Context, e *env.Env, widthDP float32) layout
 	} else {
 		if sidebarPaneWidth > 0 {
 			s.layoutPaneRect(gtx, sidebarRect, gtx.Dp(e.Th.Cut.Large), e.Th.R.Stone1, func(gtx layout.Context) layout.Dimensions {
-				return s.sidebar.Layout(gtx, e, class)
+				return s.sidebar.Layout(gtx, e, class, sidebarProgress)
 			})
+			s.sidebar.ConsumeNavigation()
 		}
 		s.layoutPaneRect(gtx, contentRect, gtx.Dp(e.Th.Cut.Large), e.Th.R.Stone2, func(gtx layout.Context) layout.Dimensions {
 			return s.layoutContent(gtx, e)
@@ -102,8 +107,15 @@ func (s *uiShell) layout(gtx layout.Context, e *env.Env, widthDP float32) layout
 		} else {
 			s.sheetMotion.Duration = e.Th.Motion.MenuOut
 			s.sheetMotion.Set(gtx, 0)
-			_ = s.sheetMotion.Value(gtx)
+			s.sheetMotion.Value(gtx)
 		}
+	}
+	if class == look.Medium {
+		s.layoutSidebarSheet(gtx, e, frameContentRect)
+	} else {
+		s.sidebarSheetMotion.Duration = e.Th.Motion.MenuOut
+		s.sidebarSheetMotion.Set(gtx, 0)
+		s.sidebarSheetMotion.Value(gtx)
 	}
 
 	playerRect := image.Rect(margin, playerY, size.X-margin, playerY+playerHeight)
@@ -121,7 +133,8 @@ func (s *uiShell) layout(gtx layout.Context, e *env.Env, widthDP float32) layout
 	}
 
 	frame := chrome.Frame{
-		Class: class, Sidebar: sidebarColumn, Content: frameContentRect,
+		Class: class, Sidebar: rects.SidebarColumn, SidebarProgress: sidebarProgress,
+		SidebarSheet: s.nav.SidebarSheetOpen(), Content: frameContentRect,
 		Decorated: s.config.Decorated, Maximized: s.config.Mode == gioapp.Maximized,
 	}
 	layoutAt(gtx, image.Point{}, image.Pt(size.X, topHeight), func(gtx layout.Context) layout.Dimensions {
@@ -133,19 +146,41 @@ func (s *uiShell) layout(gtx layout.Context, e *env.Env, widthDP float32) layout
 	return layout.Dimensions{Size: size}
 }
 
-func (s *uiShell) reconcileProvider(gtx layout.Context, e *env.Env) {
-	provider := e.Store.Snapshot().Provider
-	if provider != e.Th.Src.Provider {
-		e.Th.SetProvider(gtx, provider)
-	}
-	e.Th.Animate(gtx)
+type frameRects struct {
+	Sidebar       image.Rectangle
+	Content       image.Rectangle
+	Panel         image.Rectangle
+	SidebarColumn int
 }
 
-func panelDockEligible(widthDP float32, class look.Class) bool {
+func resolveFrameRects(size image.Point, top, bottom, margin, gap, sidebarWidth, panelWidth int) frameRects {
+	sidebarColumn := 0
+	contentX := margin
+	if sidebarWidth > 0 {
+		sidebarColumn = margin + sidebarWidth
+		contentX = sidebarColumn + gap
+	}
+	panelGap := 0
+	if panelWidth > 0 {
+		panelGap = gap
+	}
+	contentRight := max(contentX, size.X-margin-panelWidth-panelGap)
+	return frameRects{
+		Sidebar:       image.Rect(margin, top, margin+sidebarWidth, bottom),
+		Content:       image.Rect(contentX, top, contentRight, bottom),
+		Panel:         image.Rect(size.X-margin-panelWidth, top, size.X-margin, bottom),
+		SidebarColumn: sidebarColumn,
+	}
+}
+
+func panelDockEligible(widthDP float32, class look.Class, collapsed bool) bool {
 	sidebar := float32(0)
 	switch class {
 	case look.Expanded:
 		sidebar = float32(look.SidebarExpanded)
+		if collapsed {
+			sidebar = float32(look.SidebarMedium)
+		}
 	case look.Medium:
 		sidebar = float32(look.SidebarMedium)
 	default:
@@ -242,6 +277,75 @@ func (s *uiShell) layoutPanelSheet(gtx layout.Context, e *env.Env, content image
 		return s.rightPanel.Layout(gtx, e)
 	})
 	opacity.Pop()
+}
+
+func (s *uiShell) layoutSidebarSheet(gtx layout.Context, e *env.Env, content image.Rectangle) {
+	desired := s.nav.SidebarSheetOpen()
+	s.sidebarSheetMotion.Ease = anim.EaseChisel
+	if desired {
+		s.sidebarSheetMotion.Duration = e.Th.Motion.MenuIn
+	} else {
+		s.sidebarSheetMotion.Duration = e.Th.Motion.MenuOut
+	}
+	if !s.sidebarSheetReady {
+		s.sidebarSheetMotion.Set(gtx, 0)
+		s.sidebarSheetReady = true
+	}
+	target := float32(0)
+	if desired {
+		target = 1
+	}
+	s.sidebarSheetMotion.Set(gtx, target)
+	progress := s.sidebarSheetMotion.Value(gtx)
+	if progress <= 0 || content.Empty() {
+		return
+	}
+	for {
+		raw, ok := gtx.Event(pointer.Filter{Target: &s.sidebarSheetOutside, Kinds: pointer.Press})
+		if !ok {
+			break
+		}
+		if _, ok := raw.(pointer.Event); ok && desired {
+			s.nav.CloseSidebarSheet()
+			desired = false
+			gtx.Execute(op.InvalidateCmd{})
+		}
+	}
+
+	width := min(gtx.Dp(look.SidebarExpanded), content.Dx())
+	rect := image.Rect(content.Min.X, content.Min.Y, content.Min.X+width, content.Max.Y)
+	layer := op.Record(gtx.Ops)
+	registerOutside := func(rectangle image.Rectangle) {
+		if rectangle.Empty() {
+			return
+		}
+		area := clip.Rect(rectangle).Push(gtx.Ops)
+		event.Op(gtx.Ops, &s.sidebarSheetOutside)
+		area.Pop()
+	}
+	window := image.Rectangle{Max: gtx.Constraints.Max}
+	registerOutside(image.Rect(window.Min.X, window.Min.Y, window.Max.X, rect.Min.Y))
+	registerOutside(image.Rect(window.Min.X, rect.Max.Y, window.Max.X, window.Max.Y))
+	registerOutside(image.Rect(window.Min.X, rect.Min.Y, rect.Min.X, rect.Max.Y))
+	registerOutside(image.Rect(rect.Max.X, rect.Min.Y, window.Max.X, rect.Max.Y))
+	sheetBlocker := clip.Rect(rect).Push(gtx.Ops)
+	event.Op(gtx.Ops, &s.sidebarSheet)
+	sheetBlocker.Pop()
+
+	travel := gtx.Dp(6)
+	if !desired {
+		travel = gtx.Dp(4)
+	}
+	rect = rect.Add(image.Pt(-int(float32(travel)*(1-progress)+.5), 0))
+	opacity := paint.PushOpacity(gtx.Ops, progress)
+	s.layoutPaneRect(gtx, rect, gtx.Dp(e.Th.Cut.Large), e.Th.R.Stone1, func(gtx layout.Context) layout.Dimensions {
+		return s.sidebarSheet.Layout(gtx, e, look.Expanded, 0)
+	})
+	opacity.Pop()
+	if s.sidebarSheet.ConsumeNavigation() {
+		s.nav.CloseSidebarSheet()
+	}
+	op.Defer(gtx.Ops, layer.Stop())
 }
 
 func (s *uiShell) layoutPaneRect(gtx layout.Context, rectangle image.Rectangle, cut int, plane color.NRGBA, body layout.Widget) {

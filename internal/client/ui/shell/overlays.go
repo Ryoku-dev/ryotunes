@@ -11,6 +11,14 @@ import (
 )
 
 func (s *uiShell) layoutOverlays(gtx layout.Context, e *env.Env) {
+	requested := s.sidebar.ConsumeNewPlaylistRequest()
+	if s.sidebarSheet.ConsumeNewPlaylistRequest() {
+		requested = true
+	}
+	if requested {
+		s.sidebar.OpenNewPlaylistDialog()
+	}
+	s.sidebar.LayoutDialogs(gtx, e)
 	s.itemMenu.LayoutDialogs(gtx, e)
 	s.layoutConfirm(gtx, e)
 	s.placards.Layout(gtx, e.Th.Theme)

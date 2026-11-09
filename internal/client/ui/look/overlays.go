@@ -36,14 +36,17 @@ const (
 	End
 )
 
-// Placement describes an overlay's anchor relationship.
+// Placement describes an overlay's anchor relationship. Width fixes the
+// overlay's width; MinWidth only keeps it at least that wide (a choice list
+// as wide as its trigger, still growing for a longer label).
 type Placement struct {
-	Prefer  Side
-	Align   Align
-	Gap     unit.Dp
-	Width   unit.Dp
-	Passive bool
-	Return  any
+	Prefer   Side
+	Align    Align
+	Gap      unit.Dp
+	Width    unit.Dp
+	MinWidth unit.Dp
+	Passive  bool
+	Return   any
 }
 
 type overlayEntry struct {
@@ -330,7 +333,10 @@ func (overlays *Overlays) layoutEntry(gtx layout.Context, theme *Theme, entry *o
 		}
 	}
 	if entry.placement.Width > 0 {
-		measure.Constraints.Min.X = min(measure.Constraints.Max.X, gtx.Dp(entry.placement.Width))
+		width := min(measure.Constraints.Max.X, gtx.Dp(entry.placement.Width))
+		measure.Constraints.Min.X, measure.Constraints.Max.X = width, width
+	} else if entry.placement.MinWidth > 0 {
+		measure.Constraints.Min.X = min(measure.Constraints.Max.X, gtx.Dp(entry.placement.MinWidth))
 	}
 	record := op.Record(gtx.Ops)
 	dimensions := inset.Layout(measure, entry.content)

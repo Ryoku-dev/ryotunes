@@ -4,19 +4,13 @@ import (
 	"image"
 	"image/color"
 	"math"
-	"strconv"
-	"strings"
-	"time"
 
 	"gioui.org/f32"
 	"gioui.org/layout"
-	"gioui.org/op"
 	"gioui.org/op/clip"
 	"gioui.org/op/paint"
-	"gioui.org/text"
 
 	"github.com/ryoku-dev/ryoku/docs/lithic/library/go/kit"
-	"github.com/ryoku-dev/ryoku/docs/lithic/library/go/palette"
 	"github.com/ryoku-dev/ryotunes/internal/client/state"
 	"github.com/ryoku-dev/ryotunes/internal/client/ui/act"
 	"github.com/ryoku-dev/ryotunes/internal/client/ui/env"
@@ -25,8 +19,6 @@ import (
 	"github.com/ryoku-dev/ryotunes/internal/model"
 	"github.com/ryoku-dev/ryotunes/internal/protocol"
 )
-
-const seekSafetyTimeout = 3 * time.Second
 
 // PlayerBar owns the persistent and compact playback bars.
 type PlayerBar struct {
@@ -43,8 +35,8 @@ type PlayerBar struct {
 	download kit.IconPlaque
 	downTip  look.Tip
 
-	transport transport
-	seek      look.Scrubber
+	transport widgets.Transport
+	seek      widgets.Seek
 	volume    volumeControl
 
 	lyrics    kit.IconPlaque
@@ -58,13 +50,7 @@ type PlayerBar struct {
 	sound     kit.IconPlaque
 	soundTip  look.Tip
 
-	seekTrackID  string
-	seekPending  bool
-	seekDragging bool
-	seekTarget   float64
-	seekOrigin   float64
-	seekUntil    time.Time
-	lastToast    uint64
+	lastToast uint64
 
 	compact compactPlayer
 }
@@ -124,28 +110,6 @@ func playerBarTrailingWidth(fit playerBarFit, metrics playerBarFitMetrics) int {
 	return plaques*metrics.Plaque + smallGaps*metrics.SmallGap + 3*fit.Gap + fit.Scrubber
 }
 
-func playbackDisplayDuration(reported float64, value *string) float64 {
-	if reported > 0 && !math.IsNaN(reported) && !math.IsInf(reported, 0) {
-		return reported
-	}
-	if value == nil {
-		return 0
-	}
-	parts := strings.Split(strings.TrimSpace(*value), ":")
-	if len(parts) < 2 || len(parts) > 3 {
-		return 0
-	}
-	seconds := 0
-	for index, part := range parts {
-		component, err := strconv.Atoi(strings.TrimSpace(part))
-		if err != nil || component < 0 || (index > 0 && component >= 60) {
-			return 0
-		}
-		seconds = seconds*60 + component
-	}
-	return float64(seconds)
-}
-
 // Layout renders the 88 dp three-zone player interior.
 func (bar *PlayerBar) Layout(gtx layout.Context, e *env.Env) layout.Dimensions {
 	snapshot := e.Store.Snapshot()
@@ -155,7 +119,6 @@ func (bar *PlayerBar) Layout(gtx layout.Context, e *env.Env) layout.Dimensions {
 	}
 	track := trackFromPlayback(snapshot.Playback.Now, e.Store.CurrentTrack())
 	provider := model.ProviderOf(track.VideoID)
-	bar.reconcileSeek(gtx, e, snapshot, track.VideoID)
 
 	barWidth := gtx.Constraints.Max.X
 	height := min(gtx.Constraints.Max.Y, gtx.Dp(88))
@@ -296,7 +259,7 @@ func (bar *PlayerBar) layoutLike(gtx layout.Context, e *env.Env, liked bool) lay
 				return layout.Center.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 					return bar.likeFill.Layout(gtx, e.Th, liked,
 						func(gtx layout.Context) layout.Dimensions { return look.Icon.HeartOutline.Layout(gtx, e.Th.R.Fg2) },
-						func(gtx layout.Context) layout.Dimensions { return look.Icon.Heart.Layout(gtx, e.Th.Src.Ink) },
+						func(gtx layout.Context) layout.Dimensions { return look.Icon.Heart.Layout(gtx, e.Th.Accent.Ink) },
 					)
 				})
 			}),
@@ -357,79 +320,10 @@ func (bar *PlayerBar) layoutCentre(gtx layout.Context, e *env.Env, snapshot stat
 			layout.Rigid(func(gtx layout.Context) layout.Dimensions { return bar.transport.Layout(gtx, e, snapshot) }),
 			layout.Rigid(layout.Spacer{Height: 6}.Layout),
 			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-				return bar.layoutSeek(gtx, e, snapshot, track, provider)
+				return bar.seek.Layout(gtx, e, snapshot, track)
 			}),
 		)
 	})
-}
-
-func (bar *PlayerBar) layoutSeek(gtx layout.Context, e *env.Env, snapshot state.State, track model.Track, provider model.Provider) layout.Dimensions {
-	if provider == model.ProviderRadio {
-		return layout.Center.Layout(gtx, kit.Claim(e.Th.Theme, palette.Alive, "Live"))
-	}
-	duration := playbackDisplayDuration(snapshot.Playback.Duration, track.Duration)
-	knownDuration := duration > 0
-	position := 0.0
-	end := "--:--"
-	if knownDuration {
-		position = e.Store.PositionAt(gtx.Now)
-		end = widgets.Duration(duration)
-	}
-	value := float32(0)
-	if knownDuration {
-		value = float32(min(max(position/duration, 0), 1))
-	}
-	return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
-		layout.Rigid(playerTimeBox(e, widgets.Duration(position), text.End)),
-		layout.Rigid(layout.Spacer{Width: 8}.Layout),
-		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-			fill := e.Th.R.Fg2
-			if !snapshot.Playback.Paused {
-				fill = e.Th.Src.Ink
-			}
-			scrubGTX := gtx
-			if !knownDuration {
-				scrubGTX = gtx.Disabled()
-			}
-			dimensions := bar.seek.Layout(scrubGTX, e.Th, value, look.ScrubberStyle{
-				Fill: fill,
-				Bubble: func(fraction float32) string {
-					if !knownDuration {
-						return "--:--"
-					}
-					return widgets.Duration(float64(fraction) * duration)
-				},
-				WheelStep: float32(min(1, 5/max(1, duration))),
-				Wave:      e.Fx.Wave,
-				Live:      !snapshot.Playback.Paused,
-			})
-			if !knownDuration {
-				if bar.seekDragging {
-					e.Store.SetSeekDrag(nil)
-				}
-				bar.seekDragging = false
-				return dimensions
-			}
-			fraction, dragging := bar.seek.Dragging()
-			if dragging {
-				preview := float64(fraction) * duration
-				e.Store.SetSeekDrag(&preview)
-			}
-			committedFraction, committed := bar.seek.Committed()
-			if committed {
-				bar.commitSeek(gtx, e, snapshot, float64(committedFraction)*duration, duration)
-			} else if bar.seekDragging && !dragging {
-				e.Store.SetSeekDrag(nil)
-			}
-			bar.seekDragging = dragging
-			if !e.Fx.Wave || dragging {
-				bar.requestProgressFrame(gtx, e, duration, max(1, dimensions.Size.X), snapshot.Playback.Paused)
-			}
-			return dimensions
-		}),
-		layout.Rigid(layout.Spacer{Width: 8}.Layout),
-		layout.Rigid(playerTimeBox(e, end, text.Start)),
-	)
 }
 
 func (bar *PlayerBar) layoutTrailing(gtx layout.Context, e *env.Env, provider model.Provider, fit playerBarFit) layout.Dimensions {
@@ -521,57 +415,6 @@ func (bar *PlayerBar) layoutTrailing(gtx layout.Context, e *env.Env, provider mo
 	return dimensions
 }
 
-func (bar *PlayerBar) commitSeek(gtx layout.Context, e *env.Env, snapshot state.State, target, duration float64) {
-	target = min(max(target, 0), duration)
-	bar.seekPending = true
-	bar.seekTarget = target
-	bar.seekOrigin = snapshot.Playback.Position
-	bar.seekUntil = gtx.Now.Add(seekSafetyTimeout)
-	e.Store.SetSeekDrag(&target)
-	gtx.Execute(op.InvalidateCmd{At: bar.seekUntil})
-	callVoid(e, protocol.MethodSeek, protocol.SeekParams{Position: target})
-}
-
-func (bar *PlayerBar) reconcileSeek(gtx layout.Context, e *env.Env, snapshot state.State, trackID string) {
-	if trackID != bar.seekTrackID {
-		bar.seekTrackID = trackID
-		bar.seekPending = false
-		e.Store.SetSeekDrag(nil)
-		return
-	}
-	if !bar.seekPending {
-		return
-	}
-	position := snapshot.Playback.Position
-	passed := math.Abs(position-bar.seekTarget) <= .5
-	if bar.seekTarget > bar.seekOrigin {
-		passed = passed || position >= bar.seekTarget
-	} else if bar.seekTarget < bar.seekOrigin {
-		passed = passed || position <= bar.seekTarget
-	}
-	if passed || !gtx.Now.Before(bar.seekUntil) {
-		bar.seekPending = false
-		e.Store.SetSeekDrag(nil)
-	}
-}
-
-func (bar *PlayerBar) requestProgressFrame(gtx layout.Context, e *env.Env, duration float64, trackPixels int, paused bool) {
-	if paused || duration <= 0 || trackPixels <= 0 {
-		return
-	}
-	pixelDelay := time.Duration(duration / float64(trackPixels) * float64(time.Second))
-	if pixelDelay < 250*time.Millisecond {
-		pixelDelay = 250 * time.Millisecond
-	}
-	position := e.Store.PositionAt(gtx.Now)
-	secondDelay := time.Duration((1 - (position - math.Floor(position))) * float64(time.Second))
-	if secondDelay <= 0 {
-		secondDelay = time.Second
-	}
-	delay := min(pixelDelay, secondDelay)
-	gtx.Execute(op.InvalidateCmd{At: gtx.Now.Add(delay)})
-}
-
 func (bar *PlayerBar) forwardToast(e *env.Env, toast *state.Toast) {
 	if toast == nil || toast.Serial == bar.lastToast || e.Toast == nil {
 		return
@@ -584,14 +427,6 @@ func (bar *PlayerBar) forwardToast(e *env.Env, toast *state.Toast) {
 		kind = env.ToastSuccess
 	}
 	e.Toast(toast.Message, kind)
-}
-
-func playerTimeBox(e *env.Env, value string, align text.Alignment) layout.Widget {
-	return func(gtx layout.Context) layout.Dimensions {
-		return fixedPlayerWidth(gtx.Dp(44), func(gtx layout.Context) layout.Dimensions {
-			return (kit.Label{Style: e.Th.T.Mono, Color: e.Th.R.Fg3, MaxLines: 1, Align: align}).Layout(gtx, e.Th.Theme, value)
-		})(gtx)
-	}
 }
 
 func fixedPlayerWidth(width int, widget layout.Widget) layout.Widget {

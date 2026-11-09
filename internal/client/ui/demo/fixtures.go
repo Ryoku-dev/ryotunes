@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/ryoku-dev/ryotunes/internal/client/state"
+	"github.com/ryoku-dev/ryotunes/internal/eq"
 	"github.com/ryoku-dev/ryotunes/internal/model"
 	"github.com/ryoku-dev/ryotunes/internal/protocol"
 )
@@ -33,19 +34,20 @@ func SpectrumLevels() []float32 {
 }
 
 type fixtures struct {
-	snapshot  protocol.Snapshot
-	tracks    []model.Track
-	cards     []model.BrowseItem
-	library   []model.BrowseItem
-	feed      model.Feed
-	focusFeed model.Feed
-	playlist  model.PlaylistPage
-	album     model.AlbumPage
-	artist    model.ArtistPage
-	lyrics    model.Lyrics
-	radio     []model.RadioStation
-	logs      model.LogsResult
-	stats     model.ListeningStats
+	snapshot         protocol.Snapshot
+	tracks           []model.Track
+	cards            []model.BrowseItem
+	library          []model.BrowseItem
+	feed             model.Feed
+	focusFeed        model.Feed
+	playlist         model.PlaylistPage
+	album            model.AlbumPage
+	artist           model.ArtistPage
+	lyrics           model.Lyrics
+	radio            []model.RadioStation
+	logs             model.LogsResult
+	stats            model.ListeningStats
+	equalizerPresets []model.EQPreset
 }
 
 func makeFixtures(directory string, playing bool) (fixtures, error) {
@@ -278,10 +280,25 @@ func makeFixtures(directory string, playing bool) (fixtures, error) {
 	}
 	premium := true
 	spotifyName, soundcloudName, tidalName, tidalQuality := "Nero on Spotify", "nero", "Nero", "LOSSLESS"
+	equalizer := model.Equalizer{
+		Enabled: true, Preamp: -2.5, Preset: "Mineral lift",
+		Bands: []model.EQBand{
+			{Type: model.EQHighPass, Frequency: 32, Q: .71, Enabled: true},
+			{Type: model.EQLowShelf, Frequency: 90, Gain: 3.5, Q: .8, Enabled: true},
+			{Type: model.EQPeak, Frequency: 280, Gain: -2, Q: 1.2, Enabled: true},
+			{Type: model.EQPeak, Frequency: 1200, Gain: 2.8, Q: 1.4, Enabled: true},
+			{Type: model.EQPeak, Frequency: 4200, Gain: 3.2, Q: 1.1, Enabled: true},
+			{Type: model.EQHighShelf, Frequency: 10500, Gain: -1.5, Q: .7, Enabled: true},
+		},
+	}
+	equalizerPresets := eq.Builtins()
+	equalizerPresets = append(equalizerPresets, model.EQPreset{
+		Name: "Mineral lift", Preamp: equalizer.Preamp, Bands: append([]model.EQBand(nil), equalizer.Bands...),
+	})
 	snapshot := protocol.Snapshot{
 		Playback: model.PlaybackSnapshot{Now: &now, Paused: !playing, Position: 105, Duration: 198, Volume: 68},
 		Queue:    queue, Settings: settings, Auth: account, AudioFx: model.DefaultAudioFx(),
-		Provider: model.ProviderYouTube, Downloads: downloads, Personal: personal,
+		Equalizer: equalizer, Provider: model.ProviderYouTube, Downloads: downloads, Personal: personal,
 		Spotify:    model.SpotifyStatus{SignedIn: true, Stored: true, Name: &spotifyName, Premium: &premium},
 		SoundCloud: model.SoundCloudStatus{SignedIn: true, Name: &soundcloudName},
 		Tidal:      model.TidalStatus{SignedIn: true, Name: &tidalName, Quality: &tidalQuality, HasCredentials: true},
@@ -290,6 +307,7 @@ func makeFixtures(directory string, playing bool) (fixtures, error) {
 	return fixtures{
 		snapshot: snapshot, tracks: tracks, cards: cards, library: library, feed: feed, focusFeed: focusFeed,
 		playlist: playlist, album: album, artist: artist, lyrics: lyrics, radio: radio, logs: logs, stats: stats,
+		equalizerPresets: equalizerPresets,
 	}, nil
 }
 

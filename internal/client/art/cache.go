@@ -15,6 +15,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -26,14 +27,18 @@ import (
 )
 
 const (
-	defaultMaxBytes = 64 << 20
-	defaultWorkers  = 4
-	maxSourceBytes  = 32 << 20
+	defaultMaxBytes   = 64 << 20
+	defaultMaxSamples = 256
+	defaultWorkers    = 4
+	maxSourceBytes    = 32 << 20
+	sampleLoadSize    = 64
+	failureTTL        = 30 * time.Second
 )
 
 // Options configures a bounded artwork cache.
 type Options struct {
 	MaxBytes   int
+	MaxSamples int
 	Workers    int
 	Timeout    time.Duration
 	Invalidate func()
@@ -46,13 +51,19 @@ type Cache struct {
 	cancel     context.CancelFunc
 	client     *http.Client
 	maxBytes   int
+	maxSamples int
 	invalidate func()
 
 	mu             sync.Mutex
 	entries        map[cacheKey]*cacheEntry
 	pending        map[cacheKey]uint64
+	pendingURL     map[string]int
+	failed         map[cacheKey]time.Time
+	failedURL      map[string]time.Time
 	lru            list.List
 	bytes          int
+	samples        map[string]*sampleCacheEntry
+	sampleLRU      list.List
 	nextGeneration uint64
 	jobs           chan loadJob
 	workers        sync.WaitGroup
@@ -71,6 +82,12 @@ type cacheEntry struct {
 	lru   *list.Element
 }
 
+type sampleCacheEntry struct {
+	url    string
+	sample artworkSample
+	lru    *list.Element
+}
+
 type loadJob struct {
 	key        cacheKey
 	generation uint64
@@ -86,6 +103,10 @@ func New(options Options) *Cache {
 	if maxBytes <= 0 {
 		maxBytes = defaultMaxBytes
 	}
+	maxSamples := options.MaxSamples
+	if maxSamples <= 0 {
+		maxSamples = defaultMaxSamples
+	}
 	client := options.HTTPClient
 	if client == nil {
 		timeout := options.Timeout
@@ -96,9 +117,11 @@ func New(options Options) *Cache {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	cache := &Cache{
-		ctx: ctx, cancel: cancel, client: client, maxBytes: maxBytes,
+		ctx: ctx, cancel: cancel, client: client, maxBytes: maxBytes, maxSamples: maxSamples,
 		invalidate: options.Invalidate, entries: make(map[cacheKey]*cacheEntry),
-		pending: make(map[cacheKey]uint64), jobs: make(chan loadJob, workers*4),
+		samples: make(map[string]*sampleCacheEntry), pending: make(map[cacheKey]uint64),
+		pendingURL: make(map[string]int), failed: make(map[cacheKey]time.Time),
+		failedURL: make(map[string]time.Time), jobs: make(chan loadJob, workers*4),
 		placeholder: Placeholder(),
 	}
 	cache.workers.Add(workers)
@@ -121,25 +144,36 @@ func (c *Cache) Get(rawURL string, size int) (paint.ImageOp, bool) {
 		c.mu.Unlock()
 		return op, true
 	}
-	if rawURL == "" || c.ctx.Err() != nil {
+	if rawURL == "" || c.ctx.Err() != nil || c.failureActiveLocked(key) {
 		c.mu.Unlock()
 		return c.placeholder, false
 	}
-	if _, loading := c.pending[key]; !loading {
-		c.nextGeneration++
-		generation := c.nextGeneration
-		c.pending[key] = generation
-		select {
-		case c.jobs <- loadJob{key: key, generation: generation}:
-		default:
-			delete(c.pending, key)
-		}
-	}
+	c.enqueueLocked(key)
 	c.mu.Unlock()
 	return c.placeholder, false
 }
 
-// Forget removes every cached and in-flight size for one URL.
+// Sample returns the cached cover sample and whether sampling has completed.
+// On a miss it queues one small load, independent of whether any surface draws the cover.
+func (c *Cache) Sample(rawURL string) (sample color.NRGBA, ready bool) {
+	if rawURL == "" {
+		return color.NRGBA{}, true
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if entry := c.samples[rawURL]; entry != nil {
+		c.sampleLRU.MoveToFront(entry.lru)
+		return entry.sample.color, true
+	}
+	key := cacheKey{url: rawURL, size: sampleLoadSize}
+	if c.ctx.Err() != nil || c.failureActiveLocked(key) {
+		return color.NRGBA{}, true
+	}
+	c.enqueueLocked(key)
+	return color.NRGBA{}, false
+}
+
+// Forget removes every cached, failed, and in-flight size and sample for one URL.
 func (c *Cache) Forget(rawURL string) {
 	c.mu.Lock()
 	for key, entry := range c.entries {
@@ -151,6 +185,17 @@ func (c *Cache) Forget(rawURL string) {
 		if key.url == rawURL {
 			delete(c.pending, key)
 		}
+	}
+	delete(c.pendingURL, rawURL)
+	for key := range c.failed {
+		if key.url == rawURL {
+			delete(c.failed, key)
+		}
+	}
+	delete(c.failedURL, rawURL)
+	if entry := c.samples[rawURL]; entry != nil {
+		delete(c.samples, rawURL)
+		c.sampleLRU.Remove(entry.lru)
 	}
 	c.mu.Unlock()
 }
@@ -166,6 +211,53 @@ func Placeholder() paint.ImageOp {
 	pixel := image.NewNRGBA(image.Rect(0, 0, 1, 1))
 	pixel.SetNRGBA(0, 0, color.NRGBA{})
 	return paint.NewImageOp(pixel)
+}
+
+func (c *Cache) enqueueLocked(key cacheKey) bool {
+	if key.url == "" || c.pendingURL[key.url] > 0 {
+		return false
+	}
+	if _, loading := c.pending[key]; loading {
+		return false
+	}
+	c.nextGeneration++
+	generation := c.nextGeneration
+	c.pending[key] = generation
+	c.pendingURL[key.url]++
+	select {
+	case c.jobs <- loadJob{key: key, generation: generation}:
+		return true
+	default:
+		delete(c.pending, key)
+		delete(c.pendingURL, key.url)
+		return false
+	}
+}
+
+func (c *Cache) failureActiveLocked(key cacheKey) bool {
+	if len(c.failed) == 0 && len(c.failedURL) == 0 {
+		return false
+	}
+	now := time.Now()
+	if until, failed := c.failedURL[key.url]; failed {
+		if now.Before(until) {
+			return true
+		}
+		delete(c.failedURL, key.url)
+	}
+	if until, failed := c.failed[key]; failed {
+		if now.Before(until) {
+			return true
+		}
+		delete(c.failed, key)
+	}
+	return false
+}
+
+func (c *Cache) needsSample(rawURL string) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.samples[rawURL] == nil
 }
 
 // ParseCollage parses a ryotunes-collage marker into exactly four nonempty URLs.
@@ -194,13 +286,13 @@ func (c *Cache) worker() {
 		case <-c.ctx.Done():
 			return
 		case job := <-c.jobs:
-			img, err := c.load(c.ctx, job.key.url, job.key.size)
-			c.finish(job, img, err)
+			img, sample, err := c.load(c.ctx, job.key.url, job.key.size, c.needsSample(job.key.url))
+			c.finish(job, img, sample, err)
 		}
 	}
 }
 
-func (c *Cache) finish(job loadJob, img image.Image, loadErr error) {
+func (c *Cache) finish(job loadJob, img image.Image, sample artworkSample, loadErr error) {
 	c.mu.Lock()
 	generation, current := c.pending[job.key]
 	if !current || generation != job.generation {
@@ -208,9 +300,30 @@ func (c *Cache) finish(job loadJob, img image.Image, loadErr error) {
 		return
 	}
 	delete(c.pending, job.key)
-	if loadErr != nil || img == nil || c.ctx.Err() != nil {
+	delete(c.pendingURL, job.key.url)
+	if c.ctx.Err() != nil {
 		c.mu.Unlock()
 		return
+	}
+	invalidate := c.invalidate
+	if loadErr != nil || img == nil {
+		until := time.Now().Add(failureTTL)
+		c.failed[job.key] = until
+		c.failedURL[job.key.url] = until
+		c.mu.Unlock()
+		if invalidate != nil {
+			invalidate()
+		}
+		return
+	}
+	delete(c.failedURL, job.key.url)
+	for key := range c.failed {
+		if key.url == job.key.url {
+			delete(c.failed, key)
+		}
+	}
+	if sample.ready {
+		c.putSampleLocked(job.key.url, sample)
 	}
 	bounds := img.Bounds()
 	byteSize := bounds.Dx() * bounds.Dy() * 4
@@ -222,7 +335,6 @@ func (c *Cache) finish(job loadJob, img image.Image, loadErr error) {
 		oldest := c.lru.Back().Value.(*cacheEntry)
 		c.removeLocked(oldest)
 	}
-	invalidate := c.invalidate
 	c.mu.Unlock()
 	if invalidate != nil {
 		invalidate()
@@ -235,21 +347,44 @@ func (c *Cache) removeLocked(entry *cacheEntry) {
 	c.bytes -= entry.bytes
 }
 
-func (c *Cache) load(ctx context.Context, rawURL string, size int) (image.Image, error) {
+func (c *Cache) putSampleLocked(rawURL string, sample artworkSample) {
+	if rawURL == "" {
+		return
+	}
+	if entry := c.samples[rawURL]; entry != nil {
+		entry.sample = sample
+		c.sampleLRU.MoveToFront(entry.lru)
+		return
+	}
+	entry := &sampleCacheEntry{url: rawURL, sample: sample}
+	entry.lru = c.sampleLRU.PushFront(entry)
+	c.samples[rawURL] = entry
+	for c.sampleLRU.Len() > c.maxSamples {
+		oldest := c.sampleLRU.Back().Value.(*sampleCacheEntry)
+		delete(c.samples, oldest.url)
+		c.sampleLRU.Remove(oldest.lru)
+	}
+}
+
+func (c *Cache) load(ctx context.Context, rawURL string, size int, needSample bool) (image.Image, artworkSample, error) {
 	if urls, collage := ParseCollage(rawURL); collage {
-		return c.loadCollage(ctx, urls, size)
+		return c.loadCollage(ctx, urls, size, needSample)
 	}
 	if strings.HasPrefix(rawURL, model.CollageThumbnailPrefix) {
-		return nil, errors.New("malformed artwork collage")
+		return nil, artworkSample{}, errors.New("malformed artwork collage")
 	}
 	img, err := c.loadSource(ctx, rawURL)
 	if err != nil {
-		return nil, err
+		return nil, artworkSample{}, err
 	}
-	return downscale(img, size), nil
+	var sample artworkSample
+	if needSample {
+		sample = sampleArtwork(img)
+	}
+	return downscale(img, size), sample, nil
 }
 
-func (c *Cache) loadCollage(ctx context.Context, urls [4]string, size int) (image.Image, error) {
+func (c *Cache) loadCollage(ctx context.Context, urls [4]string, size int, needSample bool) (image.Image, artworkSample, error) {
 	if size < 2 {
 		size = 2
 	}
@@ -263,51 +398,64 @@ func (c *Cache) loadCollage(ctx context.Context, urls [4]string, size int) (imag
 	offsets := [4]image.Point{{}, {X: left}, {Y: top}, {X: left, Y: top}}
 	for i, source := range urls {
 		if strings.HasPrefix(source, model.CollageThumbnailPrefix) {
-			return nil, errors.New("nested artwork collage")
+			return nil, artworkSample{}, errors.New("nested artwork collage")
 		}
 		img, err := c.loadSource(ctx, source)
 		if err != nil {
-			return nil, err
+			return nil, artworkSample{}, err
 		}
 		cell := cover(img, widths[i], heights[i])
 		destination := image.Rectangle{Min: offsets[i], Max: offsets[i].Add(image.Pt(widths[i], heights[i]))}
 		draw.Draw(canvas, destination, cell, cell.Bounds().Min, draw.Src)
 	}
-	return canvas, nil
+	if needSample {
+		return canvas, sampleArtwork(canvas), nil
+	}
+	return canvas, artworkSample{}, nil
 }
 
 func (c *Cache) loadSource(ctx context.Context, rawURL string) (image.Image, error) {
-	parsed, err := url.Parse(rawURL)
-	if err != nil {
-		return nil, err
-	}
 	var reader io.ReadCloser
-	switch parsed.Scheme {
-	case "file":
-		if parsed.Host != "" && parsed.Host != "localhost" {
-			return nil, errors.New("file artwork host is not local")
-		}
-		file, err := os.Open(parsed.Path)
+	if filepath.IsAbs(rawURL) {
+		// the local provider hands out the cover path itself, which url.Parse would
+		// mangle at the first '?' or '%'
+		file, err := os.Open(rawURL)
 		if err != nil {
 			return nil, err
 		}
 		reader = file
-	case "http", "https":
-		request, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
+	} else {
+		parsed, err := url.Parse(rawURL)
 		if err != nil {
 			return nil, err
 		}
-		response, err := c.client.Do(request)
-		if err != nil {
-			return nil, err
+		switch parsed.Scheme {
+		case "file":
+			if parsed.Host != "" && parsed.Host != "localhost" {
+				return nil, errors.New("file artwork host is not local")
+			}
+			file, err := os.Open(parsed.Path)
+			if err != nil {
+				return nil, err
+			}
+			reader = file
+		case "http", "https":
+			request, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
+			if err != nil {
+				return nil, err
+			}
+			response, err := c.client.Do(request)
+			if err != nil {
+				return nil, err
+			}
+			if response.StatusCode < 200 || response.StatusCode >= 300 {
+				_ = response.Body.Close()
+				return nil, errors.New("artwork request failed: " + response.Status)
+			}
+			reader = response.Body
+		default:
+			return nil, errors.New("unsupported artwork URL")
 		}
-		if response.StatusCode < 200 || response.StatusCode >= 300 {
-			_ = response.Body.Close()
-			return nil, errors.New("artwork request failed: " + response.Status)
-		}
-		reader = response.Body
-	default:
-		return nil, errors.New("unsupported artwork URL")
 	}
 	defer reader.Close()
 	img, _, err := image.Decode(io.LimitReader(reader, maxSourceBytes+1))

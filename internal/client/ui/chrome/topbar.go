@@ -7,6 +7,7 @@ import (
 	"gioui.org/layout"
 	"gioui.org/op"
 	"gioui.org/op/clip"
+	"gioui.org/op/paint"
 	"gioui.org/text"
 
 	"github.com/ryoku-dev/ryoku/docs/lithic/library/go/kit"
@@ -17,16 +18,17 @@ import (
 // TopBar owns the persistent title, navigation, search, provider, and window controls.
 type TopBar struct {
 	move       kit.Click
+	sidebar    look.SidebarPlaque
+	sidebarTip look.Tip
 	back       kit.IconPlaque
 	forward    kit.IconPlaque
 	searchOpen kit.IconPlaque
 	maximize   kit.IconPlaque
 	close      kit.IconPlaque
 
-	search    topSearch
-	providers providerSwitcher
-	discord   discordToggle
-
+	search        topSearch
+	providers     providerSwitcher
+	discord       discordToggle
 	compactSearch bool
 	pending       system.Action
 	hasPending    bool
@@ -98,6 +100,10 @@ func (top *TopBar) handle(gtx layout.Context, e *env.Env, frame Frame) {
 		}
 	}
 	acted := false
+	if top.sidebar.Clicked(gtx) && frame.Class != look.Compact {
+		e.Nav.ToggleSidebar()
+		acted = true
+	}
 	if top.back.Clicked(gtx) && e.Nav.CanBack() {
 		e.Nav.Back()
 		acted = true
@@ -132,15 +138,25 @@ func (top *TopBar) layoutBrand(gtx layout.Context, e *env.Env, frame Frame, heig
 	markSize := gtx.Dp(24)
 	switch frame.Class {
 	case look.Expanded:
-		topBarAt(gtx, image.Rect(gtx.Dp(21), gtx.Dp(16), gtx.Dp(21)+markSize, gtx.Dp(16)+markSize), look.RyokuMark(24))
-		titleX := gtx.Dp(21) + markSize + gtx.Dp(8)
+		progress := min(max(frame.SidebarProgress, 0), 1)
+		paneWidth := max(0, frame.Sidebar-gtx.Dp(8))
+		railX := gtx.Dp(8) + max(0, (paneWidth-markSize)/2)
+		expandedX := gtx.Dp(21)
+		x := expandedX + int(float32(railX-expandedX)*progress+.5)
+		topBarAt(gtx, image.Rect(x, gtx.Dp(16), x+markSize, gtx.Dp(16)+markSize), look.RyokuMark(24))
+		titleX := x + markSize + gtx.Dp(8)
 		right := frame.Sidebar
-		if right <= titleX {
-			right = max(titleX, frame.Content.Min.X)
+		alpha := max(0, 1-2*progress)
+		if alpha > 0 && right > titleX {
+			bounds := image.Rect(titleX, gtx.Dp(16), right, gtx.Dp(40))
+			crop := clip.Rect(bounds).Push(gtx.Ops)
+			opacity := paint.PushOpacity(gtx.Ops, alpha)
+			topBarAt(gtx, bounds, func(gtx layout.Context) layout.Dimensions {
+				return kit.Label{Style: e.Th.T.Title, Color: e.Th.R.Fg, MaxLines: 1, Align: text.Start}.Layout(gtx, e.Th.Theme, "Ryotunes")
+			})
+			opacity.Pop()
+			crop.Pop()
 		}
-		topBarAt(gtx, image.Rect(titleX, gtx.Dp(16), right, gtx.Dp(40)), func(gtx layout.Context) layout.Dimensions {
-			return kit.Label{Style: e.Th.T.Title, Color: e.Th.R.Fg, MaxLines: 1, Align: text.Start}.Layout(gtx, e.Th.Theme, "Ryotunes")
-		})
 	case look.Medium:
 		column := frame.Sidebar
 		if column <= 0 {
@@ -164,6 +180,23 @@ func (top *TopBar) layoutNavigation(gtx layout.Context, e *env.Env, frame Frame,
 		})
 		return start + gtx.Dp(32)
 	}
+	tip := "Show sidebar · Ctrl B"
+	open := frame.SidebarSheet
+	if frame.Class == look.Expanded {
+		open = !e.Nav.SidebarCollapsed()
+		if open {
+			tip = "Collapse sidebar · Ctrl B"
+		} else {
+			tip = "Expand sidebar · Ctrl B"
+		}
+	}
+	top.sidebar.Description, top.sidebar.Open = tip, open
+	topBarAt(gtx, image.Rect(start, gtx.Dp(12), start+gtx.Dp(32), gtx.Dp(44)), func(gtx layout.Context) layout.Dimensions {
+		return top.sidebarTip.Layout(gtx, e.Th, e.Overlays, tip, func(gtx layout.Context) layout.Dimensions {
+			return top.sidebar.Layout(gtx, e.Th)
+		})
+	})
+	start += gtx.Dp(36)
 
 	canBack, canForward := e.Nav.CanBack(), e.Nav.CanForward()
 	top.back.Kind, top.back.Icon, top.back.Description, top.back.Small = kit.PlaqueQuiet, look.Icon.Back, "Back", true

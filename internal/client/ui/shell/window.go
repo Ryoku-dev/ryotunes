@@ -1,9 +1,6 @@
 package shell
 
 import (
-	"context"
-	"image"
-	"strings"
 	"sync"
 	"time"
 
@@ -22,7 +19,6 @@ import (
 	"github.com/ryoku-dev/ryotunes/internal/client/ui/env"
 	"github.com/ryoku-dev/ryotunes/internal/client/ui/look"
 	"github.com/ryoku-dev/ryotunes/internal/client/ui/widgets"
-	"github.com/ryoku-dev/ryotunes/internal/model"
 )
 
 type postQueue struct {
@@ -65,27 +61,33 @@ type uiShell struct {
 	pages   map[string]env.Page
 	config  gioapp.Config
 
-	topBar     chrome.TopBar
-	sidebar    chrome.Sidebar
-	bottomNav  chrome.BottomNav
-	player     chrome.PlayerBar
-	sound      chrome.Sound
-	rightPanel chrome.RightPanel
-	nowPlaying chrome.NowPlaying
-	mini       chrome.Mini
+	topBar       chrome.TopBar
+	sidebar      chrome.Sidebar
+	sidebarSheet chrome.Sidebar
+	bottomNav    chrome.BottomNav
+	player       chrome.PlayerBar
+	sound        chrome.Sound
+	rightPanel   chrome.RightPanel
+	nowPlaying   chrome.NowPlaying
+	mini         chrome.Mini
 
-	overlays          look.Overlays
-	placards          kit.Placard
-	confirm           kit.Confirm
-	confirmReq        *confirmRequest
-	itemMenu          widgets.ItemMenu
-	soundTag          struct{}
-	sheetOutside      struct{}
-	panelMotion       anim.Tween
-	sheetMotion       anim.Tween
-	sheetReady        bool
-	contentSwap       look.Swap
-	transitionWidgets map[string]layout.Widget
+	overlays            look.Overlays
+	placards            kit.Placard
+	confirm             kit.Confirm
+	confirmReq          *confirmRequest
+	itemMenu            widgets.ItemMenu
+	soundTag            struct{}
+	sheetOutside        struct{}
+	panelMotion         anim.Tween
+	sheetMotion         anim.Tween
+	sheetReady          bool
+	sidebarMotion       anim.Tween
+	sidebarMotionReady  bool
+	sidebarSheetMotion  anim.Tween
+	sidebarSheetReady   bool
+	sidebarSheetOutside struct{}
+	contentSwap         look.Swap
+	transitionWidgets   map[string]layout.Widget
 
 	classReady      bool
 	lastClass       look.Class
@@ -112,6 +114,7 @@ func newShell(runtime *clientRuntime, initial env.Route, panel env.Panel, mini b
 	}
 	shell.posts.invalidate = runtime.hub.Invalidate
 	shell.nav = newNavigator(initial, panel, mini, runtime.hub.Invalidate)
+	shell.nav.collapsed = runtime.store.Snapshot().Client.SidebarCollapsed
 	shell.nav.onChange = shell.persistNavigation
 	shell.nav.onMini = shell.requestWindow
 	go shell.preferenceWriter()
@@ -178,8 +181,7 @@ func (s *uiShell) newWindow(mini bool) *gioapp.Window {
 		scale := clientScale(preferences)
 		window.Option(
 			gioapp.Title("Ryotunes Mini"),
-			gioapp.Size(unit.Dp(360*scale), unit.Dp(420*scale)),
-			gioapp.MinSize(unit.Dp(300*scale), unit.Dp(320*scale)),
+			gioapp.Size(unit.Dp(520*scale), unit.Dp(176*scale)),
 			gioapp.Decorated(false),
 		)
 		return window
@@ -212,11 +214,19 @@ func (s *uiShell) runWindow(window *gioapp.Window, mini bool) error {
 	defer removeWindow()
 
 	var operations op.Ops
+	minimumSet := !mini
 	for {
 		raw := window.Event()
 		switch event := raw.(type) {
 		case gioapp.ConfigEvent:
 			s.config = event.Config
+			if !minimumSet {
+				// Gio pads the first minimum with a 40 dp fallback title bar until
+				// decorations are settled, and niri sizes the mini from that first one
+				minimumSet = true
+				scale := clientScale(s.runtime.store.Snapshot().Client)
+				window.Option(gioapp.MinSize(unit.Dp(300*scale), unit.Dp(160*scale)))
+			}
 		case gioapp.FrameEvent:
 			if !mini {
 				s.persistWindowSize(s.config, event.Metric)
@@ -291,61 +301,6 @@ func scaleMetric(gtx *layout.Context, preferences state.ClientPreferences) {
 	scale := clientScale(preferences)
 	gtx.Metric.PxPerDp *= scale
 	gtx.Metric.PxPerSp *= scale
-}
-
-func (s *uiShell) environment(now time.Time, theme *look.Theme) *env.Env {
-	snapshot := s.runtime.store.Snapshot()
-	lowResource := strings.EqualFold(strings.TrimSpace(snapshot.Settings[string(model.SettingLowResourceMode)]), "true")
-	motion := !snapshot.Client.ReduceMotion && !lowResource
-	available := s.runtime.spectrum != nil && s.runtime.spectrum.Available()
-	fx := env.Fx{
-		Visualizer: snapshot.Client.VisualizerOn() && motion && available,
-		Wave:       snapshot.Client.WaveOn() && motion,
-	}
-	playing := snapshot.Playback.Now != nil && !snapshot.Playback.Paused
-	if s.runtime.spectrum != nil {
-		s.runtime.spectrum.SetActive(playing && fx.Visualizer)
-	}
-	e := &env.Env{
-		Th: theme, Overlays: &s.overlays, Store: s.runtime.store, Conn: s.runtime.client,
-		Nav: s.nav, Art: s.runtime.art, Spectrum: s.runtime.spectrum, Fx: fx, Now: now,
-	}
-	e.Toast = func(message string, _ env.ToastKind) {
-		s.posts.Post(func() { s.placards.Push(time.Now(), message, "") })
-	}
-	e.Go = func(fn func(context.Context)) {
-		if fn == nil {
-			return
-		}
-		go func() {
-			fn(s.runtime.ctx)
-			s.runtime.hub.Invalidate()
-		}()
-	}
-	e.Confirm = func(title, body, action, required string, run func()) {
-		s.posts.Post(func() {
-			s.confirmReq = &confirmRequest{title: title, body: body, action: action, required: required, run: run}
-			s.confirm.Dialog.Open = true
-		})
-	}
-	e.Menu = func(target env.MenuTarget) {
-		s.posts.Post(func() {
-			if target.Context == "add-to-playlist" && target.Track != nil {
-				s.itemMenu.OpenAdd(*target.Track)
-				return
-			}
-			s.itemMenu.OpenAt(e, target, e.Overlays.Press())
-		})
-	}
-	s.nav.onSound = func(anchor image.Rectangle) {
-		e.Overlays.Open(&s.soundTag, anchor, look.Placement{
-			Prefer: look.Above, Align: look.End, Width: 340,
-		}, func(gtx layout.Context) layout.Dimensions {
-			return s.sound.Layout(gtx, e)
-		})
-	}
-	act.OpenAuthURLs(e)
-	return e
 }
 
 func (s *uiShell) requestWindow(mini bool) {
@@ -446,6 +401,7 @@ func (s *uiShell) persistNavigation() {
 		preferences.PanelTab = string(panel)
 	}
 	preferences.MiniOpen = s.nav.miniOpen()
+	preferences.SidebarCollapsed = s.nav.SidebarCollapsed()
 	s.runtime.store.SetClientPreferences(preferences)
 	s.savePreferences()
 }

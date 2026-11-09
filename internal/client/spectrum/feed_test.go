@@ -14,8 +14,8 @@ import (
 func TestStaticFeed(t *testing.T) {
 	feed := NewStatic([]float32{-1, 0.25, 2})
 	defer feed.Close()
-	if !feed.Available() {
-		t.Fatal("static feed is unavailable")
+	if !feed.Installed() || !feed.Available() {
+		t.Fatal("static feed is not installed and available")
 	}
 
 	now := time.Now()
@@ -59,7 +59,7 @@ func TestFeedStartsStopsAndRestartsCava(t *testing.T) {
 	var invalidations atomic.Int64
 	feed := New(func() { invalidations.Add(1) })
 	defer feed.Close()
-	if !feed.Available() {
+	if !feed.Installed() || !feed.Available() {
 		t.Fatal("feed did not find fake cava")
 	}
 	feed.SetActive(true)
@@ -125,6 +125,9 @@ func TestFeedGivesUpAfterThreeFailedStarts(t *testing.T) {
 		feed.Want(time.Now())
 		return !feed.Available()
 	})
+	if !feed.Installed() {
+		t.Fatal("failed capture hid installed cava")
+	}
 	if starts := len(strings.Fields(string(mustRead(t, logPath)))); starts != failureLimit {
 		t.Fatalf("failed starts = %d, want %d", starts, failureLimit)
 	}
@@ -135,9 +138,29 @@ func TestFeedGivesUpAfterThreeFailedStarts(t *testing.T) {
 	feed.SetActive(false)
 }
 
+func TestFeedSetActiveSignalsOnlyChanges(t *testing.T) {
+	feed := NewStatic(nil)
+	defer feed.Close()
+	for _, active := range []bool{true, false} {
+		feed.SetActive(active)
+		select {
+		case <-feed.capture.wake:
+		default:
+			t.Fatalf("SetActive(%v) did not signal its state change", active)
+		}
+		feed.SetActive(active)
+		select {
+		case <-feed.capture.wake:
+			t.Fatalf("SetActive(%v) signalled an unchanged state", active)
+		default:
+		}
+	}
+}
+
 func TestFeedInvalidatesOnlyWhenUIIsNotPulling(t *testing.T) {
 	var invalidations atomic.Int64
-	feed := &Feed{
+	feed := &Feed{}
+	feed.capture = &captureLifecycle{
 		invalidate: func() { invalidations.Add(1) },
 		active:     true,
 		running:    true,
@@ -150,9 +173,9 @@ func TestFeedInvalidatesOnlyWhenUIIsNotPulling(t *testing.T) {
 		t.Fatalf("invalidations with recent Want = %d, want first-frame wake only", got)
 	}
 
-	feed.mu.Lock()
-	feed.lastWant = time.Now().Add(-2 * pullInvalidateWindow)
-	feed.mu.Unlock()
+	feed.capture.mu.Lock()
+	feed.capture.lastWant = time.Now().Add(-2 * pullInvalidateWindow)
+	feed.capture.mu.Unlock()
 	feed.readFrames(strings.NewReader(frame))
 	if got := invalidations.Load(); got != 2 {
 		t.Fatalf("invalidations after pulling stopped = %d, want 2", got)
@@ -163,8 +186,8 @@ func TestFeedUnavailableWithoutCava(t *testing.T) {
 	t.Setenv("PATH", t.TempDir())
 	feed := New(nil)
 	defer feed.Close()
-	if feed.Available() {
-		t.Fatal("feed is available without cava on PATH")
+	if feed.Installed() || feed.Available() {
+		t.Fatal("feed reports cava without cava on PATH")
 	}
 }
 

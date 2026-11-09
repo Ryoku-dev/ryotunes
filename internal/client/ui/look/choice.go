@@ -48,7 +48,7 @@ func (choice *Choice) Layout(gtx layout.Context, theme *Theme, overlays *Overlay
 				return dimensions
 			}
 			width := unit.Dp(float32(choice.size.X) / gtx.Metric.PxPerDp)
-			overlays.Open(&choice.click.Clickable, anchor, Placement{Prefer: Below, Align: Start, Width: width}, content)
+			overlays.Open(&choice.click.Clickable, anchor, Placement{Prefer: Below, Align: Start, MinWidth: width}, content)
 		}
 	}
 	label := ""

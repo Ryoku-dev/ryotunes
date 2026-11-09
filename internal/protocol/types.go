@@ -30,6 +30,7 @@ type Snapshot struct {
 	Settings   model.SettingsSnapshot `json:"settings"`
 	Auth       model.Account          `json:"auth"`
 	AudioFx    model.AudioFx          `json:"audioFx"`
+	Equalizer  model.Equalizer        `json:"equalizer"`
 	Provider   model.Provider         `json:"provider"`
 	Spotify    model.SpotifyStatus    `json:"spotify"`
 	SoundCloud model.SoundCloudStatus `json:"soundcloud"`
@@ -93,6 +94,25 @@ type PlayNextParams struct {
 // SetRepeatParams changes repeat mode.
 type SetRepeatParams struct {
 	Mode model.RepeatMode `json:"mode"`
+}
+
+// EqualizerPresetParams names a saved equalizer preset.
+type EqualizerPresetParams struct {
+	Name string `json:"name"`
+}
+
+// ImportEqualizerParams carries Equalizer APO or AutoEQ ParametricEQ text.
+// A non-empty Name also saves the imported curve as a preset.
+type ImportEqualizerParams struct {
+	Text string `json:"text"`
+	Name string `json:"name,omitempty"`
+}
+
+// ImportEqualizerResult is the applied equalizer and what the import dropped
+// or changed, one plain sentence per warning.
+type ImportEqualizerResult struct {
+	Equalizer model.Equalizer `json:"equalizer"`
+	Warnings  []string        `json:"warnings,omitempty"`
 }
 
 // SetStopAfterCurrentParams changes the one-shot queue stop.

@@ -20,7 +20,7 @@ import (
 
 // NowPlaying renders the artwork-first playback view and its lyrics or queue.
 type NowPlaying struct {
-	art        look.ArtView
+	art        widgets.PlayArt
 	visualizer look.Visualizer
 	tabs       kit.Tabs
 	lyrics     Lyrics
@@ -67,7 +67,7 @@ func (playing *NowPlaying) Layout(gtx layout.Context, e *env.Env) layout.Dimensi
 				gtx.Constraints.Min.Y, gtx.Constraints.Max.Y = band, band
 				return layout.Inset{Left: inset, Right: inset}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 					return widgets.Visualizer(gtx, e, &playing.visualizer, look.VisualizerStyle{
-						Ink: palette.WithAlpha(e.Th.Src.Ink, alpha),
+						Ink: palette.WithAlpha(e.Th.Accent.Ink, alpha),
 						Bar: 9, Gap: 3, Floor: 2,
 					})
 				})
@@ -156,7 +156,7 @@ func (playing *NowPlaying) layoutNarrowHeader(gtx layout.Context, e *env.Env, tr
 		return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
 			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 				size := image.Pt(gtx.Dp(120), gtx.Dp(120))
-				return playing.art.Layout(gtx, e.Th, e.Art, optionalString(track.Thumbnail), size, look.Shape{Cut: 7}, e.Th.Motion.Field)
+				return playing.art.Layout(gtx, e, optionalString(track.Thumbnail), size, look.Shape{Cut: 7}, e.Th.Motion.Field)
 			}),
 			layout.Rigid(layout.Spacer{Width: 21}.Layout),
 			layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
@@ -219,7 +219,7 @@ func (playing *NowPlaying) layoutDetails(gtx layout.Context, e *env.Env, track m
 		return layout.Flex{Axis: layout.Vertical, Alignment: layout.Middle}.Layout(gtx,
 			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 				size := image.Pt(artSide, artSide)
-				return playing.art.Layout(gtx, e.Th, e.Art, optionalString(track.Thumbnail), size, look.Shape{Cut: 16}, e.Th.Motion.Field)
+				return playing.art.Layout(gtx, e, optionalString(track.Thumbnail), size, look.Shape{Cut: 16}, e.Th.Motion.Field)
 			}),
 			layout.Rigid(layout.Spacer{Height: detailGap}.Layout),
 			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
@@ -358,7 +358,7 @@ func (playing *NowPlaying) layoutActs(gtx layout.Context, e *env.Env, track mode
 			liked := rating == model.RatingLike
 			playing.likeFill.Layout(iconGTX, e.Th, liked,
 				func(gtx layout.Context) layout.Dimensions { return look.Icon.HeartOutline.Layout(gtx, e.Th.R.Fg2) },
-				func(gtx layout.Context) layout.Dimensions { return look.Icon.Heart.Layout(gtx, e.Th.Src.Ink) },
+				func(gtx layout.Context) layout.Dimensions { return look.Icon.Heart.Layout(gtx, e.Th.Accent.Ink) },
 			)
 			offset.Pop()
 			if playing.like.Clicked(gtx) {

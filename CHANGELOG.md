@@ -2,13 +2,20 @@
 
 ## Unreleased
 
+- Ryotunes takes its colour from the album art now: the play buttons, the seek wave, the visualizer, hearts, the playing track and the lyrics all match the cover that's playing. Settings, Appearance can switch it to the provider's colour or your Ryoku palette instead.
+- Home has a now playing card with the cover, the seek bar, the controls and a visualizer, and clicking the cover there or in now playing plays and pauses.
+- The visualizer has four styles in Settings, Appearance, or by clicking it on Home: bars, curve, oscilloscope and vectorscope. The scopes read the real stereo signal through pw-record, only while they're on screen.
+- New parametric equalizer with up to 20 bands: drag the points on the curve, use the wheel for Q, double click to add a band, pick a preset or paste an AutoEQ profile. Open it from the sound menu or Settings, Sound.
+- The sidebar folds down to an icon rail and back with the button next to Back or Ctrl B, and it remembers your choice. On narrower windows the same button opens the full sidebar over the page.
+- The corners of the panes can be set in Settings, Appearance, from square to deep cuts or your own size, and Desktop follows the window corners you set in Ryoku Hub.
+- The mini player is a wide strip now, with the cover along its left edge and no empty space around it.
 - Ryotunes is laid out like a music player now: your playlists sit in the sidebar, the queue and lyrics open beside the music and the player stays along the bottom, with a now playing view for big artwork and lyrics.
-- The Ryoku mark is back, the provider switcher sits on top with the provider icons again, and the app takes on the provider's colour when you switch.
+- The Ryoku mark is back, and the provider switcher sits on top with the provider icons again, lit in the provider's colour.
 - Search is one field in the top bar, with recent searches and suggestions while you type.
 - Play, likes, track changes, seeking, panels and provider switches have small animations, and nothing moves while you are not doing anything.
 - The Discord toggle is back in the top bar, artists can be subscribed to again, and Settings has its missing rows back: sound, watched folders, playlist import and export, diagnostics and the engine version.
 - The seek bar is a slim, sharp zigzag that moves while music plays and lies flat when you pause, like Android's wavy progress but cut in Lithic.
-- Page headers and the now playing view have a visualizer of Lithic blades that move with the music at 60 frames a second. It uses cava and can be turned off in Settings, Appearance.
+- Page headers and the now playing view have a visualizer that moves with the music at 60 frames a second. It can be turned off in Settings, Appearance.
 - Home's mood chips now replace the page with that mood's music, and All brings the usual Home back.
 - Sign in opens your browser for YouTube Music, Spotify, SoundCloud and TIDAL, with Open again and Copy link while it waits, and the Home Sign in starts it right there. YouTube Music first tries the session from one browser profile at a time and opens the browser instead of showing an error when that session can't be used.
 - Fixed lyrics in now playing falling behind the song, the mini player getting cut off at 110% zoom, the time over the seek bar being cut in half, and the Settings section list trailing behind your scroll. The mini player's window buttons are smaller and sit clear of the corner.

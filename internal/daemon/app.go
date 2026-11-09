@@ -78,6 +78,11 @@ func New(ctx context.Context, bootstrapLog *slog.Logger) (_ *App, err error) {
 	a.EngineVersion = a.Player.EngineVersion()
 
 	kv := a.Store.KV()
+	a.equalizerPlayer = a.Player
+	a.equalizerStore = kv
+	if err := a.restoreEqualizer(); err != nil {
+		return nil, err
+	}
 	disabled := make([]string, len(settings.DisabledStreamClients))
 	for i, client := range settings.DisabledStreamClients {
 		disabled[i] = string(client)

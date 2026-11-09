@@ -14,6 +14,7 @@ import (
 	"time"
 
 	mpv "github.com/gen2brain/go-mpv"
+	"github.com/ryoku-dev/ryotunes/internal/eq"
 	"github.com/ryoku-dev/ryotunes/internal/model"
 )
 
@@ -44,10 +45,12 @@ type Player struct {
 	cadence  atomic.Int64
 	asyncID  atomic.Uint64
 	fxState  atomic.Pointer[model.AudioFx]
+	eqState  atomic.Pointer[model.Equalizer]
 	engine   atomic.Pointer[string]
 
-	fx       model.AudioFx
-	loudness *float64
+	fx        model.AudioFx
+	equalizer model.Equalizer
+	loudness  *float64
 }
 
 type request struct {
@@ -69,15 +72,18 @@ func New(o Options) (*Player, error) {
 		log = slog.Default()
 	}
 	p := &Player{
-		log:      log,
-		requests: make(chan request),
-		stop:     make(chan struct{}),
-		closed:   make(chan struct{}),
-		events:   make(chan Event, 256),
-		fx:       model.DefaultAudioFx(),
+		log:       log,
+		requests:  make(chan request),
+		stop:      make(chan struct{}),
+		closed:    make(chan struct{}),
+		events:    make(chan Event, 256),
+		fx:        model.DefaultAudioFx(),
+		equalizer: eq.Default(),
 	}
 	initialFx := p.fx
 	p.fxState.Store(&initialFx)
+	initialEqualizer := p.equalizer
+	p.eqState.Store(&initialEqualizer)
 	p.cadence.Store(int64(positionCadence(o.LowResource)))
 	p.idle.Store(true)
 
@@ -113,7 +119,7 @@ func (p *Player) Load(ctx context.Context, s model.Stream, startAt float64, paus
 			p.loudness = previousLoudness
 			return err
 		}
-		if err := p.setPropertyAsync(m, "af", mpv.FormatString, afChain(loudnessGain(p.loudness), p.fx)); err != nil {
+		if err := p.setPropertyAsync(m, "af", mpv.FormatString, afChain(loudnessGain(p.loudness), p.fx, p.equalizer)); err != nil {
 			p.loudness = previousLoudness
 			return err
 		}
@@ -217,9 +223,9 @@ func (p *Player) SetFx(fx model.AudioFx) error {
 		if err := p.setPropertyAsync(m, "speed", mpv.FormatDouble, fx.Speed); err != nil {
 			return err
 		}
-		if err := p.setPropertyAsync(m, "af", mpv.FormatString, afChain(loudnessGain(p.loudness), fx)); err != nil {
+		if err := p.setPropertyAsync(m, "af", mpv.FormatString, afChain(loudnessGain(p.loudness), fx, p.equalizer)); err != nil {
 			_ = p.setPropertyAsync(m, "speed", mpv.FormatDouble, previous.Speed)
-			_ = p.setPropertyAsync(m, "af", mpv.FormatString, afChain(loudnessGain(p.loudness), previous))
+			_ = p.setPropertyAsync(m, "af", mpv.FormatString, afChain(loudnessGain(p.loudness), previous, p.equalizer))
 			return err
 		}
 		p.fx = fx
@@ -237,13 +243,47 @@ func (p *Player) Fx() model.AudioFx {
 	return model.DefaultAudioFx()
 }
 
+// SetEqualizer replaces the complete parametric filter chain. mpv 0.41 does
+// not forward af-command through its lavfi wrapper, so parameter-only edits use
+// this asynchronous rebuild path too.
+func (p *Player) SetEqualizer(equalizer model.Equalizer) error {
+	accepted := eq.Normalize(equalizer)
+	return p.call(context.Background(), func(m *mpv.Mpv) error {
+		if equalizerAudioEqual(p.equalizer, accepted) {
+			p.equalizer = accepted
+			copy := accepted
+			p.eqState.Store(&copy)
+			return nil
+		}
+		chain := afChain(loudnessGain(p.loudness), p.fx, accepted)
+		p.log.Debug("applying equalizer filter chain", "enabled", accepted.Enabled, "bands", len(accepted.Bands), "af", chain)
+		if err := p.setPropertyAsync(m, "af", mpv.FormatString, chain); err != nil {
+			return err
+		}
+		p.equalizer = accepted
+		copy := accepted
+		p.eqState.Store(&copy)
+		return nil
+	})
+}
+
+// Equalizer returns a copy of the equalizer most recently accepted by mpv.
+func (p *Player) Equalizer() model.Equalizer {
+	if equalizer := p.eqState.Load(); equalizer != nil {
+		copy := *equalizer
+		copy.Bands = append([]model.EQBand(nil), equalizer.Bands...)
+		return copy
+	}
+	return eq.Default()
+}
+
 // SetLoudness applies the stream's loudness measurement while preserving all user effects.
 func (p *Player) SetLoudness(db *float64) {
 	value := cloneFloat(db)
 	err := p.call(context.Background(), func(m *mpv.Mpv) error {
 		previous := p.loudness
 		p.loudness = value
-		if err := p.setPropertyAsync(m, "af", mpv.FormatString, afChain(loudnessGain(value), p.fx)); err != nil {
+		if err := p.setPropertyAsync(m, "af", mpv.FormatString, afChain(loudnessGain(value), p.fx, p.equalizer)); err != nil {
 			p.loudness = previous
 			return err
 		}

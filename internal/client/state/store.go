@@ -70,6 +70,7 @@ type State struct {
 	Settings   model.SettingsSnapshot
 	Auth       model.Account
 	AudioFx    model.AudioFx
+	Equalizer  model.Equalizer
 	Provider   model.Provider
 	Spotify    SpotifyState
 	SoundCloud SoundCloudState
@@ -424,6 +425,7 @@ func (s *Store) applySnapshotLocked(snapshot protocol.Snapshot, now time.Time) {
 		s.state.Auth = snapshot.Auth
 	}
 	s.state.AudioFx = snapshot.AudioFx
+	s.state.Equalizer = snapshot.Equalizer
 	s.state.Provider = snapshot.Provider
 	if !s.spotifyEventSeen {
 		s.state.Spotify = SpotifyState{SpotifyStatus: snapshot.Spotify}
@@ -557,6 +559,14 @@ func (s *Store) applyLocked(name string, data json.RawMessage, now time.Time) er
 		if err := decode(data, &s.state.AudioFx); err != nil {
 			return err
 		}
+	case protocol.EventEqualizer:
+		// a fresh value: decoding into the old one keeps an omitted preset and
+		// rewrites the bands the published snapshot still shares
+		var equalizer model.Equalizer
+		if err := decode(data, &equalizer); err != nil {
+			return err
+		}
+		s.state.Equalizer = equalizer
 	case protocol.EventShow:
 		s.state.ShowRequested = true
 	case protocol.EventAuthChanged:

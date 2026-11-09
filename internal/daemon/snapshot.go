@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/ryoku-dev/ryotunes/internal/eq"
 	"github.com/ryoku-dev/ryotunes/internal/model"
 	"github.com/ryoku-dev/ryotunes/internal/protocol"
 )
@@ -21,8 +22,10 @@ func (a *App) Snapshot() protocol.Snapshot {
 	}
 	if a.Player != nil {
 		out.AudioFx = a.Player.Fx()
+		out.Equalizer = a.Player.Equalizer()
 	} else {
 		out.AudioFx = model.DefaultAudioFx()
+		out.Equalizer = eq.Default()
 	}
 	a.mu.Lock()
 	out.Provider = model.Provider(a.provider)

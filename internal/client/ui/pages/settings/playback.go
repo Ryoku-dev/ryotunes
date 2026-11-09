@@ -97,14 +97,34 @@ func (p *page) layoutPlayback(gtx layout.Context, e *env.Env, snapshot state.Sta
 }
 
 func (p *page) layoutSound(gtx layout.Context, e *env.Env, snapshot state.State) layout.Dimensions {
-	return p.settingRows(gtx, p.settingRow(e.Th, "Playback sound", "Shape tempo, pitch, reverb, bass and stereo width. Current preset: "+snapshot.AudioFx.PresetName()+".", func(gtx layout.Context) layout.Dimensions {
-		p.sound.Kind, p.sound.Icon, p.sound.Label = kit.PlaqueLine, look.Icon.Tune, "Open sound"
-		dims := p.sound.Layout(gtx, e.Th.Theme)
-		if p.sound.Clicked(gtx) {
-			e.Nav.OpenSound(e.Overlays.AnchorOf(&p.sound.Clickable, dims.Size))
-		}
-		return dims
-	}))
+	return p.settingRows(gtx,
+		p.settingRow(e.Th, "Playback sound", "Shape tempo, pitch, reverb, bass and stereo width. Current preset: "+snapshot.AudioFx.PresetName()+".", func(gtx layout.Context) layout.Dimensions {
+			p.sound.open.Kind, p.sound.open.Icon, p.sound.open.Label = kit.PlaqueLine, look.Icon.Tune, "Open sound"
+			dims := p.sound.open.Layout(gtx, e.Th.Theme)
+			if p.sound.open.Clicked(gtx) {
+				e.Nav.OpenSound(e.Overlays.AnchorOf(&p.sound.open.Clickable, dims.Size))
+			}
+			return dims
+		}),
+		p.settingRow(e.Th, "Equalizer", equalizerProof(snapshot.Equalizer), func(gtx layout.Context) layout.Dimensions {
+			p.sound.equalizer.Kind, p.sound.equalizer.Icon, p.sound.equalizer.Label = kit.PlaqueLine, look.Icon.Equalizer, "Open equalizer"
+			dims := p.sound.equalizer.Layout(gtx, e.Th.Theme)
+			if p.sound.equalizer.Clicked(gtx) {
+				e.Nav.Push(env.Route{Kind: env.RouteEqualizer})
+			}
+			return dims
+		}))
+}
+
+func equalizerProof(equalizer model.Equalizer) string {
+	if !equalizer.Enabled {
+		return "Bypassed"
+	}
+	preset := strings.TrimSpace(equalizer.Preset)
+	if preset == "" {
+		preset = "Custom"
+	}
+	return "On · " + preset
 }
 
 func (p *page) layoutLyrics(gtx layout.Context, e *env.Env, snapshot state.State) layout.Dimensions {

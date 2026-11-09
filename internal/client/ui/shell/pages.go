@@ -6,6 +6,7 @@ import (
 	"github.com/ryoku-dev/ryotunes/internal/client/ui/pages/artist"
 	"github.com/ryoku-dev/ryotunes/internal/client/ui/pages/diagnostics"
 	"github.com/ryoku-dev/ryotunes/internal/client/ui/pages/downloads"
+	"github.com/ryoku-dev/ryotunes/internal/client/ui/pages/equalizer"
 	"github.com/ryoku-dev/ryotunes/internal/client/ui/pages/home"
 	"github.com/ryoku-dev/ryotunes/internal/client/ui/pages/library"
 	listpage "github.com/ryoku-dev/ryotunes/internal/client/ui/pages/list"
@@ -36,6 +37,8 @@ func (s *uiShell) page(route env.Route) env.Page {
 		page = settings.New(route)
 	case env.RouteDiagnostics:
 		page = diagnostics.New(route)
+	case env.RouteEqualizer:
+		page = equalizer.New(route)
 	case env.RouteArtist:
 		page = artist.New(route)
 	case env.RouteAlbum:

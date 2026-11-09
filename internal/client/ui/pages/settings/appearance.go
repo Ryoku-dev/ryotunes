@@ -20,11 +20,18 @@ import (
 )
 
 var (
-	appearanceLabels = []string{"Follow Ryoku", "Dark", "Light"}
-	appearanceValues = []string{"follow", "dark", "light"}
-	densityLabels    = []string{"Comfortable", "Compact"}
-	densityValues    = []string{"comfortable", "compact"}
-	motionLabels     = []string{"Full", "Reduced"}
+	appearanceLabels         = []string{"Follow Ryoku", "Dark", "Light"}
+	appearanceValues         = []string{"follow", "dark", "light"}
+	densityLabels            = []string{"Comfortable", "Compact"}
+	densityValues            = []string{"comfortable", "compact"}
+	motionLabels             = []string{"Full", "Reduced"}
+	visualizerStyleLabels    = []string{"Bars", "Curve", "Oscilloscope", "Vectorscope"}
+	visualizerSpectrumLabels = visualizerStyleLabels[:2]
+	visualizerScopeLabels    = visualizerStyleLabels[2:]
+	accentLabels             = []string{"Album art", "Source", "Desktop"}
+	accentValues             = []string{state.AccentArt, state.AccentSource, state.AccentDesktop}
+	cornerLabels             = []string{"Desktop", "Square", "Fine", "Chisel", "Deep", "Custom"}
+	cornerValues             = []string{state.CornersDesktop, state.CornersSquare, state.CornersFine, state.CornersChisel, state.CornersDeep, state.CornersCustom}
 )
 
 func (p *page) layoutAppearance(gtx layout.Context, e *env.Env, snapshot state.State) layout.Dimensions {
@@ -37,20 +44,39 @@ func (p *page) layoutAppearance(gtx layout.Context, e *env.Env, snapshot state.S
 	density := indexOf(densityValues, preferences.Density, 0)
 	scale := settingInt(snapshot.Settings, model.SettingUIScale, 100)
 	lowResource := settingBool(snapshot.Settings, model.SettingLowResourceMode, false)
-	visualizerAvailable := e.Spectrum != nil && e.Spectrum.Available()
-	visualizerDetail := "Bars that move with the music in page headers and the now playing view."
-	if !visualizerAvailable {
-		visualizerDetail = "Install cava to see the visualizer"
-	} else if preferences.ReduceMotion {
+	visualizerStyle := preferences.Style()
+	spectrumInstalled := e.Spectrum != nil && e.Spectrum.Installed()
+	scopeInstalled := e.Scope != nil && e.Scope.Installed()
+	spectrumAvailable := e.Spectrum != nil && e.Spectrum.Available()
+	scopeAvailable := e.Scope != nil && e.Scope.Available()
+	anyVisualizerInstalled := spectrumInstalled || scopeInstalled
+	visualizerDetail, selectedVisualizerAvailable := visualizerPreferenceDetail(
+		visualizerStyle,
+		spectrumInstalled,
+		scopeInstalled,
+		spectrumAvailable,
+		scopeAvailable,
+	)
+	if selectedVisualizerAvailable && preferences.ReduceMotion {
 		visualizerDetail += " Reduced motion pauses it without changing this setting."
-	} else if lowResource {
+	} else if selectedVisualizerAvailable && lowResource {
 		visualizerDetail += " Low resource mode pauses it without changing this setting."
 	}
+	styleLabels, styleValues := visualizerStyleOptions(spectrumInstalled, scopeInstalled)
+	visualizerStyleDetail := visualizerStylePreferenceDetail(spectrumInstalled, scopeInstalled)
 	waveDetail := "A sharp travelling wave marks the played part of every seek bar."
 	if preferences.ReduceMotion {
 		waveDetail += " Reduced motion pauses it without changing this setting."
 	} else if lowResource {
 		waveDetail += " Low resource mode pauses it without changing this setting."
+	}
+	accentMode := preferences.AccentMode()
+	accentDetail := accentPreferenceDetail(accentMode)
+	cornerPreset := preferences.CornerPreset()
+	cornerDetail := "Set the cut of every pane corner."
+	if cornerPreset == state.CornersDesktop {
+		desktopCorner, _ := look.DesktopCorner()
+		cornerDetail = "Ryoku window corners: " + intString(desktopCorner) + " dp"
 	}
 	return p.settingRows(gtx,
 		p.settingRow(e.Th, "Colours", "Follow Ryoku, or pin dark or light stones while keeping the live palette accents.", func(gtx layout.Context) layout.Dimensions {
@@ -135,16 +161,32 @@ func (p *page) layoutAppearance(gtx layout.Context, e *env.Env, snapshot state.S
 		p.settingRow(e.Th, "Visualizer", visualizerDetail, func(gtx layout.Context) layout.Dimensions {
 			p.appearance.visualizer.Value = preferences.VisualizerOn()
 			toggleGTX := gtx
-			if !visualizerAvailable {
+			if !anyVisualizerInstalled {
 				toggleGTX = toggleGTX.Disabled()
 			}
 			dims := p.appearance.visualizer.Layout(toggleGTX, e.Th.Theme)
-			if visualizerAvailable && p.appearance.visualizer.Changed() {
+			if anyVisualizerInstalled && p.appearance.visualizer.Changed() {
 				value := p.appearance.visualizer.Value
 				preferences.Visualizer = &value
 				saveClientPreferences(e, preferences)
 			}
 			return dims
+		}),
+		p.settingRowWide(e.Th, "Visualizer style", visualizerStyleDetail, func(gtx layout.Context) layout.Dimensions {
+			p.appearance.visualizerStyle.Labels = styleLabels
+			p.appearance.visualizerStyle.Selected = visualizerStyleIndex(styleValues, visualizerStyle)
+			styleGTX := gtx
+			if !preferences.VisualizerOn() || !anyVisualizerInstalled {
+				styleGTX = styleGTX.Disabled()
+			}
+			return p.appearance.visualizerStyleScroll.Layout(styleGTX, e.Th, 1, func(styleGTX layout.Context, _ int) layout.Dimensions {
+				dims := p.appearance.visualizerStyle.Layout(styleGTX, e.Th.Theme)
+				if selected, changed := p.appearance.visualizerStyle.Changed(); changed && preferences.VisualizerOn() && selected >= 0 && selected < len(styleValues) {
+					preferences.VisualizerStyle = string(styleValues[selected])
+					saveClientPreferences(e, preferences)
+				}
+				return dims
+			})
 		}),
 		p.settingRow(e.Th, "Wave progress", waveDetail, func(gtx layout.Context) layout.Dimensions {
 			p.appearance.waveProgress.Value = preferences.WaveOn()
@@ -155,7 +197,155 @@ func (p *page) layoutAppearance(gtx layout.Context, e *env.Env, snapshot state.S
 				saveClientPreferences(e, preferences)
 			}
 			return dims
+		}),
+		p.settingRowWide(e.Th, "Accent colour", accentDetail, func(gtx layout.Context) layout.Dimensions {
+			p.appearance.accent.Labels = accentLabels
+			p.appearance.accent.Selected = indexOf(accentValues, accentMode, 0)
+			return p.appearance.accentScroll.Layout(gtx, e.Th, 1, func(gtx layout.Context, _ int) layout.Dimensions {
+				dims := p.appearance.accent.Layout(gtx, e.Th.Theme)
+				if selected, changed := p.appearance.accent.Changed(); changed && selected >= 0 && selected < len(accentValues) {
+					preferences.Accent = accentValues[selected]
+					saveClientPreferences(e, preferences)
+				}
+				return dims
+			})
+		}),
+		p.settingRowWide(e.Th, "Corners", cornerDetail, func(gtx layout.Context) layout.Dimensions {
+			p.appearance.corners.Labels = cornerLabels
+			p.appearance.corners.Selected = indexOf(cornerValues, cornerPreset, 3)
+			return layout.Flex{Axis: layout.Vertical, Alignment: layout.End}.Layout(gtx,
+				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+					return p.appearance.cornersScroll.Layout(gtx, e.Th, 1, func(gtx layout.Context, _ int) layout.Dimensions {
+						dims := p.appearance.corners.Layout(gtx, e.Th.Theme)
+						if selected, changed := p.appearance.corners.Changed(); changed && selected >= 0 && selected < len(cornerValues) {
+							previousPreset := cornerPreset
+							cornerPreset = cornerValues[selected]
+							preferences.Corners = cornerPreset
+							if cornerPreset == state.CornersCustom {
+								desktopCorner, _ := look.DesktopCorner()
+								preferences.CornerDp = cornerDpForCustom(previousPreset, preferences.CornerDp, desktopCorner)
+							}
+							saveClientPreferences(e, preferences)
+						}
+						return dims
+					})
+				}),
+				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+					if cornerPreset != state.CornersCustom {
+						return layout.Dimensions{}
+					}
+					return layout.Inset{Top: unit.Dp(8)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+						p.appearance.corner.Min = 0
+						p.appearance.corner.Max = state.CornerMaxDp
+						p.appearance.corner.Step = 1
+						p.appearance.corner.Value = float32(preferences.CornerDp)
+						return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
+							layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+								dims := p.appearance.corner.Layout(gtx, e.Th.Theme)
+								if p.appearance.corner.Changed() {
+									preferences.CornerDp = int(p.appearance.corner.Value + .5)
+									e.Store.SetClientPreferences(preferences)
+									if p.appearance.corner.Pressed() {
+										p.appearance.cornerSaveArmed = true
+									} else {
+										saveClientPreferences(e, preferences)
+										p.appearance.cornerSaveArmed = false
+									}
+								} else if p.appearance.cornerSaveArmed && !p.appearance.corner.Pressed() {
+									saveClientPreferences(e, preferences)
+									p.appearance.cornerSaveArmed = false
+								}
+								return dims
+							}),
+							layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
+							layout.Rigid(kit.Text(e.Th.Theme, e.Th.T.Mono, e.Th.R.Fg, intString(preferences.CornerDp)+" dp")),
+						)
+					})
+				}),
+			)
 		}))
+}
+
+func visualizerStyleIndex(styles []state.VisualizerStyle, style state.VisualizerStyle) int {
+	for index, candidate := range styles {
+		if candidate == style {
+			return index
+		}
+	}
+	return 0
+}
+
+func visualizerStyleOptions(spectrumInstalled, scopeInstalled bool) ([]string, []state.VisualizerStyle) {
+	switch {
+	case spectrumInstalled && !scopeInstalled:
+		return visualizerSpectrumLabels, state.VisualizerStyles[:2]
+	case !spectrumInstalled && scopeInstalled:
+		return visualizerScopeLabels, state.VisualizerStyles[2:]
+	default:
+		return visualizerStyleLabels, state.VisualizerStyles
+	}
+}
+
+func visualizerStylePreferenceDetail(spectrumInstalled, scopeInstalled bool) string {
+	switch {
+	case spectrumInstalled && !scopeInstalled:
+		return "Install pw-record to see the waveform and stereo field"
+	case !spectrumInstalled && scopeInstalled:
+		return "Install cava to see Bars and Curve"
+	case !spectrumInstalled && !scopeInstalled:
+		return "Install cava or pw-record to choose a visualizer style"
+	default:
+		return "Choose how the visualizer draws the music."
+	}
+}
+
+func visualizerPreferenceDetail(style state.VisualizerStyle, spectrumInstalled, scopeInstalled, spectrumAvailable, scopeAvailable bool) (string, bool) {
+	if style == state.VisualizerBars || style == state.VisualizerCurve {
+		switch {
+		case !spectrumInstalled:
+			return "Install cava to see Bars and Curve", false
+		case !spectrumAvailable:
+			return "cava stopped; play again to retry", false
+		case style == state.VisualizerCurve:
+			return "A curve that moves with the music in page headers and the now playing view.", true
+		default:
+			return "Bars that move with the music in page headers and the now playing view.", true
+		}
+	}
+	switch {
+	case !scopeInstalled:
+		return "Install pw-record to see the waveform and stereo field", false
+	case !scopeAvailable:
+		return "pw-record stopped; play again to retry", false
+	case style == state.VisualizerVectorscope:
+		return "The stereo field moves with the music in page headers and the now playing view.", true
+	default:
+		return "A waveform that moves with the music in page headers and the now playing view.", true
+	}
+}
+
+func cornerDpForCustom(previousPreset string, stored, desktop int) int {
+	if stored != 0 {
+		return stored
+	}
+	if previousPreset == state.CornersDesktop {
+		return desktop
+	}
+	if dp, ok := state.CornerPresetDp(previousPreset); ok {
+		return dp
+	}
+	return stored
+}
+
+func accentPreferenceDetail(mode string) string {
+	switch mode {
+	case state.AccentSource:
+		return "The colour of the service you are listening on"
+	case state.AccentDesktop:
+		return "Your Ryoku palette's accent"
+	default:
+		return "The colour of the cover that is playing"
+	}
 }
 
 func applyAppearance(e *env.Env, appearance, paletteFile string) {

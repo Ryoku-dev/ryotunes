@@ -9,6 +9,7 @@ import (
 	"github.com/ryoku-dev/ryotunes/internal/client/ui/act"
 	"github.com/ryoku-dev/ryotunes/internal/client/ui/env"
 	"github.com/ryoku-dev/ryotunes/internal/client/ui/look"
+	"github.com/ryoku-dev/ryotunes/internal/client/ui/widgets"
 	"github.com/ryoku-dev/ryotunes/internal/model"
 	"github.com/ryoku-dev/ryotunes/internal/protocol"
 )
@@ -36,7 +37,7 @@ func (bar *PlayerBar) LayoutCompact(gtx layout.Context, e *env.Env) layout.Dimen
 	}
 	track := trackFromPlayback(snapshot.Playback.Now, e.Store.CurrentTrack())
 	provider := model.ProviderOf(track.VideoID)
-	bar.reconcileSeek(gtx, e, snapshot, track.VideoID)
+	bar.seek.Reconcile(gtx, e, snapshot, track.VideoID)
 
 	width := gtx.Constraints.Max.X
 	height := min(gtx.Constraints.Max.Y, gtx.Dp(64))
@@ -44,11 +45,11 @@ func (bar *PlayerBar) LayoutCompact(gtx layout.Context, e *env.Env) layout.Dimen
 		return layout.Dimensions{}
 	}
 	gtx.Constraints = layout.Exact(image.Pt(width, height))
-	bar.layoutCompactProgress(gtx, e, playbackDisplayDuration(snapshot.Playback.Duration, track.Duration), snapshot.Playback.Paused)
+	bar.layoutCompactProgress(gtx, e, widgets.PlaybackDuration(snapshot.Playback.Duration, track.Duration), snapshot.Playback.Paused)
 
 	canRate := provider != model.ProviderLocal && provider != model.ProviderRadio
 	key := track.VideoID
-	dimensions := layout.Inset{Left: 13, Right: 13}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+	dimensions := layout.Inset{Top: 8, Left: 13, Right: 13}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 		return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
 			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 				return bar.compact.artClick.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
@@ -89,7 +90,7 @@ func (bar *PlayerBar) LayoutCompact(gtx layout.Context, e *env.Env) layout.Dimen
 					icon, description = look.Icon.Pause, "Pause"
 				}
 				return bar.compact.playTip.Layout(gtx, e.Th, e.Overlays, description, func(gtx layout.Context) layout.Dimensions {
-					return transportMorphPlaque(gtx, e.Th, &bar.compact.play, &bar.compact.playMorph, icon, description)
+					return widgets.PlayPlaque(gtx, e.Th, &bar.compact.play, &bar.compact.playMorph, icon, description)
 				})
 			}),
 			layout.Rigid(layout.Spacer{Width: 4}.Layout),
@@ -140,9 +141,9 @@ func (bar *PlayerBar) layoutCompactProgress(gtx layout.Context, e *env.Env, dura
 	live := e.Fx.Wave && !paused
 	look.DrawWave(
 		gtx, e.Th, &bar.compact.wave, image.Rect(0, 0, width, max(1, gtx.Dp(8))),
-		fraction, e.Th.Src.Ink, e.Th.R.Fg3, 1.5, 1.5, 12, live,
+		fraction, e.Th.Accent.Ink, e.Th.R.Fg3, 1.5, 1.5, 12, live,
 	)
 	if !live {
-		bar.requestProgressFrame(gtx, e, duration, max(1, width), paused)
+		widgets.ProgressFrame(gtx, e, duration, max(1, width), paused)
 	}
 }

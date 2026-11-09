@@ -305,7 +305,7 @@ func (queue *Queue) layoutRow(gtx layout.Context, e *env.Env, entry queueEntry) 
 				item.children[2] = layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
 					titleInk := e.Th.R.Fg
 					if playing {
-						titleInk = e.Th.Src.Ink
+						titleInk = e.Th.Accent.Ink
 					} else if row.Item.Autoplay {
 						titleInk = e.Th.R.Fg2
 					}
@@ -361,7 +361,7 @@ func (queue *Queue) layoutRow(gtx layout.Context, e *env.Env, entry queueEntry) 
 	if item.arrivalSet {
 		arrival := item.arrival.Value(gtx)
 		if arrival < 1 {
-			kit.Notch(gtx.Ops, image.Point{}, gtx.Dp(e.Th.Cut.Notch), palette.WithAlpha(e.Th.Src.Ink, 1-arrival))
+			kit.Notch(gtx.Ops, image.Point{}, gtx.Dp(e.Th.Cut.Notch), palette.WithAlpha(e.Th.Accent.Ink, 1-arrival))
 		}
 	}
 	return dims

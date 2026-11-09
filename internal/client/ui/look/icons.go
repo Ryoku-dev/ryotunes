@@ -16,6 +16,7 @@ var Icon struct {
 	Settings, Minimize, Maximize, Restore, Check, Drag, Remove, Folder, Person *widget.Icon
 	Album, Playlist, PlaylistAdd, Refresh, Share, OpenInNew, Sparkle, Explicit *widget.Icon
 	Equalizer, Sort                                                            *widget.Icon
+	ChevronDown                                                                *widget.Icon
 }
 
 func init() {
@@ -70,4 +71,5 @@ func init() {
 	Icon.Explicit = kit.Icon(mdicons.AVExplicit)
 	Icon.Equalizer = kit.Icon(mdicons.AVEqualizer)
 	Icon.Sort = kit.Icon(mdicons.ContentSort)
+	Icon.ChevronDown = kit.Icon(mdicons.NavigationExpandMore)
 }

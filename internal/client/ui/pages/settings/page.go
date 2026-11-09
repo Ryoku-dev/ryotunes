@@ -56,7 +56,15 @@ type appearanceControls struct {
 	scale                    kit.Stepper
 	lowResource              kit.Toggle
 	visualizer               kit.Toggle
+	visualizerStyle          kit.Filters
+	visualizerStyleScroll    look.HScroller
 	waveProgress             kit.Toggle
+	accent                   kit.Filters
+	accentScroll             look.HScroller
+	corners                  kit.Filters
+	cornersScroll            look.HScroller
+	corner                   kit.Slider
+	cornerSaveArmed          bool
 	palette                  fieldValue
 	usePalette, clearPalette kit.Plaque
 	tray, autostart          kit.Toggle
@@ -66,6 +74,10 @@ type playbackControls struct {
 	autoplay, duplicates, stopAfter, history kit.Toggle
 	quality                                  look.Choice
 	clients                                  map[model.StreamClient]*kit.Toggle
+}
+
+type soundControls struct {
+	open, equalizer kit.Plaque
 }
 
 type lyricsControls struct {
@@ -191,7 +203,7 @@ type page struct {
 	data          dataControls
 	diagnosticsUI diagnosticsControls
 	about         aboutControls
-	sound         kit.Plaque
+	sound         soundControls
 	retry         kit.Plaque
 }
 

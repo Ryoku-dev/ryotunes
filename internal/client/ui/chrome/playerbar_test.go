@@ -1,6 +1,7 @@
 package chrome
 
 import (
+	"strconv"
 	"testing"
 	"time"
 )
@@ -47,31 +48,6 @@ func TestFitPlayerBarAt110Percent(t *testing.T) {
 	}
 }
 
-func TestPlaybackDisplayDuration(t *testing.T) {
-	short := "2:39"
-	long := "1:02:03"
-	invalid := "soon"
-	tests := []struct {
-		name     string
-		reported float64
-		value    *string
-		want     float64
-	}{
-		{name: "reported wins", reported: 42, value: &short, want: 42},
-		{name: "minutes and seconds", value: &short, want: 159},
-		{name: "hours minutes seconds", value: &long, want: 3723},
-		{name: "unknown", value: nil, want: 0},
-		{name: "invalid", value: &invalid, want: 0},
-	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			if got := playbackDisplayDuration(test.reported, test.value); got != test.want {
-				t.Fatalf("playbackDisplayDuration() = %v, want %v", got, test.want)
-			}
-		})
-	}
-}
-
 func TestFitMiniScrubber(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -111,6 +87,100 @@ func TestFitMiniStageAcrossZoom(t *testing.T) {
 				t.Fatalf("fitMiniStage() = (%d, %t), want (%d, %t)", side, visible, test.wantSide, test.wantVisible)
 			}
 		})
+	}
+}
+
+func TestMiniLayoutSelection(t *testing.T) {
+	tests := []struct {
+		name          string
+		width, height int
+		wantLandscape bool
+	}{
+		{name: "default landscape", width: 520, height: 176, wantLandscape: true},
+		{name: "exact landscape boundary", width: 560, height: 400, wantLandscape: true},
+		{name: "below landscape boundary", width: 559, height: 400, wantLandscape: false},
+		{name: "short portrait falls back to landscape", width: 300, height: 230, wantLandscape: true},
+		{name: "portrait", width: 360, height: 420, wantLandscape: false},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := miniUsesLandscape(test.width, test.height, 251); got != test.wantLandscape {
+				t.Fatalf("miniUsesLandscape(%d, %d) = %t, want %t", test.width, test.height, got, test.wantLandscape)
+			}
+		})
+	}
+}
+
+func TestMiniFitAcrossZoom(t *testing.T) {
+	for _, zoom := range []int{80, 100, 110, 125, 140} {
+		t.Run(strconv.Itoa(zoom)+" percent", func(t *testing.T) {
+			dp := func(value int) int { return (value*zoom + 50) / 100 }
+			landscape := fitMini(
+				dp(520), dp(176), dp(251), dp(13), dp(54),
+				dp(120), dp(112), dp(32), dp(4),
+				dp(360), dp(72),
+			)
+			if !landscape.Landscape || landscape.ArtSide != dp(176) || landscape.ColumnWidth != dp(344) {
+				t.Fatalf("landscape fit at %d%% = %+v", zoom, landscape)
+			}
+			if !landscape.ShowLike || !landscape.ShowLyrics || !landscape.ShowVolume || landscape.VolumeScrubber != 0 {
+				t.Fatalf("landscape controls at %d%% = %+v", zoom, landscape)
+			}
+
+			portrait := fitMini(
+				dp(360), dp(420), dp(251), dp(13), dp(54),
+				dp(120), dp(112), dp(32), dp(4),
+				dp(360), dp(72),
+			)
+			if portrait.Landscape || portrait.ArtSide != 0 || portrait.ColumnWidth != 0 {
+				t.Fatalf("portrait fit at %d%% = %+v", zoom, portrait)
+			}
+		})
+	}
+}
+
+func TestMiniVolumeScrubberOnlyWhenItFits(t *testing.T) {
+	without := fitMini(559, 200, 251, 13, 54, 120, 112, 32, 4, 360, 72)
+	if without.VolumeScrubber != 0 {
+		t.Fatalf("359 dp column showed a volume scrubber: %+v", without)
+	}
+	with := fitMini(560, 200, 251, 13, 54, 120, 112, 32, 4, 360, 72)
+	if with.VolumeScrubber != 72 {
+		t.Fatalf("360 dp column volume scrubber = %d, want 72: %+v", with.VolumeScrubber, with)
+	}
+	narrow := fitMini(300, 160, 251, 13, 54, 120, 112, 32, 4, 360, 72)
+	if !narrow.CompactTransport || narrow.ShowLike || narrow.ShowLyrics || narrow.ShowVolume {
+		t.Fatalf("minimum-width landscape did not shed controls cleanly: %+v", narrow)
+	}
+}
+
+func TestMiniForcedLandscapeFit(t *testing.T) {
+	fit := fitMini(300, 230, 251, 13, 54, 120, 112, 32, 4, 360, 72)
+	if !fit.Landscape || fit.ColumnWidth != 70 || fit.ColumnInset != 8 || fit.InnerWidth != 54 {
+		t.Fatalf("300x230 forced landscape geometry = %+v", fit)
+	}
+	if fit.ShowSeek || fit.ShowTransport || fit.ShowLike || fit.ShowLyrics || !fit.ShowVolume {
+		t.Fatalf("300x230 forced landscape controls do not fit: %+v", fit)
+	}
+}
+
+func TestMiniLandscapeHeadingKeyCachesSteadyState(t *testing.T) {
+	var mini Mini
+	if got := mini.landscapeHeadingKey("demo-track", false, 0); got != "track:demo-track" {
+		t.Fatalf("track key = %q", got)
+	}
+	if allocations := testing.AllocsPerRun(100, func() {
+		_ = mini.landscapeHeadingKey("demo-track", false, 0)
+	}); allocations != 0 {
+		t.Fatalf("steady track key allocated %.1f times", allocations)
+	}
+	if got := mini.landscapeHeadingKey("demo-track", true, 7); got != "lyrics:7:demo-track" {
+		t.Fatalf("lyrics key = %q", got)
+	}
+	if allocations := testing.AllocsPerRun(100, func() {
+		_ = mini.landscapeHeadingKey("demo-track", true, 7)
+	}); allocations != 0 {
+		t.Fatalf("steady lyrics key allocated %.1f times", allocations)
 	}
 }
 
