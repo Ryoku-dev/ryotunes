@@ -30,7 +30,7 @@ func TestWriteConfig(t *testing.T) {
 		"[input]", "method = pipewire", "source = easyeffects_sink.monitor",
 		"[output]", "method = raw", "raw_target = /dev/stdout", "data_format = ascii",
 		"ascii_max_range = 1000", "bar_delimiter = 59", "frame_delimiter = 10",
-		"channels = mono", "mono_option = average", "[smoothing]", "noise_reduction = 50",
+		"channels = mono", "mono_option = average", "[smoothing]", "noise_reduction = 30",
 	} {
 		if !strings.Contains(string(data), line+"\n") {
 			t.Errorf("config is missing %q", line)

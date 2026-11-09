@@ -7,9 +7,11 @@ import (
 
 	"gioui.org/io/system"
 	"gioui.org/layout"
+	"gioui.org/op"
 	"gioui.org/op/clip"
 	"gioui.org/op/paint"
 	"gioui.org/text"
+	"gioui.org/unit"
 
 	"github.com/ryoku-dev/ryoku/docs/lithic/library/go/kit"
 	"github.com/ryoku-dev/ryotunes/internal/client/state"
@@ -36,19 +38,14 @@ type Mini struct {
 	lyrics              Lyrics
 	showLyrics          bool
 
-	landscapeTrackID     string
-	landscapeTrackKey    string
-	landscapeLyricID     string
-	landscapeLyricIndex  int
-	landscapeLyricKey    string
-	landscapeLyricReady  bool
-	landscapeWordsID     string
-	landscapeWordsLine   int
-	landscapeWordsActive int
-	landscapeWordsReady  bool
-	landscapeWordsAll    string
-	landscapeWordsSung   string
-	landscapeWordsNext   string
+	landscapeTrackID      string
+	landscapeTrackKey     string
+	landscapeLyricID      string
+	landscapeLyricIndex   int
+	landscapeLyricKey     string
+	landscapeLyricReady   bool
+	landscapeWraps        map[string]bool
+	landscapeLyricWrapped bool
 
 	seek      widgets.Seek
 	transport widgets.Transport
@@ -199,6 +196,7 @@ func (mini *Mini) layoutLandscapeColumn(gtx layout.Context, e *env.Env, snapshot
 		provider = model.ProviderOf(track.VideoID)
 		if mini.showLyrics && provider != model.ProviderRadio {
 			mini.lyrics.ensure(gtx, e)
+			mini.lyrics.updateLineMotion(gtx, e.Th.Motion.Field)
 			key = mini.landscapeHeadingKey(track.VideoID, true, mini.lyrics.active)
 		}
 	}
@@ -213,31 +211,57 @@ func (mini *Mini) layoutLandscapeColumn(gtx layout.Context, e *env.Env, snapshot
 	}
 
 	return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
-		layout.Rigid(miniFixedHeight(gtx.Dp(24), func(gtx layout.Context) layout.Dimensions {
-			return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
-				layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-					return mini.landscapeTitleSwap.Layout(gtx, e.Th, key, 0, e.Th.Motion.Field, func(gtx layout.Context, swapKey string) layout.Dimensions {
-						return mini.layoutLandscapePrimary(gtx, e, swapKey, title)
+		layout.Rigid(miniFixedHeight(gtx.Dp(44), func(gtx layout.Context) layout.Dimensions {
+			gtx.Constraints.Min.X = gtx.Constraints.Max.X
+			mini.landscapeLyricWrapped = false
+			return layout.Stack{}.Layout(gtx,
+				layout.Stacked(func(gtx layout.Context) layout.Dimensions {
+					return layout.Inset{Right: 54}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+						return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+							layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+								dims := mini.landscapeTitleSwap.Layout(gtx, e.Th, key, 0, e.Th.Motion.Field, func(gtx layout.Context, swapKey string) layout.Dimensions {
+									return mini.layoutLandscapePrimary(gtx, e, swapKey, title, swapKey == key)
+								})
+								height := gtx.Sp(e.Th.T.Label.Line)
+								if mini.landscapeLyricWrapped {
+									height *= 2
+								}
+								dims.Size.Y = min(gtx.Constraints.Max.Y, height)
+								return dims
+							}),
+							layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+								return layout.Inset{Top: 2}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+									return mini.landscapeArtistSwap.Layout(gtx, e.Th, key, 0, e.Th.Motion.Field, func(gtx layout.Context, swapKey string) layout.Dimensions {
+										return mini.layoutLandscapeSecondary(gtx, e, swapKey, artists)
+									})
+								})
+							}),
+						)
 					})
 				}),
-				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					return mini.expandTip.Layout(gtx, e.Th, e.Overlays, "Expand", func(gtx layout.Context) layout.Dimensions {
-						return mini.expand.Layout(gtx, e.Th)
-					})
-				}),
-				layout.Rigid(layout.Spacer{Width: 6}.Layout),
-				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					return mini.closeTip.Layout(gtx, e.Th, e.Overlays, "Close", func(gtx layout.Context) layout.Dimensions {
-						return mini.close.Layout(gtx, e.Th)
-					})
+				layout.Stacked(func(gtx layout.Context) layout.Dimensions {
+					size := gtx.Constraints.Max
+					child := gtx
+					child.Constraints.Min = image.Point{}
+					child.Constraints.Max = image.Pt(gtx.Dp(54), gtx.Dp(24))
+					move := op.Offset(image.Pt(max(0, size.X-child.Constraints.Max.X), 0)).Push(gtx.Ops)
+					layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(child,
+						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+							return mini.expandTip.Layout(gtx, e.Th, e.Overlays, "Expand", func(gtx layout.Context) layout.Dimensions {
+								return mini.expand.Layout(gtx, e.Th)
+							})
+						}),
+						layout.Rigid(layout.Spacer{Width: 6}.Layout),
+						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+							return mini.closeTip.Layout(gtx, e.Th, e.Overlays, "Close", func(gtx layout.Context) layout.Dimensions {
+								return mini.close.Layout(gtx, e.Th)
+							})
+						}),
+					)
+					move.Pop()
+					return layout.Dimensions{Size: size}
 				}),
 			)
-		})),
-		layout.Rigid(layout.Spacer{Height: 2}.Layout),
-		layout.Rigid(miniFixedHeight(gtx.Dp(18), func(gtx layout.Context) layout.Dimensions {
-			return mini.landscapeArtistSwap.Layout(gtx, e.Th, key, 0, e.Th.Motion.Field, func(gtx layout.Context, swapKey string) layout.Dimensions {
-				return mini.layoutLandscapeSecondary(gtx, e, swapKey, artists)
-			})
 		})),
 		layout.Flexed(1, layout.Spacer{}.Layout),
 		layout.Rigid(miniFixedHeight(gtx.Dp(18), func(gtx layout.Context) layout.Dimensions {
@@ -253,8 +277,12 @@ func (mini *Mini) layoutLandscapeColumn(gtx layout.Context, e *env.Env, snapshot
 	)
 }
 
-func (mini *Mini) layoutLandscapePrimary(gtx layout.Context, e *env.Env, key, title string) layout.Dimensions {
+func (mini *Mini) layoutLandscapePrimary(gtx layout.Context, e *env.Env, key, title string, current bool) layout.Dimensions {
+	mini.setLandscapeWrapped(key, current, false)
 	if index, ok := miniLyricIndex(key); ok {
+		if current {
+			defer mini.lyrics.scheduleBoundary(gtx, e, LyricsCompact)
+		}
 		if mini.lyrics.lyrics == nil {
 			return (kit.Label{Style: e.Th.T.Label, Color: e.Th.R.Fg, MaxLines: 1}).Layout(gtx, e.Th.Theme, "Resolving lyrics")
 		}
@@ -262,17 +290,25 @@ func (mini *Mini) layoutLandscapePrimary(gtx layout.Context, e *env.Env, key, ti
 			return (kit.Label{Style: e.Th.T.Label, Color: e.Th.R.Fg, MaxLines: 1}).Layout(gtx, e.Th.Theme, "No synced lyrics")
 		}
 		line := mini.lyrics.lyrics.Lines[index]
-		if len(line.Words) > 0 {
-			return mini.layoutMiniLyricWords(gtx, e, index, line.Words)
+		if e.Store.Snapshot().Client.WordByWordOn() && index < len(mini.lyrics.words) && len(mini.lyrics.words[index]) > 0 {
+			result := mini.lyrics.karaoke[index].Layout(gtx, e.Th, mini.lyrics.words[index], look.KaraokeStyle{
+				Key: mini.lyrics.trackID, Text: e.Th.T.Label, Base: e.Th.R.Fg2, Highlight: e.Th.Accent.Ink,
+				Align: text.Start, PreferredRows: 1, MaxRows: 2, MinScale: .8,
+				Lift: unit.Dp(2 * mini.lyrics.lineProgress(index)), PositionMS: mini.lyrics.positionMS(gtx, e),
+			})
+			mini.setLandscapeWrapped(key, current, result.Rows > 1)
+			return result.Dimensions
 		}
-		return (kit.Label{Style: e.Th.T.Label, Color: e.Th.R.Fg, MaxLines: 1}).Layout(gtx, e.Th.Theme, strings.TrimSpace(line.Text))
+		dims := (kit.Label{Style: e.Th.T.Label, Color: e.Th.R.Fg, MaxLines: 2}).Layout(gtx, e.Th.Theme, strings.TrimSpace(line.Text))
+		mini.setLandscapeWrapped(key, current, dims.Size.Y > gtx.Sp(e.Th.T.Label.Line))
+		return dims
 	}
 	return (kit.Label{Style: e.Th.T.Row, Color: e.Th.R.Fg, MaxLines: 1}).Layout(gtx, e.Th.Theme, title)
 }
 
 func (mini *Mini) layoutLandscapeSecondary(gtx layout.Context, e *env.Env, key, artists string) layout.Dimensions {
 	if index, ok := miniLyricIndex(key); ok {
-		if mini.lyrics.lyrics == nil || index+1 < 0 || index+1 >= len(mini.lyrics.lyrics.Lines) {
+		if mini.landscapeWraps[key] || mini.lyrics.lyrics == nil || index+1 < 0 || index+1 >= len(mini.lyrics.lyrics.Lines) {
 			return layout.Dimensions{}
 		}
 		next := strings.TrimSpace(mini.lyrics.lyrics.Lines[index+1].Text)
@@ -281,40 +317,14 @@ func (mini *Mini) layoutLandscapeSecondary(gtx layout.Context, e *env.Env, key, 
 	return (kit.Label{Style: e.Th.T.Caption, Color: e.Th.R.Fg2, MaxLines: 1}).Layout(gtx, e.Th.Theme, artists)
 }
 
-func (mini *Mini) layoutMiniLyricWords(gtx layout.Context, e *env.Env, lineIndex int, words []model.LyricsWord) layout.Dimensions {
-	active := activeLyricWord(words, mini.lyrics.positionMS(gtx, e))
-	if !mini.landscapeWordsReady || mini.landscapeWordsID != mini.lyrics.trackID ||
-		mini.landscapeWordsLine != lineIndex || mini.landscapeWordsActive != active {
-		mini.landscapeWordsID = mini.lyrics.trackID
-		mini.landscapeWordsLine = lineIndex
-		mini.landscapeWordsActive = active
-		mini.landscapeWordsReady = true
-		mini.landscapeWordsAll = lyricWordsText(words)
-		mini.landscapeWordsSung = ""
-		mini.landscapeWordsNext = mini.landscapeWordsAll
-		if active >= len(words)-1 {
-			mini.landscapeWordsSung = mini.landscapeWordsAll
-			mini.landscapeWordsNext = ""
-		} else if active >= 0 {
-			mini.landscapeWordsSung = lyricWordsText(words[:active+1]) + " "
-			mini.landscapeWordsNext = lyricWordsText(words[active+1:])
-		}
+func (mini *Mini) setLandscapeWrapped(key string, current, wrapped bool) {
+	if mini.landscapeWraps == nil {
+		mini.landscapeWraps = make(map[string]bool)
 	}
-	if mini.landscapeWordsSung == "" {
-		return (kit.Label{Style: e.Th.T.Label, Color: e.Th.R.Fg, MaxLines: 1}).Layout(gtx, e.Th.Theme, mini.landscapeWordsAll)
+	mini.landscapeWraps[key] = wrapped
+	if current {
+		mini.landscapeLyricWrapped = wrapped
 	}
-	if mini.landscapeWordsNext == "" {
-		return (kit.Label{Style: e.Th.T.Label, Color: e.Th.Accent.Ink, MaxLines: 1}).Layout(gtx, e.Th.Theme, mini.landscapeWordsAll)
-	}
-	total := max(1, len(mini.landscapeWordsSung)+len(mini.landscapeWordsNext))
-	return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Baseline}.Layout(gtx,
-		layout.Flexed(float32(len(mini.landscapeWordsSung))/float32(total), func(gtx layout.Context) layout.Dimensions {
-			return (kit.Label{Style: e.Th.T.Label, Color: e.Th.Accent.Ink, MaxLines: 1}).Layout(gtx, e.Th.Theme, mini.landscapeWordsSung)
-		}),
-		layout.Flexed(float32(len(mini.landscapeWordsNext))/float32(total), func(gtx layout.Context) layout.Dimensions {
-			return (kit.Label{Style: e.Th.T.Label, Color: e.Th.R.Fg, MaxLines: 1}).Layout(gtx, e.Th.Theme, mini.landscapeWordsNext)
-		}),
-	)
 }
 
 func (mini *Mini) layoutStrip(gtx layout.Context, e *env.Env) layout.Dimensions {
@@ -518,6 +528,9 @@ func (mini *Mini) landscapeHeadingKey(trackID string, lyrics bool, lyricIndex in
 		}
 		return mini.landscapeTrackKey
 	}
+	if mini.landscapeLyricID != trackID && mini.landscapeWraps != nil {
+		clear(mini.landscapeWraps)
+	}
 	if !mini.landscapeLyricReady || mini.landscapeLyricID != trackID || mini.landscapeLyricIndex != lyricIndex {
 		mini.landscapeLyricID = trackID
 		mini.landscapeLyricIndex = lyricIndex
@@ -585,17 +598,6 @@ func miniLyricIndex(key string) (int, bool) {
 	}
 	index, err := strconv.Atoi(value)
 	return index, err == nil
-}
-
-func lyricWordsText(words []model.LyricsWord) string {
-	var text strings.Builder
-	for index, word := range words {
-		if index > 0 {
-			text.WriteByte(' ')
-		}
-		text.WriteString(strings.TrimSpace(word.Text))
-	}
-	return strings.TrimSpace(text.String())
 }
 
 func miniFixedHeight(height int, content layout.Widget) layout.Widget {

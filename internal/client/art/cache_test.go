@@ -41,14 +41,43 @@ func TestCacheLoadsLocalCoverFromBarePath(t *testing.T) {
 		}
 	}})
 	defer cache.Close()
-	cache.Sample(path)
+	cache.Palette(path)
 	select {
 	case <-changed:
 	case <-time.After(2 * time.Second):
 		t.Fatal("local cover did not load")
 	}
-	sample, ready := cache.Sample(path)
-	if !ready || sample.A == 0 || sample.R < sample.B {
-		t.Fatalf("local cover sample = %#v, ready=%v, want the orange cover", sample, ready)
+	picked, ready := cache.Palette(path)
+	if !ready || picked.Vibrant.A == 0 || picked.Vibrant.R < picked.Vibrant.B {
+		t.Fatalf("local cover palette = %#v, ready=%v, want the orange cover", picked, ready)
+	}
+}
+
+func TestCacheFailedTracksPermanentInputsAndCooldowns(t *testing.T) {
+	changed := make(chan struct{}, 1)
+	cache := New(Options{Workers: 1, Invalidate: func() {
+		select {
+		case changed <- struct{}{}:
+		default:
+		}
+	}})
+	if !cache.Failed("", 32) {
+		t.Fatal("empty artwork URL was not reported as failed")
+	}
+
+	missing := filepath.Join(t.TempDir(), "missing.png")
+	cache.Get(missing, 32)
+	select {
+	case <-changed:
+	case <-time.After(2 * time.Second):
+		t.Fatal("missing artwork did not finish loading")
+	}
+	if !cache.Failed(missing, 32) {
+		t.Fatal("failed artwork URL was not reported during its cooldown")
+	}
+
+	cache.Close()
+	if !cache.Failed("https://example.invalid/cover.png", 32) {
+		t.Fatal("closed cache was not reported as failed")
 	}
 }

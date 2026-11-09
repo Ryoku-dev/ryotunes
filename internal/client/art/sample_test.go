@@ -12,35 +12,41 @@ import (
 	"time"
 )
 
-func TestSampleArtworkRejectsGreyImage(t *testing.T) {
+func TestSampleArtworkRejectsGreyVibrantButKeepsDominant(t *testing.T) {
 	img := image.NewNRGBA(image.Rect(0, 0, 48, 48))
 	for y := range 48 {
 		for x := range 48 {
 			img.SetNRGBA(x, y, color.NRGBA{R: 128, G: 128, B: 128, A: 0xff})
 		}
 	}
-	if sample := sampleArtwork(img); sample.ok {
-		t.Fatalf("grey artwork sampled %#v", sample.color)
+	sample := sampleArtwork(img)
+	if sample.palette.Vibrant.A != 0 {
+		t.Fatalf("grey artwork vibrant = %#v", sample.palette.Vibrant)
+	}
+	if sample.palette.Dominant.A == 0 {
+		t.Fatal("grey artwork did not produce a dominant colour")
 	}
 }
 
-func TestSampleArtworkPicksHighestScoredBucket(t *testing.T) {
+func TestSampleArtworkPicksVibrantAndDominantBuckets(t *testing.T) {
 	img := image.NewNRGBA(image.Rect(0, 0, 48, 24))
+	dominant := color.NRGBA{R: 28, G: 28, B: 30, A: 0xff}
+	vibrant := color.NRGBA{R: 238, G: 82, B: 58, A: 0xff}
 	for y := range 24 {
 		for x := range 48 {
-			pixel := color.NRGBA{R: 180, G: 155, B: 155, A: 0xff}
-			if x >= 24 {
-				pixel = color.NRGBA{G: 100, B: 166, A: 0xff}
+			pixel := dominant
+			if x >= 36 {
+				pixel = vibrant
 			}
 			img.SetNRGBA(x, y, pixel)
 		}
 	}
 	sample := sampleArtwork(img)
-	if !sample.ok {
-		t.Fatal("saturated artwork had no sample")
+	if sample.palette.Vibrant.R <= sample.palette.Vibrant.B {
+		t.Fatalf("vibrant = %#v, want coral bucket", sample.palette.Vibrant)
 	}
-	if sample.color.B <= sample.color.G || sample.color.B <= sample.color.R {
-		t.Fatalf("sample = %#v, want the blue bucket", sample.color)
+	if sample.palette.Dominant.B <= sample.palette.Dominant.R {
+		t.Fatalf("dominant = %#v, want navy bucket", sample.palette.Dominant)
 	}
 }
 
@@ -71,17 +77,17 @@ func TestCacheSamplesDecodedArtworkWithoutAnotherDownload(t *testing.T) {
 		}
 	}})
 	defer cache.Close()
-	if _, ready := cache.Sample(server.URL); ready {
-		t.Fatal("sample was ready before artwork loaded")
+	if _, ready := cache.Palette(server.URL); ready {
+		t.Fatal("palette was ready before artwork loaded")
 	}
 	select {
 	case <-changed:
 	case <-time.After(2 * time.Second):
 		t.Fatal("artwork did not finish loading")
 	}
-	sample, ready := cache.Sample(server.URL)
-	if !ready || sample.A == 0 {
-		t.Fatalf("sample = %#v, ready=%v", sample, ready)
+	picked, ready := cache.Palette(server.URL)
+	if !ready || picked.Vibrant.A == 0 || picked.Dominant.A == 0 {
+		t.Fatalf("palette = %#v, ready=%v", picked, ready)
 	}
 	if got := requests.Load(); got != 1 {
 		t.Fatalf("artwork requests = %d, want 1", got)
@@ -106,8 +112,8 @@ func TestCacheFailureCooldownStopsRequestAndInvalidationStorms(t *testing.T) {
 		}
 	}})
 	defer cache.Close()
-	if _, ready := cache.Sample(server.URL); ready {
-		t.Fatal("failed sample was ready before its request")
+	if _, ready := cache.Palette(server.URL); ready {
+		t.Fatal("failed palette was ready before its request")
 	}
 	cache.Get(server.URL, 96)
 	select {
@@ -116,7 +122,7 @@ func TestCacheFailureCooldownStopsRequestAndInvalidationStorms(t *testing.T) {
 		t.Fatal("failed artwork request did not finish")
 	}
 	for range 10_000 {
-		cache.Sample(server.URL)
+		cache.Palette(server.URL)
 		cache.Get(server.URL, 64)
 		cache.Get(server.URL, 96)
 	}

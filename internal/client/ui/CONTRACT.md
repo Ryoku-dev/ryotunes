@@ -114,14 +114,16 @@ every frame, so library gold plaques follow without a wrapper. Where the accent
 comes from is the **Accent colour** preference (`ClientPreferences.Accent`):
 
 1. **Album art** (default). The loaded track's cover, sampled off the frame
-   goroutine by the art cache: a 24 × 24 downsample, pixels with alpha under
-   128 or saturation under .12 skipped, colours bucketed by 3 bits per
-   channel, each pixel scoring `saturation × (1 − |max − .65|)`, the bucket
-   with the best total wins and its average is the sample (1.x's rule). The
-   sample keeps its hue; saturation is clamped to .55–.85 and lightness set to
-   .70 in dark mode and .42 in light, so it reads on every stone. A cover that
-   is still loading keeps the previous accent; a track without a cover, a grey
-   cover (no bucket) or nothing loaded uses the desktop accent.
+   goroutine by the art cache into an `art.Palette`. `Vibrant` is 1.x's rule: a
+   24 × 24 downsample, pixels with alpha under 128 or saturation under .12
+   skipped, colours bucketed by 3 bits per channel, each pixel scoring
+   `saturation × (1 − |max − .65|)`, the bucket with the best total wins and
+   its average is the sample. `Dominant` is the most populous bucket over all
+   opaque pixels, whatever their saturation. The accent keeps `Vibrant`'s hue;
+   saturation is clamped to .55–.85 and lightness set to .70 in dark mode and
+   .42 in light, so it reads on every stone. A cover that is still loading
+   keeps the previous accent; a track without a cover, a grey cover (no
+   vibrant bucket) or nothing loaded uses the desktop accent.
 2. **Source.** The active provider's brand (`look/brand.go`), as v2 did for
    everything but play.
 3. **Desktop.** The Ryoku palette's gold roles as loaded.
@@ -130,7 +132,26 @@ Every accent change (a new track, a provider switch in Source mode, the
 preference itself) tweens all four colours over `Motion.Field` (320) with the
 chisel ease; a palette or mode change snaps. Album, playlist and artist heroes
 tint only their own field (and its visualizer lane) with their own cover's
-sample, tweening in when it arrives; their Play plaque stays the global accent.
+vibrant colour, tweening in when it arrives; their Play plaque stays the global
+accent.
+
+**Cover tint.** While the accent comes from the album art and **Tint the
+window** is on (`ClientPreferences.CoverTintOn()`, default on), every surface
+takes the cover's hue, the way Ryoku's own palette takes the wallpaper's
+(`look/tint.go`, `look/oklch.go`). Ground, the four stones, vein, fg, fg2, fg3
+and sel are re-hued in OKLCH: each keeps its own lightness, so every contrast
+pair holds, and takes a small chroma (dark mode: ground .020, stone1 .026,
+stone2 .030, stone3 .034, stone4 .036, vein .030, fg .010, fg2 .014, fg3 .018,
+sel .018; light mode .8 of those) times a strength, reduced until it fits
+sRGB. The minerals, scrim, onSel and onSel2 never change, so states read the
+same on any cover. Hue and strength come from the palette: the dominant
+colour's hue when its OKLCH chroma is at least .04 (strength
+`min(1, chroma / .12)`), else the vibrant colour's hue at strength .35, else
+no tint (a black and white cover keeps the desktop stones). The accent is then
+derived against the tinted stone2, so `Accent.Ink` still meets 4.5:1. A track,
+mode or preference change tweens the whole role set together with the accent
+over `Motion.Field`; a palette change snaps. With the tint off, an accent mode
+other than Album art, or nothing loaded, the stones are the desktop palette's.
 
 **Source colour.** The active provider's brand is identity, not state, so it
 may stand without a word, and since v3 it lives in one place: the provider
@@ -409,9 +430,31 @@ on Escape or an outside press, which it swallows.
   `Motion.Notch`. The header's more menu: Stop after this track, Save queue as
   playlist, Clear. Empty: `kit.Empty` "Nothing queued" / "Play something and
   the next tracks show here."
-- **Lyrics:** synced lines, the active one `T.Section` `fg` with sung words in
-  `Accent.Ink`, others `T.Proof` `fg3`, romanized line under each in
-  `T.Caption`. The active line sits one third from the top. Following moves
+- **Lyrics:** synced lines in fixed-height rows, romanized and translated
+  lines under each in `T.Caption`. Every line is laid out at the active size
+  (`T.Section` here, `T.Sentence` on the now playing stage); lines that are
+  not active are scaled about their centre to the resting size (`T.Proof`,
+  `T.Section` on the stage) in `fg3`. When a line becomes active it scales up
+  to full size and brightens over `Motion.Field`, and the line it replaces
+  settles back the same way.
+
+  **Word by word** (`look.Karaoke`, while the Word by word preference is on,
+  default): the active line's words flow and wrap centred (a line too long for
+  its row scales down until it fits, never clipped), unsung words in `fg2`,
+  sung words in `Accent.Ink`, and the word being sung fills from its left edge
+  behind a 45° cut that follows the clock, rising 2 dp (3 on the stage) while
+  it fills; sung words stay up and the line settles when it goes inactive.
+  Word timing comes from the lyrics when the source times each word (TTML,
+  enhanced LRC, KRC, yrc). Otherwise it is estimated from the line's own
+  timing: words split at spaces (CJK runs per character), each weighted by
+  its rune count plus one, sung across
+  `min(gap − 120 ms, max(500 ms, 1.25 × 70 ms × total weight))` from the
+  line's start, where the gap runs to the line's end time or else the next
+  line's start. With the preference off the active line is whole in `fg`
+  (still scaling). While a word fills, the lyrics ask for frames 1/30 s ahead;
+  between words they schedule only the next boundary; paused, none.
+
+  The active line sits one third from the top. Following moves
   the list's anchor (`layout.Position.First`) next to the active line at once,
   so the line is laid out on the first frame, and springs only the remaining
   distance (at most one viewport). Only real wheel, trackpad or drag input on
@@ -438,8 +481,8 @@ player bar stay. Escape, Back or the plaque closes it. It enters over
   `T.Sentence` (two lines), artists `T.Proof` `fg2` (links), album `T.Caption`
   `fg3`, then 21, an act row of normal quiet icon plaques **8 apart**: like,
   add to playlist, download, start radio, more. Nothing in this row is gold.
-  Right column: `kit.Tabs` Lyrics, Queue, then the content; lyrics here use
-  `T.Sentence` for the active line and `T.Section` `fg3` for the others.
+  Right column: `kit.Tabs` Lyrics, Queue, then the content; lyrics here sing
+  at `T.Sentence` with the others resting at `T.Section` (see Lyrics).
 - Narrower: a pane shorter than 720 puts art 120 (cut 7) beside the title,
   artists and act row; a taller pane stacks art `min(paneW - 42, 280,
   paneH - 440)` over them. The Lyrics and Queue tabs and their scroller fill
@@ -480,8 +523,10 @@ layout's 251 dp fixed rows:
 - At narrower forced-landscape sizes, the seek and action controls appear only
   when their complete row fits; the cover remains the play and pause control.
 - Lyrics: the toggle crossfades the title and artists rows into the active
-  synced line (`T.Label` `fg`, sung words in `Accent.Ink`) and the next line
-  (`T.Caption` `fg3`) over `Motion.Field`; the controls stay.
+  synced line, sung word by word (`look.Karaoke` at `T.Label`, left aligned,
+  one row: a long line scales down to .8, and past that wraps to two rows and
+  hides the next line), and the next line (`T.Caption` `fg3`) over
+  `Motion.Field`; the controls stay.
 - Every blank part of the strip drags the window.
 
 A taller window that can fit those fixed rows keeps the v2 portrait layout: a
@@ -506,6 +551,7 @@ new over `Motion.Field`.
 - **Spectrum feed.** `internal/client/spectrum` runs `cava` (the same analyser
   the Ryoku shell and Ryotunes 1.x use) while a visible Bars or Curve
   visualizer wants it and playback is playing: 64 bands at 60 frames a second,
+  `noise_reduction = 30` so it answers quickly,
   mono, raw ASCII on stdout, `method = pipewire`. Its `source` is the sink the
   daemon's playback stream links into, found with `pw-dump` (the
   Stream/Output/Audio node whose `application.process.binary` is `ryotunesd`,
@@ -523,13 +569,28 @@ new over `Motion.Field`.
   while playing, stopped within a second after, the same restart and give-up
   rules, `Available()` false without `pw-record`), never writes to disk, and
   only one of the two feeds runs for a given style.
+- **Dynamics** (`look/pulse.go`). Each frame's band levels are shaped
+  `(max(level − .03, 0) / .97) ^ 1.35`, so quiet bands sink and loud ones
+  stand out. A beat detector follows the bass (the mean of the lowest eighth
+  of the bands, or the RMS of the sample window for the scopes) against its
+  own moving average (time constant 1.2 s): a rise past 1.35 × the average,
+  above .25 and at least 160 ms after the last beat, sets a kick to 1 that
+  decays with a 180 ms time constant. The kick lifts every bar and the curve
+  by up to 14 % (never past the lane), adds up to .25 alpha, and thickens the
+  curve and oscilloscope strokes by up to 1 dp and the vectorscope points by
+  .75 dp.
 - **Bars** (`look.Visualizer`). Vertical blades rising from the bottom of
   their lane: square at the bottom, the top-right corner cut at 45° by
   `min(barWidth, height)`. Pitch 12 (bar 9, gap 3) in the now playing band, 9
   (bar 6, gap 3) in headers. The 64 bands are resampled to the bar count.
-  Each bar follows its band with a spring that rises fast (ω = 4 / 70 ms) and
-  falls slowly (ω = 4 / 220 ms). While playing a bar is at least 2 high, so
-  the lane reads as a floor in a quiet passage. One path, one paint.
+  Each bar follows its band with a spring that rises fast (ω = 4 / 50 ms) and
+  falls slower (ω = 4 / 180 ms). While playing a bar is at least 2 high, so
+  the lane reads as a floor in a quiet passage. Blades paint in four alpha
+  steps by level (.55, .7, .85 and 1 × the style's alpha), one path per step,
+  so loud bands are brighter. **Peak caps**: a 2 thick cap rides 2 above each
+  blade's highest point, holds 140 ms, then falls with constant acceleration
+  (the lane's height in 550 ms) until it rests on its blade; one path, one
+  paint, in the brightest step's ink.
 - **Curve.** The same springs, drawn as one line through the band tops across
   the lane (monotone cubic, so it never dips under the floor), 2 thick with
   square ends, and the area under it filled at a third of the line's alpha.
@@ -547,18 +608,22 @@ new over `Motion.Field`.
   previous frames kept at alpha .45 and .18 for persistence. In a lane wider
   than tall it folds `Y` upward into a half diamond 2 × lane height wide,
   centred. Header lanes are too short for it and draw Bars instead.
-- **Ink.** `Accent.Ink` at alpha .45 in dark mode and .35 in light (lanes on a
-  field), full alpha on the Home card's instrument.
-- **Frames.** While anything moves a visualizer asks for its next frame 1/60
-  s ahead (60 a second even on faster screens; the feeds only wake a resting
-  visualizer). Paused, bars and curve fall to nothing, the scope traces flatten
-  over `Motion.Field`, and then they ask for none; nothing is drawn at rest.
+- **Ink.** `Accent.Ink` at alpha .70 in dark mode and .55 in light in header
+  lanes, .85 and .75 in the now playing band, full alpha on the Home card's
+  instrument.
+- **Frames.** While anything moves (springs, falling caps, a decaying kick) a
+  visualizer asks for its next frame 1/60 s ahead (60 a second even on faster
+  screens; the feeds only wake a resting visualizer). Paused, bars and curve
+  fall to nothing, caps settle, the scope traces flatten over `Motion.Field`,
+  and then they ask for none; nothing is drawn at rest.
 - **Where.** Page headers (`widgets.Header`, `widgets.Hero`): a lane along the
   field's bottom edge, the field's full width, inside the bottom padding
   (header bottom padding 40, lane 32; compact 24 and 18), drawn after the field
-  and before the text, so text never sits on it. The now playing band as
-  above. The Home now playing card's instrument (see Pages); the Home greeting
-  has no lane of its own.
+  and before the text, so text never sits on it. The now playing band along
+  the pane's bottom: `clamp(paneH × .2, 88, 144)` high when the pane is at
+  least 900 wide, `clamp(paneH × .14, 56, 96)` narrower, with the columns
+  ending 21 above it. The Home now playing card's instrument (see Pages); the
+  Home greeting has no lane of its own.
 
 ## Pages
 
@@ -992,12 +1057,13 @@ instant.
 | hover a control, row, tile or card | plane or ink fades in, out | hover in 160 / out 100 |
 | play ↔ pause | `look.Morph`: icon scales from .85 and crossfades | notch 200 |
 | like | `look.Fill`: the heart fills from its centre in `Accent.Ink`; unliking empties it | notch 200 |
-| track changes | player-bar art crossfades; title and artists rise 8 and fade in | navigate 200 |
-| track changes in the now playing view | art crossfades | field 320 |
+| track changes | every cover showing it (player bar, now playing, Home card, mini) is revealed behind a 45° cut sweeping from its top-left corner past its bottom-right; title and artists rise 8 and fade in | the caller's duration: navigate 200 in the bar, field 320 elsewhere |
 | hover a scrubber | blade handle and bubble fade in; only the volume track thickens 2 → 3 | hover in / out |
 | drag a scrubber | handle follows the pointer exactly; the wave flattens; seek holds the committed value | field 320 |
 | playback starts / pauses | the wave's amplitude eases in and travels / eases out and stops | field 320 |
-| music plays | visualizer blades rise fast and fall slowly with the bands | springs, every frame |
+| music plays | visualizer blades rise fast and fall slower with the bands, brighter when loud; peak caps hold and fall | springs, every frame |
+| a beat lands | every visualizer kicks up to 14 % taller and brighter, strokes thicken | decays over 180 ms |
+| a word is sung | its highlight fills it behind a 45° cut that follows the clock and it rises 2 | continuous while it fills, 30 frames a second |
 | provider switch | active plate glides; source colours retint; content re-enters | select 240, field 320, navigate 200 |
 | current destination or selection changes | sel slab glides (sidebar, bottom nav, tables, tabs blade) | select 240 |
 | page navigation | new content fades in rising 8 | navigate 200 |
@@ -1006,12 +1072,12 @@ instant.
 | card hover | plate fades in; play plate rises 4 and fades in | hover in 160 |
 | row hover | index number crossfades to the play icon; like and more fade in | hover in / out |
 | queue row removed / added | collapses / notch cut | unfold 200 / notch 200 |
-| lyric line becomes active | the list anchors next to it and springs the rest to one third; ink fg3 → fg | spring, hover in |
+| lyric line becomes active | the list anchors next to it and springs the rest to one third; the line scales up from its resting size and brightens while the previous one settles back | spring, field 320 |
 | download completes | ring fills to full, icon morphs to `download_done` | spring, notch 200 |
 | shelf arrows | glide one page | wheel 140 |
 | placard | rises 8, blade drains (library) | placard in 300 / life 5000 |
 | now playing view opens / closes | fade with an 8 rise / fade | navigate 200 / hover out 100 |
-| accent changes (new cover, source, preference) | fill, on, ink and field tween together | field 320 |
+| accent changes (new cover, source, preference) | fill, on, ink and field tween together, and with the window tint every stone and ink retints with them | field 320 |
 | corners preference changes | every pane re-cuts in place | select 240 |
 | sidebar folds / unfolds | width tweens, labels clip and fade, icons glide to the rail | unfold 200 |
 | medium sidebar sheet | slides 6 in from the left and fades / retreats | menu in 160 / out 100 |
@@ -1024,11 +1090,13 @@ instant.
 | mini resized across landscape and portrait | the two layouts crossfade | field 320 |
 
 Nothing moves at rest: no pulsing, no idle frames. A paused, idle window draws
-zero frames. While music plays, the wave progress and the visible visualizers
-are the only things that move without being touched; they ask for frames at up
-to 60 a second and stop as soon as playback pauses, the window hides them, or
-motion is reduced. Position samples that only confirm the client's own clock
-do not redraw.
+zero frames. While music plays, the wave progress, the visible visualizers and
+the word being sung in visible lyrics are the only things that move without
+being touched; they ask for frames at up to 60 a second (30 for the lyric
+wipe) and stop as soon as playback pauses, the window hides them, or motion is
+reduced. Reduced motion keeps the word by word colours but drops the wipe, the
+lift and the line scaling. Position samples that only confirm the client's own
+clock do not redraw.
 
 ## Settings
 
@@ -1056,23 +1124,33 @@ storage, Diagnostics, About. Rows that were missing in 2.0.0 and come back:
   version) in mono; updates with Check, Install, View changelog and Show
   release notes.
 
-Skins and decor are not restored: colour comes from the Ryoku palette. The
-Appearance section offers Colours (Follow Ryoku, Dark, Light), Palette file
-(choose a palette JSON, or none), Density, Motion, UI scale, Low resource
-mode, **Visualizer** (on by default; its detail says "Bars that move with the
-music in page headers and the now playing view" or, without cava, "Install
-cava to see the visualizer" with the toggle disabled), **Visualizer style**
-(`kit.Filters` Bars, Curve, Oscilloscope, Vectorscope, disabled while the
-visualizer is off; without `pw-record` the last two are disabled and the
-detail says "Install pw-record to see the waveform and stereo field"),
-**Wave progress** (on by default), **Accent colour** (`kit.Filters` Album art,
-Source, Desktop; details "The colour of the cover that is playing", "The
-colour of the service you are listening on", "Your Ryoku palette's accent")
-and **Corners** (`kit.Filters` Desktop, Square, Fine, Chisel, Deep, Custom;
-Custom adds a `kit.Slider` 0 to 32 with the value in mono; Desktop's detail
-names what it follows, "Ryoku window corners: 18 dp"). Every change applies
-live with its motion. Reduced motion and low resource mode turn the
-visualizer and the wave off without changing the stored settings.
+Skins and decor are not restored: colour comes from the Ryoku palette, or from
+the playing cover when the window is tinted. The Appearance section offers
+Colours (Follow Ryoku, Dark, Light), Palette file (choose a palette JSON, or
+none), Density, Motion, UI scale, Low resource mode, **Visualizer** (on by
+default; its detail says "Bars that move with the music in page headers and
+the now playing view" or, without cava, "Install cava to see the visualizer"
+with the toggle disabled), **Visualizer style** (`kit.Filters` Bars, Curve,
+Oscilloscope, Vectorscope, disabled while the visualizer is off; without
+`pw-record` the last two are disabled and the detail says "Install pw-record
+to see the waveform and stereo field"), **Wave progress** (on by default),
+**Accent colour** (`kit.Filters` Album art, Source, Desktop; details "The
+colour of the cover that is playing", "The colour of the service you are
+listening on", "Your Ryoku palette's accent"), **Tint the window** (a toggle,
+on by default, detail "Every surface takes a tint of the cover that's
+playing"; disabled with the detail "Follows the album art accent" while Accent
+colour is not Album art) and **Corners** (`kit.Filters` Desktop, Square, Fine,
+Chisel, Deep, Custom; Custom adds a `kit.Slider` 0 to 32 with the value in
+mono; Desktop's detail names what it follows, "Ryoku window corners: 18 dp").
+Every change applies live with its motion. Reduced motion and low resource
+mode turn the visualizer and the wave off without changing the stored
+settings.
+
+The Lyrics section offers **Word by word** (the client preference, on by
+default, detail "Highlight each word as it's sung, estimated when the lyrics
+only time each line"), **Word-timed lyrics** (the daemon's `lyrics_boidu`,
+which the daemon treats as on when unset, so the row reads on too; detail "Ask
+Boidu first for lyrics timed word by word") and **Romanized lyrics**.
 
 ## Sign in
 

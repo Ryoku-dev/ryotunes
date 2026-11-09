@@ -47,13 +47,16 @@ func (playing *NowPlaying) Layout(gtx layout.Context, e *env.Env) layout.Dimensi
 		}
 		track := trackFromPlayback(snapshot.Playback.Now, e.Store.CurrentTrack())
 		wide := gtx.Constraints.Max.X >= gtx.Dp(900)
-		band, inset := gtx.Dp(56), unit.Dp(21)
+		band, inset := int(float32(gtx.Constraints.Max.Y)*.14+.5), unit.Dp(21)
+		band = min(max(band, gtx.Dp(56)), gtx.Dp(96))
 		if wide {
-			band, inset = gtx.Dp(88), 34
+			band = int(float32(gtx.Constraints.Max.Y)*.2 + .5)
+			band = min(max(band, gtx.Dp(88)), gtx.Dp(144))
+			inset = 34
 		}
-		alpha := float32(.45)
+		alpha := float32(.75)
 		if e.Th.R.Dark {
-			alpha = .55
+			alpha = .85
 		}
 		return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
 			layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {

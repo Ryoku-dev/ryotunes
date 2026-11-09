@@ -102,7 +102,8 @@ func (visualizer *Visualizer) drawCurve(gtx layout.Context, style VisualizerStyl
 		if pointCount > 1 {
 			x = float32(index) * float32(size.X) / float32(pointCount-1)
 		}
-		visualizer.curvePoints[index] = f32.Pt(x, float32(size.Y)-min(visualizer.values[source], float32(size.Y)))
+		height := visualizerDisplayHeight(visualizer.values[source], float32(size.Y), visualizer.kick)
+		visualizer.curvePoints[index] = f32.Pt(x, float32(size.Y)-height)
 	}
 	monotoneTangents(visualizer.curvePoints, visualizer.curveSlopes, visualizer.curveTangents)
 
@@ -119,5 +120,6 @@ func (visualizer *Visualizer) drawCurve(gtx layout.Context, style VisualizerStyl
 	stroke.Begin(gtx.Ops)
 	stroke.MoveTo(visualizer.curvePoints[0])
 	appendMonotone(&stroke, visualizer.curvePoints, visualizer.curveTangents)
-	paint.FillShape(gtx.Ops, style.Ink, clip.Stroke{Path: stroke.End(), Width: float32(max(1, gtx.Dp(2)))}.Op())
+	width := max(float32(1), (2+visualizer.kick)*gtx.Metric.PxPerDp)
+	paint.FillShape(gtx.Ops, style.Ink, clip.Stroke{Path: stroke.End(), Width: width}.Op())
 }

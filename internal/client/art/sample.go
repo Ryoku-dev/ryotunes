@@ -10,10 +10,16 @@ import (
 
 const accentSampleSize = 24
 
+// Palette contains the cover colours used by the client. A zero-alpha colour
+// means that the corresponding pick was not available.
+type Palette struct {
+	Vibrant  color.NRGBA
+	Dominant color.NRGBA
+}
+
 type artworkSample struct {
-	color color.NRGBA
-	ready bool
-	ok    bool
+	palette Palette
+	ready   bool
 }
 
 type sampleBucket struct {
@@ -30,14 +36,25 @@ func sampleArtwork(source image.Image) artworkSample {
 	}
 	pixels := image.NewNRGBA(image.Rect(0, 0, accentSampleSize, accentSampleSize))
 	xdraw.CatmullRom.Scale(pixels, pixels.Bounds(), source, source.Bounds(), xdraw.Src, nil)
-	buckets := make(map[uint16]*sampleBucket, 64)
-	var best *sampleBucket
+
+	var dominantBuckets, vibrantBuckets [512]sampleBucket
+	dominantIndex, vibrantIndex := -1, -1
 	for y := range accentSampleSize {
 		for x := range accentSampleSize {
 			pixel := pixels.NRGBAAt(x, y)
 			if pixel.A < 128 {
 				continue
 			}
+			key := int(pixel.R>>5)<<6 | int(pixel.G>>5)<<3 | int(pixel.B>>5)
+			dominant := &dominantBuckets[key]
+			dominant.count++
+			dominant.red += uint64(pixel.R)
+			dominant.green += uint64(pixel.G)
+			dominant.blue += uint64(pixel.B)
+			if dominantIndex < 0 || dominant.count > dominantBuckets[dominantIndex].count {
+				dominantIndex = key
+			}
+
 			maximum := max(pixel.R, pixel.G, pixel.B)
 			minimum := min(pixel.R, pixel.G, pixel.B)
 			if maximum == 0 {
@@ -48,31 +65,37 @@ func sampleArtwork(source image.Image) artworkSample {
 				continue
 			}
 			value := float64(maximum) / 255
-			score := saturation * (1 - math.Abs(value-.65))
-			key := uint16(pixel.R>>5)<<6 | uint16(pixel.G>>5)<<3 | uint16(pixel.B>>5)
-			bucket := buckets[key]
-			if bucket == nil {
-				bucket = &sampleBucket{}
-				buckets[key] = bucket
-			}
-			bucket.count++
-			bucket.red += uint64(pixel.R)
-			bucket.green += uint64(pixel.G)
-			bucket.blue += uint64(pixel.B)
-			bucket.score += score
-			if best == nil || bucket.score > best.score {
-				best = bucket
+			vibrant := &vibrantBuckets[key]
+			vibrant.count++
+			vibrant.red += uint64(pixel.R)
+			vibrant.green += uint64(pixel.G)
+			vibrant.blue += uint64(pixel.B)
+			vibrant.score += saturation * (1 - math.Abs(value-.65))
+			if vibrantIndex < 0 || vibrant.score > vibrantBuckets[vibrantIndex].score {
+				vibrantIndex = key
 			}
 		}
 	}
-	if best == nil || best.count == 0 {
-		return artworkSample{ready: true}
+
+	sample := artworkSample{ready: true}
+	if dominantIndex >= 0 {
+		sample.palette.Dominant = bucketColour(dominantBuckets[dominantIndex])
 	}
-	count := uint64(best.count)
-	return artworkSample{color: color.NRGBA{
-		R: uint8(best.red / count),
-		G: uint8(best.green / count),
-		B: uint8(best.blue / count),
+	if vibrantIndex >= 0 {
+		sample.palette.Vibrant = bucketColour(vibrantBuckets[vibrantIndex])
+	}
+	return sample
+}
+
+func bucketColour(bucket sampleBucket) color.NRGBA {
+	if bucket.count == 0 {
+		return color.NRGBA{}
+	}
+	count := uint64(bucket.count)
+	return color.NRGBA{
+		R: uint8(bucket.red / count),
+		G: uint8(bucket.green / count),
+		B: uint8(bucket.blue / count),
 		A: 0xff,
-	}, ready: true, ok: true}
+	}
 }

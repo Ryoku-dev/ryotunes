@@ -10,7 +10,6 @@ import (
 	"gioui.org/layout"
 	"gioui.org/op/clip"
 	"gioui.org/op/paint"
-	"gioui.org/unit"
 
 	"github.com/ryoku-dev/ryoku/docs/lithic/library/go/palette"
 )
@@ -107,7 +106,8 @@ func (visualizer *Visualizer) drawOscilloscope(gtx layout.Context, th *Theme, st
 	for _, point := range visualizer.osc.points[1:] {
 		path.LineTo(point)
 	}
-	paint.FillShape(gtx.Ops, style.Ink, clip.Stroke{Path: path.End(), Width: float32(max(1, gtx.Dp(2)))}.Op())
+	width := max(float32(1), (2+visualizer.kick)*gtx.Metric.PxPerDp)
+	paint.FillShape(gtx.Ops, style.Ink, clip.Stroke{Path: path.End(), Width: width}.Op())
 }
 
 type vectorscopeState struct {
@@ -180,7 +180,7 @@ func (visualizer *Visualizer) drawVectorPoints(gtx layout.Context, points []f32.
 	if len(points) == 0 || ink.A == 0 {
 		return
 	}
-	dot := max(float32(1), float32(gtx.Dp(unit.Dp(1.5))))
+	dot := max(float32(1), (1.5+.75*visualizer.kick)*gtx.Metric.PxPerDp)
 	half := dot / 2
 	var path clip.Path
 	path.Begin(gtx.Ops)

@@ -69,10 +69,10 @@ func TestParseLRCWordTiming(t *testing.T) {
 	}{
 		{
 			name:      "enhanced LRC",
-			input:     "[00:10.00]<00:10.00>Hello <00:10.50>world",
+			input:     "[00:10.00]<00:10.00>Hello <00:10.50>world <00:11.00>",
 			wantText:  "Hello world",
-			wantStart: []uint64{10000, 10000},
-			wantEnd:   []uint64{10000, 10500},
+			wantStart: []uint64{10000, 10500},
+			wantEnd:   []uint64{10500, 11000},
 		},
 		{
 			name:      "K LRC",

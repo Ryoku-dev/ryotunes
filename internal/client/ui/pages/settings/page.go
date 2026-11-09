@@ -59,6 +59,7 @@ type appearanceControls struct {
 	visualizerStyle          kit.Filters
 	visualizerStyleScroll    look.HScroller
 	waveProgress             kit.Toggle
+	coverTint                kit.Toggle
 	accent                   kit.Filters
 	accentScroll             look.HScroller
 	corners                  kit.Filters
@@ -81,7 +82,7 @@ type soundControls struct {
 }
 
 type lyricsControls struct {
-	wordByWord, romanize kit.Toggle
+	wordByWord, timedSource, romanize kit.Toggle
 }
 
 type authFlowControls struct {

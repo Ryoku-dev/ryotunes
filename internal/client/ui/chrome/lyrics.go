@@ -3,16 +3,20 @@ package chrome
 
 import (
 	"image"
-	"image/color"
 	"math"
 	"strings"
 	"time"
 
+	"gioui.org/f32"
 	"gioui.org/layout"
 	"gioui.org/op"
+	"gioui.org/op/clip"
 	"gioui.org/text"
+	"gioui.org/unit"
 
+	"github.com/ryoku-dev/ryoku/docs/lithic/library/go/anim"
 	"github.com/ryoku-dev/ryoku/docs/lithic/library/go/kit"
+	"github.com/ryoku-dev/ryoku/docs/lithic/library/go/palette"
 	libtheme "github.com/ryoku-dev/ryoku/docs/lithic/library/go/theme"
 	"github.com/ryoku-dev/ryotunes/internal/client/ui/act"
 	"github.com/ryoku-dev/ryotunes/internal/client/ui/env"
@@ -45,6 +49,13 @@ type lyricFollowPlan struct {
 	springDelta  int
 }
 
+type lyricLineMotion struct {
+	current, previous        int
+	currentValue, priorValue float32
+	currentTween, priorTween anim.Tween
+	ready                    bool
+}
+
 // Lyrics resolves, caches, and follows the current track's lyric document.
 type Lyrics struct {
 	scroll      look.Scroller
@@ -53,6 +64,8 @@ type Lyrics struct {
 	retry       kit.Plaque
 	lyrics      *model.Lyrics
 	timed       []int
+	words       [][]look.KaraokeWord
+	karaoke     []look.Karaoke
 	rowTops     []int
 	rowSeen     []uint64
 	laidRows    []int
@@ -65,6 +78,7 @@ type Lyrics struct {
 	offsetMS    int64
 	active      int
 	lastActive  int
+	lineMotion  lyricLineMotion
 	manualUntil time.Time
 	lastTarget  int
 	romanized   bool
@@ -92,18 +106,22 @@ func (lyrics *Lyrics) Refresh(e *env.Env) {
 func (lyrics *Lyrics) Layout(gtx layout.Context, e *env.Env, size LyricsSize) layout.Dimensions {
 	lyrics.ensure(gtx, e)
 	lyrics.romanized = settingEnabled(e.Store.Snapshot().Settings, model.SettingLyricsRomanize, false)
+	var dims layout.Dimensions
 	if size == LyricsCompact {
-		return lyrics.layoutCompact(gtx, e)
-	}
-	inset := layout.Inset{Top: 13, Bottom: 13}
-	if size == LyricsPanel {
-		inset.Left, inset.Right = 13, 13
+		dims = lyrics.layoutCompact(gtx, e)
 	} else {
-		inset.Left, inset.Right = 21, 21
+		inset := layout.Inset{Top: 13, Bottom: 13}
+		if size == LyricsPanel {
+			inset.Left, inset.Right = 13, 13
+		} else {
+			inset.Left, inset.Right = 21, 21
+		}
+		dims = inset.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+			return lyrics.layoutDocument(gtx, e, size)
+		})
 	}
-	return inset.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-		return lyrics.layoutDocument(gtx, e, size)
-	})
+	lyrics.scheduleBoundary(gtx, e, size)
+	return dims
 }
 
 func (lyrics *Lyrics) ensure(gtx layout.Context, e *env.Env) {
@@ -120,6 +138,8 @@ func (lyrics *Lyrics) ensure(gtx layout.Context, e *env.Env) {
 		lyrics.err = ""
 		lyrics.lyrics = nil
 		lyrics.timed = lyrics.timed[:0]
+		lyrics.words = nil
+		lyrics.karaoke = nil
 		lyrics.lineClicks = nil
 		lyrics.rowTops = lyrics.rowTops[:0]
 		lyrics.rowSeen = lyrics.rowSeen[:0]
@@ -127,6 +147,7 @@ func (lyrics *Lyrics) ensure(gtx layout.Context, e *env.Env) {
 		lyrics.offsetMS = 0
 		lyrics.active = -1
 		lyrics.lastActive = -2
+		lyrics.lineMotion = lyricLineMotion{}
 		lyrics.manualUntil = time.Time{}
 		lyrics.lastTarget = 0
 		lyrics.forceAnchor = true
@@ -151,7 +172,6 @@ func (lyrics *Lyrics) ensure(gtx layout.Context, e *env.Env) {
 			lyrics.forceAnchor = true
 		}
 		lyrics.active = activeLyricLine(lyrics.lyrics.Lines, lyrics.timed, positionMS)
-		lyrics.scheduleBoundary(gtx, e)
 	} else {
 		lyrics.active = -1
 	}
@@ -185,6 +205,8 @@ func (lyrics *Lyrics) fetch(e *env.Env, trackID string, requestID uint64) {
 		} else {
 			lyrics.err = ""
 			lyrics.lyrics = document
+			lyrics.words = nil
+			lyrics.karaoke = nil
 			lyrics.timed = lyrics.timed[:0]
 			lineCount := 0
 			if document != nil {
@@ -194,6 +216,10 @@ func (lyrics *Lyrics) fetch(e *env.Env, trackID string, requestID uint64) {
 						lyrics.timed = append(lyrics.timed, index)
 					}
 				}
+			}
+			if document != nil && document.Synced {
+				lyrics.words = look.PrepareKaraoke(document.Lines)
+				lyrics.karaoke = make([]look.Karaoke, lineCount)
 			}
 			lyrics.rowTops = make([]int, lineCount)
 			lyrics.rowSeen = make([]uint64, lineCount)
@@ -248,20 +274,7 @@ func activeLyricLine(lines []model.LyricsLine, timed []int, positionMS int64) in
 	return timed[low-1]
 }
 
-func activeLyricWord(words []model.LyricsWord, positionMS int64) int {
-	low, high := 0, len(words)
-	for low < high {
-		middle := low + (high-low)/2
-		if int64(words[middle].StartMS) > positionMS {
-			high = middle
-		} else {
-			low = middle + 1
-		}
-	}
-	return low - 1
-}
-
-func (lyrics *Lyrics) scheduleBoundary(gtx layout.Context, e *env.Env) {
+func (lyrics *Lyrics) scheduleBoundary(gtx layout.Context, e *env.Env, size LyricsSize) {
 	snapshot := e.Store.Snapshot()
 	if snapshot.Playback.Paused || lyrics.lyrics == nil || !lyrics.lyrics.Synced {
 		return
@@ -276,30 +289,42 @@ func (lyrics *Lyrics) scheduleBoundary(gtx layout.Context, e *env.Env) {
 			break
 		}
 	}
+	visible := size == LyricsCompact ||
+		lyrics.active >= 0 && lyrics.active < len(lyrics.rowSeen) && lyrics.rowSeen[lyrics.active] == lyrics.generation
+	wiping := false
 	if lyrics.active >= 0 && lyrics.active < len(lyrics.lyrics.Lines) {
 		line := lyrics.lyrics.Lines[lyrics.active]
 		if line.EndTimeMS != nil && int64(*line.EndTimeMS) > positionMS {
 			nextMS = min(nextMS, int64(*line.EndTimeMS))
 		}
-		for _, word := range line.Words {
-			if int64(word.StartMS) > positionMS {
-				nextMS = min(nextMS, int64(word.StartMS))
-				break
-			}
-			if int64(word.EndMS) > positionMS {
-				nextMS = min(nextMS, int64(word.EndMS))
-				break
+		if snapshot.Client.WordByWordOn() && lyrics.active < len(lyrics.words) {
+			for _, word := range lyrics.words[lyrics.active] {
+				if int64(word.StartMS) > positionMS {
+					nextMS = min(nextMS, int64(word.StartMS))
+					break
+				}
+				if int64(word.EndMS) > positionMS {
+					nextMS = min(nextMS, int64(word.EndMS))
+					wiping = visible && !anim.Reduced()
+					break
+				}
 			}
 		}
-	}
-	if nextMS == noBoundary {
-		return
 	}
 	speed := snapshot.AudioFx.Speed
 	if speed <= 0 {
 		speed = 1
 	}
-	delay := time.Duration(float64(nextMS-positionMS)/speed) * time.Millisecond
+	delay := time.Duration(0)
+	if nextMS != noBoundary {
+		delay = time.Duration(float64(nextMS-positionMS)/speed) * time.Millisecond
+	}
+	if wiping && (delay <= 0 || delay > time.Second/30) {
+		delay = time.Second / 30
+	}
+	if delay <= 0 {
+		return
+	}
 	if delay < time.Millisecond {
 		delay = time.Millisecond
 	}
@@ -365,12 +390,13 @@ func (lyrics *Lyrics) layoutPlain(gtx layout.Context, e *env.Env, size LyricsSiz
 	return lyrics.scroll.Layout(gtx, e.Th, len(lyrics.lyrics.Lines), func(gtx layout.Context, index int) layout.Dimensions {
 		line := lyrics.lyrics.Lines[index]
 		return layout.Inset{Top: 8, Bottom: 13}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-			return lyrics.layoutLine(gtx, e, line, false, size)
+			return lyrics.layoutLine(gtx, e, line, index, false, size)
 		})
 	})
 }
 
 func (lyrics *Lyrics) layoutSynced(gtx layout.Context, e *env.Env, size LyricsSize) layout.Dimensions {
+	lyrics.updateLineMotion(gtx, e.Th.Motion.Field)
 	viewport := gtx.Constraints.Max.Y
 	rowHeight := gtx.Dp(88)
 	if size == LyricsStage {
@@ -427,7 +453,7 @@ func (lyrics *Lyrics) layoutSynced(gtx layout.Context, e *env.Env, size LyricsSi
 		line := lyrics.lyrics.Lines[lineIndex]
 		click := lyrics.lineClick(line, lineIndex, size)
 		dims := click.Layout(rowGTX, func(gtx layout.Context) layout.Dimensions {
-			return lyrics.layoutLine(gtx, e, line, lineIndex == lyrics.active, size)
+			return lyrics.layoutLine(gtx, e, line, lineIndex, true, size)
 		})
 		if click.Clicked(gtx) && line.TimeMS != nil {
 			lyrics.seek(e, float64(int64(*line.TimeMS)+lyrics.offsetMS)/1000)
@@ -494,77 +520,160 @@ func (lyrics *Lyrics) lineClick(line model.LyricsLine, index int, size LyricsSiz
 	return click
 }
 
-func (lyrics *Lyrics) layoutLine(gtx layout.Context, e *env.Env, line model.LyricsLine, active bool, size LyricsSize) layout.Dimensions {
-	style, ink := lyricsStyle(e, size, active)
-	return layout.Center.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-		maxWidth := gtx.Dp(560)
-		if size == LyricsStage {
-			maxWidth = gtx.Dp(760)
-		}
-		gtx.Constraints.Max.X = min(gtx.Constraints.Max.X, maxWidth)
-		children := []layout.FlexChild{
+func (lyrics *Lyrics) layoutLine(gtx layout.Context, e *env.Env, line model.LyricsLine, index int, synced bool, size LyricsSize) layout.Dimensions {
+	activeStyle, restingStyle := lyricStyles(e, size)
+	progress := float32(0)
+	if synced {
+		progress = lyrics.lineProgress(index)
+	} else {
+		activeStyle = restingStyle
+	}
+	wordByWord := synced && e.Store.Snapshot().Client.WordByWordOn()
+	targetInk := e.Th.R.Fg
+	if wordByWord {
+		targetInk = e.Th.R.Fg2
+	}
+	ink := palette.Mix(e.Th.R.Fg3, targetInk, progress)
+	highlight := palette.Mix(e.Th.R.Fg3, e.Th.Accent.Ink, progress)
+	captionInk := palette.Mix(e.Th.R.Fg3, e.Th.R.Fg2, progress)
+
+	render := func(gtx layout.Context) layout.Dimensions {
+		return layout.Flex{Axis: layout.Vertical, Alignment: layout.Middle}.Layout(gtx,
 			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-				if active && len(line.Words) > 0 {
-					return lyrics.layoutWords(gtx, e, style, line.Words)
+				if wordByWord && index >= 0 && index < len(lyrics.words) && len(lyrics.words[index]) > 0 {
+					lift := unit.Dp(2)
+					preferredRows, maximumRows, minimumScale := 2, 2, float32(.72)
+					if size == LyricsStage {
+						lift = 3
+					} else if size == LyricsCompact {
+						preferredRows, maximumRows, minimumScale = 1, 2, .8
+					}
+					result := lyrics.karaoke[index].Layout(gtx, e.Th, lyrics.words[index], look.KaraokeStyle{
+						Key: lyrics.trackID, Text: activeStyle, Base: ink, Highlight: highlight,
+						Align: text.Middle, PreferredRows: preferredRows, MaxRows: maximumRows,
+						MinScale: minimumScale, Lift: unit.Dp(float32(lift) * progress),
+						PositionMS: lyrics.positionMS(gtx, e),
+					})
+					return result.Dimensions
 				}
-				return (kit.Label{Style: style, Color: ink, MaxLines: 2, Align: text.Middle}).Layout(gtx, e.Th.Theme, strings.TrimSpace(line.Text))
+				return (kit.Label{Style: activeStyle, Color: ink, MaxLines: 2, Align: text.Middle}).Layout(gtx, e.Th.Theme, strings.TrimSpace(line.Text))
 			}),
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				if !lyrics.romanized || line.Romanized == nil || strings.TrimSpace(*line.Romanized) == "" {
+					return layout.Dimensions{}
+				}
+				return layout.Inset{Top: 4}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+					return (kit.Label{Style: e.Th.T.Caption, Color: captionInk, MaxLines: 2, Align: text.Middle}).Layout(gtx, e.Th.Theme, strings.TrimSpace(*line.Romanized))
+				})
+			}),
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				if line.Translation == nil || strings.TrimSpace(*line.Translation) == "" {
+					return layout.Dimensions{}
+				}
+				return layout.Inset{Top: 4}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+					return (kit.Label{Style: e.Th.T.Caption, Color: captionInk, MaxLines: 2, Align: text.Middle}).Layout(gtx, e.Th.Theme, strings.TrimSpace(*line.Translation))
+				})
+			}),
+		)
+	}
+
+	maxWidth := gtx.Dp(560)
+	if size == LyricsStage {
+		maxWidth = gtx.Dp(760)
+	}
+	if !synced {
+		return layout.Inset{Left: 13, Right: 13}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+			gtx.Constraints.Max.X = min(gtx.Constraints.Max.X, maxWidth)
+			return layout.Center.Layout(gtx, render)
+		})
+	}
+
+	slot := gtx.Constraints.Max
+	sideRoom := gtx.Dp(13)
+	canvas := image.Pt(max(1, min(maxWidth, slot.X-2*sideRoom)), max(1, slot.Y))
+	restingScale := float32(1)
+	if activeStyle.Size > 0 {
+		restingScale = float32(restingStyle.Size) / float32(activeStyle.Size)
+	}
+	if restingScale <= 0 || restingScale > 1 {
+		restingScale = 1
+	}
+	restingWrap := index != lyrics.lineMotion.current && index != lyrics.lineMotion.previous
+	if restingWrap && restingScale < 1 {
+		canvas.X = int(math.Ceil(float64(float32(canvas.X) / restingScale)))
+		canvas.Y = int(math.Ceil(float64(float32(canvas.Y) / restingScale)))
+	}
+
+	contentGTX := gtx
+	contentGTX.Constraints.Min = canvas
+	contentGTX.Constraints.Max = canvas
+	record := op.Record(gtx.Ops)
+	dims := layout.Center.Layout(contentGTX, render)
+	call := record.Stop()
+
+	scale := restingScale + (1-restingScale)*progress
+	if anim.Reduced() {
+		scale = 1
+		if restingWrap {
+			scale = restingScale
 		}
-		if lyrics.romanized && line.Romanized != nil && strings.TrimSpace(*line.Romanized) != "" {
-			children = append(children,
-				layout.Rigid(layout.Spacer{Height: 4}.Layout),
-				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					return (kit.Label{Style: e.Th.T.Caption, Color: ink, MaxLines: 2, Align: text.Middle}).Layout(gtx, e.Th.Theme, strings.TrimSpace(*line.Romanized))
-				}),
-			)
-		}
-		if line.Translation != nil && strings.TrimSpace(*line.Translation) != "" {
-			children = append(children,
-				layout.Rigid(layout.Spacer{Height: 4}.Layout),
-				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					return (kit.Label{Style: e.Th.T.Caption, Color: ink, MaxLines: 2, Align: text.Middle}).Layout(gtx, e.Th.Theme, strings.TrimSpace(*line.Translation))
-				}),
-			)
-		}
-		return layout.Flex{Axis: layout.Vertical, Alignment: layout.Middle}.Layout(gtx, children...)
-	})
+	}
+	mask := clip.Rect{Max: slot}.Push(gtx.Ops)
+	move := op.Offset(image.Pt((slot.X-dims.Size.X)/2, (slot.Y-dims.Size.Y)/2)).Push(gtx.Ops)
+	centre := f32.Pt(float32(dims.Size.X)/2, float32(dims.Size.Y)/2)
+	transform := op.Affine(f32.AffineId().Scale(centre, f32.Pt(scale, scale))).Push(gtx.Ops)
+	call.Add(gtx.Ops)
+	transform.Pop()
+	move.Pop()
+	mask.Pop()
+	return layout.Dimensions{Size: slot}
 }
 
-func lyricsStyle(e *env.Env, size LyricsSize, active bool) (libtheme.TextStyle, color.NRGBA) {
-	if !active {
-		if size == LyricsStage {
-			return e.Th.T.Section, e.Th.R.Fg3
-		}
-		return e.Th.T.Proof, e.Th.R.Fg3
-	}
+func lyricStyles(e *env.Env, size LyricsSize) (active, resting libtheme.TextStyle) {
 	switch size {
 	case LyricsStage:
-		return e.Th.T.Sentence, e.Th.R.Fg
+		return e.Th.T.Sentence, e.Th.T.Section
 	case LyricsCompact:
-		return e.Th.T.Row, e.Th.R.Fg
+		return e.Th.T.Label, e.Th.T.Caption
 	default:
-		return e.Th.T.Section, e.Th.R.Fg
+		return e.Th.T.Section, e.Th.T.Proof
 	}
 }
 
-func (lyrics *Lyrics) layoutWords(gtx layout.Context, e *env.Env, style libtheme.TextStyle, words []model.LyricsWord) layout.Dimensions {
-	activeWord := activeLyricWord(words, lyrics.positionMS(gtx, e))
-	children := make([]layout.FlexChild, 0, len(words))
-	for index := range words {
-		index := index
-		children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			word := words[index].Text
-			if index+1 < len(words) {
-				word += " "
-			}
-			ink := e.Th.R.Fg
-			if index <= activeWord {
-				ink = e.Th.Accent.Ink
-			}
-			return kit.Text(e.Th.Theme, style, ink, word)(gtx)
-		}))
+func (lyrics *Lyrics) updateLineMotion(gtx layout.Context, duration time.Duration) {
+	motion := &lyrics.lineMotion
+	if !motion.ready {
+		motion.current, motion.previous = lyrics.active, -1
+		motion.currentTween = anim.Tween{Duration: duration, Ease: anim.EaseChisel}
+		motion.currentTween.Set(gtx, 1)
+		motion.currentValue, motion.priorValue, motion.ready = 1, 0, true
+		return
 	}
-	return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx, children...)
+	if lyrics.active != motion.current {
+		motion.previous = motion.current
+		motion.priorTween = anim.Tween{Duration: duration, Ease: anim.EaseChisel}
+		motion.priorTween.Set(gtx, motion.currentValue)
+		motion.priorTween.Set(gtx, 0)
+		motion.current = lyrics.active
+		motion.currentTween = anim.Tween{Duration: duration, Ease: anim.EaseChisel}
+		motion.currentTween.Set(gtx, 0)
+		motion.currentTween.Set(gtx, 1)
+	}
+	motion.currentValue = motion.currentTween.Value(gtx)
+	motion.priorValue = motion.priorTween.Value(gtx)
+	if motion.priorValue <= 0 {
+		motion.previous = -1
+	}
+}
+
+func (lyrics *Lyrics) lineProgress(index int) float32 {
+	if index == lyrics.lineMotion.current {
+		return lyrics.lineMotion.currentValue
+	}
+	if index == lyrics.lineMotion.previous {
+		return lyrics.lineMotion.priorValue
+	}
+	return 0
 }
 
 func (lyrics *Lyrics) layoutCompact(gtx layout.Context, e *env.Env) layout.Dimensions {
@@ -572,6 +681,7 @@ func (lyrics *Lyrics) layoutCompact(gtx layout.Context, e *env.Env) layout.Dimen
 		empty := kit.Empty{Icon: look.Icon.Lyrics, Title: "No lyrics for this track"}
 		return empty.Layout(gtx, e.Th.Theme)
 	}
+	lyrics.updateLineMotion(gtx, e.Th.Motion.Field)
 	center := max(0, lyrics.active)
 	return layout.Flex{Axis: layout.Vertical, Alignment: layout.Middle}.Layout(gtx,
 		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions { return lyrics.compactLine(gtx, e, center-1) }),
@@ -587,7 +697,7 @@ func (lyrics *Lyrics) compactLine(gtx layout.Context, e *env.Env, index int) lay
 	line := lyrics.lyrics.Lines[index]
 	click := lyrics.lineClick(line, index, LyricsCompact)
 	dims := click.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-		return lyrics.layoutLine(gtx, e, line, index == lyrics.active, LyricsCompact)
+		return lyrics.layoutLine(gtx, e, line, index, true, LyricsCompact)
 	})
 	if click.Clicked(gtx) && line.TimeMS != nil {
 		lyrics.seek(e, float64(int64(*line.TimeMS)+lyrics.offsetMS)/1000)

@@ -183,37 +183,49 @@ func parseParenthesizedWords(raw string, stamp lineStamp) ([]model.LyricsWord, s
 func parseAngleWords(raw string, stamp lineStamp) ([]model.LyricsWord, string) {
 	var words []model.LyricsWord
 	var plain strings.Builder
-	last := stamp.start
+	start := stamp.start
 	for pos := 0; pos < len(raw); {
 		open := strings.IndexByte(raw[pos:], '<')
 		if open < 0 {
-			plain.WriteString(raw[pos:])
+			tail := raw[pos:]
+			plain.WriteString(tail)
+			if strings.TrimSpace(tail) != "" {
+				end := start
+				if stamp.end != nil && *stamp.end > start {
+					end = *stamp.end
+				}
+				words = append(words, model.LyricsWord{Text: tail, StartMS: start, EndMS: end})
+			}
 			break
 		}
 		open += pos
-		plain.WriteString(raw[pos:open])
 		close := strings.IndexByte(raw[open:], '>')
 		if close < 0 {
-			plain.WriteString(raw[open:])
+			tail := raw[pos:]
+			plain.WriteString(tail)
+			if strings.TrimSpace(tail) != "" {
+				end := start
+				if stamp.end != nil && *stamp.end > start {
+					end = *stamp.end
+				}
+				words = append(words, model.LyricsWord{Text: tail, StartMS: start, EndMS: end})
+			}
 			break
 		}
 		close += open
 		boundary, ok := parseLRCTime(raw[open+1 : close])
 		if !ok {
-			plain.WriteString(raw[open : close+1])
+			plain.WriteString(raw[pos : close+1])
 			pos = close + 1
 			continue
 		}
-		next := strings.IndexByte(raw[close+1:], '<')
-		wordEnd := len(raw)
-		if next >= 0 {
-			wordEnd = close + 1 + next
+		text := raw[pos:open]
+		plain.WriteString(text)
+		if strings.TrimSpace(text) != "" {
+			words = append(words, model.LyricsWord{Text: text, StartMS: start, EndMS: boundary})
 		}
-		word := raw[close+1 : wordEnd]
-		plain.WriteString(word)
-		words = append(words, model.LyricsWord{Text: word, StartMS: last, EndMS: boundary})
-		last = boundary
-		pos = wordEnd
+		start = boundary
+		pos = close + 1
 	}
 	if len(words) == 0 {
 		return nil, raw

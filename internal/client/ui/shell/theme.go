@@ -74,26 +74,27 @@ func (s *uiShell) reconcileProvider(gtx layout.Context, e *env.Env) {
 	}
 
 	roles := e.Th.LoadedRoles()
-	target := look.AccentFromDesktop(roles)
-	setAccent := true
+	targetRoles := roles
+	targetAccent := look.AccentFromDesktop(roles)
+	setScheme := true
 	switch snapshot.Client.AccentMode() {
 	case state.AccentSource:
-		target = look.AccentFromSource(snapshot.Provider, roles)
+		targetAccent = look.AccentFromSource(snapshot.Provider, roles)
 	case state.AccentArt:
 		if snapshot.Playback.Now != nil && snapshot.Playback.Now.Thumbnail != nil {
 			thumbnail := strings.TrimSpace(*snapshot.Playback.Now.Thumbnail)
 			if thumbnail != "" && e.Art != nil {
-				sample, ready := e.Art.Sample(thumbnail)
+				coverPalette, ready := e.Art.Palette(thumbnail)
 				if !ready {
-					setAccent = false
-				} else if sample.A != 0 {
-					target = e.Th.ArtAccent(sample)
+					setScheme = false
+				} else {
+					targetRoles, targetAccent = e.Th.ArtScheme(coverPalette, snapshot.Client.CoverTintOn())
 				}
 			}
 		}
 	}
-	if setAccent {
-		e.Th.SetAccent(gtx, target)
+	if setScheme {
+		e.Th.SetScheme(gtx, targetRoles, targetAccent)
 	}
 
 	preset := snapshot.Client.CornerPreset()

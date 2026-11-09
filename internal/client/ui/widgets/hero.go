@@ -200,7 +200,7 @@ func (h *Hero) resolveTint(gtx layout.Context, e *env.Env, rawURL string) look.A
 		h.tint = e.Th.Accent
 		return h.tint
 	}
-	sample, ready := e.Art.Sample(rawURL)
+	coverPalette, ready := e.Art.Palette(rawURL)
 	if !ready {
 		if !h.tintSet {
 			h.tint = e.Th.Accent
@@ -211,8 +211,8 @@ func (h *Hero) resolveTint(gtx layout.Context, e *env.Env, rawURL string) look.A
 		return h.advanceTint(gtx)
 	}
 	target := e.Th.Accent
-	if sample.A != 0 {
-		target = e.Th.ArtAccent(sample)
+	if coverPalette.Vibrant.A != 0 {
+		target = e.Th.ArtAccent(coverPalette.Vibrant)
 	}
 	if !h.tintSet {
 		h.tint, h.tintFrom, h.tintTo = target, target, target
@@ -253,9 +253,9 @@ func (h *Hero) field(gtx layout.Context, e *env.Env, tint look.Accent, cuts [4]i
 			stack := op.Offset(image.Pt(0, dimensions.Size.Y-height)).Push(gtx.Ops)
 			laneGTX := gtx
 			laneGTX.Constraints = layout.Exact(image.Pt(dimensions.Size.X, height))
-			alpha := float32(.35)
+			alpha := float32(.55)
 			if e.Th.R.Dark {
-				alpha = .45
+				alpha = .70
 			}
 			Visualizer(laneGTX, e, &h.visualizer, look.VisualizerStyle{
 				Ink: palette.WithAlpha(tint.Ink, alpha), Bar: 6, Gap: 3, Floor: 2, HeaderLane: true,

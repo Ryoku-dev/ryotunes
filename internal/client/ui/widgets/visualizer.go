@@ -60,9 +60,9 @@ func headerLaneMetrics(class look.Class) (bottom, height unit.Dp) {
 }
 
 func headerVisualizerStyle(e *env.Env) look.VisualizerStyle {
-	alpha := float32(.35)
+	alpha := float32(.55)
 	if e.Th.R.Dark {
-		alpha = .45
+		alpha = .70
 	}
 	return look.VisualizerStyle{
 		Ink:        palette.WithAlpha(e.Th.Accent.Ink, alpha),

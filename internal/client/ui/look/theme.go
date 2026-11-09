@@ -10,6 +10,7 @@ import (
 	"github.com/ryoku-dev/ryoku/docs/lithic/library/go/palette"
 	libtheme "github.com/ryoku-dev/ryoku/docs/lithic/library/go/theme"
 	"github.com/ryoku-dev/ryoku/docs/lithic/library/go/tokens"
+	"github.com/ryoku-dev/ryotunes/internal/client/art"
 	"github.com/ryoku-dev/ryotunes/internal/model"
 )
 
@@ -28,16 +29,17 @@ type Accent struct {
 	Fill, On, Ink, Field color.NRGBA
 }
 
-const accentCacheSize = 32
+const schemeCacheSize = 32
 
-type accentCacheKey struct {
-	sample color.NRGBA
-	stone2 color.NRGBA
-	dark   bool
+type schemeCacheKey struct {
+	cover  art.Palette
+	base   palette.Roles
+	tinted bool
 }
 
-type accentCacheEntry struct {
-	key    accentCacheKey
+type schemeCacheEntry struct {
+	key    schemeCacheKey
+	roles  palette.Roles
 	accent Accent
 	used   bool
 }
@@ -55,15 +57,17 @@ type Theme struct {
 	srcTween       anim.Tween
 	providerSet    bool
 
+	schemeFrom, schemeTo palette.Roles
 	accentFrom, accentTo Accent
-	accentTween          anim.Tween
-	accentSet            bool
+	schemeTween          anim.Tween
+	schemeSet            bool
+	schemeAnimating      bool
 
 	cornerTween anim.Tween
 	cornerSet   bool
 
-	accentCache     [accentCacheSize]accentCacheEntry
-	accentCacheNext int
+	schemeCache     [schemeCacheSize]schemeCacheEntry
+	schemeCacheNext int
 }
 
 // NewTheme constructs the official Lithic theme with Ryotunes fonts.
@@ -84,13 +88,15 @@ func NewTheme(roles palette.Roles, density libtheme.Density, provider ...model.P
 		srcFrom:     source,
 		srcTo:       source,
 		srcTween:    anim.Tween{Duration: base.Motion.Field, Ease: anim.EaseChisel},
+		schemeFrom:  roles,
+		schemeTo:    roles,
 		accentFrom:  accent,
 		accentTo:    accent,
-		accentTween: anim.Tween{Duration: base.Motion.Field, Ease: anim.EaseChisel},
+		schemeTween: anim.Tween{Duration: base.Motion.Field, Ease: anim.EaseChisel},
 		cornerTween: anim.Tween{Duration: base.Motion.Select, Ease: anim.EaseChisel},
 		providerSet: initial != "",
 	}
-	theme.applyAccent(accent)
+	theme.applyScheme(roles, accent)
 	return theme
 }
 
@@ -102,34 +108,55 @@ func (theme *Theme) LoadedRoles() palette.Roles {
 // SetRoles replaces palette roles and makes the next accent assignment snap.
 func (theme *Theme) SetRoles(roles palette.Roles) {
 	theme.loadedRoles = roles
-	theme.R = roles
 	theme.Src = sourceFor(theme.Src.Provider, roles)
 	theme.srcFrom, theme.srcTo = theme.Src, theme.Src
 	theme.srcTween = anim.Tween{Duration: theme.Motion.Field, Ease: anim.EaseChisel}
-	theme.accentSet = false
-	theme.accentCache = [accentCacheSize]accentCacheEntry{}
-	theme.accentCacheNext = 0
-	theme.applyAccent(theme.Accent)
+	theme.schemeSet = false
+	theme.schemeAnimating = false
+	theme.schemeCache = [schemeCacheSize]schemeCacheEntry{}
+	theme.schemeCacheNext = 0
+	accent := AccentFromDesktop(roles)
+	theme.schemeFrom, theme.schemeTo = roles, roles
+	theme.accentFrom, theme.accentTo = accent, accent
+	theme.schemeTween = anim.Tween{Duration: theme.Motion.Field, Ease: anim.EaseChisel}
+	theme.applyScheme(roles, accent)
 }
 
-// ArtAccent derives and caches a cover accent for the loaded palette.
-func (theme *Theme) ArtAccent(sample color.NRGBA) Accent {
-	key := accentCacheKey{sample: sample, stone2: theme.loadedRoles.Stone2, dark: theme.loadedRoles.Dark}
-	for index := range theme.accentCache {
-		entry := theme.accentCache[index]
+// ArtScheme derives and caches the cover-tinted roles and accent together.
+func (theme *Theme) ArtScheme(cover art.Palette, tinted bool) (palette.Roles, Accent) {
+	key := schemeCacheKey{cover: cover, base: theme.loadedRoles, tinted: tinted}
+	for index := range theme.schemeCache {
+		entry := theme.schemeCache[index]
 		if entry.used && entry.key == key {
-			return entry.accent
+			return entry.roles, entry.accent
 		}
 	}
-	accent := AccentFromSample(sample, theme.loadedRoles)
-	theme.accentCache[theme.accentCacheNext] = accentCacheEntry{key: key, accent: accent, used: true}
-	theme.accentCacheNext = (theme.accentCacheNext + 1) % len(theme.accentCache)
+	roles := theme.loadedRoles
+	if tinted {
+		if tintedRoles, ok := CoverTint(roles, cover); ok {
+			roles = tintedRoles
+		}
+	}
+	accent := AccentFromDesktop(roles)
+	if cover.Vibrant.A != 0 {
+		accent = AccentFromSample(cover.Vibrant, roles)
+	}
+	theme.schemeCache[theme.schemeCacheNext] = schemeCacheEntry{
+		key: key, roles: roles, accent: accent, used: true,
+	}
+	theme.schemeCacheNext = (theme.schemeCacheNext + 1) % len(theme.schemeCache)
+	return roles, accent
+}
+
+// ArtAccent derives a hero accent without changing the window roles.
+func (theme *Theme) ArtAccent(sample color.NRGBA) Accent {
+	_, accent := theme.ArtScheme(art.Palette{Vibrant: sample}, false)
 	return accent
 }
 
 // SetProvider snaps the first source assignment and transitions later switches.
 func (theme *Theme) SetProvider(gtx layout.Context, provider model.Provider) {
-	target := sourceFor(provider, theme.loadedRoles)
+	target := sourceFor(provider, theme.schemeTo)
 	if !theme.providerSet {
 		theme.providerSet = true
 		theme.Src, theme.srcFrom, theme.srcTo = target, target, target
@@ -147,24 +174,40 @@ func (theme *Theme) SetProvider(gtx layout.Context, provider model.Provider) {
 	theme.animateSource(gtx)
 }
 
-// SetAccent snaps the first assignment and transitions later music changes.
-func (theme *Theme) SetAccent(gtx layout.Context, target Accent) {
-	if !theme.accentSet {
-		theme.accentSet = true
-		theme.accentFrom, theme.accentTo = target, target
-		theme.accentTween = anim.Tween{Duration: theme.Motion.Field, Ease: anim.EaseChisel}
-		theme.applyAccent(target)
+// SetScheme transitions the window roles and accent as one field change.
+func (theme *Theme) SetScheme(gtx layout.Context, roles palette.Roles, accent Accent) {
+	targetSource := sourceFor(theme.srcTo.Provider, roles)
+	if !theme.schemeSet {
+		theme.schemeSet = true
+		theme.schemeAnimating = false
+		theme.schemeFrom, theme.schemeTo = roles, roles
+		theme.accentFrom, theme.accentTo = accent, accent
+		theme.schemeTween = anim.Tween{Duration: theme.Motion.Field, Ease: anim.EaseChisel}
+		theme.Src, theme.srcFrom, theme.srcTo = targetSource, targetSource, targetSource
+		theme.srcTween = anim.Tween{Duration: theme.Motion.Field, Ease: anim.EaseChisel}
+		theme.applyScheme(roles, accent)
 		return
 	}
-	theme.animateAccent(gtx)
-	if theme.accentTo == target {
+	if theme.schemeTo == roles && theme.accentTo == accent && theme.srcTo == targetSource {
 		return
 	}
-	theme.accentFrom, theme.accentTo = theme.Accent, target
-	theme.accentTween = anim.Tween{Duration: theme.Motion.Field, Ease: anim.EaseChisel}
-	theme.accentTween.Set(gtx, 0)
-	theme.accentTween.Set(gtx, 1)
-	theme.animateAccent(gtx)
+	theme.animateScheme(gtx)
+	theme.animateSource(gtx)
+	theme.schemeFrom, theme.schemeTo = theme.R, roles
+	theme.accentFrom, theme.accentTo = theme.Accent, accent
+	theme.schemeTween = anim.Tween{Duration: theme.Motion.Field, Ease: anim.EaseChisel}
+	theme.schemeTween.Set(gtx, 0)
+	theme.schemeTween.Set(gtx, 1)
+	theme.srcFrom, theme.srcTo = theme.Src, targetSource
+	theme.srcTween = anim.Tween{Duration: theme.Motion.Field, Ease: anim.EaseChisel}
+	theme.srcTween.Set(gtx, 0)
+	theme.srcTween.Set(gtx, 1)
+	theme.schemeAnimating = true
+}
+
+// SetAccent transitions an accent while restoring the untouched desktop roles.
+func (theme *Theme) SetAccent(gtx layout.Context, accent Accent) {
+	theme.SetScheme(gtx, theme.loadedRoles, accent)
 }
 
 // SetCorner snaps the first pane cut and transitions later preference changes.
@@ -180,10 +223,10 @@ func (theme *Theme) SetCorner(gtx layout.Context, target unit.Dp) {
 	theme.Cut.Large = unit.Dp(theme.cornerTween.Value(gtx))
 }
 
-// Animate advances the active provider transition.
+// Animate advances active theme transitions.
 func (theme *Theme) Animate(gtx layout.Context) {
 	theme.animateSource(gtx)
-	theme.animateAccent(gtx)
+	theme.animateScheme(gtx)
 	if theme.cornerSet {
 		theme.Cut.Large = unit.Dp(theme.cornerTween.Value(gtx))
 	}
@@ -199,24 +242,57 @@ func (theme *Theme) animateSource(gtx layout.Context) {
 	}
 }
 
-func (theme *Theme) animateAccent(gtx layout.Context) {
-	if !theme.accentSet {
+func (theme *Theme) animateScheme(gtx layout.Context) {
+	if !theme.schemeAnimating {
 		return
 	}
-	progress := theme.accentTween.Value(gtx)
-	theme.applyAccent(Accent{
+	progress := theme.schemeTween.Value(gtx)
+	roles := mixRoles(theme.schemeFrom, theme.schemeTo, progress)
+	accent := Accent{
 		Fill:  palette.Mix(theme.accentFrom.Fill, theme.accentTo.Fill, progress),
 		On:    palette.Mix(theme.accentFrom.On, theme.accentTo.On, progress),
 		Ink:   palette.Mix(theme.accentFrom.Ink, theme.accentTo.Ink, progress),
 		Field: palette.Mix(theme.accentFrom.Field, theme.accentTo.Field, progress),
-	})
+	}
+	theme.applyScheme(roles, accent)
+	if progress >= 1 {
+		theme.schemeAnimating = false
+	}
 }
 
-func (theme *Theme) applyAccent(accent Accent) {
+func (theme *Theme) applyScheme(roles palette.Roles, accent Accent) {
+	theme.R = roles
 	theme.Accent = accent
 	theme.R.Gold = accent.Fill
 	theme.R.OnGold = accent.On
 	theme.R.GoldInk = accent.Ink
+}
+
+func mixRoles(from, to palette.Roles, progress float32) palette.Roles {
+	return palette.Roles{
+		Ground:  palette.Mix(from.Ground, to.Ground, progress),
+		Stone1:  palette.Mix(from.Stone1, to.Stone1, progress),
+		Stone2:  palette.Mix(from.Stone2, to.Stone2, progress),
+		Stone3:  palette.Mix(from.Stone3, to.Stone3, progress),
+		Stone4:  palette.Mix(from.Stone4, to.Stone4, progress),
+		Vein:    palette.Mix(from.Vein, to.Vein, progress),
+		Fg:      palette.Mix(from.Fg, to.Fg, progress),
+		Fg2:     palette.Mix(from.Fg2, to.Fg2, progress),
+		Fg3:     palette.Mix(from.Fg3, to.Fg3, progress),
+		Sel:     palette.Mix(from.Sel, to.Sel, progress),
+		OnSel:   palette.Mix(from.OnSel, to.OnSel, progress),
+		OnSel2:  palette.Mix(from.OnSel2, to.OnSel2, progress),
+		Gold:    palette.Mix(from.Gold, to.Gold, progress),
+		OnGold:  palette.Mix(from.OnGold, to.OnGold, progress),
+		GoldInk: palette.Mix(from.GoldInk, to.GoldInk, progress),
+		Jade:    palette.Mix(from.Jade, to.Jade, progress),
+		Lapis:   palette.Mix(from.Lapis, to.Lapis, progress),
+		Amber:   palette.Mix(from.Amber, to.Amber, progress),
+		Jasper:  palette.Mix(from.Jasper, to.Jasper, progress),
+		Scrim:   palette.Mix(from.Scrim, to.Scrim, progress),
+		Dark:    to.Dark,
+		Source:  to.Source,
+	}
 }
 
 func sourceFor(provider model.Provider, roles palette.Roles) Source {

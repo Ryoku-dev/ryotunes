@@ -128,9 +128,19 @@ func equalizerProof(equalizer model.Equalizer) string {
 }
 
 func (p *page) layoutLyrics(gtx layout.Context, e *env.Env, snapshot state.State) layout.Dimensions {
+	preferences := snapshot.Client
 	return p.settingRows(gtx,
-		p.toggleSettingRow(e, &p.lyrics.wordByWord, snapshot.Settings, model.SettingLyricsBoidu, false,
-			"Word-by-word lyrics", "Use word timing when the lyrics service provides it."),
+		p.settingRow(e.Th, "Word by word", "Highlight each word as it's sung, estimated when the lyrics only time each line", func(gtx layout.Context) layout.Dimensions {
+			p.lyrics.wordByWord.Value = preferences.WordByWordOn()
+			dims := p.lyrics.wordByWord.Layout(gtx, e.Th.Theme)
+			if p.lyrics.wordByWord.Changed() {
+				preferences.WordByWord = new(p.lyrics.wordByWord.Value)
+				saveClientPreferences(e, preferences)
+			}
+			return dims
+		}),
+		p.toggleSettingRow(e, &p.lyrics.timedSource, snapshot.Settings, model.SettingLyricsBoidu, true,
+			"Word-timed lyrics", "Ask Boidu first for lyrics timed word by word"),
 		p.toggleSettingRow(e, &p.lyrics.romanize, snapshot.Settings, model.SettingLyricsRomanize, false,
 			"Romanized lyrics", "Show romanized readings when the lyrics service provides them."))
 }

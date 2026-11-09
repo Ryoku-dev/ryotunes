@@ -210,6 +210,25 @@ func (p *page) layoutAppearance(gtx layout.Context, e *env.Env, snapshot state.S
 				return dims
 			})
 		}),
+		p.settingRow(e.Th, "Tint the window", func() string {
+			if accentMode != state.AccentArt {
+				return "Follows the album art accent"
+			}
+			return "Every surface takes a tint of the cover that's playing"
+		}(), func(gtx layout.Context) layout.Dimensions {
+			p.appearance.coverTint.Value = preferences.CoverTintOn()
+			toggleGTX := gtx
+			if accentMode != state.AccentArt {
+				toggleGTX = toggleGTX.Disabled()
+			}
+			dims := p.appearance.coverTint.Layout(toggleGTX, e.Th.Theme)
+			if accentMode == state.AccentArt && p.appearance.coverTint.Changed() {
+				value := p.appearance.coverTint.Value
+				preferences.CoverTint = &value
+				saveClientPreferences(e, preferences)
+			}
+			return dims
+		}),
 		p.settingRowWide(e.Th, "Corners", cornerDetail, func(gtx layout.Context) layout.Dimensions {
 			p.appearance.corners.Labels = cornerLabels
 			p.appearance.corners.Selected = indexOf(cornerValues, cornerPreset, 3)

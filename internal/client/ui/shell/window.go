@@ -275,8 +275,8 @@ func (s *uiShell) frameMini(frame gioapp.FrameEvent, operations *op.Ops) {
 	theme := s.runtime.applyClientTheme(preferences)
 	e := s.environment(gtx.Now, theme)
 	act.PendingClipboard(gtx)
-	paint.Fill(gtx.Ops, theme.R.Ground)
 	s.reconcileProvider(gtx, e)
+	paint.Fill(gtx.Ops, theme.R.Ground)
 	s.mini.Layout(gtx, e)
 	if action, ok := s.mini.WindowAction(); ok {
 		s.performWindowAction(action)

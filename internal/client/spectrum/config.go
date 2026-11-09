@@ -44,7 +44,7 @@ func writeConfig(source string) (string, error) {
 		"channels = mono\n" +
 		"mono_option = average\n\n" +
 		"[smoothing]\n" +
-		"noise_reduction = 50\n")
+		"noise_reduction = 30\n")
 	if err := os.WriteFile(path, data, configFileMode); err != nil {
 		return "", err
 	}

@@ -7,6 +7,7 @@ import (
 	"image/png"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/ryoku-dev/ryotunes/internal/client/state"
@@ -218,13 +219,33 @@ func makeFixtures(directory string, playing bool) (fixtures, error) {
 	}
 
 	lyrics := model.Lyrics{Source: "YouTube Music", Synced: true}
-	lyricText := []string{"Stone in the water", "A line beneath the blue", "Every quiet signal", "Finds another room", "Hold the borrowed light", "Let the night train through", "Nothing has to hurry", "Nothing has to prove", "Turn toward the shoreline", "Hear the copper ring", "Carry what is quiet", "Leave the current singing"}
+	lyricText := []string{
+		"Stone in the water", "A line beneath the blue", "夜汽車 carries the quiet home",
+		"Every quiet signal finds another room", "Hold the borrowed light",
+		"Let the night train through every open window until the shoreline answers in copper",
+		"Nothing has to hurry when the copper sky turns", "Nothing has to prove",
+		"Turn toward the shoreline", "Hear the copper ring", "Carry what is quiet", "Leave the current singing",
+	}
 	for index, line := range lyricText {
-		start := uint64(45_000 + index*10_000)
-		end := start + 9_000
-		romanized := fmt.Sprintf("Reading %02d", index+1)
-		words := []model.LyricsWord{{Text: line, StartMS: start, EndMS: end}}
-		lyrics.Lines = append(lyrics.Lines, model.LyricsLine{TimeMS: &start, EndTimeMS: &end, Text: line, Words: words, Romanized: &romanized})
+		start := uint64(50_000 + index*9_000)
+		end := start + 8_000
+		entry := model.LyricsLine{
+			TimeMS: new(start), EndTimeMS: new(end), Text: line,
+			Romanized: new(fmt.Sprintf("Reading %02d", index+1)),
+		}
+		if index%3 == 0 {
+			fields := strings.Fields(line)
+			span := end - start - 500
+			for wordIndex, word := range fields {
+				wordStart := start + span*uint64(wordIndex)/uint64(len(fields))
+				wordEnd := start + span*uint64(wordIndex+1)/uint64(len(fields))
+				entry.Words = append(entry.Words, model.LyricsWord{Text: word, StartMS: wordStart, EndMS: wordEnd})
+			}
+		}
+		if index == 4 {
+			entry.Translation = new("Keep the light we were lent")
+		}
+		lyrics.Lines = append(lyrics.Lines, entry)
 	}
 
 	radio := make([]model.RadioStation, 12)
@@ -312,21 +333,36 @@ func makeFixtures(directory string, playing bool) (fixtures, error) {
 }
 
 func writeArtwork(directory string) ([]string, error) {
-	colors := []color.NRGBA{{R: 72, G: 92, B: 108, A: 255}, {R: 142, G: 105, B: 72, A: 255}, {R: 79, G: 111, B: 91, A: 255}, {R: 96, G: 83, B: 123, A: 255}, {R: 128, G: 73, B: 82, A: 255}, {R: 61, G: 104, B: 121, A: 255}, {R: 126, G: 116, B: 73, A: 255}, {R: 82, G: 82, B: 86, A: 255}}
-	urls := make([]string, len(colors))
-	for index, fill := range colors {
+	grounds := []color.NRGBA{
+		{R: 90, G: 95, B: 120, A: 255}, {R: 105, G: 120, B: 95, A: 255},
+		{R: 120, G: 120, B: 90, A: 255}, {R: 105, G: 95, B: 120, A: 255},
+		{R: 120, G: 95, B: 115, A: 255}, {R: 75, G: 95, B: 75, A: 255},
+		{R: 105, G: 85, B: 105, A: 255}, {R: 100, G: 80, B: 100, A: 255},
+	}
+	vibrants := []color.NRGBA{
+		{R: 239, G: 93, B: 72, A: 255}, {R: 76, G: 184, B: 218, A: 255},
+		{R: 238, G: 167, B: 58, A: 255}, {R: 93, G: 206, B: 161, A: 255},
+		{R: 92, G: 174, B: 232, A: 255}, {R: 235, G: 104, B: 176, A: 255},
+		{R: 129, G: 91, B: 224, A: 255}, {R: 222, G: 118, B: 62, A: 255},
+	}
+	urls := make([]string, len(grounds))
+	for index, ground := range grounds {
 		path := filepath.Join(directory, fmt.Sprintf("art-%02d.png", index+1))
 		file, err := os.Create(path)
 		if err != nil {
 			return nil, err
 		}
-		image := image.NewNRGBA(image.Rect(0, 0, 192, 192))
-		for offset := range image.Pix {
-			if offset%4 == 0 {
-				image.Pix[offset], image.Pix[offset+1], image.Pix[offset+2], image.Pix[offset+3] = fill.R, fill.G, fill.B, fill.A
+		cover := image.NewNRGBA(image.Rect(0, 0, 192, 192))
+		for y := range 192 {
+			for x := range 192 {
+				fill := ground
+				if x >= 80 && x < 176 && y >= 32 && y < 152 && (x-80)+(y-32) >= 20 {
+					fill = vibrants[index]
+				}
+				cover.SetNRGBA(x, y, fill)
 			}
 		}
-		if err := png.Encode(file, image); err != nil {
+		if err := png.Encode(file, cover); err != nil {
 			_ = file.Close()
 			return nil, err
 		}

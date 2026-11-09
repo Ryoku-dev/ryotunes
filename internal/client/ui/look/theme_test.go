@@ -11,6 +11,7 @@ import (
 
 	"github.com/ryoku-dev/ryoku/docs/lithic/library/go/palette"
 	libtheme "github.com/ryoku-dev/ryoku/docs/lithic/library/go/theme"
+	"github.com/ryoku-dev/ryotunes/internal/client/art"
 	"github.com/ryoku-dev/ryotunes/internal/model"
 )
 
@@ -107,7 +108,7 @@ func TestThemeCornerSnapsThenTweens(t *testing.T) {
 	}
 }
 
-func TestThemeRolesReapplyCurrentAccentAndSnapNextTarget(t *testing.T) {
+func TestThemeRolesSnapAndNextSchemeStartsFresh(t *testing.T) {
 	theme := NewTheme(palette.Signature(true), libtheme.Comfortable)
 	var operations op.Ops
 	gtx := layout.Context{Ops: &operations, Now: time.Unix(3000, 0)}
@@ -116,12 +117,62 @@ func TestThemeRolesReapplyCurrentAccentAndSnapNextTarget(t *testing.T) {
 
 	light := palette.Signature(false)
 	theme.SetRoles(light)
-	if theme.R.Gold != current.Fill {
-		t.Fatalf("SetRoles lost current accent: gold=%#v want %#v", theme.R.Gold, current.Fill)
+	if theme.R != light {
+		t.Fatalf("SetRoles did not snap to the untouched light palette")
 	}
-	target := AccentFromSample(color.NRGBA{R: 20, G: 120, B: 220, A: 0xff}, light)
-	theme.SetAccent(gtx, target)
-	if theme.Accent != target {
-		t.Fatalf("post-palette accent = %#v, want snapped %#v", theme.Accent, target)
+	targetRoles, target := theme.ArtScheme(art.Palette{
+		Vibrant:  color.NRGBA{R: 20, G: 120, B: 220, A: 0xff},
+		Dominant: color.NRGBA{R: 30, G: 80, B: 150, A: 0xff},
+	}, true)
+	theme.SetScheme(gtx, targetRoles, target)
+	if theme.Accent != target || theme.R.Stone2 != targetRoles.Stone2 {
+		t.Fatalf("post-palette scheme did not snap to its first target")
+	}
+	if theme.LoadedRoles() != light {
+		t.Fatal("loaded roles were changed by cover tint")
+	}
+}
+
+func TestThemeTweensTintAccentAndSourceTogether(t *testing.T) {
+	base := palette.Signature(true)
+	theme := NewTheme(base, libtheme.Comfortable, model.ProviderYouTube)
+	var operations op.Ops
+	start := time.Unix(4000, 0)
+	gtx := layout.Context{Ops: &operations, Now: start}
+	theme.SetAccent(gtx, AccentFromDesktop(base))
+
+	targetRoles, targetAccent := theme.ArtScheme(art.Palette{
+		Vibrant:  color.NRGBA{R: 239, G: 93, B: 72, A: 255},
+		Dominant: color.NRGBA{R: 90, G: 95, B: 120, A: 255},
+	}, true)
+	initialSource := sourceFor(model.ProviderYouTube, base)
+	targetSource := sourceFor(model.ProviderYouTube, targetRoles)
+	theme.SetScheme(gtx, targetRoles, targetAccent)
+	if theme.R.Stone2 != base.Stone2 || theme.Accent != AccentFromDesktop(base) || theme.Src != initialSource {
+		t.Fatal("scheme change did not begin at the current roles, accent, and source field")
+	}
+	if theme.srcTo != targetSource {
+		t.Fatalf("source target = %#v, want tinted scheme source %#v", theme.srcTo, targetSource)
+	}
+	gtx.Now = start.Add(theme.Motion.Field / 2)
+	theme.Animate(gtx)
+	if theme.R.Stone2 == base.Stone2 || theme.R.Stone2 == targetRoles.Stone2 {
+		t.Fatalf("halfway stone2 = %#v, want an intermediate tint", theme.R.Stone2)
+	}
+	if theme.Accent == AccentFromDesktop(base) || theme.Accent == targetAccent {
+		t.Fatalf("halfway accent = %#v, want an intermediate accent", theme.Accent)
+	}
+	gtx.Now = start.Add(theme.Motion.Field)
+	theme.Animate(gtx)
+	if theme.R.Stone2 != targetRoles.Stone2 || theme.Accent != targetAccent || theme.Src != targetSource {
+		t.Fatal("tint, accent, and source field did not finish together")
+	}
+	if ratio := palette.ContrastRatio(theme.Src.Ink, theme.R.Stone2); ratio < 4.5 {
+		t.Fatalf("source ink contrast on tinted stone2 = %.3f", ratio)
+	}
+
+	theme.SetProvider(gtx, model.ProviderSpotify)
+	if want := sourceFor(model.ProviderSpotify, targetRoles); theme.srcTo != want {
+		t.Fatalf("provider target = %#v, want source derived from tinted scheme %#v", theme.srcTo, want)
 	}
 }

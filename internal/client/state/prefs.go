@@ -29,6 +29,10 @@ type ClientPreferences struct {
 	VisualizerStyle  string `json:"visualizerStyle,omitempty"`
 	Corners          string `json:"corners,omitempty"`
 	CornerDp         int    `json:"cornerDp,omitempty"`
+	// CoverTint tints every surface with the playing cover; missing means on.
+	CoverTint *bool `json:"coverTint,omitempty"`
+	// WordByWord highlights lyrics word by word as they are sung; missing means on.
+	WordByWord *bool `json:"wordByWord,omitempty"`
 }
 
 // VisualizerOn reports the stored visualizer preference; missing means on.
@@ -39,6 +43,16 @@ func (p ClientPreferences) VisualizerOn() bool {
 // WaveOn reports the stored wave-progress preference; missing means on.
 func (p ClientPreferences) WaveOn() bool {
 	return p.WaveProgress == nil || *p.WaveProgress
+}
+
+// CoverTintOn reports the stored window tint preference; missing means on.
+func (p ClientPreferences) CoverTintOn() bool {
+	return p.CoverTint == nil || *p.CoverTint
+}
+
+// WordByWordOn reports the stored karaoke preference; missing means on.
+func (p ClientPreferences) WordByWordOn() bool {
+	return p.WordByWord == nil || *p.WordByWord
 }
 
 // The accent sources: the playing cover, the provider's brand, or the

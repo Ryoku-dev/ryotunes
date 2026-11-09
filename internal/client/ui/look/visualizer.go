@@ -14,13 +14,16 @@ import (
 	"gioui.org/unit"
 
 	"github.com/ryoku-dev/ryoku/docs/lithic/library/go/anim"
+	"github.com/ryoku-dev/ryoku/docs/lithic/library/go/palette"
 	"github.com/ryoku-dev/ryotunes/internal/client/state"
 )
 
 const (
-	visualizerRiseOmega   = 4 / .070
-	visualizerFallOmega   = 4 / .220
+	visualizerRiseOmega   = 4 / .050
+	visualizerFallOmega   = 4 / .180
 	visualizerScopeFrames = 2048
+	peakCapHold           = 140 * time.Millisecond
+	peakCapFall           = 550 * time.Millisecond
 )
 
 // VisualizerStyle configures the visual rhythm and ink.
@@ -35,6 +38,7 @@ type VisualizerStyle struct {
 type Visualizer struct {
 	springs []anim.Spring
 	values  []float32
+	caps    []peakCap
 	used    int
 
 	curvePoints   []f32.Point
@@ -45,6 +49,8 @@ type Visualizer struct {
 	scopeFade   motionValue
 	osc         oscilloscopeState
 	vector      vectorscopeState
+	pulse       beatDetector
+	kick        float32
 
 	style           state.VisualizerStyle
 	previousStyle   state.VisualizerStyle
@@ -56,6 +62,66 @@ type motionValue struct {
 	value, from, target float32
 	start               time.Time
 	ready               bool
+}
+
+type peakCap struct {
+	height, peak, lastBlade float32
+	holdUntil, fallStart    time.Time
+	ready, resting          bool
+}
+
+func (cap *peakCap) update(now time.Time, blade, lane, gap float32) (bool, time.Time) {
+	blade = min(max(blade, 0), lane)
+	rising := cap.ready && blade > cap.lastBlade+.01
+	cap.lastBlade = blade
+	if !cap.ready {
+		cap.ready = true
+		if blade <= 0 {
+			cap.height, cap.peak, cap.resting = 0, 0, true
+			return false, time.Time{}
+		}
+		cap.height = min(lane, blade+gap)
+		cap.peak = cap.height
+		cap.holdUntil = now.Add(peakCapHold)
+		return false, cap.holdUntil
+	}
+	if rising && blade+gap > cap.height+.01 {
+		cap.height = min(lane, blade+gap)
+		cap.peak = cap.height
+		cap.holdUntil = now.Add(peakCapHold)
+		cap.fallStart = time.Time{}
+		cap.resting = false
+		return false, cap.holdUntil
+	}
+	if !cap.holdUntil.IsZero() && now.Before(cap.holdUntil) {
+		return false, cap.holdUntil
+	}
+	if cap.fallStart.IsZero() {
+		if cap.resting && blade >= cap.height-.01 {
+			cap.height = blade
+			return false, time.Time{}
+		}
+		cap.peak = cap.height
+		if cap.resting || cap.holdUntil.IsZero() {
+			cap.fallStart = now
+		} else {
+			cap.fallStart = cap.holdUntil
+		}
+		cap.holdUntil = time.Time{}
+		cap.resting = false
+	}
+	elapsed := max(0, now.Sub(cap.fallStart).Seconds())
+	fallSeconds := peakCapFall.Seconds()
+	acceleration := 2 * float64(lane) / (fallSeconds * fallSeconds)
+	height := cap.peak - float32(.5*acceleration*elapsed*elapsed)
+	if height <= blade+.01 {
+		cap.height = blade
+		cap.fallStart = time.Time{}
+		cap.resting = true
+		return false, time.Time{}
+	}
+	cap.height = height
+	return true, time.Time{}
 }
 
 func (motion *motionValue) set(now time.Time, target float32, duration time.Duration) (float32, bool) {
@@ -146,11 +212,13 @@ func (visualizer *Visualizer) prepare(count int) {
 		spring.Snap(0)
 		visualizer.springs = append(visualizer.springs, spring)
 		visualizer.values = append(visualizer.values, 0)
+		visualizer.caps = append(visualizer.caps, peakCap{})
 	}
 	if count < visualizer.used {
 		for index := count; index < visualizer.used; index++ {
 			visualizer.springs[index].Snap(0)
 			visualizer.values[index] = 0
+			visualizer.caps[index] = peakCap{}
 		}
 	}
 	visualizer.used = count
@@ -186,19 +254,46 @@ func effectiveVisualizerStyle(kind state.VisualizerStyle, style VisualizerStyle)
 	return kind
 }
 
+func visualizerAlphaBucket(level float32) int {
+	switch {
+	case level < .25:
+		return 0
+	case level < .5:
+		return 1
+	case level < .75:
+		return 2
+	default:
+		return 3
+	}
+}
+
+// visualizerAlphaSteps brightens louder blades; bucket i paints at step i.
+var visualizerAlphaSteps = [...]float32{.55, .7, .85, 1}
+
+func pulsedVisualizerStyle(style VisualizerStyle, kick float32) VisualizerStyle {
+	alpha := min(1, float32(style.Ink.A)/255+.25*min(max(kick, 0), 1))
+	style.Ink.A = uint8(math.Round(float64(alpha * 255)))
+	return style
+}
+
+func visualizerDisplayHeight(value, lane, kick float32) float32 {
+	return min(lane, max(0, value)*(1+.14*min(max(kick, 0), 1)))
+}
+
 func (visualizer *Visualizer) updateBars(gtx layout.Context, levels, samples []float32, live, scopeBars bool, style VisualizerStyle) bool {
 	size := gtx.Constraints.Max
 	bar, gap, floor := visualizerMetrics(gtx, style)
 	count := visualizerBarCount(size.X, bar, gap)
 	visualizer.prepare(count)
 	moving := false
-	for index := 0; index < count; index++ {
+	for index := range count {
 		target := float32(0)
 		if live {
 			level := resampleLevel(levels, index, count)
 			if scopeBars {
 				level = scopeBarLevel(samples, index, count)
 			}
+			level = shapeVisualizerLevel(level)
 			target = float32(floor) + level*float32(max(size.Y-floor, 0))
 		}
 		spring := &visualizer.springs[index]
@@ -218,25 +313,73 @@ func (visualizer *Visualizer) updateBars(gtx layout.Context, levels, samples []f
 	return moving
 }
 
+func (visualizer *Visualizer) updatePeakCaps(gtx layout.Context) (bool, time.Time) {
+	lane := float32(gtx.Constraints.Max.Y)
+	gap := float32(max(1, gtx.Dp(2)))
+	moving := false
+	var wake time.Time
+	for index := range visualizer.used {
+		blade := visualizerDisplayHeight(visualizer.values[index], lane, visualizer.kick)
+		capMoving, capWake := visualizer.caps[index].update(gtx.Now, blade, lane, gap)
+		moving = moving || capMoving
+		if !capWake.IsZero() && (wake.IsZero() || capWake.Before(wake)) {
+			wake = capWake
+		}
+	}
+	return moving, wake
+}
+
+func (visualizer *Visualizer) clearPeakCaps() {
+	for index := range visualizer.used {
+		visualizer.caps[index] = peakCap{}
+	}
+}
+
 func (visualizer *Visualizer) drawBars(gtx layout.Context, style VisualizerStyle) {
 	size := gtx.Constraints.Max
 	bar, gap, _ := visualizerMetrics(gtx, style)
-	var path clip.Path
-	path.Begin(gtx.Ops)
-	visible := false
-	for index := 0; index < visualizer.used; index++ {
-		value := visualizer.values[index]
-		if value <= .01 {
+	for bucket, step := range visualizerAlphaSteps {
+		var path clip.Path
+		path.Begin(gtx.Ops)
+		visible := false
+		for index := range visualizer.used {
+			value := visualizerDisplayHeight(visualizer.values[index], float32(size.Y), visualizer.kick)
+			if value <= .01 || visualizerAlphaBucket(value/float32(size.Y)) != bucket {
+				continue
+			}
+			left := float32(index * (bar + gap))
+			right := float32(min(index*(bar+gap)+bar, size.X))
+			appendVisualizerBlade(&path, left, right, float32(size.Y), value)
+			visible = true
+		}
+		outline := path.End()
+		if visible && style.Ink.A > 0 {
+			paint.FillShape(gtx.Ops, palette.WithAlpha(style.Ink, step), clip.Outline{Path: outline}.Op())
+		}
+	}
+
+	var caps clip.Path
+	caps.Begin(gtx.Ops)
+	capsVisible := false
+	capThickness := float32(max(1, gtx.Dp(2)))
+	for index := range visualizer.used {
+		capHeight := visualizer.caps[index].height
+		if capHeight <= .01 {
 			continue
 		}
-		visible = true
 		left := float32(index * (bar + gap))
 		right := float32(min(index*(bar+gap)+bar, size.X))
-		appendVisualizerBlade(&path, left, right, float32(size.Y), min(value, float32(size.Y)))
+		capTop := max(0, float32(size.Y)-capHeight-capThickness)
+		caps.MoveTo(f32.Pt(left, capTop))
+		caps.LineTo(f32.Pt(right, capTop))
+		caps.LineTo(f32.Pt(right, min(float32(size.Y), capTop+capThickness)))
+		caps.LineTo(f32.Pt(left, min(float32(size.Y), capTop+capThickness)))
+		caps.Close()
+		capsVisible = true
 	}
-	outline := path.End()
-	if visible && style.Ink.A > 0 {
-		paint.FillShape(gtx.Ops, style.Ink, clip.Outline{Path: outline}.Op())
+	capOutline := caps.End()
+	if capsVisible && style.Ink.A > 0 {
+		paint.FillShape(gtx.Ops, style.Ink, clip.Outline{Path: capOutline}.Op())
 	}
 }
 
@@ -244,6 +387,7 @@ func (visualizer *Visualizer) drawStyle(gtx layout.Context, th *Theme, kind stat
 	if alpha <= 0 {
 		return
 	}
+	style = pulsedVisualizerStyle(style, visualizer.kick)
 	opacity := paint.PushOpacity(gtx.Ops, min(alpha, 1))
 	switch effectiveVisualizerStyle(kind, style) {
 	case state.VisualizerCurve:
@@ -288,6 +432,17 @@ func (visualizer *Visualizer) Layout(gtx layout.Context, th *Theme, levels, samp
 	}
 
 	current := effectiveVisualizerStyle(kind, style)
+	if anim.Reduced() {
+		visualizer.pulse = beatDetector{}
+		visualizer.kick = 0
+	} else {
+		energy := spectrumBassEnergy(levels)
+		if kind == state.VisualizerOscilloscope || kind == state.VisualizerVectorscope {
+			energy = scopeRMSEnergy(samples)
+		}
+		visualizer.kick = visualizer.pulse.update(gtx.Now, energy, live)
+	}
+	pulseMoving := visualizer.kick > 0
 	spectrumLive := live && (kind == state.VisualizerBars || kind == state.VisualizerCurve)
 	scopeBars := style.HeaderLane && kind == state.VisualizerVectorscope
 	barsMoving := visualizer.updateBars(gtx, levels, samples, spectrumLive || (live && scopeBars), scopeBars, style)
@@ -300,6 +455,15 @@ func (visualizer *Visualizer) Layout(gtx layout.Context, th *Theme, levels, samp
 		visualizer.vector.update(samples)
 	}
 
+	barsVisible := current == state.VisualizerBars || effectiveVisualizerStyle(visualizer.previousStyle, style) == state.VisualizerBars
+	capsMoving := false
+	var capWake time.Time
+	if barsVisible {
+		capsMoving, capWake = visualizer.updatePeakCaps(gtx)
+	} else {
+		visualizer.clearPeakCaps()
+	}
+
 	progress, transitioning := visualizer.styleProgress(gtx.Now, th.Motion.Field)
 	if transitioning {
 		visualizer.drawStyle(gtx, th, visualizer.previousStyle, style, 1-progress, scopeLevel)
@@ -307,8 +471,10 @@ func (visualizer *Visualizer) Layout(gtx layout.Context, th *Theme, levels, samp
 	} else {
 		visualizer.drawStyle(gtx, th, visualizer.style, style, 1, scopeLevel)
 	}
-	if live || barsMoving || scopeMoving || transitioning {
+	if barsMoving || capsMoving || pulseMoving || scopeLive || scopeMoving || transitioning {
 		gtx.Execute(op.InvalidateCmd{At: gtx.Now.Add(playbackMotionFrameInterval)})
+	} else if !capWake.IsZero() && capWake.After(gtx.Now) {
+		gtx.Execute(op.InvalidateCmd{At: capWake})
 	}
 	return layout.Dimensions{Size: size}
 }

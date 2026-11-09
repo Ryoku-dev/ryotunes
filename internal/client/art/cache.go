@@ -153,24 +153,34 @@ func (c *Cache) Get(rawURL string, size int) (paint.ImageOp, bool) {
 	return c.placeholder, false
 }
 
-// Sample returns the cached cover sample and whether sampling has completed.
+// Palette returns the cached cover palette and whether sampling has completed.
 // On a miss it queues one small load, independent of whether any surface draws the cover.
-func (c *Cache) Sample(rawURL string) (sample color.NRGBA, ready bool) {
+func (c *Cache) Palette(rawURL string) (palette Palette, ready bool) {
 	if rawURL == "" {
-		return color.NRGBA{}, true
+		return Palette{}, true
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if entry := c.samples[rawURL]; entry != nil {
 		c.sampleLRU.MoveToFront(entry.lru)
-		return entry.sample.color, true
+		return entry.sample.palette, true
 	}
 	key := cacheKey{url: rawURL, size: sampleLoadSize}
 	if c.ctx.Err() != nil || c.failureActiveLocked(key) {
-		return color.NRGBA{}, true
+		return Palette{}, true
 	}
 	c.enqueueLocked(key)
-	return color.NRGBA{}, false
+	return Palette{}, false
+}
+
+// Failed reports whether rawURL at size cannot load now.
+func (c *Cache) Failed(rawURL string, size int) bool {
+	if size <= 0 {
+		size = 1
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return rawURL == "" || c.ctx.Err() != nil || c.failureActiveLocked(cacheKey{url: rawURL, size: size})
 }
 
 // Forget removes every cached, failed, and in-flight size and sample for one URL.

@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Lyrics are sung word by word now: each word fills with the cover's colour as it's sung and lifts a little, and the line being sung grows into place while the last one settles back. Lyrics that only time each line get their word timing estimated, and it can be turned off in Settings, Lyrics.
+- The whole window takes on the colour of the cover that's playing, the sidebar, panels and player bar included, and retints when the track changes. Turn it off with Tint the window in Settings, Appearance.
+- A new cover slides in behind a sharp diagonal cut when the track changes.
+- Visualizers are bolder and react much more to the music: loud bands are brighter, bars have peak caps that hold and fall, every style kicks on the beat, and the now playing visualizer is taller.
+- Fixed the Word-timed lyrics setting showing off while it was actually on.
 - Ryotunes takes its colour from the album art now: the play buttons, the seek wave, the visualizer, hearts, the playing track and the lyrics all match the cover that's playing. Settings, Appearance can switch it to the provider's colour or your Ryoku palette instead.
 - Home has a now playing card with the cover, the seek bar, the controls and a visualizer, and clicking the cover there or in now playing plays and pauses.
 - The visualizer has four styles in Settings, Appearance, or by clicking it on Home: bars, curve, oscilloscope and vectorscope. The scopes read the real stereo signal through pw-record, only while they're on screen.
