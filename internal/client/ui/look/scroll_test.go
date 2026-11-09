@@ -80,13 +80,29 @@ func TestScrollFractionalAccumulation(t *testing.T) {
 }
 
 func TestScrollerUserScrolledOnlyForRealInput(t *testing.T) {
+	for _, x11 := range []bool{false, true} {
+		name := "wayland"
+		if x11 {
+			name = "x11"
+		}
+		t.Run(name, func(t *testing.T) {
+			saved := scrollOnX11
+			scrollOnX11 = x11
+			t.Cleanup(func() { scrollOnX11 = saved })
+			testScrollerUserScrolledOnlyForRealInput(t)
+		})
+	}
+}
+
+func testScrollerUserScrolledOnlyForRealInput(t *testing.T) {
+	const row = 24
 	theme := NewTheme(palette.Signature(true), libtheme.Comfortable)
 	var scroller Scroller
 	var operations op.Ops
 	var router input.Router
 	now := time.Unix(200, 0)
 	element := func(gtx layout.Context, _ int) layout.Dimensions {
-		return layout.Dimensions{Size: gtx.Constraints.Constrain(image.Pt(120, 24))}
+		return layout.Dimensions{Size: gtx.Constraints.Constrain(image.Pt(120, row))}
 	}
 	context := func() layout.Context {
 		return layout.Context{
@@ -95,6 +111,8 @@ func TestScrollerUserScrolledOnlyForRealInput(t *testing.T) {
 			Constraints: layout.Exact(image.Pt(120, 96)),
 		}
 	}
+	// the list moves whole rows into First, so compare the distance scrolled
+	scrolled := func() int { return scroller.Position.First*row + scroller.Position.Offset }
 	frame := func() {
 		operations.Reset()
 		scroller.Layout(context(), theme, 20, element)
@@ -117,7 +135,10 @@ func TestScrollerUserScrolledOnlyForRealInput(t *testing.T) {
 	outerGTX := context()
 	outerGTX.Constraints = layout.Exact(image.Pt(120, 500))
 	scroller.UpdateInput(outerGTX)
-	offsetAfterInput := scroller.Position.Offset
+	afterInput := scrolled()
+	if afterInput <= 0 {
+		t.Fatalf("real pointer scroll did not move the list: %+v", scroller.Position)
+	}
 	if !scroller.UserScrolled() {
 		t.Fatal("real pointer scroll did not set UserScrolled")
 	}
@@ -125,8 +146,8 @@ func TestScrollerUserScrolledOnlyForRealInput(t *testing.T) {
 		t.Fatal("UserScrolled did not clear on read")
 	}
 	scroller.Layout(context(), theme, 20, element)
-	if scroller.Position.Offset != offsetAfterInput {
-		t.Fatalf("Layout consumed input twice: offset %d became %d", offsetAfterInput, scroller.Position.Offset)
+	if got := scrolled(); got != afterInput {
+		t.Fatalf("Layout consumed input twice: scrolled %d px became %d", afterInput, got)
 	}
 	router.Frame(&operations)
 

@@ -23,7 +23,8 @@ jobs:
             build-essential desktop-file-utils pkg-config \
             libwayland-dev libx11-dev libx11-xcb-dev \
             libxkbcommon-x11-dev libgles2-mesa-dev libegl1-mesa-dev \
-            libffi-dev libxcursor-dev libvulkan-dev libmpv2 libvorbis-dev libogg-dev
+            libffi-dev libxcursor-dev libvulkan-dev \
+            libasound2-dev libflac-dev libmpg123-dev libmpv-dev libvorbis-dev libogg-dev
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
