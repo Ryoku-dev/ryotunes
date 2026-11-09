@@ -1,67 +1,73 @@
 # Ryotunes release checklist
 
-## Release pipeline
-1. Releases are automatic: each default-branch push checks out its exact event SHA, stamps the next `v1.x.x` version, verifies, tags and publishes it. GitHub's `queue: max` retains pending runs (up to its 100-run platform limit); plain `cancel-in-progress: false` alone would still discard pending pushes. Do not remove `queue` merely because actionlint 1.7.12 predates that documented option.
-2. Confirm the published assets are `ryotunes-<version>-1-x86_64.pkg.tar.zst`, its `.sha256`, `ryotunes-<version>.tar.gz` and its `.sha256`. New releases become latest; repairing an older release must not demote a newer v1 release. Notes combine authored changelog content, GitHub-generated notes and the actual commit range.
-3. `scripts/build-arch-package.sh` reproduces the package locally (`docker run --rm -v "$PWD:/src" -w /src archlinux:latest scripts/build-arch-package.sh`); the file name is epochless, but `pacman -Qp` on it reports `ryotunes 1:<version>-1`.
-4. The package upgrades cleanly over a machine still on the legacy 2.x line (`sudo pacman -U ./ryotunes-<version>-1-x86_64.pkg.tar.zst`); `pacman -Q ryotunes` then reports `1:<version>-1`.
-5. `/usr/bin/ryotunes`, `ryotunesd`, `ryotunes-cli` and the native client at `/usr/share/ryotunes/client` (including its `version` file) are installed; exactly one normal Ryotunes desktop launcher is visible.
-6. A package upgrade never restarts the app or daemon inside the pacman transaction; after updating, quitting and reopening Ryotunes loads the new build.
-7. Re-run a failed workflow (or Actions → Release → Run workflow with its existing tag) to repair publication without allocating a second version. Version commits are fast-forwarded to the default branch only if it still points to that run's source SHA; protected or newer branch history is never overwritten. About must handle an unpublished release, a failed check, a newer release, checksum/authentication failure and the final Quit-and-reopen state.
+Use this checklist for a numbered release from the default branch.
 
-## Window/startup
-8. A genuine cold start shows the main UI on the **first invocation** (never tray-only until a second launch) and maps directly as a centered floating Ryotunes window at about 89% × 84% of usable work area, without a tiled/fullscreen flash.
-9. Desktop launcher, terminal, autostart and tray reconstruction produce the same floating default; manual maximize is not persisted as the next cold-start default.
-10. Cold start and tray reconstruction reveal only after the frontend is mounted; no black/blank startup frame.
-11. Mini-player renders polished Playing/Lyrics/Queue views; its WM close does not reopen full Ryotunes, its action menus are absent only inside mini, and Open Full Ryotunes keeps mini visible until the main UI is actually shown.
+## Prepare the version
 
-## Home/Edit Home
-12. Above-fold Home becomes usable before optional lower enrichment; revisit from another page is near-instant from session cache.
-13. Scroll Home continuously: visible loaded shelves never refetch/reorder/remount due to viewport movement; lower sections append quietly with stable dimensions.
-14. No Music Videos/video-only Home entry appears.
-15. Mixed artist-seeded recommendation shelves never render `// <artist>`; display heading is `// You might also like`.
-16. Edit Home lists the same supported registry as Home, identifies unavailable/hidden state, shows drag insertion position, Save applies, Cancel reverts and Reset returns to canonical order.
+1. Choose a semantic version `X.Y.Z`.
+2. Synchronize the version files and create the release heading:
 
-## Search/actions
-17. Full Search is vertically scrollable beyond the first batch, owns nested touchpad/wheel scrolling without moving the page behind it, and loads bounded continuation pages near the bottom without duplicates or scroll jumps.
-18. Search query, selection and list scroll survive page navigation/back; Up/Down continues through loaded batches; the Home/global dropdown and category result pages also continue past their first bounded responses.
-19. Selected-result inspector is populated appropriately for song/artist/album/playlist.
-20. `⋯` is visible at idle everywhere track/item actions are offered, in Dark and Light.
-21. Right-click/two-finger context click and Shift+F10/Menu open the same track menu at a fitted location and never play the track.
-22. Verify Play next, Add to queue, Start radio, Like/Save, Dislike, Go to artist, Shortcuts, Share and Add to playlist where applicable.
+   ```sh
+   ./release/sync-version.sh X.Y.Z --release
+   ```
 
-## Player/queue/lyrics/UI
-23. Queue reorder is smooth, vertically constrained, has a visible insertion rule, edge auto-scroll and no accidental playback/text selection.
-24. Queue search/scroll state survives Queue ↔ Lyrics switches; lyrics scroll and per-track timing offset persist.
-25. Mini Lyrics auto-follows the active line without opening the full app and remains lightweight during playback.
-26. Large Queue/Now Playing/mini artwork shows an immediate cached/thumbnail placeholder and swaps decoded final artwork without black boxes or layout shift; rapid track changes do not show stale art.
-27. Settings/Open Music Link/Listen Together and other standard dialogs share the outer-edge close control and consistent Escape/focus behavior.
-28. Dark, professional Light and Follow System switch without resetting playback/navigation; Reduced Motion and Low Resource Mode reduce decorative work.
+3. Confirm `VERSION`, `release/arch/PKGBUILD`, `release/aur/PKGBUILD` and the metainfo release entry all use `X.Y.Z`.
+4. Move the user-visible changes into `## vX.Y.Z - YYYY-MM-DD` in `CHANGELOG.md`. Leave `## Unreleased` present and empty when there are no pending changes.
+5. Confirm the first numbered changelog heading matches `VERSION`.
 
-## v2.4 feature gates
-- **Internet Radio:** open Radio from Discover and verify popular stations load only after the page is opened. Search, Load more and station Play must work without a frontend polling loop.
-- Play at least one HTTP(S) station through native libmpv, close/hibernate the main window during playback, reopen, and confirm native playback/MPRIS continuity.
-- Verify Radio exposes no YouTube-only Like/Dislike, Add to playlist, Share, Start radio or lyrics actions; it must not enter On Repeat, Last.fm scrobbles or Home artist personalization.
-- With Listen Together active as host and as guest, starting Internet Radio must be rejected with a clear notice rather than desynchronizing peers.
-- **Device playlists signed out:** create from Library, sidebar and Add to playlist → **Create + add**. Restart Ryotunes and verify the playlist and tracks persist.
-- Sign in, verify device playlists remain present and editable, then sign out and verify they remain. No device playlist may be cleared by the account playlist-index reset.
-- Add/remove tracks, rename, set/remove local artwork and delete a device playlist. Confirm no operation sends a device playlist id as a YouTube radio/autoplay seed.
-- **Discord presence title:** save a custom 2–128 character title, verify the active card updates without restarting playback, restart Ryotunes and verify persistence, then Reset to **Ryotunes**.
-- Verify album artwork carries the Ryotunes badge, missing/invalid artwork uses the Ryotunes mark, and local filesystem paths never reach Discord. YouTube and Spotify buttons must open the correct service; SoundCloud numeric IDs and local/radio tracks must not produce fabricated YouTube links.
-- Discord disabled/unavailable behaviour must remain parked/backed-off. The inherited application ID `1525891596804161727` is registered as **Limusic**; changing the activity artwork/name does not change its portal-owned lemon icon. A Ryotunes-owned Discord application ID is required before claiming the registered identity has been replaced.
+## Check the tree
 
-## Integrations/lifecycle
-29. MPRIS and Ryoku QS controls play/pause/seek/next correctly before and after main-WebKit hibernation/reopen.
-30. Discord disabled mode performs no repeated IPC work; unavailable Discord backs off; enabled activity updates and shuts down on Quit.
-31. Start on login matches actual OS registration and launches the current normal `/usr/bin/ryotunes` route.
-32. Close-to-tray + active playback keeps native playback/MPRIS alive with no user-facing main WebKit renderer.
-33. Tray only + no active playback starts the five-minute exit deadline; playback or UI restore cancels/resets it.
-34. Five full minutes without playback/UI fully exits and removes MPRIS/Music Island state.
-35. Explicit Quit tears down playback, media state/MPRIS and integrations immediately; it never waits for the five-minute timer.
+Run the release gate from the repository root:
 
-## Resource/stability acceptance
-36. `resource-check.sh` discovers Ryotunes through `/proc/<pid>/exe`, not argv matching, and captures cold/visible-idle/active-scroll samples.
-37. Run visible idle with and without playback, Home active touchpad scrolling, Low Resource OFF vs ON and background playback. Background should contain no main user-facing WebKit process.
-38. `background-check.sh`, `pause-resume-check.sh`, `quit-check.sh` and `tray-idle-exit-check.sh` pass.
-39. Run `long-session-check.sh` for 30–60 minutes while exercising Home/Search/Artist/Album/Playlist/Library/Queue/Lyrics/Settings/mini-player. After settling, CPU and PSS should stop climbing and return near the established idle band.
-40. Record actual v2.4 field numbers; do not infer them from static/source validation.
+```sh
+./release/check.sh
+```
+
+The gate covers formatting, vet, tests, pure Go binary builds, version alignment, the no-em-dash rule, client role literals and desktop file validation when available.
+
+## Build the package
+
+Build the exact checkout with the release package script:
+
+```sh
+rm -rf dist
+./release/build-arch-package.sh dist
+```
+
+The output must include:
+
+```text
+dist/ryotunes-X.Y.Z-1-x86_64.pkg.tar.zst
+dist/ryotunes-X.Y.Z-1-x86_64.pkg.tar.zst.sha256
+```
+
+The package filename is epochless. Its metadata must report `ryotunes 1:X.Y.Z-1`.
+
+The package builder runs the glibc ceiling check. Run it explicitly against the final package when reviewing a copied or rebuilt artifact:
+
+```sh
+./release/check-glibc.sh dist/ryotunes-X.Y.Z-1-x86_64.pkg.tar.zst 2.41
+```
+
+Verify the sidecar and inspect the package contents:
+
+```sh
+(
+  cd dist
+  sha256sum -c ryotunes-X.Y.Z-1-x86_64.pkg.tar.zst.sha256
+)
+bsdtar -tf dist/ryotunes-X.Y.Z-1-x86_64.pkg.tar.zst
+```
+
+The package must contain `ryotunes`, `ryotunesd`, `ryotunes-cli`, `ryotunes-sync`, `ryotunes-diagnostics`, the systemd user units, desktop entry, metainfo, icons, Matugen template, license, README and upstream notice. Its install hooks must not restart the daemon during an update and must never remove `ryoku-desktop`.
+
+## Publish and tag
+
+1. Commit the version, changelog and package metadata together.
+2. Push the commit containing the `VERSION` change to `main`.
+3. The Release workflow builds the source archive and package, then creates or updates GitHub release tag `vX.Y.Z` at that commit.
+4. Confirm tag `vX.Y.Z` points to the intended commit.
+5. Confirm the release has the package, package checksum, source archive and source checksum.
+6. Confirm the release notes come from the matching changelog section.
+7. Install the published package on an Arch or Ryoku system, Quit Ryotunes, reopen it and confirm the client and daemon report the new version.
+8. Run `./release/void/install.sh` on Void and confirm the glibc check and xbps upgrade complete.

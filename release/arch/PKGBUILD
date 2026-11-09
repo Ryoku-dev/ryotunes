@@ -1,0 +1,89 @@
+# Local-source PKGBUILD for the Ryotunes release archive.
+pkgname=ryotunes
+pkgver=2.0.0
+pkgrel=1
+# This epoch is permanent so the rebuilt line upgrades every legacy package.
+epoch=1
+pkgdesc="Ryoku's native Lithic music player"
+url='https://github.com/ryoku-dev/ryotunes'
+arch=('x86_64')
+license=('GPL-3.0-or-later')
+depends=(
+  'mpv'
+  'libvorbis'
+  'libogg'
+  'yt-dlp'
+  'ffmpeg'
+  'hicolor-icon-theme'
+  'xdg-utils'
+  'polkit'
+  'desktop-file-utils'
+  'wayland'
+  'libxkbcommon'
+  'libx11'
+  'libxcursor'
+  'libxfixes'
+  'vulkan-icd-loader'
+  'mesa'
+)
+makedepends=('go')
+install=ryotunes.install
+options=(!debug)
+source=()
+sha256sums=()
+
+prepare() {
+  local root
+  root="$(cd "$startdir/../.." && pwd)"
+  rm -rf "$srcdir/ryotunes"
+  mkdir -p "$srcdir/ryotunes"
+  tar \
+    --exclude='.git' \
+    --exclude='./dist' \
+    --exclude='./release/arch/pkg' \
+    --exclude='./release/arch/src' \
+    --exclude='./release/arch/*.pkg.tar.*' \
+    -C "$root" -cf - . | tar -C "$srcdir/ryotunes" -xf -
+}
+
+build() {
+  cd "$srcdir/ryotunes"
+  local ldflags="-s -w -X github.com/ryoku-dev/ryotunes/internal/version.Version=$pkgver"
+  mkdir -p build
+  CGO_ENABLED=1 go build -trimpath -buildmode=pie -ldflags "$ldflags" -o build/ryotunes ./cmd/ryotunes
+  CGO_ENABLED=1 go build -trimpath -buildmode=pie -ldflags "$ldflags" -o build/ryotunesd ./cmd/ryotunesd
+  CGO_ENABLED=0 go build -trimpath -buildmode=pie -ldflags "$ldflags" -o build/ryotunes-cli ./cmd/ryotunes-cli
+  CGO_ENABLED=0 go build -trimpath -buildmode=pie -ldflags "$ldflags" -o build/ryotunes-sync ./cmd/ryotunes-sync
+}
+
+check() {
+  cd "$srcdir/ryotunes"
+  go test ./...
+}
+
+package() {
+  cd "$srcdir/ryotunes"
+  install -Dm755 build/ryotunes "$pkgdir/usr/bin/ryotunes"
+  install -Dm755 build/ryotunesd "$pkgdir/usr/bin/ryotunesd"
+  install -Dm755 build/ryotunes-cli "$pkgdir/usr/bin/ryotunes-cli"
+  install -Dm755 build/ryotunes-sync "$pkgdir/usr/bin/ryotunes-sync"
+  install -Dm755 release/diagnostics.sh "$pkgdir/usr/bin/ryotunes-diagnostics"
+
+  install -Dm644 release/linux/ryotunesd.socket "$pkgdir/usr/lib/systemd/user/ryotunesd.socket"
+  install -Dm644 release/linux/ryotunesd.service "$pkgdir/usr/lib/systemd/user/ryotunesd.service"
+  install -Dm644 release/linux/90-ryotunes.preset "$pkgdir/usr/lib/systemd/user-preset/90-ryotunes.preset"
+  install -Dm644 release/linux/ryotunes.desktop "$pkgdir/usr/share/applications/ryotunes.desktop"
+  install -Dm644 release/linux/dev.ryoku.ryotunes.metainfo.xml "$pkgdir/usr/share/metainfo/dev.ryoku.ryotunes.metainfo.xml"
+  install -Dm644 release/matugen/ryotunes.json "$pkgdir/usr/share/ryotunes/matugen/ryotunes.json"
+
+  install -Dm644 assets/icons/32x32.png "$pkgdir/usr/share/icons/hicolor/32x32/apps/ryotunes.png"
+  install -Dm644 assets/icons/64x64.png "$pkgdir/usr/share/icons/hicolor/64x64/apps/ryotunes.png"
+  install -Dm644 assets/icons/128x128.png "$pkgdir/usr/share/icons/hicolor/128x128/apps/ryotunes.png"
+  install -Dm644 assets/icons/256x256.png "$pkgdir/usr/share/icons/hicolor/256x256/apps/ryotunes.png"
+  install -Dm644 assets/icons/512x512.png "$pkgdir/usr/share/icons/hicolor/512x512/apps/ryotunes.png"
+  install -Dm644 assets/icons/ryotunes.svg "$pkgdir/usr/share/icons/hicolor/scalable/apps/ryotunes.svg"
+
+  install -Dm644 LICENSE "$pkgdir/usr/share/licenses/ryotunes/LICENSE"
+  install -Dm644 README.md "$pkgdir/usr/share/doc/ryotunes/README.md"
+  install -Dm644 UPSTREAM.md "$pkgdir/usr/share/doc/ryotunes/UPSTREAM.md"
+}

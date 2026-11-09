@@ -1,85 +1,68 @@
 # Contributing to Ryotunes
 
-Ryotunes is a Ryoku-first desktop application, so changes are reviewed for behaviour, integration and steady-state cost — not only whether they compile.
+Ryotunes is a Go application with a Gio client and a separate playback daemon. Keep changes within the existing package boundaries described in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
-## Start here
+## Go conventions
 
-For development setup, use [docs/INSTALL-ARCH.md](docs/INSTALL-ARCH.md).
+- Run `gofmt` on changed Go files.
+- Keep package APIs small and use the standard library where it is enough.
+- Return typed provider errors when the daemon or queue must choose a user-visible outcome.
+- Keep provider calls outside the daemon state lock.
+- Add tests beside the package whose behaviour changes.
+- Do not duplicate protocol method names or payload shapes outside `internal/protocol`.
+- Do not add a second store, palette resolver or playback owner.
 
-Frontend:
+## Product contracts
 
-```bash
-cd ui
-pnpm install --frozen-lockfile
-pnpm check
-pnpm build
+Every change must preserve these rules:
+
+- Ryotunes is audio only.
+- `ryotunesd` owns playback, the queue, providers and integrations.
+- Closing a window does not stop playback or active downloads.
+- Nothing polls, animates or redraws when its surface is hidden and no live work needs it.
+- Quit stops playback, unregisters MPRIS, closes integrations and exits the daemon.
+- Package install, update and removal never remove `ryoku-desktop`.
+
+## Lithic UI
+
+Use the [Ryoku Lithic specification](https://github.com/ryoku-dev/ryoku/tree/main/docs/lithic) and the components in `internal/client/lithic`.
+
+- Use semantic roles, not colour values.
+- Use 45 degree cuts or square corners, not radii.
+- Use bone for selection, gold for the task's consequential action and mineral plus text for state.
+- Take type, spacing and motion from the shared Lithic theme.
+- Motion must answer an action or state change and then stop.
+- Reduced motion makes the same state change immediate.
+- Pages do not create their own visual primitives when the kit already provides one.
+
+## Development
+
+```sh
+go build ./...
+go test ./...
 ```
 
-Native:
+For an isolated daemon:
 
-```bash
-cargo fmt --all -- --check
-cargo test --workspace --locked
-cargo check --workspace --locked
+```sh
+root=$(mktemp -d)
+mkdir -p "$root/run" "$root/data" "$root/cache" "$root/config" "$root/state"
+XDG_RUNTIME_DIR="$root/run" \
+XDG_DATA_HOME="$root/data" \
+XDG_CACHE_HOME="$root/cache" \
+XDG_CONFIG_HOME="$root/config" \
+XDG_STATE_HOME="$root/state" \
+go run ./cmd/ryotunesd
 ```
 
-For local development with the desktop host:
+## Gate
 
-```bash
-cargo tauri dev
+Before sending a change, run the release gate from the repository root:
+
+```sh
+./release/check.sh
 ```
 
-## Preserve the product contracts
+It checks formatting, vet, tests, the pure Go binaries, version alignment, tracked text, client role usage and the desktop file when its validator is installed.
 
-Changes must not regress these release-critical behaviours:
-
-- audio-only native playback through the backend/libmpv;
-- background WebKit hibernation while native playback and MPRIS continue;
-- tray-only playback staying alive;
-- tray-only idle exit when nothing is playing;
-- explicit Quit fully stopping playback and unregistering media state;
-- event-driven playback without a permanent high-frequency frontend transport timer;
-- stable Home DOM without physical section virtualization;
-- independent `Ryotunes Mini` geometry;
-- replacement packaging that never removes `ryoku-desktop`.
-
-## UI conventions
-
-- Treat Ryoku live semantic tokens as the Follow System source of truth.
-- Do not create an independent palette layer that only partly follows Ryoku.
-- Artwork may be colourful; functional chrome stays restrained.
-- Prefer one-pixel structure, compact geometry and existing UI primitives.
-- Use existing iconography before introducing another library.
-- Motion should communicate state, not run as ambient decoration.
-- Honour reduced-motion and Ryoku motion settings.
-- Do not add custom wheel physics.
-- Keep network/provider logic behind the Rust command boundary.
-
-See [docs/DESIGN.md](docs/DESIGN.md) for the visual language.
-
-## Performance review
-
-If a change touches playback UI, lyrics, artwork, Home, visualizers, WebViews or timers, include a quick steady-state check.
-
-Look for:
-
-- new intervals/timeouts that repeat forever;
-- requestAnimationFrame loops;
-- hidden WebKit work;
-- repeated image decoding;
-- unnecessary compositor animation;
-- work that continues after the main WebView is hibernated.
-
-## Pull requests
-
-Keep PRs concrete:
-
-1. what changed;
-2. why it changed;
-3. what lifecycle or UI surface is affected;
-4. how it was validated;
-5. screenshots or measurements when they improve review quality.
-
-For large architectural changes, open an issue first so the constraints can be agreed before implementation.
-
-Provider/network features should fail softly. An external service going down must not make local playback or the desktop shell unusable.
+A pull request should say what changed, which product contract it touches and how it was checked. Include a screenshot for a visible client change.

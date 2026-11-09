@@ -1,142 +1,75 @@
-# Ryotunes design language
+# Ryotunes design
 
-Ryotunes should look like it belongs to Ryoku before a user reads the title.
+Ryotunes applies the [Ryoku Lithic specification](https://github.com/ryoku-dev/ryoku/tree/main/docs/lithic) through `internal/client/lithic`. The specification defines the roles, cuts, type, components and motion. This document describes how those rules map to the music player.
 
-This document exists to keep visual polish, shell integration and performance moving in the same direction.
+## Window layout
 
-## Product character
+The main window has four persistent regions:
 
-Ryotunes is:
+1. The rail holds Home, Search, Library, Radio, Downloads and Settings.
+2. The work pane holds the current route and its list or detail content.
+3. The right panel holds Queue or Lyrics and may be closed when more work-pane space is needed.
+4. The player bar spans the bottom and keeps transport, progress, volume and the current track available across routes.
 
-- architectural rather than decorative;
-- warm rather than sterile;
-- dense enough to feel like a desktop tool, never cramped;
-- expressive through artwork and Ryoku colour, not through permanent animation;
-- precise about spacing, alignment and one-pixel structure.
+The mini player is a second window in the same process. It reads the same client store and does not create a second playback state.
 
-It is not a generic streaming-service clone and it should not become a rainbow dashboard.
+At narrow widths, regions change structure rather than shrinking the wide layout until it clips. Window and pane corners use the shared cut primitives. Content such as album art may remain square.
 
-## Colour
+## Selection and action
 
-### Follow System
+Bone means the current place. Use the selection role for:
 
-Follow System is the primary Ryoku-native mode.
+- the current route in the rail;
+- the playing row in a track list;
+- the current Queue or Lyrics panel choice;
+- the selected filter, tab or picker value.
 
-Rust resolves Ryoku Material roles and exposes semantic tokens to the frontend. Named Ryoku palettes and wallpaper-derived palettes therefore remain authoritative.
+Gold is reserved for Play and Save. It does not mark navigation, playback state, decoration or passive information. Other actions use the line, quiet or danger variants from the Lithic kit.
 
-Do not introduce a second independent "Ryotunes system palette" that competes with Ryoku.
+## Mineral fields
 
-### Local overrides
+The selected album, artist or playlist begins with a mineral field. The field contains artwork, the name, a short proof such as artist, year or track count, and the relevant actions. It is a state-bearing header, not a decorative gradient or artwork wash.
 
-Explicit Light and Dark modes remain local Ryotunes choices.
+Downloads, authentication and playback states use the Lithic state minerals with a shape and a plain label:
 
-Light mode uses a restrained material family:
+| Tone | Ryotunes use |
+|---|---|
+| Jade | ready, connected, playing or downloaded |
+| Lapis | connecting, buffering, scanning or downloading |
+| Amber | paused, waiting, sign-in required or attention needed |
+| Jasper | failed, expired, unavailable or destructive |
+| Idle vein | stopped, disconnected or not started |
 
-- warm parchment content surfaces;
-- sage navigation;
-- blue-grey structural surfaces;
-- clay / terracotta playback emphasis;
-- muted gold only as a supporting detail.
+Colour never carries a state by itself. Keep the word and the notch, flake or field when space becomes tight.
 
-Dark mode stays ink-like and lets artwork or the live Ryoku palette provide most of the colour.
+## Type
 
-## Geometry
+The selected album, artist, playlist or route may own the one large title in a view. Use the shared working sizes everywhere else.
 
-Ryotunes follows the structural language already used across Ryoku:
+Space Mono is for literal data:
 
-- one-pixel hairlines;
-- deliberate card boundaries;
-- compact radii rather than inflated pill geometry;
-- clear separation between navigation, content and transport;
-- ornaments only in real dead space.
+- track and elapsed durations;
+- track, result and download counts;
+- provider, playlist and room identifiers;
+- bitrate, sample rate and other measured values.
 
-The compositor owns initial main-window sizing and centring on Ryoku.
+Titles, labels and prose use the shared Lithic text roles rather than the data face.
 
-The mini-player is a separate surface and must never inherit the main-window exact-title rule.
+## Motion and idle work
 
-## Typography
+Motion answers a press, selection, navigation or state change and then stops. Use the shared chisel curve and duration tokens. Do not add ambient movement, stagger list rows, spin idle icons or request frames for a hidden surface.
 
-Use the existing application type system.
+Reduced motion makes the same state transition immediate. An idle window with a still pointer and no live work requests no frames. Queue position and playback time come from daemon events; the client does not run a permanent transport loop when hidden.
 
-Hierarchy should come from:
+## Palette
 
-1. scale,
-2. weight,
-3. spacing,
-4. semantic colour.
+Ryotunes has roles, not standalone colour rules. The palette resolver follows the Ryoku sources in this order:
 
-Do not solve hierarchy by adding more colours.
+1. `$XDG_CONFIG_HOME/ryoku/shell.json` `themePalette` for a named scheme;
+2. `$XDG_CACHE_HOME/ryoku/colors.json` for the live wallpaper role set;
+3. `$XDG_CONFIG_HOME/ryoku/theme.json` for whether wallpaper colours are active;
+4. the Lithic signature fallback when no Ryoku palette is available.
 
-Metadata should remain quiet enough that titles, current playback and primary actions lead the eye.
+Settings can pin dark or light neutrals while continuing to use palette accents. An optional Material role-set JSON file can override the palette roles. That palette file replaces the 1.x skin system; it does not change layout, type, cuts or motion.
 
-## Motion
-
-Motion is feedback, not ambient decoration.
-
-Good reasons to animate:
-
-- state changed;
-- content entered or left;
-- selection moved;
-- the user directly manipulated something.
-
-Bad reasons to animate:
-
-- "the screen looks empty";
-- a visualizer can run forever;
-- a background gradient can drift forever;
-- the frontend needs a permanent frame loop for decoration.
-
-Ryoku live motion settings and reduced-motion preferences take precedence.
-
-## Artwork
-
-Artwork is allowed to be colourful. Chrome does not need to compete with it.
-
-Large artwork swaps should:
-
-- reuse already available thumbnails where possible;
-- prepare the next image before replacing the current one;
-- reject stale asynchronous requests;
-- keep decode/cache work bounded.
-
-## Home
-
-Home deliberately keeps a stable DOM.
-
-Do not reintroduce physical section virtualization that mounts and unmounts large portions of the page during scrolling. Previous versions proved that this creates visible jumps and unstable browsing.
-
-Use progressive loading, containment and caching instead.
-
-## Playback surfaces
-
-The bottom player, Now Playing, queue, lyrics and mini-player should feel like one system.
-
-A playback action should not change visual language just because the user moved to another surface.
-
-Transport controls need breathing room around structural dividers. Hover and pressed states must preserve contrast instead of collapsing into black-on-black or white-on-white states.
-
-## Performance budget
-
-A visual change is incomplete until its steady-state cost is considered.
-
-Avoid:
-
-- permanent high-frequency frontend clocks;
-- always-on requestAnimationFrame loops;
-- decorative FFT work when no visualizer is visible;
-- hidden WebKit work that survives after the main surface is hibernated.
-
-The UI should be rich while visible and quiet while absent.
-
-## Review questions
-
-Before merging a UI change, ask:
-
-- Does this still look like Ryoku?
-- Does Follow System remain semantically complete?
-- Is the Home DOM still stable?
-- Does the mini-player remain independent?
-- Did this add a new timer, animation loop or hidden renderer wakeup?
-- Does the same state look coherent in Home, Queue, Lyrics, Now Playing and Mini?
-- Does Light mode remain restrained rather than colourful for its own sake?
+Palette changes are watched and applied to both windows. A palette change under the same state snaps to the new roles. Mineral field motion is for a state change, not a wallpaper change.

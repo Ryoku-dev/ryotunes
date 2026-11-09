@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=Ryotunes
+GenericName=Music Player
+Comment=Ryoku's main music app for discovering, streaming, and enjoying your music collection
+Exec=ryotunes
+Icon=ryotunes
+Terminal=false
+Categories=AudioVideo;Audio;Player;
+Keywords=music;youtube;spotify;soundcloud;tidal;player;ryoku;lyrics;
+StartupNotify=true
+StartupWMClass=ryotunes

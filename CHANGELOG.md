@@ -2,12 +2,15 @@
 
 ## Unreleased
 
-- Lyrics can now be romanized from Settings ▸ Appearance, including pinyin readings for Chinese and transliterations for Japanese and Korean.
-- TIDAL sign-in now opens its approval page in the browser while keeping the code visible (`client/lib/playback.js`, `client/tests/tst_playback.qml`).
-- Playlist and album Play actions now start in sequence, while clicking a track preserves the current shuffle mode. Active shuffle and repeat controls follow the live Ryoku accent.
-- Icon buttons now show their labels on hover and expose the same labels to assistive technology.
-- Tracks and browse cards now open their actions on right-click. Context menus stay inside the window and close on outside clicks or scrolling.
-- Settings ▸ Downloads can now save tracks as FLAC, for players and libraries that expect FLAC files. It adds no further lossy compression but cannot make a YouTube or SoundCloud source better than it is, and files are several times larger. Cover art and lyrics are embedded as with the other formats. Tracks already saved in another format are not downloaded again. Saved formats from newer Ryotunes versions fall back to Original instead of preventing the daemon from starting.
+- Fixed remote playback stalling or skipping during back-to-back loads, restored live playback events, made daemon shutdown deterministic, and applied proxy changes across every network-backed source and download.
+
+## v2.0.0 - 2026-11-08
+
+- Ryotunes now uses the Lithic look in one native main window.
+- Tidal and local music now sit beside YouTube Music, Spotify, SoundCloud and internet radio in the same app.
+- Material role-set palette files replace the 1.x skin system.
+- The mini player keeps playback controls available in a separate compact window.
+- The existing library, device playlists, settings and provider sign-ins carry over from 1.x.
 
 ## v1.2.3 - 2026-10-19
 
@@ -43,23 +46,23 @@
 
 ## v1.1.6 - 2026-09-25
 
-- SoundCloud sign-in now happens in your own browser instead of a Ryotunes window: pressing Connect opens soundcloud.com (captchas and Google/Facebook/Apple popups work there), and the daemon watches your browser's cookie stores — Firefox-family and Chromium-family profiles, default browser first — importing the session the moment it appears and proving the token against `/me` before saving it. Already signed in in the browser? One click imports it instantly, no browser round trip. Cookie stores are only re-read when their file actually changes, and an unfinished sign-in ends with a clear message after five minutes rather than hanging.
+- SoundCloud sign-in now happens in your own browser instead of a Ryotunes window: pressing Connect opens soundcloud.com (captchas and Google/Facebook/Apple popups work there), and the daemon watches your browser's cookie stores, Firefox-family and Chromium-family profiles with the default browser first, importing the session the moment it appears and proving the token against `/me` before saving it. Already signed in in the browser? One click imports it instantly, no browser round trip. Cookie stores are only re-read when their file actually changes, and an unfinished sign-in ends with a clear message after five minutes rather than hanging.
 
-- Installing an update from Settings now restarts Ryotunes by itself: after the package lands, a detached helper waits for the old daemon to release its socket lock, then relaunches — socket-activating the new daemon and opening the new client — instead of leaving "quit and reopen" as the user's chore. If the helper fails, the app stays open with the old manual guidance as the fallback.
+- Installing an update from Settings now restarts Ryotunes by itself: after the package lands, a detached helper waits for the old daemon to release its socket lock, then relaunches, socket-activating the new daemon and opening the new client, instead of leaving "quit and reopen" as the user's chore. If the helper fails, the app stays open with the old manual guidance as the fallback.
 
 ## v1.1.5 - 2026-09-25
 
 ## v1.1.4 - 2026-09-24
 
-- Fixed "Download playlist / Download album" always failing (albums: "missing field `video_id`", playlists: "missing field `videoId`"): two stacked bugs — the client mapped an album/playlist's rows into batch entries twice, dropping every track id, and the daemon's batch endpoint read its JSON in snake_case while the client posts camelCase. Single-track downloads were unaffected, which is why only albums and playlists broke.
-- Album and playlist downloads now read as one collection: the queue and history group every batch under a single card showing the album/playlist cover, kind, aggregate progress and how many tracks are saved, waiting, failed or cancelled — expandable to its per-track rows. Batch tracks also land in a folder named after their collection on disk, and re-downloading still dedups against them wherever they sit.
-- Added Settings ▸ Diagnostics: one rolling record of everything that went wrong, for both halves of the app. The daemon logs its own warnings and errors, every failed request, and panics to a ring buffer and a rotating file (`$XDG_DATA_HOME/dev.ryoku.ryotunes/logs/ryotunesd.log`); the client forwards the failures it sees (rejected actions, lost connections, error toasts), buffering them while the daemon is down and delivering them on reconnect. The page filters by level, source and text, copies the whole list to the clipboard, and opens the log folder — so "songs won't play" finally has evidence to show instead of a guess.
-- Settings ▸ Storage's cache action is now a one-click playback repair: "Force clear caches" drops every layer that can wedge stream resolution — cached stream URLs and lyrics, mpv's on-disk audio bytes, the stored PoToken, the per-video WEB_REMIX failure blacklist — and rotates the anonymous YouTube playback identity (`visitorData`) on the spot, which is the manual fix for "Couldn't load this track — YouTube rejected the stream link". If the identity re-fetch fails (offline), the toast says so; the token is still dropped, so the next launch or a bot-gated resolve re-bootstraps it. Changing stream quality keeps clearing only the URL cache and no longer rotates the identity.
+- Fixed "Download playlist / Download album" always failing (albums: "missing field `video_id`", playlists: "missing field `videoId`"): two stacked bugs, the client mapped an album/playlist's rows into batch entries twice, dropping every track id, and the daemon's batch endpoint read its JSON in snake_case while the client posts camelCase. Single-track downloads were unaffected, which is why only albums and playlists broke.
+- Album and playlist downloads now read as one collection: the queue and history group every batch under a single card showing the album/playlist cover, kind, aggregate progress and how many tracks are saved, waiting, failed or cancelled, expandable to its per-track rows. Batch tracks also land in a folder named after their collection on disk, and re-downloading still dedups against them wherever they sit.
+- Added Settings ▸ Diagnostics: one rolling record of everything that went wrong, for both halves of the app. The daemon logs its own warnings and errors, every failed request, and panics to a ring buffer and a rotating file (`$XDG_DATA_HOME/dev.ryoku.ryotunes/logs/ryotunesd.log`); the client forwards the failures it sees (rejected actions, lost connections, error toasts), buffering them while the daemon is down and delivering them on reconnect. The page filters by level, source and text, copies the whole list to the clipboard, and opens the log folder, so "songs won't play" finally has evidence to show instead of a guess.
+- Settings ▸ Storage's cache action is now a one-click playback repair: "Force clear caches" drops every layer that can wedge stream resolution, including cached stream URLs and lyrics, mpv's on-disk audio bytes, the stored PoToken and the per-video WEB_REMIX failure blacklist, and rotates the anonymous YouTube playback identity (`visitorData`) on the spot, which is the manual fix for "Couldn't load this track: YouTube rejected the stream link". If the identity re-fetch fails (offline), the toast says so; the token is still dropped, so the next launch or a bot-gated resolve re-bootstraps it. Changing stream quality keeps clearing only the URL cache and no longer rotates the identity.
 
 ## v1.1.1 - 2026-09-24
 
-- Added SoundCloud sign-in: a Ryotunes window opens the site's own sign-in (account or Google/Facebook/Apple), captures the session's OAuth token from the webview's cookie jar, proves it against `/me` before saving it, and keeps it alive through SoundCloud's rotating refresh. Signing in is optional — SoundCloud still browses and plays as a guest — but a signed-in account adds its own playlists, liked tracks and followed artists to Home, and the token survives restarts (an expired one says so instead of silently vanishing).
-- Home is now the merged feed: YouTube Music's shelves remain the spine (the default source, signed in or not), and every signed-in provider contributes its own shelves to the same page — Spotify's made-for-you rows when a Premium session exists, SoundCloud's personal rows when connected. Cards navigate and play across providers exactly as before; one provider being down never blanks the page.
+- Added SoundCloud sign-in: a Ryotunes window opens the site's own sign-in (account or Google/Facebook/Apple), captures the session's OAuth token from the webview's cookie jar, proves it against `/me` before saving it, and keeps it alive through SoundCloud's rotating refresh. Signing in is optional, so SoundCloud still browses and plays as a guest, but a signed-in account adds its own playlists, liked tracks and followed artists to Home, and the token survives restarts (an expired one says so instead of silently vanishing).
+- Home is now the merged feed: YouTube Music's shelves remain the spine (the default source, signed in or not), and every signed-in provider contributes its own shelves to the same page, including Spotify's made-for-you rows when a Premium session exists and SoundCloud's personal rows when connected. Cards navigate and play across providers exactly as before; one provider being down never blanks the page.
 
 ## v1.1.0 - 2026-09-24
 
@@ -101,14 +104,14 @@
 
 - **Fresh v1 releases on every default-branch push.** The app, daemon, CLI, native client and package start at `1.0.0`. CI queues pushes, builds each exact source, and advances `1.0.9 → 1.1.0` (major fixed at 1). Releases include generated notes, binary/source archives and SHA-256 sidecars. A permanent pacman `epoch=1` makes v1 packages an upgrade from legacy v2 installations without changing the release asset filenames. Package hooks no longer restart the daemon during the transaction.
 - **About credits and standalone updates.** Both clients credit ashmitvoid and neur0map and link LiMusic upstream. About shows current/available versions, checks GitHub on request, opens the changelog and installs verified official Arch packages with administrator approval, independently of a full Ryoku update. After installation, fully Quit and reopen Ryotunes to reload the client and daemon.
-- **Releases ship a prebuilt Arch package.** Each release builds `ryotunes-<version>-1-x86_64.pkg.tar.zst` (and its `.sha256`) with an unprivileged `makepkg` in an Arch container from that release's exact source and attaches it to the GitHub release beside the reproducible source tarball, so `pacman -U` — and Ryoku's `update`/`doctor`, which read GitHub releases directly — no longer wait on a downstream rebuild. `scripts/build-arch-package.sh` reproduces the asset locally (`docker run --rm -v "$PWD:/src" -w /src archlinux:latest scripts/build-arch-package.sh`). The old `ryotunes-release` repository_dispatch into Ryoku Arch is removed.
+- **Releases ship a prebuilt Arch package.** Each release builds `ryotunes-<version>-1-x86_64.pkg.tar.zst` (and its `.sha256`) with an unprivileged `makepkg` in an Arch container from that release's exact source and attaches it to the GitHub release beside the reproducible source tarball, so `pacman -U` and Ryoku's `update`/`doctor`, which read GitHub releases directly, no longer wait on a downstream rebuild. `scripts/build-arch-package.sh` reproduces the asset locally (`docker run --rm -v "$PWD:/src" -w /src archlinux:latest scripts/build-arch-package.sh`). The old `ryotunes-release` repository_dispatch into Ryoku Arch is removed.
 - Release checks now validate synchronized manifest versions and shipped capability policy rather than pinning UI copy, comments, or implementation source text; version bumps no longer rewrite the check script.
 - Added **Download album** to the native album menu: queues the complete album rather than filtered rows, follows continuation pages, reuses download preferences and bounded workers, and reports unavailable tracks or partial admission errors.
 - **One-click music downloads in the native client.** A download control beside the heart saves the current track immediately; Downloads in the sidebar shows progress, waiting tracks and persistent history with cancel, retry and open-folder actions. Settings › Downloads adds the destination, Original/MP3/Opus formats, artist folders, embedded cover art & lyrics, and a safe 1–4 worker limit (default 1). Workers survive window closure, never overwrite existing files, and are terminated/reaped on quit; interrupted jobs remain retryable. YouTube and public SoundCloud use their source links; Spotify uses a clearly labelled YouTube search match. Downloads embed available cover art and plain lyrics where supported and save matching image and synced `.lrc` or plain `.txt` companion files. Local lyrics take precedence over network lookups for offline playback. Metadata lookups send track details to external providers; missing matches produce non-fatal history notes.
 - **Device playlists get automatic artwork.** A local playlist's card and page now build a cover from its own songs: four distinct song covers become a 2x2 collage, one to three collapse to the first cover, an empty playlist shows none. A custom cover you pick still wins everywhere, and removing it (Reset) drops straight back to the automatic art without a round-trip to YouTube Music. Cards, the page header and the sidebar refresh the instant tracks are added or removed or a cover changes.
 - Fixed native-client reconnection when the daemon was absent on the initial connection attempt, so download state and playback resynchronize without reopening the client.
 - Join the mpv event reader before destroying its native handle, preventing a shutdown race exposed by download metadata enrichment.
-- **Ryotunes v2 Discord presence.** The Rich Presence card is rebuilt around the v2 identity: the track's album art is the hero image with a small Ryotunes badge overlaid (**Ryotunes v2** on hover), and when a track has no shareable art (local files, missing thumbnails) the Ryotunes brand mark stands in rather than the underlying Discord application's icon. Hovering the art now shows the album and the service it is playing from, and the "listen" button is routed by provider — YouTube Music watch pages and Spotify `open.spotify.com` track pages, with SoundCloud (numeric-id only) and local/radio tracks left linkless rather than pointing somewhere wrong. The default "Listening to" title is now **Ryotunes v2**; a custom title you set is still kept. (The Discord application registration itself is still the upstream one — changing the name and icon Discord shows in its own app registry needs a Ryotunes-owned Application ID, which is pending.)
+- **Ryotunes v2 Discord presence.** The Rich Presence card is rebuilt around the v2 identity: the track's album art is the hero image with a small Ryotunes badge overlaid (**Ryotunes v2** on hover), and when a track has no shareable art (local files, missing thumbnails) the Ryotunes brand mark stands in rather than the underlying Discord application's icon. Hovering the art now shows the album and the service it is playing from, and the "listen" button is routed by provider: YouTube Music watch pages and Spotify `open.spotify.com` track pages, with SoundCloud (numeric-id only) and local/radio tracks left linkless rather than pointing somewhere wrong. The default "Listening to" title is now **Ryotunes v2**; a custom title you set is still kept. (The Discord application registration itself is still the upstream one; changing the name and icon Discord shows in its own app registry needs a Ryotunes-owned Application ID, which is pending.)
 
 ## v2.5.1 - 2026-09-06
 
@@ -145,7 +148,7 @@
 - Added `RYOTUNES_WEBKIT_FEATURES=Name=1,...` to flip WebKitGTK feature flags (for example `CompositingBordersVisible`, `CompositingRepaintCountersVisible`) when profiling the renderer.
 - Brought the release gate back to green on a clean checkout: the reveal-failsafe invariant matched the old 1500 ms, the private-path scan tripped on a git worktree's `.git` file, and two files had drifted from rustfmt.
 
-## v2.4.1 — 2026-09-02
+## v2.4.1 - 2026-09-02
 
 - Isolated the remote Google login and hidden cipher/PoToken JavaScript WebViews from all Ryotunes application commands using Tauri's runtime-authority AppManifest and an explicit main/mini-only command permission.
 - Replaced broad bundled `core:default` exposure with only the app/event and explicit window/WebView permissions the UI needs.
@@ -157,7 +160,7 @@
 - Added weekly dependency monitoring/security audits and release invariants for the new trust boundaries.
 - Preserved native libmpv playback, WebKit hibernation, MPRIS/tray lifecycle, five-minute idle exit and event-driven performance behavior.
 
-## v2.3 — 2026-08-27
+## v2.3 - 2026-08-27
 
 - Fixed Ryoku/Hyprland cold-launch geometry by adding compositor-owned `size = { 1760, 1000 }` to the exact-title managed window rule.
 - Polished the Home listening-console controls so Play/Pause and Queue have a balanced gap above the lower divider.
@@ -172,7 +175,7 @@
 - Added a native reveal deadline for cold start, reconstructed main windows, and second-launch recovery so a lost frontend readiness message cannot leave the application permanently invisible.
 - Added release invariants guarding against reintroducing rAF-gated hidden-window readiness and requiring the native recovery path.
 
-## v2.2 — 2026-08-27
+## v2.2 - 2026-08-27
 
 - Promoted Ryotunes to the final Ryoku-shell user release candidate.
 - Raised default floating main-window fallback to 1760×1000 logical and adaptive mapped geometry to ~92% × 84% of monitor work area.
@@ -184,7 +187,7 @@
 - Stopped Settings/header divider lines before the close-control zone.
 - Kept v2.1 R3 cold-start/reopen native reveal failsafes, Search pagination, Home stable-DOM behavior, background WebKit hibernation and native Quit/MPRIS teardown.
 
-## v2.1 — 2026-08-27
+## v2.1 - 2026-08-27
 
 - Fixed first-launch visibility with one native frontend-ready handshake shared by cold start and reconstructed WebViews.
 - Fixed mini-player expand-to-main race by retaining the mini surface until the full UI is actually visible.
@@ -197,7 +200,7 @@
 - Preserved audio-only playback, background WebKit hibernation, five-minute tray idle shutdown, explicit Quit teardown, stable Home DOM and bounded artwork/cache paths.
 
 
-## v2.0 — 2026-08-26
+## v2.0 - 2026-08-26
 
 - Canonicalized the frozen v2.0 Cargo.lock from the target-machine Cargo diff: removed stale `httpdate` and `tauri-plugin-window-state` lock entries and the stale `hyper -> httpdate` edge. The builder now requires `cargo fetch --locked` to accept the shipped lockfile directly and never performs an unlocked refresh.
 - Fixed native `pnpm check` blockers found during the first target-machine build: keyed-each `animate:flip` structure in Edit Home, module/instance `BrowseItem` import collision in Search, listbox option focus semantics, and deprecated Svelte module-script syntax.
@@ -213,7 +216,7 @@
 - Preserved audio-only playback, event-driven transport, background WebKit hibernation, five-minute tray idle exit, Low Resource Mode and deterministic explicit Quit.
 - Rebuilt release invariants, `/proc/<pid>/exe` diagnostics and zero-touch `ryotunes-v2.0 2.0.0-1` replacement packaging.
 
-## v1.9 — 2026-08-26
+## v1.9 - 2026-08-26
 
 - Adaptive centered Ryoku/Hyprland floating window (~89% × 84% of monitor work area) with no stale maximized/fullscreen restore.
 - Restored and redesigned the 640×200 Ryoku-style mini-player; its boot surface can no longer cover the compact UI.
@@ -226,7 +229,7 @@
 - Preserved five-minute tray-only no-playback exit, deterministic explicit Quit and Low Resource/background-WebKit architecture.
 - Robust process diagnostics and zero-touch Ryoku replacement packaging with newest-available stock-backup migration.
 
-## v1.7 R4 — 2026-08-26
+## v1.7 R4 - 2026-08-26
 
 - Hardened explicit Quit into one authoritative shutdown path: stop mpv, clear/drop MPRIS, close Discord presence, leave Listen Together with a bounded timeout, then exit.
 - Kept paused background playback resumable from Ryoku QS/MPRIS; Pause no longer means an idle/empty session.
@@ -239,7 +242,7 @@
 - Deferred optional cipher/network prewarm off the cold-start critical path and shortened UI reconstruction safety delays.
 - Removed eager Home continuation crawling/community enrichment, bounded Familiar Artists loading and retained v1.6 WebKit hibernation/stable Home containment.
 
-## v1.7 R2/R3 stabilization — 2026-08-26
+## v1.7 R2/R3 stabilization - 2026-08-26
 
 - Fixed background pause lifecycle: paused loaded tracks remain resumable through tray/QS/MPRIS instead of triggering process exit.
 - Removed eager Home continuation crawling and community search enrichment that could cause intermittent visible-idle CPU spikes.
@@ -247,7 +250,7 @@
 - Slowed fallback Ryoku palette polling while retaining immediate focus/visibility refresh.
 - Added managed Ryoku replacement packaging so the public launcher is singular while `ryoku-desktop` itself remains installed and recoverable.
 
-## v1.6 — 2026-08-26
+## v1.6 - 2026-08-26
 
 - Added Linux main-WebKit hibernation during background playback and automatic idle process shutdown when no UI/audio remains.
 - Restored stable R4 Home layout; removed the v1.5 mount/unmount virtualization that caused scrolling bounce and renderer churn.
@@ -257,7 +260,7 @@
 - Fixed Lyrics footer/source/timing controls clipping at short and floating window heights.
 - Preserved R4 account-menu, artist-artwork, playback-progress, scrollbar and low-cost visualizer fixes.
 
-## v1.4 — 2026-08-25
+## v1.4 - 2026-08-25
 
 - Maintenance release 2: removed the permanent frontend transport clock, made PoToken helpers demand-driven, tightened helper teardown, reduced artwork-accent work and simplified touchpad fallback ownership.
 - Fixed account popover overlap at titlebar scaling and Familiar Artists hero artwork flicker.
@@ -267,7 +270,7 @@
 - Restored a lightweight playback-state visualizer without a JavaScript analyser loop.
 - Renamed the public release line to v1.4 and cleaned release/package metadata.
 
-## V23 — 2026-08-25
+## V23 - 2026-08-25
 
 - Unified playlist metadata grid, deterministic/failure-safe playlist heroes and smart-playlist identities.
 - Unified ranked local search and refined Add Shortcut/Queue/list search surfaces.
@@ -276,7 +279,7 @@
 - Memory pass: smaller bounded caches, smaller decoded artwork requests and open-only heavy overlays.
 - Preserves V22 audio-only/native playback, low-resource mode, touchpad and responsive-layout behaviour.
 
-## V22 — 2026-08-25
+## V22 - 2026-08-25
 
 - Added Low resource mode, queue search and Stop after current.
 - Added Recently Played / Rediscover smart playlists and on-demand Listening Insights.
@@ -284,7 +287,7 @@
 - Added portable playlist JSON import/export and optional Quickshell/MPRIS widget.
 - Preserved V21 responsive/touchpad/audio-only fixes and tightened resource invariants.
 
-## V21 Final — 2026-08-25
+## V21 Final - 2026-08-25
 
 - Fixed Home search suggestion clipping/stacking, shallow-window layout and visible mood-chip scrollbar.
 - Restored native two-finger touchpad ownership; the WebKit fallback now intervenes only if native pixel scrolling does not move.
@@ -297,11 +300,11 @@
 - Kept the application strictly audio-only.
 
 
-## 20.0.0 — 2026-08-24
+## 20.0.0 - 2026-08-24
 
 V20 is the release-candidate cleanup pass. It keeps the recovered V18/V19 Now Playing geometry frozen, adds global peel-by-peel Escape navigation toward Home, synchronizes Lyrics Focus with the global transient-state stack, and removes obsolete version-scoped release wiring. The seven V19 craft fixes remain intact.
 
-## 19.0.0 — 2026-08-24
+## 19.0.0 - 2026-08-24
 
 V19 is a focused craft/stability release: the recovered Now Playing geometry is frozen while seven interaction and rendering defects are corrected.
 
@@ -312,7 +315,7 @@ V19 is a focused craft/stability release: the recovered Now Playing geometry is 
 - Escape returns Search/Library to Home after transient surfaces close.
 - Remove filled hover background from dialog close buttons.
 
-## 18.0.0 — 2026-08-24
+## 18.0.0 - 2026-08-24
 
 V18 is the restoration release: it keeps the V17 reliability work, but replaces the unstable V17 Now Playing geometry with an isolated layout derived from the proven V14/Ryowalls composition.
 

@@ -1,36 +1,87 @@
 # Install on Void Linux
 
-Releases only ship an Arch package. On Void it gets repacked into an `.xbps` on your machine and installed with xbps, so it's tracked like any other package.
+Ryotunes publishes an x86_64 Arch package. The Void installer verifies that release, repacks its `usr/` tree as an xbps package and installs it through xbps.
 
 ## Install or update
 
-From a clone or the release source tarball:
+Run the installer from a clone or release source archive:
 
-```bash
-scripts/install-void.sh
+```sh
+./release/void/install.sh
 ```
 
-It downloads the latest release, checks the sha256, drops the systemd units (Void doesn't use them; `ryotunes` starts the daemon itself), builds `ryotunes-<version>_1` with the dependencies in `packaging/void/depends`, and installs it with `sudo xbps-install`.
+The script:
 
-Then quit Ryotunes and open it again (closing the window isn't enough):
+1. reads the latest Ryotunes release tag;
+2. downloads the package and its SHA-256 sidecar;
+3. verifies the checksum;
+4. removes the systemd files;
+5. checks that the client runs with the installed glibc;
+6. creates `ryotunes-X.Y.Z_1.x86_64.xbps` with `release/void/depends`;
+7. installs or upgrades it with `xbps-install`.
 
-```bash
+Quit and reopen Ryotunes after the update:
+
+```sh
 ryotunes-cli quit
 ryotunes
 ```
 
-## Updating from inside the app
+## Runtime dependencies
 
-Once installed this way (or from Ryoku's Void repo), **Settings → About → Update** works too. It does the same repack and asks polkit to run `xbps-install`, so you need a polkit agent running.
+Void package names differ in a few places:
 
-v1.2.1 and older were built against glibc 2.44 and the daemon won't start on Void (glibc 2.41). Both the script and the in-app updater refuse such a release instead of installing it.
+| Package | Use |
+|---|---|
+| `mpv` | Audio playback through libmpv |
+| `yt-dlp` | Download and provider fallback work |
+| `ffmpeg6` | Download conversion and metadata |
+| `libvorbis` | Spotify Ogg Vorbis decoding support |
 
-## No cover art
+`release/void/depends` is the complete list, including `libogg`, display libraries, icon support, `xdg-utils` and polkit.
 
-If songs play but covers stay blank, Qt can't do HTTPS. Void ships Qt's TLS backend separately:
+## Daemon startup
 
-```bash
-sudo xbps-install qt6-plugin-tls-openssl
+Void does not use the packaged systemd user units. The installer removes them while repacking. `ryotunes` starts `ryotunesd` directly when it cannot connect to the per-user socket. The same close, idle and Quit lifecycle applies.
+
+Check the daemon process and the sanitized diagnostics report with:
+
+```sh
+pgrep -a ryotunesd
+ryotunes-diagnostics
 ```
 
-Then restart Ryotunes. The repacked package already depends on it. `ryotunes-diagnostics` shows whether it's there.
+## Build from source
+
+Install Go, the compiler toolchain and the development packages corresponding to `release/void/depends`. Use the same build settings as the Arch release recipe:
+
+```sh
+version=$(cat VERSION)
+ldflags="-s -w -X github.com/ryoku-dev/ryotunes/internal/version.Version=$version"
+mkdir -p build
+CGO_ENABLED=1 go build -trimpath -buildmode=pie -ldflags "$ldflags" -o build/ryotunes ./cmd/ryotunes
+CGO_ENABLED=1 go build -trimpath -buildmode=pie -ldflags "$ldflags" -o build/ryotunesd ./cmd/ryotunesd
+CGO_ENABLED=0 go build -trimpath -buildmode=pie -ldflags "$ldflags" -o build/ryotunes-cli ./cmd/ryotunes-cli
+CGO_ENABLED=0 go build -trimpath -buildmode=pie -ldflags "$ldflags" -o build/ryotunes-sync ./cmd/ryotunes-sync
+go test ./...
+```
+
+The release package is checked against a glibc 2.41 ceiling because that is the supported Void baseline.
+
+## Sandboxed development
+
+Keep a development daemon away from the installed socket and data:
+
+```sh
+root=$(mktemp -d)
+mkdir -p "$root/run" "$root/data" "$root/cache" "$root/config" "$root/state"
+env \
+  XDG_RUNTIME_DIR="$root/run" \
+  XDG_DATA_HOME="$root/data" \
+  XDG_CACHE_HOME="$root/cache" \
+  XDG_CONFIG_HOME="$root/config" \
+  XDG_STATE_HOME="$root/state" \
+  go run ./cmd/ryotunesd
+```
+
+Use the same environment in another terminal for the client or CLI.

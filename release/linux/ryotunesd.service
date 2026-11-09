@@ -1,0 +1,10 @@
+[Unit]
+Description=Ryotunes playback daemon
+After=graphical-session.target
+Requires=ryotunesd.socket
+
+[Service]
+ExecStart=/usr/bin/ryotunesd
+Environment=RYOTUNES_LOG=warn
+Restart=on-failure
+RestartSec=2

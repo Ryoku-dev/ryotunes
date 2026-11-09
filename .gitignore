@@ -1,38 +1,24 @@
-# Rust / Tauri build output
-/target
+# Build output
+/bin/
+/dist/
+/release/arch/pkg/
+/release/arch/src/
+/release/arch/*.log
+/release/arch/*.pkg.tar.*
+/*.pkg.tar.*
+/ryotunes-v*-source.tar.gz
 
-# Frontend dependencies and generated output
-/ui/node_modules
-/ui/build
-/ui/.svelte-kit
-
-# IDE / OS files
-.idea/
-.vscode/
-.DS_Store
-
-# Local runtime state and scratch files
+# Local runtime state
 *.sqlite
 *.sqlite-shm
 *.sqlite-wal
 *.log
-rustypipe_cache.json
-rustypipe_reports/
+*.png.tmp
 
-# Platform build artifacts
-/src-tauri/libmpv-2.dll
-/.libmpv/
-
-# Optional Last.fm build credentials
-/src-tauri/lastfm.keys
-
-# Release/package output
-/ryotunes-v*-source.tar.gz
-/ryotunes-v*-full.tar.gz
-/*.pkg.tar.*
-/packaging/arch/pkg/
-/packaging/arch/src/
-/packaging/arch/*.log
+# IDE / OS
+.idea/
+.vscode/
+.DS_Store
 
 # Local environment / credentials
 .env

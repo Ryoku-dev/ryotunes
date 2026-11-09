@@ -1,7 +1,0 @@
-#!/bin/sh
-# Ryotunes native (QML) client launcher.
-#
-# The client is a Quickshell config installed at /usr/share/ryotunes/client. Quickshell resolves
-# `qs -c NAME` only from $XDG_CONFIG_HOME/quickshell/NAME, so a packaged, out-of-config-tree client
-# has to be launched by explicit path with `-p`. Extra arguments are forwarded to Quickshell.
-exec qs -p /usr/share/ryotunes/client "$@"

@@ -4,67 +4,39 @@ on:
   push:
   pull_request:
 
+permissions:
+  contents: read
+
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ci-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
   linux:
     runs-on: ubuntu-24.04
-
     steps:
       - uses: actions/checkout@v4
-
       - name: Install Linux dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev libmpv-dev
-
-      - uses: dtolnay/rust-toolchain@stable
+          sudo apt-get install -y \
+            build-essential desktop-file-utils pkg-config \
+            libwayland-dev libx11-dev libx11-xcb-dev \
+            libxkbcommon-x11-dev libgles2-mesa-dev libegl1-mesa-dev \
+            libffi-dev libxcursor-dev libvulkan-dev libmpv2 libvorbis-dev libogg-dev
+      - uses: actions/setup-go@v5
         with:
-          components: rustfmt
-
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 11
-          run_install: false
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: pnpm
-          cache-dependency-path: ui/pnpm-lock.yaml
-
-      - name: Frontend dependencies
-        working-directory: ui
-        run: pnpm install --frozen-lockfile
-
-      - name: Frontend checks
-        working-directory: ui
-        run: pnpm check && pnpm build
-
-      - name: Rust format
-        run: cargo fmt --all -- --check
-
-      - name: Rust tests
-        run: cargo test --workspace --locked -- --skip mpv_keeps_the_gain_through_pitch_changes_and_failures
-
-      - name: Real libmpv regression
-        timeout-minutes: 2
+          go-version-file: go.mod
+          cache: true
+      - name: Check formatting
+        run: test -z "$(gofmt -l .)"
+      - name: Vet
+        run: go vet ./...
+      - name: Test
+        run: go test ./...
+      - name: Build binaries
         run: |
-          set +e
-          timeout 30s cargo test --locked -p player mpv_keeps_the_gain_through_pitch_changes_and_failures -- --nocapture --test-threads=1
-          status=$?
-          set -e
-
-          if [ "$status" -eq 124 ]; then
-            echo "::warning title=libmpv integration timeout::The real-libmpv pitch rollback test timed out on this GitHub runner. Deterministic player tests passed; the Arch release workflow intentionally excludes this environment-sensitive integration case."
-            exit 0
-          fi
-
-          exit "$status"
-
-      - name: Release guard
-        env:
-          RYOTUNES_STATIC_ONLY: "1"
-        run: ./scripts/release-check.sh
+          CGO_ENABLED=0 go build -trimpath ./cmd/ryotunes-cli ./cmd/ryotunes-sync
+          CGO_ENABLED=1 go build -trimpath -buildmode=pie ./cmd/ryotunes ./cmd/ryotunesd
+      - name: Release checks
+        run: ./release/check.sh

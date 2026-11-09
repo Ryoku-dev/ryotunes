@@ -1,102 +1,46 @@
 # Security and privacy
 
-Ryotunes is a Tauri desktop application: the UI is rendered by the operating system WebView
-(WebKitGTK on Linux), while playback, account state, filesystem access and network integrations live
-in Rust. Treat both sides as part of the security boundary.
+Ryotunes handles account sessions, local media paths and playback URLs. Do not attach its data directory, database, credentials or raw logs to a public report.
 
-## Keep the system WebView current
+## Stored data
 
-Ryotunes does **not** bundle its own WebKit engine. On Arch/CachyOS/Ryoku, WebKitGTK is supplied and
-patched by the system package manager. Keep the machine fully updated with `pacman -Syu`.
+| Purpose | Default path |
+|---|---|
+| Library, settings, history, provider sessions and downloads | `~/.local/share/dev.ryoku.ryotunes/` |
+| Playback cache | `~/.cache/dev.ryoku.ryotunes/audio/` |
+| User palette files | `~/.config/ryotunes/` |
+| State and diagnostics | `~/.local/state/ryotunes/` |
+| Runtime socket | `$XDG_RUNTIME_DIR/ryotunes/` |
 
-At the time of the v2.4.1 hardening pass (September 2026), WebKitGTK **2.52.6** is the stable
-security baseline. WebKitGTK advisory WSA-2026-0005 lists vulnerabilities affecting releases before
-2.52.6. `./scripts/diagnostics.sh` reports the installed WebKitGTK version without exposing private
-paths or account information.
+The corresponding absolute `XDG_DATA_HOME`, `XDG_CACHE_HOME`, `XDG_CONFIG_HOME` and `XDG_STATE_HOME` values take precedence. Ryotunes ignores relative XDG paths.
 
-The Rust Tauri dependency is also kept above **2.11.1**, which contains the fix for
-GHSA-7gmj-67g7-phm9 (origin confusion allowing some remote pages to be mistaken for trusted local
-origins on affected platforms).
+Application directories are created with mode `0700`. The SQLite database and atomically written private files use mode `0600`.
 
-## WebView / IPC design
+Provider credentials include:
 
-- The normal `main` and `mini` surfaces load the bundled Ryotunes frontend, not a remote web app.
-- All 93 application commands are registered with Tauri's runtime authority through an explicit
-  `AppManifest` and one `allow-ui-commands` permission granted only to the `main` and `mini`
-  surfaces. The remote Google login page and hidden cipher/PoToken JavaScript runtimes therefore
-  cannot invoke Ryotunes application commands even though they exist inside the same process.
-- The Google sign-in WebView has a separate `login` label and is not included in the main/mini
-  capability files.
-- The bundled surfaces do not use `core:default`; they receive only the Tauri app/event APIs and
-  explicit window/WebView operations Ryotunes actually uses. In particular, renderer-side core image/path,
-  tray, menu and resource defaults are not exposed.
-- Neither bundled renderer has file-dialog permission. Playlist import/export, artwork selection
-  and local-folder selection open native pickers from Rust commands, so WebKit cannot silently
-  choose arbitrary filesystem paths.
-- Portable playlist files accept YouTube Music track metadata only. Local-file identifiers contain
-  filesystem paths for native local playback, so they are deliberately refused by portable
-  export/import rather than leaking machine paths into a shareable JSON file.
-- Renderer-writable settings, external URLs, Listen Together endpoints and media parameters are
-  validated again in Rust. The frontend is never treated as an authorization boundary.
-- Authenticated proxy URLs are rejected, and an invalid legacy proxy setting is discarded before
-  the networking stack starts, so proxy credentials are not returned through renderer-visible
-  settings.
-- Internet Radio playback accepts only an opaque station id from WebKit. Native code resolves the
-  cached/Radio Browser station record and rejects literal localhost/private/link-local stream
-  addresses rather than accepting a renderer-supplied URL.
-- Radio Browser discovery accepts only official `*.api.radio-browser.info` mirrors and bounds
-  each directory response before parsing it.
-- Persisted radio-station records are re-normalized through the same URL policy when a queue is
-  restored, so records written by an older release cannot bypass current stream validation.
-- The Google sign-in WebView can navigate only to HTTPS Google/YouTube hosts and has no main/mini
-  capability set.
-- External links are opened by passing a validated HTTP(S) URL directly to the OS opener. They are
-  never interpolated into a shell command.
-- The Tauri asset protocol has an empty static scope. Local cover art is copied into Ryotunes-owned
-  storage; watched music directories are not recursively exposed to the renderer.
-- Local track ids contain a native path for offline playback, but Rust verifies that exact path is
-  present in the native-scanned `local_tracks` database before it can be handed to mpv. A forged
-  `LOCAL:` id from WebKit therefore cannot open an arbitrary file.
-- Account cookies, delegated YouTube identity values, visitor data, queue internals and stream URLs
-  are deliberately excluded from the settings IPC API.
-- The optional Listen Together relay bounds WebSocket frame/message sizes, room count, queue length,
-  pending suggestions and each client's outbound queue. It binds to localhost by default; use a TLS
-  reverse proxy when deliberately exposing it as a public `wss://` endpoint.
+- `spotify/credentials.json` and `spotify/device.id` under the data directory;
+- YouTube session cookies and delegated identity values in private SQLite settings rows;
+- SoundCloud and Tidal session data in private SQLite settings rows;
+- the Last.fm session key in a private SQLite settings row.
 
-### CSP note
+Sign out of an affected provider and revoke its session before sharing a report about credential exposure.
 
-The global Tauri CSP remains unset because the cipher and PoToken extraction stack uses isolated,
-hidden `data:` WebViews that require inline/dynamic JavaScript. Tauri injects a configured global
-CSP into those data documents as well, which breaks the extraction harness. Those hidden WebViews are not granted the main/mini capability set or the application-command
-permission, so their dynamic JavaScript cannot cross into Ryotunes commands. A future move of the harness to a dedicated custom
-protocol can allow a strict per-application CSP without weakening playback.
+## Browser cookie import
 
-## Local secrets and files
+YouTube Music and SoundCloud sign-in can read eligible Firefox-family and Chromium-family cookie stores. Ryotunes does not open the browser's live SQLite database for queries. It copies the database and its SQLite sidecars into a temporary `0700` directory, creates the copies with mode `0600`, opens the copy in read-only mode and removes the temporary directory when the read ends.
 
-Session state is stored in the Tauri application-data directory. On Unix, Ryotunes sets its app data
-and cache directories to mode `0700` and its SQLite state database to `0600`.
+The import selects only cookies for the requested service. It does not write to a browser profile.
 
-Do **not** attach the application-data directory, SQLite database, browser session data, or raw
-application logs to public bug reports. They may contain account/session material or local media
-paths.
+## Reports and logs
 
-For support, prefer:
+`ryotunes-diagnostics` reports package, system, runtime and dependency state without including logs, account data, tokens, local paths, hostnames or network endpoints.
 
-```sh
-./scripts/diagnostics.sh
+The daemon log can contain provider errors and local context. Review and sanitize it before sharing. The packaged data-directory log is:
+
+```text
+~/.local/share/dev.ryoku.ryotunes/logs/ryotunesd.log
 ```
-
-The diagnostics script intentionally excludes account details, cookies, tokens, local media paths,
-hostnames and configured network endpoints.
-
-## Dependency monitoring
-
-GitHub Dependabot monitors Rust, frontend and GitHub Actions dependencies weekly. The
-`Security audit` workflow also runs RustSec (`cargo audit`) and a production frontend dependency
-audit (`pnpm audit`) on the hardening branch/main and on a weekly schedule.
 
 ## Reporting a vulnerability
 
-If you discover a bug that exposes credentials or session data, do not post the secret publicly.
-Revoke or sign out the affected session first, then report the issue with sanitized reproduction
-steps through GitHub's private vulnerability-reporting channel when available.
+Do not open a public issue containing a credential, session token, private media path or unredacted log. Use GitHub's private vulnerability reporting for `ryoku-dev/ryotunes` when available. Include the affected version, a minimal reproduction, the expected boundary and the observed result. Revoke exposed credentials first.

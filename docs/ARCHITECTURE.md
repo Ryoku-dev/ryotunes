@@ -1,112 +1,251 @@
 # Ryotunes architecture
 
-Ryotunes is split so that playback survives independently of the visible interface. This is especially important on Ryoku laptops, where keeping a WebKit view active for a song that is already playing wastes CPU, memory and power.
+Ryotunes is a Linux music player for Ryoku. It plays YouTube Music, Spotify,
+SoundCloud, Tidal, internet radio and local files through one native player,
+and it is drawn in Lithic, the Ryoku UI language. This document is the
+contract between its parts. Read it before touching any package.
 
-## Process model
+Everything is Go. The desktop is a Gio application; playback and every
+provider live in a daemon that survives the window. The repository is the
+source of truth and the packages under `release/` are the only way it reaches
+a machine.
 
-The Tauri/Rust process is authoritative for playback and desktop integration. The SvelteKit WebView is a client of that state rather than the clock that drives it.
+## Processes
 
 ```text
 Ryoku / Hyprland
-       │
-       ├── MPRIS + media keys + tray
-       │             │
-       ▼             ▼
-  Tauri / Rust ── player crate ── libmpv
-       │
-       ├── Innertube / library / integrations
-       │
-       └── visible WebKit UI (SvelteKit)
-                    │
-                    ├── Home / Search / Library
-                    ├── Queue / Lyrics / Now Playing
-                    └── Mini player
+   │  Super+J, MPRIS, media keys, tray, live palette
+   ▼
+ryotunes (Gio client, one process, two windows: main and "Ryotunes Mini")
+   │  unix socket, newline-delimited JSON, requests + events
+   ▼
+ryotunesd (daemon)
+   ├── player        libmpv through purego, audio only
+   ├── providers     youtube · spotify · soundcloud · tidal · local · radio
+   ├── library       sqlite: settings, personal, device playlists, history, caches
+   ├── downloads     yt-dlp workers, history, metadata and companions
+   └── integrations  mpris · tray · discord · last.fm · listen together · self-update
+
+ryotunes-cli         one method per call, or an event tail; what scripts and the shell use
+ryotunes-sync        the optional Listen Together room relay (a server, not installed by default)
 ```
 
-## Crates and binaries
+| Binary | Package | cgo | Why |
+|---|---|---|---|
+| `ryotunesd` | `cmd/ryotunesd` | no | libmpv is loaded with purego, sqlite is modernc, the YouTube player JS runs in goja |
+| `ryotunes` | `cmd/ryotunes` | yes | Gio needs Wayland, X11 and EGL |
+| `ryotunes-cli` | `cmd/ryotunes-cli` | no | |
+| `ryotunes-sync` | `cmd/ryotunes-sync` | no | |
 
-The workspace separates the playback core from whoever renders it. Phase 1 of the native-client plan moved everything in `src-tauri/src` that is not a window, a webview or a Tauri command into `crates/core`, behind three host traits; the daemon, CLI and QML rows below are the targets later phases add.
+The daemon never draws, the client never talks to a provider. The CLI is a
+thin socket client. Keep it that way: a feature that needs both ends is a
+method and an event, not a shared package.
 
-| Path | Role | Origin |
-|---|---|---|
-| `crates/innertube`, `crates/player`, `crates/listen-protocol`, `crates/sync-server` | unchanged | existing |
-| `crates/core` | `AppState`, orchestrator, db, lyrics, local, discord, lastfm, media (MPRIS), radio, listentogether, cipher, potoken, session (login), settings. No Tauri. Talks to the outside through three traits (4.2) | moved from `src-tauri/src` |
-| `crates/protocol` | request/response/event types, `serde` only, shared by daemon, CLI, tests | new |
-| `crates/ryotunesd` | binary: socket server, single-instance lock, systemd-friendly lifecycle, GTK thread hosting the hidden WebKitGTK views, tray | new; absorbs `tray.rs`, `webview.rs`, the login part of `session.rs` |
-| `crates/ryotunes-cli` | `ryotunes-cli <method> [json]` and `ryotunes-cli events`; the shell's and scripts' entry point | new |
-| `client/` | the QML client run by Quickshell: `qs -c ryotunes` (shipped as `/usr/share/ryotunes/client`), plus `client/mini/` for the mini player window | new, replaces `ui/` |
-| `src-tauri/` | deleted at the end of phase 4 | removed |
+## Lifecycle
 
-## Daemon
+- Socket `$XDG_RUNTIME_DIR/ryotunes/ryotunesd.sock` in a `0700` directory
+  created under `umask 077`. One daemon per user, held by an `flock` on
+  `ryotunesd.sock.lock`. A second `ryotunesd` connects to the incumbent,
+  calls `show`, exits 0.
+- `ryotunesd.socket` (systemd user unit) activates the daemon on the first
+  connection; the daemon also runs unactivated, and `ryotunes` starts the
+  socket unit or the daemon directly on a cold launch.
+- The daemon exits after a bounded idle (nothing playing, no subscriber, no
+  queued or active download, no Listen Together room) of five minutes.
+  Explicit `quit` stops playback, unregisters MPRIS, tears integrations down
+  and exits.
+- `ryotunes` is single instance: when a client is already subscribed, a
+  second launch asks the daemon to `show` and exits; the daemon raises the
+  subscribed client through the `show` event. Closing the window never stops
+  playback.
 
-`ryotunesd` hosts `crates/core` behind a unix socket so the interface can be killed without stopping playback. It is a systemd user service, socket-activated by `ryotunesd.socket` on the first client connection, and it exits on a bounded idle (nothing playing and no subscriber) after five minutes.
+## Wire protocol
 
-- Socket: `$XDG_RUNTIME_DIR/ryotunes/ryotunesd.sock`, in a `0700` directory, created under `umask 077`. A single instance is enforced with an `flock` on `ryotunesd.sock.lock`; a second launch connects to the incumbent, asks it to `show`, and exits 0.
-- Framing: newline-delimited JSON, one object per line, both directions. Request `{"id":12,"method":"play","params":{"videoId":"…"}}`; response `{"id":12,"result":…}` or `{"id":12,"error":{"code":"…","message":"…"}}`; event `{"event":"position","data":{"position":12.3}}`.
-- Methods: every `#[tauri::command]` name and JSON shape, plus the control methods `hello` (returns `{"protocol":1,"daemon":"2.4.1"}`), `subscribe` (opts into events and replies with the current `playback`/`queue`/`settings`/`auth` snapshot), `show` (raise a subscribed client's window, or launch the client when none is listening), `quit` (stop playback, unregister MPRIS, exit), and `sign_in` (open the Google login window).
-- `ryotunes-cli <method> [json]` runs one method and prints its `result`; `ryotunes-cli events [name…]` subscribes and prints one event per line until interrupted.
+`internal/protocol` is the one definition of the wire. Both binaries import
+it; nothing else defines a method name, a param shape or an event payload.
 
-The Tauri app and the daemon share the same data directory (`$XDG_DATA_HOME/dev.ryoku.ryotunes`); run one at a time until the cutover.
+- Request `{"id":12,"method":"play","params":{...}}`, response
+  `{"id":12,"result":...}` or `{"id":12,"error":{"code":"...","message":"..."}}`,
+  event `{"event":"position","data":{...}}`. One JSON object per line.
+- Method names and payload field names are those of Ryotunes 1.x, so
+  `ryotunes-cli` scripts, the Ryoku shell and RyoStore keep working. New
+  methods follow the same style: `snake_case` names, `camelCase` or
+  `snake_case` fields exactly as `internal/protocol` declares them.
+- `protocol.Methods` is the typed registry: each method has a params type, a
+  result type and a doc string. The daemon's dispatcher and the client's
+  typed calls are generated from it, so adding a method is one entry plus
+  one handler.
+- Events go only to connections that called `subscribe`. The `subscribe`
+  result is the full snapshot (playback, queue, settings, auth for every
+  provider, downloads, personal, Listen Together state) so a client restores
+  without a second round trip.
 
-### Native downloads
+## The daemon
 
-`crates/ryotunesd/src/downloads.rs` owns a persistent download queue independently of the client. `client/Downloads.qml` mirrors the `downloads` subscription snapshot and `downloads-changed` events; the player button, queue/history page and settings use dedicated `enqueue_download`, `get_downloads`, `cancel_download`, `retry_download`, `clear_download_history`, `open_download`, `open_download_folder`, `get_download_settings` and `set_download_settings` socket methods.
+`internal/daemon` wires the parts; no logic of its own beyond the method
+handlers, which are thin: validate params, call the owning package, emit.
 
-- Settings and the latest 200 terminal records live in `downloads.json` under the daemon's data directory. Writes are serialized with queue mutations and use a synced temporary file plus atomic rename. Each job captures its file preferences at enqueue time.
-- Worker admission is bounded to 1–4 jobs (default 1), with at most 200 active/queued tracks. A reserved slot is held through cancellation until the subprocess is reaped; retries get a fresh attempt identity so an older task cannot complete a newer attempt.
-- yt-dlp runs via direct argv in a separate, lower-priority process group, with one fragment downloader and constrained FFmpeg threading. Config/plugin execution is disabled, output/error buffers are bounded, and a job has a finite timeout. Quit and SIGTERM stop admission, terminate whole process groups and await teardown. Queued/active downloads inhibit daemon idle exit even without a client.
-- Downloads go to private staging directories beneath the destination. A successful exit and a nonempty completed audio file are required before a same-filesystem hard link atomically publishes the final file without replacing an existing file. Generated artist directories cannot resolve outside the chosen folder. Clearing history never removes music files.
-- With metadata embedding on, `crates/ryotunesd/src/download_media.rs` enriches staged audio via `lofty` and saves image and lyric companions before publication. Artwork uses a trusted thumbnail or a strictly matched iTunes fallback; lyrics reuse the core cache/providers with a bounded lookup. Providers receive track details including title, artist, duration and provider identifiers. For local playback, core lyrics checks `.lrc`, embedded lyrics, then `.txt` before network/cache, enabling offline lyrics. The worker retains its slot throughout enrichment; cancelled jobs never publish. Audio and companions share the final filename stem and collision suffix, using no-overwrite hard links and validated regular staging files. Missing metadata produces non-fatal per-job warnings.
-- Restart recovers interrupted jobs as retryable failures, not automatic new network activity. Spotify downloads are explicitly labelled YouTube search matches; they do not export the Spotify stream or promise the same recording. SoundCloud links come from the existing provider client; protected/unavailable content produces a visible job error.
-- `client/Daemon.qml` recreates its socket while disconnected: Quickshell retains a failed initial native socket, so setting `connected = true` repeatedly on that object is insufficient. The reconnect timer stops entirely while connected.
+```text
+internal/
+  protocol/     wire types, method registry, event names (shared)
+  model/        Track, Album, Artist, Playlist, Shelf, Lyrics, Stream, ids (shared)
+  bus/          EventSink: Emit(name, payload) fan-out to subscribers
+  store/        sqlite (modernc) and the json files: settings, personal, device playlists,
+                history, caches; every table and key documented in docs/PERSISTENCE.md
+  player/       libmpv: load, pause, seek, volume, gapless prefetch, audio fx, params,
+                events to the bus, friendly error mapping
+  queue/        the queue: manual items, continuation, shuffle, repeat, stop after current,
+                restore; asks a Resolver for streams and a Continuer for more
+  provider/     the Provider interface and Registry
+    youtube/    InnerTube clients, visitorData, cipher (goja), player resolve chain,
+                yt-dlp fallback, browser-cookie sign-in, browse parsers
+    spotify/    go-librespot session, loopback stream server for mpv, web api browse
+    soundcloud/ client_id discovery, api v2, stream transcodings, cookie sign-in
+    tidal/      OAuth, api, playbackinfo manifests
+    local/      folder scan, tags, local playlists, watch
+    radio/      radio-browser directory, live streams
+  lyrics/       providers, lrc parsing, cache, romanize/
+  downloads/    queue, workers, yt-dlp argv, staging and publication, metadata
+  integrations/ mpris/ tray/ discord/ lastfm/ listentogether/ (ltproto/ is the shared room protocol)
+  diag/         the log ring and file, get_logs, client error intake
+  update/       release lookup, verification, pacman / xbps / dnf paths
+  daemon/       App, Server, Methods, Lifecycle, Diagnostics, Logs
+```
 
-## Background playback
+### Provider contract
 
-Closing the main window is not the same operation as quitting the application.
+```go
+type Provider interface {
+    ID() model.Provider
+    Capabilities() Capabilities            // what the client may offer for this source
+    Home(ctx, more string) (model.Feed, error)
+    Search(ctx, q string, kind model.SearchKind, page string) (model.SearchPage, error)
+    Suggest(ctx, q string) ([]string, error)
+    Album(ctx, id string) (model.Album, error)
+    Artist(ctx, id string) (model.ArtistPage, error)
+    Playlist(ctx, id string, more string) (model.Playlist, error)
+    Library(ctx) (model.Library, error)
+    Resolve(ctx, trackID string, q model.Quality) (model.Stream, error)
+    Next(ctx, trackID string, played []string) ([]model.Track, error)
+    Account(ctx) (model.Account, error)
+}
+```
 
-On Linux, the Quickshell client and `ryotunesd` are separate processes. Closing or hibernating the client does not stop active daemon playback, MPRIS or tray controls. Reopening subscribes to the daemon's current state rather than creating a second player.
+Optional interfaces (`Rater`, `PlaylistEditor`, `AlbumSaver`, `Lyricist`,
+`SignIn`) are asserted by the daemon, and `Capabilities` tells the client
+which controls to show. A provider never touches the player, the store or
+the bus; it returns model values and the daemon does the rest. Provider
+errors are typed (`provider.ErrSignInRequired`, `ErrUnavailable`,
+`ErrBotGated`, `ErrNotFound`) so the queue can decide between halting and
+skipping.
 
-A tray-only session with no playback has a bounded idle lifetime and exits automatically. Explicit Quit stops the playback session, unregisters MPRIS and shuts integrations down immediately.
+### Streams
 
-## UI update model
+`model.Stream` is what mpv plays: a URL, headers, a user agent, an optional
+expiry and the codec/bitrate for the UI. YouTube, SoundCloud, Tidal and
+radio return a remote URL. Spotify returns a loopback URL: the Spotify
+package serves the decrypted Ogg Vorbis over `127.0.0.1` with `Range`
+support so mpv seeks like any file. Local returns a `file://` URL. The
+player never knows which provider it is playing.
 
-Playback state is event-driven. Ryotunes avoids a permanent high-frequency frontend transport clock and avoids heavy requestAnimationFrame/FFT loops for ordinary idle playback.
+### Ids on the wire
 
-The primary QML Home uses a reusable `ListView` with an asynchronous header. `client/components/HomeFeed.qml` pins `contentY` to `originY` until interaction, with `Binding.RestoreNone`: restoring the old pre-layout value (usually zero) when the binding is released skips a tall header whose origin is negative. The QML regression exercises a real wheel event after header growth.
+Every track id tells its provider: `spotify:track:…` and `spotify:…` are
+Spotify, `sc:…` is SoundCloud, `tidal:…` is Tidal, `LOCAL…` is a local file,
+`RYOTUNES_RADIO:…` is a radio station, `RYOTUNES_*` are Ryotunes' own
+collections, and anything else is a YouTube id. `model.ProviderOf(id)` is
+the one function that decides.
 
-Continuation pages append shelves to a persistent `ListModel`; only an explicit feed reload clears it. Reassigning a JavaScript array as `ListView.model` resets the view to its header, so pagination must not rebuild the entire model or compensate by writing `contentY` afterward. This follows Qt's [incremental ListModel API](https://doc.qt.io/qt-6/qml-qtqml-models-listmodel.html).
+### Concurrency
 
-Home's personal state is a mirror of the existing daemon `personal_json` store, not another database. `client/Personal.qml` hydrates before applying local mutations, serializes immediate saves, and ignores its own outstanding write echoes. Songs are recorded from genuine `now-playing` events; album/playlist controls capture their context before playback and record it after the command succeeds. Subscription snapshots restore the UI without recording another listen.
+The daemon is goroutine-per-request with one `App` mutex around queue and
+playback state; provider calls run outside the lock. The player's event loop
+is one goroutine that publishes to the bus. Long work (downloads, library
+scans, Listen Together) runs in its own package with its own locks and
+publishes events; it never calls back into `App` under a lock.
 
-`client/lib/recommendations.js` builds a provider-scoped candidate pool from the existing Home response. A lightweight relevance score combines provider order, artist affinity, recency, shortcut affinity and recent-play fatigue; a maximum-marginal-relevance pass adds variety. Candidate count is capped at 300 and output at 12. The diversity pass caches each candidate's maximum similarity as picks are added, so its work is O(candidates × picks), with no training, new network endpoint or timer. Header/feed and personal-data changes trigger recomputation; additional card artwork uses the existing image pipeline.
+### Errors and logging
 
-We considered [implicit](https://github.com/benfred/implicit) (MIT) and [LightFM](https://github.com/lyst/lightfm) (Apache-2.0), but their trained models add machinery that one user's sparse local history does not justify. Neither is a dependency and no implementation was copied. The local diversity pass follows the standard [MMR relevance/diversity principle](https://www.elastic.co/search-labs/blog/maximum-marginal-relevance-diversify-results).
+`log/slog`, JSON to `$XDG_STATE_HOME/ryotunes/ryotunesd.log` with size
+rotation, level from `RYOTUNES_LOG` (default `warn`). Every repairable
+playback wedge logs one `info` line that names the repair. User-visible
+errors are plain sentences in `internal/daemon/copy.go`; packages return
+typed errors and the handler picks the sentence.
 
-Search loads results incrementally in bounded pages, deduplicates them and preserves query, selection and scroll state when navigating back.
+## The client
 
-## Artwork
+`internal/client` is a Gio application in Lithic.
 
-Large artwork paths reuse already available thumbnails, prepare higher-resolution images before swapping them into view, reject stale track requests, and keep the cache bounded. The goal is to avoid blank artwork and decode spikes during queue/Now Playing changes.
+```text
+internal/client/
+  lithic/      the Lithic kit for Gio: roles from the Ryoku palette, cut primitives,
+               type, plaque, tablet, field, search, toggle, slider, tabs, filters,
+               menu, popover, dialog, placard, tooltip, chart, flake, blade, list
+  conn/        socket client: typed calls, event stream, reconnect, snapshot replay
+  state/       reducers: playback, queue, settings, auth, downloads, personal,
+               lyrics, listen together; one Store with Invalidate hooks
+  art/         image loading: http, decode off the UI goroutine, downscale, LRU,
+               collage for device playlists
+  ui/          the window: rail, panes, router, pages, chrome, mini window
+```
 
-Device playlists carry no provider thumbnail, so the daemon derives one from their songs (`crates/ryotunesd/src/methods.rs`): the first four *distinct* non-empty song covers in playlist order. Four distinct covers become one thumbnail string — the literal `ryotunes-collage:` prefix followed by a JSON array of exactly four URLs; one to three collapse to the first cover; an empty playlist carries none. That marker is rendered only by the shared native `Artwork.qml` as a 2x2 grid — it is never a real URL, never sent to a provider, and download artwork resolution rejects it as an untrusted host. A user's custom cover overrides the automatic art, and clearing it returns the automatic art without contacting YouTube Music. The art is recomputed on every fetch, so add/remove/reorder shows up on the next `get_library`/`get_playlist`; a `library-changed` event refreshes cards, the page header and the sidebar live.
+- One `Store` holds the daemon snapshot plus client-only state (route stack,
+  panel modes, zoom). Reducers are pure functions of (state, event); the
+  frame loop drains a channel and invalidates.
+- Pages are retained structs with their own widget state (`lithic.List`,
+  clicks, tweens), composed from the kit; they never draw a colour or a
+  radius of their own.
+- The mini player is a second `app.Window` in the same process titled
+  `Ryotunes Mini`; the main window is titled `Ryotunes`. Both read the same
+  `Store`.
+- `ryotunes --png out.png [--demo]` renders one frame headlessly, for review
+  and for the docs.
 
-## Linux / Ryoku lifecycle
+### Lithic
 
-The Linux `ryotunes` executable is a native-only launcher. It requests `show` on the daemon socket, starting the user socket unit or the daemon directly for a cold launch. Connection or protocol failures never open the legacy Tauri player.
+The look is specified in the Ryoku repository, `docs/lithic/`. The client's
+`lithic` package implements it: roles are filled from the live palette
+(`shell.json` `themePalette`, then `colors.json` while `theme.json` follows
+the wallpaper, then the signature fallback), watched with inotify. No colour
+value exists in the client outside the signature fallback and the three
+fixed minerals. Appearance offers Follow desktop, Dark and Light, density,
+reduced motion and an optional palette file (a Material role set, the format
+`colors.json` uses), which is what a Ryotunes skin is now.
 
-The primary window is a Quickshell surface (`org.quickshell`, title `Ryotunes`). Cold launch, second-instance launch, tray reopen and mini-player-to-main restoration converge on the daemon's show event and the client's visibility lifecycle. The package exposes one desktop entry and requires Quickshell.
+## Persistence
 
-## Packaging invariants
+`$XDG_DATA_HOME/dev.ryoku.ryotunes/` is the data directory, unchanged from
+Ryotunes 1.x so a user's library, device playlists, settings and sign-ins
+survive the rebuild. It holds `ryotunes.sqlite` (settings, personal, device
+playlists, history, play counts, stream and lyrics caches, local index; the
+1.x schema with additive migrations only), `downloads.json`, `logs/`,
+`covers/playlists/`, and the provider credentials (`spotify/credentials.json`,
+`spotify/device.id`, the YouTube, SoundCloud and Tidal tokens as settings
+rows). `$XDG_CACHE_HOME/dev.ryoku.ryotunes/audio` is the mpv disk cache.
+`$XDG_CONFIG_HOME/ryotunes/` holds user palette files. The schema and every
+settings key are in `docs/PERSISTENCE.md`. Files are written to a temporary
+name and renamed.
 
-The Ryoku replacement package is intentionally conservative:
+## Packaging
 
-- never uninstall the `ryoku-desktop` package;
-- preserve genuine stock entry points for rollback;
-- expose one active `/usr/bin/ryotunes` route and one desktop launcher;
-- migrate old custom Ryotunes generations only after the new generation is active;
-- install/remove only the Ryotunes-managed Hyprland rule;
-- verify binary ownership and active routes after installation.
+`release/` builds the Arch package (`ryotunes 1:<version>-1`, epoch kept),
+the Void depends and installer, the AUR `-bin` recipe. The package installs
+the four binaries, the systemd user units and preset, the desktop entry,
+icons, the metainfo and the matugen template. It never removes
+`ryoku-desktop`. CI runs `gofmt`, `go vet`, `go test ./...`, `go build` with
+`CGO_ENABLED=0` for the three pure binaries and the Gio client with cgo, the
+release gates in `release/check.sh`, and the glibc ceiling check.
 
-## Release gates
+## Development
 
-`scripts/release-check.sh` runs source-level structural and regression checks. A distributable build must additionally pass Svelte/TypeScript semantic checking, locked Cargo fetch/test/check, the native Tauri release build and final pacman package ownership validation on an Arch/Ryoku build machine.
+```sh
+go build ./...            # everything
+go test ./...             # unit tests, no network
+go run ./cmd/ryotunesd    # a daemon against $XDG_RUNTIME_DIR; set XDG_* to sandbox it
+go run ./cmd/ryotunes     # the client; --png out.png --demo renders offline
+go run ./cmd/ryotunes-cli hello
+```
+
+Sandbox a daemon with `XDG_RUNTIME_DIR=/tmp/rt/run XDG_DATA_HOME=/tmp/rt/data`
+so it never touches the user's library or socket. Headless renders need no
+display.

@@ -1,33 +1,71 @@
 # Troubleshooting
 
-## The app does not start
+Start with the sanitized system report:
 
-Run `ryotunes-diagnostics` after a package install (or `./scripts/diagnostics.sh` from the source tree) and check that WebKitGTK 4.1 and mpv are present. If you installed the package, `pacman -Q ryotunes` should report the installed version.
+```sh
+ryotunes-diagnostics
+```
 
-## Build fails because `rust` conflicts with `rustup`
+It reports the installed package, session, processes and runtime dependencies without including account details, tokens, local paths, hostnames or network endpoints.
 
-Do not install both. Ryotunes accepts either provider. If `cargo --version` already works, keep the existing toolchain. The included installer only installs `rustup` when Cargo is missing.
+## YouTube rejects every track
 
-## The interface is too large or too small
+**Symptom:** Tracks are skipped as unavailable, or the error says that YouTube rejected the stream link or bot-gated every playback client.
 
-Use **Settings → General → Interface scale**. `Ctrl+0` restores the Ryotunes default (120%).
+**Fix:** Open Settings, then Storage, and choose **Force clear caches**. This removes stale stream and lyric caches, mpv audio cache data and the stored playback token so Ryotunes can obtain a new playback identity. It preserves accounts, library data, history and artwork. Try the track again after the action finishes.
 
-## Signed-in content is empty or stale
+If the account session has expired, sign out of YouTube Music and sign in again.
 
-Confirm the network is available, then reopen the affected page. If the Google session expired, sign out and sign in again. Ryotunes keeps signed-out playback/search usable and should not require deleting the whole data directory for an account refresh.
+## Spotify asks for sign-in or skips every track
 
-## A track cannot play
+Spotify playback requires Premium. Confirm that the account has Premium, then sign out and sign in again. This replaces revoked credentials and restores the saved device session. A free account can be identified but cannot provide audio playback.
 
-Some tracks are region/account restricted or can temporarily fail across YouTube playback clients. Ryotunes tries its normal fallback chain automatically. Personal uploads require an active signed-in YouTube Music session.
+If the problem returns after a daemon restart, capture `ryotunes-cli get_logs` before another sign-in so the session restore failure remains visible.
 
-## Cover art is blank everywhere
+## SoundCloud sign-in does not complete
 
-Qt has no TLS backend, so the QML client can't fetch any images (`qs log` shows `No functional TLS backend was found`). On Void install `qt6-plugin-tls-openssl` and restart Ryotunes. `ryotunes-diagnostics` checks for it.
+Ryotunes imports the SoundCloud session from a supported browser profile. Sign in at `soundcloud.com` in Firefox, Chromium, Chrome or a related browser, leave that profile open, then press the SoundCloud connect action again.
 
-## Touchpad scrolling stops over cards
+The importer reads temporary copies of the browser cookie database and does not modify the browser profile. If the browser uses an unsupported profile location, complete sign-in in a standard profile and retry. A guest session can still browse and play public SoundCloud tracks.
 
-This should not happen in current builds: album art and cards do not capture wheel/two-finger events for volume. Only the actual volume slider handles a wheel gesture. Please attach a sanitized diagnostics report if you can reproduce it.
+## The daemon does not start
 
-## Full reset
+On a systemd user session, inspect both units:
 
-Uninstalling the package intentionally preserves personal application data. For a complete reset, first sign out of Ryotunes, close the app, then remove its `dev.ryoku.ryotunes` application-data directory using your desktop's normal per-user data location. Do not post that directory publicly because it can contain session state.
+```sh
+systemctl --user status ryotunesd
+systemctl --user status ryotunesd.socket
+journalctl --user -u ryotunesd.service -n 100 --no-pager
+```
+
+Confirm that `mpv`, `yt-dlp`, `ffmpeg` and `libvorbis` are installed. Then reload and restart socket activation:
+
+```sh
+systemctl --user daemon-reload
+systemctl --user restart ryotunesd.socket
+ryotunes
+```
+
+On Void, run `ryotunes` once to start the daemon directly, then check `pgrep -a ryotunesd` and `ryotunes-diagnostics`.
+
+## Collect logs
+
+The packaged data-directory log is:
+
+```text
+~/.local/share/dev.ryoku.ryotunes/logs/ryotunesd.log
+```
+
+Ask the daemon for its bounded log ring with:
+
+```sh
+ryotunes-cli get_logs
+```
+
+Run the sanitized diagnostics helper with:
+
+```sh
+ryotunes-diagnostics
+```
+
+Logs may contain local media paths, provider responses or account context. Review and remove private values before sharing them. Do not upload the SQLite database, browser profile or provider credential files.

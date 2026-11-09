@@ -1,0 +1,46 @@
+# Maintainer: Ryoku developers <https://github.com/ryoku-dev>
+pkgname=ryotunes-bin
+pkgver=2.0.0
+pkgrel=1
+epoch=1
+pkgdesc="Ryoku's native Lithic music player"
+arch=('x86_64')
+url='https://github.com/ryoku-dev/ryotunes'
+license=('GPL-3.0-or-later')
+depends=(
+  'mpv'
+  'libvorbis'
+  'libogg'
+  'yt-dlp'
+  'ffmpeg'
+  'hicolor-icon-theme'
+  'xdg-utils'
+  'polkit'
+  'desktop-file-utils'
+  'wayland'
+  'libxkbcommon'
+  'libx11'
+  'libxcursor'
+  'libxfixes'
+  'vulkan-icd-loader'
+  'mesa'
+)
+provides=("ryotunes=$pkgver")
+conflicts=('ryotunes')
+install=ryotunes-bin.install
+
+_asset="ryotunes-${pkgver}-1-x86_64.pkg.tar.zst"
+source_x86_64=(
+  "${_asset}::https://github.com/ryoku-dev/ryotunes/releases/download/v${pkgver}/${_asset}"
+  "${_asset}.sha256::https://github.com/ryoku-dev/ryotunes/releases/download/v${pkgver}/${_asset}.sha256"
+)
+sha256sums_x86_64=('SKIP' 'SKIP')
+
+prepare() {
+  cd "$srcdir"
+  sha256sum -c "${_asset}.sha256"
+}
+
+package() {
+  bsdtar -xpf "$srcdir/$_asset" -C "$pkgdir" usr
+}

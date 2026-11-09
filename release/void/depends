@@ -1,0 +1,17 @@
+# Void runtime dependencies, one package per line.
+desktop-file-utils
+ffmpeg6
+hicolor-icon-theme
+libogg
+libvorbis
+libX11
+libXcursor
+libXfixes
+libxkbcommon
+mesa-dri
+mpv
+polkit
+vulkan-loader
+wayland
+xdg-utils
+yt-dlp

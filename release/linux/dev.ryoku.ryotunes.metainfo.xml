@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>dev.ryoku.ryotunes</id>
+  <name>Ryotunes</name>
+  <summary>Ryoku's main music app</summary>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-3.0-or-later</project_license>
+  <description>
+    <p>Discover, stream, and enjoy music from YouTube Music, Spotify, SoundCloud, Tidal, internet radio, and local files.</p>
+    <p>Ryotunes combines lyrics, downloads, queue management, desktop media controls, and the live Ryoku palette in a native Lithic interface.</p>
+  </description>
+  <launchable type="desktop-id">ryotunes.desktop</launchable>
+  <provides>
+    <binary>ryotunes</binary>
+  </provides>
+  <categories>
+    <category>AudioVideo</category>
+    <category>Audio</category>
+  </categories>
+  <releases>
+    <release version="2.0.0" date="2026-11-08"/>
+  </releases>
+</component>

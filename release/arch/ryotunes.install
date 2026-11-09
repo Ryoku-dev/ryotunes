@@ -1,0 +1,36 @@
+post_install() {
+  # Repair stale user units left by older packages only on a fresh install.
+  for uid in $(loginctl list-users --no-legend 2>/dev/null | awk '{print $1}'); do
+    systemctl --user -M "$uid@" daemon-reload 2>/dev/null || true
+    systemctl --user -M "$uid@" stop ryotunesd.socket ryotunesd.service 2>/dev/null || true
+  done
+  post_upgrade
+}
+
+post_upgrade() {
+  gtk-update-icon-cache -q -t -f usr/share/icons/hicolor 2>/dev/null || true
+  update-desktop-database -q 2>/dev/null || true
+  systemctl --global enable ryotunesd.socket 2>/dev/null || true
+  for uid in $(loginctl list-users --no-legend 2>/dev/null | awk '{print $1}'); do
+    systemctl --user -M "$uid@" daemon-reload 2>/dev/null || true
+    systemctl --user -M "$uid@" enable --now ryotunesd.socket 2>/dev/null || true
+  done
+  echo 'Ryotunes was upgraded. Quit Ryotunes and reopen it to restart ryotunesd.'
+  # Never restart the daemon during its own update transaction.
+  # This package must never remove ryoku-desktop.
+}
+
+pre_remove() {
+  for uid in $(loginctl list-users --no-legend 2>/dev/null | awk '{print $1}'); do
+    systemctl --user -M "$uid@" stop ryotunesd.socket ryotunesd.service 2>/dev/null || true
+  done
+}
+
+post_remove() {
+  gtk-update-icon-cache -q -t -f usr/share/icons/hicolor 2>/dev/null || true
+  update-desktop-database -q 2>/dev/null || true
+  systemctl --global disable ryotunesd.socket 2>/dev/null || true
+  for uid in $(loginctl list-users --no-legend 2>/dev/null | awk '{print $1}'); do
+    systemctl --user -M "$uid@" daemon-reload 2>/dev/null || true
+  done
+}
