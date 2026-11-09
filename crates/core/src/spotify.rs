@@ -121,7 +121,7 @@ pub fn tidal_playlist_id(id: &str) -> Option<&str> {
     id.strip_prefix(TIDAL_PLAYLIST_PREFIX).filter(|s| !s.is_empty())
 }
 
-const RECOVERY_COOLDOWN: std::time::Duration = std::time::Duration::from_secs(30);
+const RECOVERY_COOLDOWN: std::time::Duration = std::time::Duration::from_secs(2);
 
 /// Owns the Spotify sign-in, the current client and the catalogue selector. Construct once with the
 /// daemon's data directory; `spotify` credentials land under `<data_dir>/spotify`.
