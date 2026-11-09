@@ -6,18 +6,19 @@ import (
 	"gioui.org/layout"
 	"gioui.org/unit"
 
-	"github.com/ryoku-dev/ryotunes/internal/client/lithic"
+	"github.com/ryoku-dev/ryoku/docs/lithic/library/go/kit"
 	"github.com/ryoku-dev/ryotunes/internal/client/ui/act"
 	"github.com/ryoku-dev/ryotunes/internal/client/ui/env"
+	"github.com/ryoku-dev/ryotunes/internal/client/ui/look"
 	"github.com/ryoku-dev/ryotunes/internal/model"
 	"github.com/ryoku-dev/ryotunes/internal/protocol"
 )
 
 type newPlaylistDialog struct {
-	dialog lithic.Dialog
-	name   lithic.TextField
-	cancel lithic.Button
-	create lithic.Button
+	dialog kit.Dialog
+	name   kit.TextField
+	cancel kit.Plaque
+	create kit.Plaque
 	err    string
 	busy   bool
 }
@@ -28,7 +29,7 @@ func (d *newPlaylistDialog) Open() {
 	d.err = ""
 }
 
-func (d *newPlaylistDialog) Layout(gtx layout.Context, e *env.Env, p *Page) {
+func (d *newPlaylistDialog) Layout(gtx layout.Context, e *env.Env, p *Page) layout.Dimensions {
 	if d.cancel.Clicked(gtx) {
 		d.dialog.Open = false
 	}
@@ -52,26 +53,22 @@ func (d *newPlaylistDialog) Layout(gtx layout.Context, e *env.Env, p *Page) {
 			})
 		}
 	}
-	body := func(gtx layout.Context) layout.Dimensions {
-		return d.name.Layout(gtx, e.Th, "Playlist name", "New playlist", "", d.err)
-	}
-	cancel := func(gtx layout.Context) layout.Dimensions {
-		return d.cancel.Layout(gtx, e.Th, lithic.Quiet, nil, "Cancel")
-	}
-	create := func(gtx layout.Context) layout.Dimensions {
-		if d.busy {
-			gtx = gtx.Disabled()
-		}
-		return d.create.Layout(gtx, e.Th, lithic.Gold, lithic.Icon("add"), "Create")
-	}
-	d.dialog.Layout(gtx, e.Th, "New playlist", body, cancel, create)
+	d.name.Label, d.name.Placeholder, d.name.Error = "Playlist name", "New playlist", d.err
+	d.cancel.Kind, d.cancel.Label = kit.PlaqueQuiet, "Cancel"
+	d.create.Kind, d.create.Icon, d.create.Label, d.create.Busy = kit.PlaqueLine, look.Icon.Add, "Create", d.busy
+	d.dialog.Width = 520
+	return d.dialog.Layout(gtx, e.Th.Theme, "New playlist",
+		func(gtx layout.Context) layout.Dimensions { return d.name.Layout(gtx, e.Th.Theme) },
+		func(gtx layout.Context) layout.Dimensions { return d.cancel.Layout(gtx, e.Th.Theme) },
+		func(gtx layout.Context) layout.Dimensions { return d.create.Layout(gtx, e.Th.Theme) },
+	)
 }
 
 type importPlaylistDialog struct {
-	dialog       lithic.Dialog
-	path         lithic.TextField
-	cancel       lithic.Button
-	importButton lithic.Button
+	dialog       kit.Dialog
+	path         kit.TextField
+	cancel       kit.Plaque
+	importButton kit.Plaque
 	err          string
 	busy         bool
 }
@@ -82,7 +79,7 @@ func (d *importPlaylistDialog) Open() {
 	d.err = ""
 }
 
-func (d *importPlaylistDialog) Layout(gtx layout.Context, e *env.Env, p *Page) {
+func (d *importPlaylistDialog) Layout(gtx layout.Context, e *env.Env, p *Page) layout.Dimensions {
 	if d.cancel.Clicked(gtx) {
 		d.dialog.Open = false
 	}
@@ -112,28 +109,25 @@ func (d *importPlaylistDialog) Layout(gtx layout.Context, e *env.Env, p *Page) {
 			})
 		}
 	}
-	body := func(gtx layout.Context) layout.Dimensions {
-		return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
-			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-				return lithic.Text(e.Th, e.Th.T.Body, e.Th.R.Fg2, "Choose a Ryotunes playlist file; its tracks land in a new library playlist.")(gtx)
-			}),
-			layout.Rigid(layout.Spacer{Height: unit.Dp(21)}.Layout),
-			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-				d.path.Mono = true
-				return d.path.Layout(gtx, e.Th, "Playlist file", "/home/you/Music/playlist.json", "Ryotunes playlist files end in .json.", d.err)
-			}),
-		)
-	}
-	cancel := func(gtx layout.Context) layout.Dimensions {
-		return d.cancel.Layout(gtx, e.Th, lithic.Quiet, nil, "Cancel")
-	}
-	importAction := func(gtx layout.Context) layout.Dimensions {
-		if d.busy {
-			gtx = gtx.Disabled()
-		}
-		return d.importButton.Layout(gtx, e.Th, lithic.Gold, lithic.Icon("upload_file"), "Import")
-	}
-	d.dialog.Layout(gtx, e.Th, "Import playlist", body, cancel, importAction)
+	d.path.Label = "Playlist file"
+	d.path.Placeholder = "/home/you/Music/playlist.json"
+	d.path.Help = "Ryotunes playlist files end in .json."
+	d.path.Error = d.err
+	d.path.Mono = true
+	d.cancel.Kind, d.cancel.Label = kit.PlaqueQuiet, "Cancel"
+	d.importButton.Kind, d.importButton.Icon, d.importButton.Label, d.importButton.Busy = kit.PlaqueLine, look.Icon.OpenInNew, "Import", d.busy
+	d.dialog.Width = 620
+	return d.dialog.Layout(gtx, e.Th.Theme, "Import playlist",
+		func(gtx layout.Context) layout.Dimensions {
+			return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+				layout.Rigid(kit.Text(e.Th.Theme, e.Th.T.Body, e.Th.R.Fg2, "Choose a Ryotunes playlist file; its tracks land in a new library playlist.")),
+				layout.Rigid(layout.Spacer{Height: unit.Dp(21)}.Layout),
+				layout.Rigid(func(gtx layout.Context) layout.Dimensions { return d.path.Layout(gtx, e.Th.Theme) }),
+			)
+		},
+		func(gtx layout.Context) layout.Dimensions { return d.cancel.Layout(gtx, e.Th.Theme) },
+		func(gtx layout.Context) layout.Dimensions { return d.importButton.Layout(gtx, e.Th.Theme) },
+	)
 }
 
 func (d *importPlaylistDialog) createImported(e *env.Env, p *Page, title string, items []model.Track) {
@@ -165,21 +159,17 @@ func (d *importPlaylistDialog) addImported(e *env.Env, p *Page, playlistID, titl
 		d.addImported(e, p, playlistID, title, items, index+1)
 	}
 	if isDevicePlaylist(playlistID) {
-		act.Call[bool](e, protocol.MethodAddToLocalPlaylist, protocol.AddToLocalPlaylistParams{PlaylistID: playlistID, Item: items[index]}, func(_ bool, err error) {
-			done(err)
-		})
+		act.Call[bool](e, protocol.MethodAddToLocalPlaylist, protocol.AddToLocalPlaylistParams{PlaylistID: playlistID, Item: items[index]}, func(_ bool, err error) { done(err) })
 		return
 	}
-	act.Call[*bool](e, protocol.MethodAddToPlaylist, protocol.PlaylistTrackParams{PlaylistID: playlistID, VideoID: items[index].VideoID}, func(_ *bool, err error) {
-		done(err)
-	})
+	act.Call[*bool](e, protocol.MethodAddToPlaylist, protocol.PlaylistTrackParams{PlaylistID: playlistID, VideoID: items[index].VideoID}, func(_ *bool, err error) { done(err) })
 }
 
 type folderDialog struct {
-	dialog lithic.Dialog
-	path   lithic.TextField
-	cancel lithic.Button
-	add    lithic.Button
+	dialog kit.Dialog
+	path   kit.TextField
+	cancel kit.Plaque
+	add    kit.Plaque
 	err    string
 	busy   bool
 }
@@ -190,7 +180,7 @@ func (d *folderDialog) Open() {
 	d.err = ""
 }
 
-func (d *folderDialog) Layout(gtx layout.Context, e *env.Env, p *Page) {
+func (d *folderDialog) Layout(gtx layout.Context, e *env.Env, p *Page) layout.Dimensions {
 	if d.cancel.Clicked(gtx) {
 		d.dialog.Open = false
 	}
@@ -210,22 +200,22 @@ func (d *folderDialog) Layout(gtx layout.Context, e *env.Env, p *Page) {
 				p.local = local
 				p.localLoaded = true
 				p.syncFolderButtons()
+				p.invalidateFilter()
 				d.dialog.Open = false
 			})
 		}
 	}
-	body := func(gtx layout.Context) layout.Dimensions {
-		d.path.Mono = true
-		return d.path.Layout(gtx, e.Th, "Music folder", "/home/you/Music", "Folders Ryotunes watches for files on disk. The daemon rescans them on demand.", d.err)
-	}
-	cancel := func(gtx layout.Context) layout.Dimensions {
-		return d.cancel.Layout(gtx, e.Th, lithic.Quiet, nil, "Cancel")
-	}
-	add := func(gtx layout.Context) layout.Dimensions {
-		if d.busy {
-			gtx = gtx.Disabled()
-		}
-		return d.add.Layout(gtx, e.Th, lithic.Gold, lithic.Icon("add"), "Add folder")
-	}
-	d.dialog.Layout(gtx, e.Th, "Add local music", body, cancel, add)
+	d.path.Label = "Music folder"
+	d.path.Placeholder = "/home/you/Music"
+	d.path.Help = "Ryotunes watches this folder for music and scans it on demand."
+	d.path.Error = d.err
+	d.path.Mono = true
+	d.cancel.Kind, d.cancel.Label = kit.PlaqueQuiet, "Cancel"
+	d.add.Kind, d.add.Icon, d.add.Label, d.add.Busy = kit.PlaqueLine, look.Icon.Add, "Add folder", d.busy
+	d.dialog.Width = 620
+	return d.dialog.Layout(gtx, e.Th.Theme, "Add local music",
+		func(gtx layout.Context) layout.Dimensions { return d.path.Layout(gtx, e.Th.Theme) },
+		func(gtx layout.Context) layout.Dimensions { return d.cancel.Layout(gtx, e.Th.Theme) },
+		func(gtx layout.Context) layout.Dimensions { return d.add.Layout(gtx, e.Th.Theme) },
+	)
 }

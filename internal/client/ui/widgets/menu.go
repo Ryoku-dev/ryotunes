@@ -1,45 +1,82 @@
 package widgets
 
 import (
+	"image"
 	"strings"
 
 	"gioui.org/layout"
+	"gioui.org/widget"
 
-	"github.com/ryoku-dev/ryotunes/internal/client/lithic"
+	"github.com/ryoku-dev/ryoku/docs/lithic/library/go/kit"
 	"github.com/ryoku-dev/ryotunes/internal/client/state"
 	"github.com/ryoku-dev/ryotunes/internal/client/ui/act"
 	"github.com/ryoku-dev/ryotunes/internal/client/ui/env"
+	"github.com/ryoku-dev/ryotunes/internal/client/ui/look"
 	"github.com/ryoku-dev/ryotunes/internal/model"
 	"github.com/ryoku-dev/ryotunes/internal/protocol"
 )
 
 type menuEntry struct {
-	item lithic.MenuItem
+	item kit.MenuItem
 	run  func()
 	keep bool
 }
 
-// ItemMenu builds and executes the actions available for one track or collection.
+// ItemMenu provides context actions for tracks and browse collections.
 type ItemMenu struct {
-	menu      lithic.Menu
-	add       AddToPlaylistDialog
-	edit      EditPlaylistDialog
-	done      bool
-	subdialog bool
+	menu       kit.Menu
+	add        AddToPlaylistDialog
+	edit       EditPlaylistDialog
+	target     env.MenuTarget
+	done       bool
+	subdialog  bool
+	overlayTag int
 }
 
-// Done reports and clears whether the menu completed an action or dialog.
+// Done reports and clears completion of the current menu flow.
 func (m *ItemMenu) Done() bool {
 	done := m.done
 	m.done = false
 	return done
 }
 
-func menuItem(icon, label string, run func()) menuEntry {
-	return menuEntry{item: lithic.MenuItem{Icon: lithic.Icon(icon), Label: label}, run: run}
+// OpenAdd starts the full-window Add to playlist dialog without opening a menu.
+func (m *ItemMenu) OpenAdd(tracks ...model.Track) {
+	m.add.Tracks = append(m.add.Tracks[:0], tracks...)
+	m.add.Open = true
+	m.edit.Open = false
+	m.subdialog = true
+	m.done = false
 }
 
-func dangerItem(icon, label string, run func()) menuEntry {
+// OpenAt opens this menu at a window press point through the overlay host.
+func (m *ItemMenu) OpenAt(e *env.Env, target env.MenuTarget, at image.Point) {
+	if e == nil || e.Overlays == nil {
+		return
+	}
+	if target.Track != nil {
+		track := *target.Track
+		target.Track = &track
+	}
+	if target.Card != nil {
+		card := *target.Card
+		target.Card = &card
+	}
+	m.target = target
+	m.done = false
+	m.subdialog = false
+	m.add.Open = false
+	m.edit.Open = false
+	e.Overlays.OpenAt(&m.overlayTag, at, func(gtx layout.Context) layout.Dimensions {
+		return m.Layout(gtx, e, m.target)
+	})
+}
+
+func menuItem(icon *widget.Icon, label string, run func()) menuEntry {
+	return menuEntry{item: kit.MenuItem{Icon: icon, Label: label}, run: run}
+}
+
+func dangerItem(icon *widget.Icon, label string, run func()) menuEntry {
 	entry := menuItem(icon, label, run)
 	entry.item.Danger = true
 	return entry
@@ -105,61 +142,63 @@ func removeQueue(e *env.Env, index int) {
 }
 
 func trackEntries(m *ItemMenu, e *env.Env, target env.MenuTarget) []menuEntry {
-	t := *target.Track
-	provider := model.ProviderOf(t.VideoID)
+	track := *target.Track
+	provider := model.ProviderOf(track.VideoID)
 	entries := []menuEntry{
-		menuItem("playlist_play", "Play next", func() { act.PlayNext(e, []model.Track{t}, target.Context) }),
-		menuItem("queue", "Add to queue", func() { act.AddToQueue(e, []model.Track{t}, target.Context) }),
+		menuItem(look.Icon.Next, "Play next", func() { act.PlayNext(e, []model.Track{track}, target.Context) }),
+		menuItem(look.Icon.Queue, "Add to queue", func() { act.AddToQueue(e, []model.Track{track}, target.Context) }),
 	}
 	if provider != model.ProviderLocal && provider != model.ProviderRadio {
-		entries = append(entries, menuItem("radio", "Start radio", func() { act.StartRadio(e, "song", t.VideoID, t.Title) }))
+		entries = append(entries, menuItem(look.Icon.Radio, "Start radio", func() {
+			act.StartRadio(e, "song", track.VideoID, track.Title)
+		}))
 	}
-	add := menuItem("playlist_add", "Add to playlist", func() {
-		track := t
-		m.add.Track = &track
+	add := menuItem(look.Icon.PlaylistAdd, "Add to playlist", func() {
+		m.add.Tracks = []model.Track{track}
 		m.add.Open = true
 		m.subdialog = true
 	})
 	add.keep = true
 	entries = append(entries, add)
-	artistID, artistName := "", t.Artists
-	if t.ArtistID != nil {
-		artistID = *t.ArtistID
+
+	artistID, artistName := "", track.Artists
+	if track.ArtistID != nil {
+		artistID = *track.ArtistID
 	}
-	for _, artist := range t.ArtistRuns {
+	for _, artist := range track.ArtistRuns {
 		if artistID == "" && artist.ID != nil {
 			artistID, artistName = *artist.ID, artist.Text
 			break
 		}
 	}
 	if artistID != "" {
-		entries = append(entries, menuItem("person", "Go to artist", func() { act.OpenArtist(e, artistID, artistName) }))
+		entries = append(entries, menuItem(look.Icon.Person, "Go to artist", func() { act.OpenArtist(e, artistID, artistName) }))
 	}
-	if t.AlbumID != nil && *t.AlbumID != "" {
-		title := ""
-		if t.Album != nil {
-			title = *t.Album
-		}
-		entries = append(entries, menuItem("album", "Go to album", func() { act.OpenAlbum(e, *t.AlbumID, title) }))
+	if track.AlbumID != nil && *track.AlbumID != "" {
+		entries = append(entries, menuItem(look.Icon.Album, "Go to album", func() {
+			act.OpenAlbum(e, *track.AlbumID, textValue(track.Album))
+		}))
 	}
 	if provider != model.ProviderLocal && provider != model.ProviderRadio {
-		entries = append(entries, menuItem("download", "Download", func() { act.Download(e, t) }))
+		entries = append(entries, menuItem(look.Icon.Download, "Download", func() { act.Download(e, track) }))
 	}
 	if provider == model.ProviderYouTube || provider == model.ProviderSpotify || provider == model.ProviderSoundCloud || provider == model.ProviderTidal {
-		entries = append(entries, menuItem("link", "Copy link", func() { act.CopyLink(e, t) }))
+		entries = append(entries, menuItem(look.Icon.Share, "Copy link", func() { act.CopyLink(e, track) }))
 	}
 	if target.Context == "queue" {
-		entries = append(entries, dangerItem("remove", "Remove from queue", func() { removeQueue(e, target.QueueIndex) }))
-	} else if target.Context != "" && target.Context != "search" {
-		entries = append(entries, dangerItem("remove", "Remove from playlist", func() { act.RemoveFromPlaylist(e, target.Context, t) }))
+		entries = append(entries, dangerItem(look.Icon.Remove, "Remove from queue", func() { removeQueue(e, target.QueueIndex) }))
+	} else if target.Context != "" && target.Context != "search" && target.Context != "album" && target.Context != "library" {
+		entries = append(entries, dangerItem(look.Icon.Remove, "Remove from playlist", func() {
+			act.RemoveFromPlaylist(e, target.Context, track)
+		}))
 	}
-	if trackRateable(t) {
-		liked := t.Rating != nil && *t.Rating == model.RatingLike
-		label, rating, icon := "Like", model.RatingLike, "favorite_border"
+	if trackRateable(track) {
+		liked := trackLiked(track)
+		label, rating, icon := "Like", model.RatingLike, look.Icon.HeartOutline
 		if liked {
-			label, rating, icon = "Unlike", model.RatingIndifferent, "favorite"
+			label, rating, icon = "Unlike", model.RatingIndifferent, look.Icon.Heart
 		}
-		entries = append(entries, menuItem(icon, label, func() { act.Rate(e, t, rating) }))
+		entries = append(entries, menuItem(icon, label, func() { act.Rate(e, track, rating) }))
 	}
 	return entries
 }
@@ -181,14 +220,14 @@ func setPersonalSaved(e *env.Env, card model.BrowseItem, save bool) {
 		return
 	}
 	e.Store.UpdatePersonal(func(personal *state.Personal) bool {
-		for i, item := range personal.Saved {
+		for index, item := range personal.Saved {
 			if item.Kind != card.Kind || item.ID != card.ID {
 				continue
 			}
 			if save {
 				return false
 			}
-			personal.Saved = append(personal.Saved[:i], personal.Saved[i+1:]...)
+			personal.Saved = append(personal.Saved[:index], personal.Saved[index+1:]...)
 			return true
 		}
 		if !save {
@@ -232,34 +271,35 @@ func collectionEntries(e *env.Env, card model.BrowseItem) []menuEntry {
 	kind := strings.ToLower(card.Kind)
 	provider := model.ProviderOf(card.ID)
 	entries := []menuEntry{
-		menuItem("play", "Play", func() {
+		menuItem(look.Icon.Play, "Play", func() {
 			withCollection(e, card, func(items []model.Track) { act.PlayCollection(e, items, 0, card.ID, card.Title, false, nil) })
 		}),
-		menuItem("shuffle", "Shuffle", func() {
+		menuItem(look.Icon.OpenInNew, "Open", func() { act.OpenCard(e, card) }),
+		menuItem(look.Icon.Shuffle, "Shuffle", func() {
 			withCollection(e, card, func(items []model.Track) { act.PlayCollection(e, items, 0, card.ID, card.Title, true, nil) })
 		}),
-		menuItem("queue", "Add to queue", func() {
+		menuItem(look.Icon.Queue, "Add to queue", func() {
 			withCollection(e, card, func(items []model.Track) { act.AddToQueue(e, items, card.Title) })
 		}),
 	}
 	if provider != model.ProviderLocal && provider != model.ProviderRadio {
-		entries = append(entries, menuItem("radio", "Start radio", func() { act.StartRadio(e, kind, card.ID, card.Title) }))
+		entries = append(entries, menuItem(look.Icon.Radio, "Start radio", func() { act.StartRadio(e, kind, card.ID, card.Title) }))
 	}
 	if (kind == "album" || kind == "playlist" || kind == "mix") && provider != model.ProviderLocal && provider != model.ProviderRadio {
 		label := "Download album"
 		if kind != "album" {
 			label = "Download playlist"
 		}
-		entries = append(entries, menuItem("download", label, func() {
+		entries = append(entries, menuItem(look.Icon.Download, label, func() {
 			withCollection(e, card, func(items []model.Track) { act.DownloadCollection(e, card.Title, items) })
 		}))
 	}
 	saved := personalSaved(e, card)
-	saveLabel, saveIcon := "Save to library", "star"
+	label, icon := "Save to library", look.Icon.HeartOutline
 	if saved {
-		saveLabel, saveIcon = "Remove from library", "star"
+		label, icon = "Remove from library", look.Icon.Heart
 	}
-	entries = append(entries, menuItem(saveIcon, saveLabel, func() {
+	entries = append(entries, menuItem(icon, label, func() {
 		if kind == "album" {
 			toastCall(e, protocol.MethodSetAlbumSaved, protocol.SetAlbumSavedParams{PlaylistID: card.ID, Saved: !saved}, "Library updated")
 			return
@@ -267,20 +307,15 @@ func collectionEntries(e *env.Env, card model.BrowseItem) []menuEntry {
 		setPersonalSaved(e, card, !saved)
 	}))
 	if link := collectionLink(card); link != "" {
-		entries = append(entries, menuItem("link", "Copy link", func() { act.CopyText(e, link, "Link copied") }))
+		entries = append(entries, menuItem(look.Icon.Share, "Copy link", func() { act.CopyText(e, link, "Link copied") }))
 	}
 	return entries
 }
 
 func browseTrack(card model.BrowseItem) model.Track {
-	artists := ""
-	if card.Subtitle != nil {
-		artists = *card.Subtitle
-	}
 	return model.Track{
-		VideoID: card.ID, Title: card.Title, Artists: artists,
-		ArtistRuns: card.ArtistRuns, Duration: card.Duration,
-		Thumbnail: card.Thumbnail, PlayCount: card.PlayCount,
+		VideoID: card.ID, Title: card.Title, Artists: textValue(card.Subtitle), ArtistRuns: card.ArtistRuns,
+		Duration: card.Duration, Thumbnail: card.Thumbnail, PlayCount: card.PlayCount,
 		IsVideo: card.IsVideo, IsUpload: card.IsUpload, Explicit: card.Explicit,
 	}
 }
@@ -290,107 +325,112 @@ func targetEntries(m *ItemMenu, e *env.Env, target env.MenuTarget) []menuEntry {
 		return trackEntries(m, e, target)
 	}
 	if target.Card != nil {
-		if strings.EqualFold(target.Card.Kind, "song") || strings.EqualFold(target.Card.Kind, "track") {
+		if browseIsTrack(*target.Card) {
 			track := browseTrack(*target.Card)
 			target.Track = &track
 			return trackEntries(m, e, target)
 		}
 		return collectionEntries(e, *target.Card)
 	}
-	if target.Playlist != nil {
-		id, title := target.Context, "Playlist"
-		if target.Playlist.Title != nil {
-			title = *target.Playlist.Title
-		}
-		card := model.BrowseItem{Kind: "playlist", ID: id, Title: title, Thumbnail: target.Playlist.Thumbnail}
-		entries := collectionEntries(e, card)
-		if target.Playlist.Owned {
-			edit := menuItem("edit", "Edit playlist", func() {
-				m.edit.Page = target.Playlist
-				m.edit.Open = true
-				m.subdialog = true
-			})
-			edit.keep = true
-			entries = append(entries, edit)
-			entries = append(entries,
-				menuItem("album", "Change cover", func() {
-					act.Call[protocol.SetPlaylistCoverResult](e, protocol.MethodSetPlaylistCover, protocol.SetPlaylistCoverParams{PlaylistID: id, Pick: true}, func(result protocol.SetPlaylistCoverResult, err error) {
-						if err != nil {
-							if e.Toast != nil {
-								e.Toast(err.Error(), env.ToastError)
-							}
-							return
-						}
-						target.Playlist.Cover = result.Cover
-						target.Playlist.Thumbnail = result.Thumbnail
-						if e.Toast != nil {
-							e.Toast("Playlist cover changed", env.ToastSuccess)
-						}
-					})
-				}),
-				dangerItem("delete", "Delete playlist", func() {
-					if e.Confirm == nil {
-						return
-					}
-					confirmTitle, body, typeToConfirm := deleteConfirmCopy(id, title)
-					e.Confirm(confirmTitle, body, "Delete", typeToConfirm, func() {
-						act.Call[protocol.Null](e, protocol.MethodDeletePlaylist, protocol.PlaylistIDParams{PlaylistID: id}, func(_ protocol.Null, err error) {
-							if err != nil {
-								if e.Toast != nil {
-									e.Toast(err.Error(), env.ToastError)
-								}
-								return
-							}
-							if e.Nav != nil {
-								e.Nav.Back()
-							}
-						})
-					})
-				}),
-			)
-		}
+	if target.Playlist == nil {
+		return nil
+	}
+	id, title := target.Context, playlistTitle(target.Playlist)
+	card := model.BrowseItem{Kind: "playlist", ID: id, Title: title, Thumbnail: target.Playlist.Thumbnail}
+	entries := collectionEntries(e, card)
+	if !target.Playlist.Owned {
 		return entries
 	}
-	return nil
+	edit := menuItem(nil, "Edit playlist", func() {
+		m.edit.Page = target.Playlist
+		m.edit.Open = true
+		m.subdialog = true
+	})
+	edit.keep = true
+	entries = append(entries, edit,
+		menuItem(look.Icon.Album, "Change cover", func() {
+			act.Call[protocol.SetPlaylistCoverResult](e, protocol.MethodSetPlaylistCover, protocol.SetPlaylistCoverParams{PlaylistID: id, Pick: true}, func(result protocol.SetPlaylistCoverResult, err error) {
+				if err != nil {
+					if e.Toast != nil {
+						e.Toast(err.Error(), env.ToastError)
+					}
+					return
+				}
+				target.Playlist.Cover = result.Cover
+				target.Playlist.Thumbnail = result.Thumbnail
+				if e.Toast != nil {
+					e.Toast("Playlist cover changed", env.ToastSuccess)
+				}
+			})
+		}),
+		dangerItem(look.Icon.Remove, "Delete playlist", func() {
+			if e.Confirm == nil {
+				return
+			}
+			confirmTitle, body, proof := deleteConfirmCopy(id, title)
+			e.Confirm(confirmTitle, body, "Delete", proof, func() {
+				act.Call[protocol.Null](e, protocol.MethodDeletePlaylist, protocol.PlaylistIDParams{PlaylistID: id}, func(_ protocol.Null, err error) {
+					if err != nil {
+						if e.Toast != nil {
+							e.Toast(err.Error(), env.ToastError)
+						}
+						return
+					}
+					if e.Nav != nil {
+						e.Nav.Back()
+					}
+				})
+			})
+		}),
+	)
+	return entries
 }
 
-// Layout renders the target menu or its Add to playlist dialog.
+// Layout draws the current menu. Full-window subdialogs are drawn by LayoutDialogs.
 func (m *ItemMenu) Layout(gtx layout.Context, e *env.Env, target env.MenuTarget) layout.Dimensions {
-	if m.subdialog && !m.add.Open && !m.edit.Open {
-		m.subdialog = false
-		m.done = true
+	if m.subdialog {
 		return layout.Dimensions{}
 	}
-	if m.add.Open {
-		dims := m.add.Layout(gtx, e)
-		if !m.add.Open {
-			m.done = true
-			m.subdialog = false
-		}
-		return dims
-	}
-	if m.edit.Open {
-		dims := m.edit.Layout(gtx, e)
-		if !m.edit.Open {
-			m.done = true
-			m.subdialog = false
-		}
-		return dims
-	}
 	entries := targetEntries(m, e, target)
-	items := make([]lithic.MenuItem, len(entries))
-	for i := range entries {
-		items[i] = entries[i].item
+	items := make([]kit.MenuItem, len(entries))
+	for index := range entries {
+		items[index] = entries[index].item
 	}
-	dims := m.menu.Layout(gtx, e.Th, items)
+	dims := m.menu.Layout(gtx, e.Th.Theme, items)
 	if index, ok := m.menu.Clicked(gtx); ok && index >= 0 && index < len(entries) {
 		entry := entries[index]
 		if entry.run != nil {
 			entry.run()
 		}
-		if !entry.keep {
+		if entry.keep {
+			if e.Overlays != nil {
+				e.Overlays.Close(&m.overlayTag)
+			}
+		} else {
 			m.done = true
+			if e.Overlays != nil {
+				e.Overlays.Close(&m.overlayTag)
+			}
 		}
 	}
 	return dims
+}
+
+// LayoutDialogs draws menu-owned dialogs in full-window coordinates.
+func (m *ItemMenu) LayoutDialogs(gtx layout.Context, e *env.Env) layout.Dimensions {
+	if !m.subdialog {
+		return layout.Dimensions{}
+	}
+	var dimensions layout.Dimensions
+	switch {
+	case m.add.Open:
+		dimensions = m.add.Layout(gtx, e)
+	case m.edit.Open:
+		dimensions = m.edit.Layout(gtx, e)
+	}
+	if !m.add.Open && !m.edit.Open {
+		m.subdialog = false
+		m.done = true
+	}
+	return dimensions
 }

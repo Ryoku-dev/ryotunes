@@ -2,22 +2,26 @@
 package shell
 
 import (
+	"image"
 	"strings"
 	"sync"
 
+	"github.com/ryoku-dev/ryotunes/internal/client/ui/demo"
 	"github.com/ryoku-dev/ryotunes/internal/client/ui/env"
 )
 
 type navigator struct {
 	mu          sync.RWMutex
 	stack       []env.Route
+	forward     []env.Route
 	panel       env.Panel
+	nowPlaying  bool
 	mini        bool
-	palette     bool
 	focusSearch bool
 	invalidate  func()
 	onChange    func()
 	onMini      func(bool)
+	onSound     func(image.Rectangle)
 }
 
 func newNavigator(initial env.Route, panel env.Panel, mini bool, invalidate func()) *navigator {
@@ -48,6 +52,8 @@ func (n *navigator) Push(route env.Route) {
 	}
 	n.mu.Lock()
 	n.stack = append(n.stack, route)
+	n.forward = nil
+	n.nowPlaying = false
 	n.mu.Unlock()
 	n.changed()
 }
@@ -62,20 +68,56 @@ func (n *navigator) Replace(route env.Route) {
 	} else {
 		n.stack[len(n.stack)-1] = route
 	}
+	n.nowPlaying = false
 	n.mu.Unlock()
 	n.changed()
 }
 
 func (n *navigator) Back() bool {
 	n.mu.Lock()
+	if n.nowPlaying {
+		n.nowPlaying = false
+		n.mu.Unlock()
+		n.changed()
+		return true
+	}
 	if len(n.stack) <= 1 {
 		n.mu.Unlock()
 		return false
 	}
+	current := n.stack[len(n.stack)-1]
 	n.stack = n.stack[:len(n.stack)-1]
+	n.forward = append(n.forward, current)
 	n.mu.Unlock()
 	n.changed()
 	return true
+}
+
+func (n *navigator) Forward() bool {
+	n.mu.Lock()
+	if len(n.forward) == 0 {
+		n.mu.Unlock()
+		return false
+	}
+	index := len(n.forward) - 1
+	n.stack = append(n.stack, n.forward[index])
+	n.forward = n.forward[:index]
+	n.nowPlaying = false
+	n.mu.Unlock()
+	n.changed()
+	return true
+}
+
+func (n *navigator) CanBack() bool {
+	n.mu.RLock()
+	defer n.mu.RUnlock()
+	return n.nowPlaying || len(n.stack) > 1
+}
+
+func (n *navigator) CanForward() bool {
+	n.mu.RLock()
+	defer n.mu.RUnlock()
+	return len(n.forward) > 0
 }
 
 func (n *navigator) root(route env.Route) {
@@ -84,6 +126,8 @@ func (n *navigator) root(route env.Route) {
 	}
 	n.mu.Lock()
 	n.stack = []env.Route{route}
+	n.forward = nil
+	n.nowPlaying = false
 	n.mu.Unlock()
 	n.changed()
 }
@@ -127,6 +171,30 @@ func (n *navigator) Panel() env.Panel {
 	return n.panel
 }
 
+func (n *navigator) NowPlaying() bool {
+	n.mu.RLock()
+	defer n.mu.RUnlock()
+	return n.nowPlaying
+}
+
+func (n *navigator) ToggleNowPlaying() {
+	n.mu.Lock()
+	n.nowPlaying = !n.nowPlaying
+	n.mu.Unlock()
+	n.changed()
+}
+
+func (n *navigator) closeNowPlaying() bool {
+	n.mu.Lock()
+	wasOpen := n.nowPlaying
+	n.nowPlaying = false
+	n.mu.Unlock()
+	if wasOpen {
+		n.changed()
+	}
+	return wasOpen
+}
+
 func (n *navigator) ToggleMini() {
 	n.mu.Lock()
 	n.mini = !n.mini
@@ -136,20 +204,6 @@ func (n *navigator) ToggleMini() {
 	if n.onMini != nil {
 		n.onMini(open)
 	}
-}
-
-func (n *navigator) OpenPalette() {
-	n.mu.Lock()
-	n.palette = true
-	n.mu.Unlock()
-	n.redraw()
-}
-
-func (n *navigator) togglePalette() {
-	n.mu.Lock()
-	n.palette = !n.palette
-	n.mu.Unlock()
-	n.redraw()
 }
 
 func (n *navigator) FocusSearch() {
@@ -167,21 +221,10 @@ func (n *navigator) takeSearchFocus() bool {
 	return value
 }
 
-func (n *navigator) paletteOpen() bool {
-	n.mu.RLock()
-	defer n.mu.RUnlock()
-	return n.palette
-}
-
-func (n *navigator) closePalette() bool {
-	n.mu.Lock()
-	wasOpen := n.palette
-	n.palette = false
-	n.mu.Unlock()
-	if wasOpen {
-		n.redraw()
+func (n *navigator) OpenSound(anchor image.Rectangle) {
+	if n.onSound != nil {
+		n.onSound(anchor)
 	}
-	return wasOpen
 }
 
 func (n *navigator) miniOpen() bool {
@@ -239,17 +282,40 @@ func parseRoute(value string) env.Route {
 	return route
 }
 
+func initialRoute(stored string, options Options) env.Route {
+	route := parseRoute(stored)
+	if options.Route != "" {
+		route = parseRoute(options.Route)
+	}
+	if options.Query != "" {
+		route = env.Route{Kind: env.RouteSearch, Query: options.Query, Title: "Search"}
+	}
+	if options.Demo && route.ID == "" {
+		switch route.Kind {
+		case env.RouteArtist:
+			route.ID = demo.ArtistID
+		case env.RouteAlbum:
+			route.ID = demo.AlbumID
+		case env.RoutePlaylist:
+			route.ID = demo.PlaylistID
+		}
+	}
+	return route
+}
+
 func parsePanel(value string) env.Panel {
 	switch value {
 	case "queue":
 		return env.PanelQueue
 	case "lyrics":
 		return env.PanelLyrics
-	case "now", "now-playing":
-		return env.PanelNowPlaying
 	case "listen", "listen-together":
 		return env.PanelListen
 	default:
 		return env.PanelNone
 	}
+}
+
+func panelOpensNowPlaying(value string) bool {
+	return value == "now" || value == "now-playing"
 }

@@ -6,9 +6,10 @@ import (
 	"gioui.org/layout"
 	"gioui.org/unit"
 
-	"github.com/ryoku-dev/ryotunes/internal/client/lithic"
+	"github.com/ryoku-dev/ryoku/docs/lithic/library/go/kit"
 	"github.com/ryoku-dev/ryotunes/internal/client/ui/act"
 	"github.com/ryoku-dev/ryotunes/internal/client/ui/env"
+	"github.com/ryoku-dev/ryotunes/internal/client/ui/look"
 	"github.com/ryoku-dev/ryotunes/internal/client/ui/widgets"
 	"github.com/ryoku-dev/ryotunes/internal/model"
 	"github.com/ryoku-dev/ryotunes/internal/protocol"
@@ -41,7 +42,6 @@ type trackState struct {
 	paging       bool
 	error        string
 	request      uint64
-	list         widgets.TrackList
 }
 
 type cardState struct {
@@ -52,22 +52,21 @@ type cardState struct {
 	paging       bool
 	error        string
 	request      uint64
-	grid         widgets.CardGrid
-	more         lithic.Button
+	grid         widgets.Grid
 }
 
 type page struct {
-	route          env.Route
 	query          string
-	list           layout.List
+	scroll         look.Scroller
 	provider       model.Provider
 	spotifyBlocked bool
 	selected       int
-	filters        lithic.Filters
-	retry          lithic.Button
-	topOpen        lithic.Button
-	topHero        widgets.Hero
-	allSongs       widgets.TrackList
+	filters        kit.Filters
+	retry          kit.Plaque
+	topPlay        kit.Plaque
+	topArt         look.ArtView
+	topTable       widgets.TrackTable
+	tracksTable    widgets.TrackTable
 	shelves        map[string]*widgets.Shelf
 
 	mixed  mixedState
@@ -78,9 +77,7 @@ type page struct {
 // New returns a retained Search page for the route query.
 func New(r env.Route) env.Page {
 	return &page{
-		route:   r,
 		query:   strings.Join(strings.Fields(r.Query), " "),
-		list:    layout.List{Axis: layout.Vertical},
 		shelves: make(map[string]*widgets.Shelf),
 	}
 }
@@ -97,25 +94,13 @@ func (p *page) Refresh(e *env.Env) {
 
 func (p *page) invalidateResults() {
 	p.mixed.request++
-	p.mixed.result = model.SearchAll{}
-	p.mixed.loaded = false
-	p.mixed.loading = false
-	p.mixed.error = ""
+	p.mixed = mixedState{request: p.mixed.request}
 	p.tracks.request++
-	p.tracks.items = nil
-	p.tracks.continuation = nil
-	p.tracks.loaded = false
-	p.tracks.loading = false
-	p.tracks.paging = false
-	p.tracks.error = ""
-	for i := range p.cards {
-		p.cards[i].request++
-		p.cards[i].items = nil
-		p.cards[i].continuation = nil
-		p.cards[i].loaded = false
-		p.cards[i].loading = false
-		p.cards[i].paging = false
-		p.cards[i].error = ""
+	p.tracks = trackState{request: p.tracks.request}
+	for index := range p.cards {
+		p.cards[index].request++
+		request, grid := p.cards[index].request, p.cards[index].grid
+		p.cards[index] = cardState{request: request, grid: grid}
 	}
 }
 
@@ -134,27 +119,38 @@ func (p *page) Layout(gtx layout.Context, e *env.Env) layout.Dimensions {
 	if !blocked && p.query != "" && !p.selectedLoaded() && !p.selectedLoading() {
 		p.loadSelected(e)
 	}
-
+	inset := look.ContentInset(e.Th.Class)
+	width := int(gtx.Metric.PxToDp(gtx.Constraints.Max.X - 2*gtx.Dp(inset)))
 	children := []layout.Widget{
-		widgets.PageHeader(e, "Search", searchSentence(p.query), nil),
+		widgets.PageHeader(e, searchTitle(p.query), "", nil),
 		p.filtersLayout(e),
 	}
 	if blocked {
-		children = append(children, widgets.EmptyState(e, "login", "Sign in to Spotify", "Sign in from Settings to search Spotify."))
+		children = append(children, widgets.EmptyState(e, look.Icon.Person, "Sign in to Spotify", "Sign in from Settings to search Spotify."))
 	} else {
-		children = append(children, p.selectedContent(e))
+		children = append(children, p.contentWidgets(e, max(1, width))...)
 	}
-	inset := layout.Inset{Top: unit.Dp(34), Right: unit.Dp(34), Bottom: unit.Dp(55), Left: unit.Dp(34)}
-	return inset.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-		return p.list.Layout(gtx, len(children), func(gtx layout.Context, index int) layout.Dimensions {
-			return layout.Inset{Bottom: unit.Dp(34)}.Layout(gtx, children[index])
+	return layout.Inset{Bottom: unit.Dp(21)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+		return p.scroll.Layout(gtx, e.Th, len(children), func(gtx layout.Context, index int) layout.Dimensions {
+			if index >= len(children)-2 {
+				p.loadSelectedMore(e)
+			}
+			bottom := unit.Dp(34)
+			if index == len(children)-1 {
+				bottom = 0
+			}
+			if index == 0 {
+				return layout.Inset{Bottom: bottom}.Layout(gtx, children[index])
+			}
+			return layout.Inset{Right: inset, Bottom: bottom, Left: inset}.Layout(gtx, children[index])
 		})
 	})
 }
 
 func (p *page) handleControls(gtx layout.Context, e *env.Env, blocked bool) {
-	if selected, changed := p.filters.Changed(gtx); changed && selected >= 0 && selected < len(searchTabs) {
+	if selected, changed := p.filters.Changed(); changed && selected >= 0 && selected < len(searchTabs) {
 		p.selected = selected
+		p.scroll.ScrollTo(0)
 		if !blocked {
 			p.loadSelected(e)
 		}
@@ -162,15 +158,11 @@ func (p *page) handleControls(gtx layout.Context, e *env.Env, blocked bool) {
 	if p.retry.Clicked(gtx) && !blocked {
 		p.Refresh(e)
 	}
-	if p.topOpen.Clicked(gtx) && len(p.mixed.result.Top) != 0 {
+	if p.topPlay.Clicked(gtx) && len(p.mixed.result.Top) != 0 {
 		p.activateTop(e, p.mixed.result.Top[0])
 	}
-	for index := range p.cards {
-		if p.cards[index].more.Clicked(gtx) && !blocked {
-			p.loadCardsMore(e, index)
-		}
-	}
 }
+
 func (p *page) activateTop(e *env.Env, item model.BrowseItem) {
 	switch strings.ToLower(item.Kind) {
 	case "album", "single", "ep":
@@ -197,41 +189,31 @@ func (p *page) activateTop(e *env.Env, item model.BrowseItem) {
 func (p *page) filtersLayout(e *env.Env) layout.Widget {
 	return func(gtx layout.Context) layout.Dimensions {
 		labels := make([]string, len(searchTabs))
-		for i := range searchTabs {
-			labels[i] = searchTabs[i].label
+		for index := range searchTabs {
+			labels[index] = searchTabs[index].label
 		}
-		var counts []int
-		if p.mixed.loaded {
-			result := p.mixed.result
-			counts = []int{
-				mixedCount(result), countSongs(result.Songs),
-				len(result.Albums), len(result.Artists), len(result.Playlists),
-			}
-			if p.tracks.loaded {
-				counts[1] = len(p.tracks.items)
-			}
-			for i := range p.cards {
-				if p.cards[i].loaded {
-					counts[i+2] = len(p.cards[i].items)
-				}
-			}
-		}
-		return p.filters.Layout(gtx, e.Th, labels, counts, p.selected)
+		p.filters.Labels = labels
+		p.filters.Counts = p.resultCounts()
+		p.filters.Selected = p.selected
+		return p.filters.Layout(gtx, e.Th.Theme)
 	}
 }
 
-func (p *page) selectedContent(e *env.Env) layout.Widget {
-	if p.query == "" {
-		return widgets.EmptyState(e, "search", "Search Ryotunes", "Search for a song, album, artist, or playlist.")
+func (p *page) resultCounts() []int {
+	if !p.mixed.loaded {
+		return nil
 	}
-	switch p.selected {
-	case 0:
-		return p.mixedLayout(e)
-	case 1:
-		return p.tracksLayout(e)
-	default:
-		return p.cardsLayout(e, p.selected-2)
+	result := p.mixed.result
+	counts := []int{mixedCount(result), countSongs(result.Songs), len(result.Albums), len(result.Artists), len(result.Playlists)}
+	if p.tracks.loaded {
+		counts[1] = len(p.tracks.items)
 	}
+	for index := range p.cards {
+		if p.cards[index].loaded {
+			counts[index+2] = len(p.cards[index].items)
+		}
+	}
+	return counts
 }
 
 func (p *page) selectedLoaded() bool {
@@ -256,9 +238,18 @@ func (p *page) selectedLoading() bool {
 	}
 }
 
-func searchSentence(query string) string {
-	if query == "" {
-		return "Songs, albums, artists and playlists in one search."
+func (p *page) loadSelectedMore(e *env.Env) {
+	switch p.selected {
+	case 1:
+		p.loadTracksMore(e)
+	case 2, 3, 4:
+		p.loadCardsMore(e, p.selected-2)
 	}
-	return "Results for “" + query + "”."
+}
+
+func searchTitle(query string) string {
+	if query == "" {
+		return "Search results"
+	}
+	return "Results for “" + query + "”"
 }

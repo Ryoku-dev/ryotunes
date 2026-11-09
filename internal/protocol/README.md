@@ -25,6 +25,7 @@
 - `search_all`, `search_all_more`: mixed search and continuation.
 - `search_cards`, `search_cards_page`, `search_cards_more`: album/artist/playlist card search.
 - `get_album`, `get_artist`, `get_sc_user`, `get_browse_grid`: detail and grid browsing.
+- `set_artist_subscribed`: subscribe or unsubscribe from a YouTube Music artist channel.
 - `get_library`, `get_library_albums`, `get_library_artists`: provider library cards.
 - `get_local_library`, `add_local_folder`, `remove_local_folder`: local scan roots and catalogue.
 - `get_playlist`, `get_playlist_more`, `playlist_index`, `sync_playlist_index`: playlist reads and membership index.

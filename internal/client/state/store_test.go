@@ -39,6 +39,23 @@ func TestPositionInterpolationAndPause(t *testing.T) {
 	}
 }
 
+func TestPositionEventUpdatesRawPositionDuringSeekHold(t *testing.T) {
+	base := time.Unix(1000, 0)
+	store := New(protocol.Snapshot{Playback: model.PlaybackSnapshot{Duration: 20, Paused: true}})
+	held := 12.0
+	store.SetSeekDrag(&held)
+
+	if err := store.ApplyAt(protocol.EventPosition, json.RawMessage(`{"position":9}`), base); err != nil {
+		t.Fatal(err)
+	}
+	if got := store.PositionAt(base); got != held {
+		t.Fatalf("shown position = %v, want held position %v", got, held)
+	}
+	if got := store.Snapshot().Playback.Position; got != 9 {
+		t.Fatalf("raw position = %v, want daemon position 9", got)
+	}
+}
+
 func TestSpotifyRestoreEventWinsOpeningSnapshot(t *testing.T) {
 	store := NewEmpty()
 	if err := store.Apply(protocol.EventSpotifyAuth, json.RawMessage(`{"state":"restored"}`)); err != nil {

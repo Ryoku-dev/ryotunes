@@ -4,29 +4,33 @@ import (
 	"strings"
 
 	"gioui.org/layout"
+	"gioui.org/unit"
 
-	"github.com/ryoku-dev/ryotunes/internal/client/lithic"
+	"github.com/ryoku-dev/ryoku/docs/lithic/library/go/kit"
 	"github.com/ryoku-dev/ryotunes/internal/client/ui/act"
 	"github.com/ryoku-dev/ryotunes/internal/client/ui/env"
+	"github.com/ryoku-dev/ryotunes/internal/client/ui/look"
 	"github.com/ryoku-dev/ryotunes/internal/model"
 	"github.com/ryoku-dev/ryotunes/internal/protocol"
 )
 
-// AddToPlaylistDialog lets a track be added to an existing or new playlist.
+// AddToPlaylistDialog adds one or more tracks to an existing or new playlist.
 type AddToPlaylistDialog struct {
-	Open  bool
-	Track *model.Track
+	Open   bool
+	Tracks []model.Track
 
-	dialog    lithic.Dialog
-	menu      lithic.Menu
-	newTitle  lithic.TextField
-	create    lithic.Button
-	cancel    lithic.Button
-	playlists []model.BrowseItem
-	loading   bool
-	loaded    bool
-	err       string
-	wasOpen   bool
+	dialog     kit.Dialog
+	newTitle   kit.TextField
+	create     kit.Plaque
+	cancel     kit.Plaque
+	scroll     look.Scroller
+	buttons    map[string]*kit.Plaque
+	playlists  []model.BrowseItem
+	loading    bool
+	loaded     bool
+	err        string
+	wasOpen    bool
+	createOnly bool
 }
 
 func (d *AddToPlaylistDialog) load(e *env.Env) {
@@ -41,17 +45,26 @@ func (d *AddToPlaylistDialog) load(e *env.Env) {
 			d.err = err.Error()
 			return
 		}
-		d.playlists = items[:0]
+		d.playlists = d.playlists[:0]
 		for _, item := range items {
 			if model.IsRyotunesOwn(item.ID) && !strings.HasPrefix(item.ID, model.LocalPlaylistPrefix) {
 				continue
 			}
-			d.playlists = append(d.playlists, item)
+			if strings.EqualFold(item.Kind, "playlist") || strings.HasPrefix(item.ID, model.LocalPlaylistPrefix) {
+				d.playlists = append(d.playlists, item)
+			}
 		}
 	})
 }
 
-func addTrackToPlaylist(e *env.Env, playlistID string, track model.Track, done func(bool)) {
+func addTracksToPlaylist(e *env.Env, playlistID string, tracks []model.Track, index int, done func(bool)) {
+	if index >= len(tracks) {
+		if e.Toast != nil {
+			e.Toast("Added to playlist", env.ToastSuccess)
+		}
+		done(true)
+		return
+	}
 	finish := func(_ protocol.Null, err error) {
 		if err != nil {
 			if e.Toast != nil {
@@ -60,24 +73,21 @@ func addTrackToPlaylist(e *env.Env, playlistID string, track model.Track, done f
 			done(false)
 			return
 		}
-		if e.Toast != nil {
-			e.Toast("Added to playlist", env.ToastSuccess)
-		}
-		done(true)
+		addTracksToPlaylist(e, playlistID, tracks, index+1, done)
 	}
 	if strings.HasPrefix(playlistID, model.LocalPlaylistPrefix) {
-		act.Call[protocol.Null](e, protocol.MethodAddToLocalPlaylist, protocol.AddToLocalPlaylistParams{PlaylistID: playlistID, Item: track}, finish)
+		act.Call[protocol.Null](e, protocol.MethodAddToLocalPlaylist, protocol.AddToLocalPlaylistParams{PlaylistID: playlistID, Item: tracks[index]}, finish)
 		return
 	}
-	act.Call[protocol.Null](e, protocol.MethodAddToPlaylist, protocol.PlaylistTrackParams{PlaylistID: playlistID, VideoID: track.VideoID}, finish)
+	act.Call[protocol.Null](e, protocol.MethodAddToPlaylist, protocol.PlaylistTrackParams{PlaylistID: playlistID, VideoID: tracks[index].VideoID}, finish)
 }
 
 func (d *AddToPlaylistDialog) add(e *env.Env, playlistID string) {
-	if d.Track == nil || playlistID == "" {
+	if playlistID == "" || len(d.Tracks) == 0 {
 		return
 	}
-	track := *d.Track
-	addTrackToPlaylist(e, playlistID, track, func(ok bool) {
+	tracks := append([]model.Track(nil), d.Tracks...)
+	addTracksToPlaylist(e, playlistID, tracks, 0, func(ok bool) {
 		if ok {
 			d.Open = false
 			d.dialog.Open = false
@@ -86,13 +96,11 @@ func (d *AddToPlaylistDialog) add(e *env.Env, playlistID string) {
 }
 
 func (d *AddToPlaylistDialog) createPlaylist(e *env.Env) {
-	if d.Track == nil {
-		return
-	}
 	title := strings.TrimSpace(d.newTitle.Text())
 	if title == "" {
 		title = "New playlist"
 	}
+	tracks := append([]model.Track(nil), d.Tracks...)
 	act.Call[protocol.PlaylistIDResult](e, protocol.MethodCreatePlaylist, protocol.CreatePlaylistParams{Title: title}, func(id protocol.PlaylistIDResult, err error) {
 		if err != nil {
 			if e.Toast != nil {
@@ -100,68 +108,107 @@ func (d *AddToPlaylistDialog) createPlaylist(e *env.Env) {
 			}
 			return
 		}
-		d.add(e, string(id))
+		if len(tracks) > 0 {
+			d.add(e, string(id))
+			return
+		}
+		if e.Toast != nil {
+			e.Toast("Playlist created", env.ToastSuccess)
+		}
+		d.Open = false
+		d.dialog.Open = false
+		if e.Nav != nil {
+			e.Nav.Push(env.Route{Kind: env.RoutePlaylist, ID: string(id), Title: title})
+		}
 	})
+}
+
+func (d *AddToPlaylistDialog) playlistButton(id string) *kit.Plaque {
+	if d.buttons == nil {
+		d.buttons = make(map[string]*kit.Plaque)
+	}
+	button := d.buttons[id]
+	if button == nil {
+		button = new(kit.Plaque)
+		d.buttons[id] = button
+	}
+	return button
 }
 
 func (d *AddToPlaylistDialog) body(gtx layout.Context, e *env.Env) layout.Dimensions {
 	if d.create.Clicked(gtx) {
 		d.createPlaylist(e)
 	}
-	children := []layout.FlexChild{
-		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			return d.newTitle.Layout(gtx, e.Th, "New playlist", "New playlist", "Create a playlist and add this song.", "")
-		}),
-		layout.Rigid(layout.Spacer{Height: e.Th.Sp.S2}.Layout),
-		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			return d.create.Layout(gtx, e.Th, lithic.Line, lithic.Icon("add"), "Create playlist")
-		}),
-		layout.Rigid(layout.Spacer{Height: e.Th.Sp.S4}.Layout),
+	d.newTitle.Label = "New playlist"
+	d.newTitle.Placeholder = "Playlist title"
+	d.newTitle.Help = "Create a playlist and add these songs."
+	if d.createOnly {
+		d.newTitle.Help = "Create an empty playlist."
 	}
+	d.create.Kind, d.create.Icon, d.create.Label = kit.PlaqueLine, look.Icon.Add, "Create playlist"
+	children := []layout.FlexChild{
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions { return d.newTitle.Layout(gtx, e.Th.Theme) }),
+		layout.Rigid(layout.Spacer{Height: unit.Dp(8)}.Layout),
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions { return d.create.Layout(gtx, e.Th.Theme) }),
+	}
+	if d.createOnly {
+		return layout.Flex{Axis: layout.Vertical, Alignment: layout.Start}.Layout(gtx, children...)
+	}
+	children = append(children, layout.Rigid(layout.Spacer{Height: unit.Dp(21)}.Layout))
 	switch {
 	case d.loading:
-		children = append(children, layout.Rigid(lithic.Text(e.Th, e.Th.T.Body, e.Th.R.Fg2, "Loading playlists…")))
+		children = append(children, layout.Rigid(kit.Text(e.Th.Theme, e.Th.T.Body, e.Th.R.Fg2, "Loading playlists…")))
 	case d.err != "":
-		children = append(children, layout.Rigid(lithic.Text(e.Th, e.Th.T.Body, e.Th.R.Jasper, d.err)))
+		children = append(children, layout.Rigid(kit.Text(e.Th.Theme, e.Th.T.Body, e.Th.R.Jasper, d.err)))
 	case len(d.playlists) == 0:
-		children = append(children, layout.Rigid(lithic.Text(e.Th, e.Th.T.Body, e.Th.R.Fg2, "No playlists yet.")))
+		children = append(children, layout.Rigid(kit.Text(e.Th.Theme, e.Th.T.Body, e.Th.R.Fg2, "No playlists yet.")))
 	default:
-		items := make([]lithic.MenuItem, len(d.playlists))
-		for i, playlist := range d.playlists {
-			items[i] = lithic.MenuItem{Icon: lithic.Icon("playlist_play"), Label: playlist.Title}
-		}
 		children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			dims := d.menu.Layout(gtx, e.Th, items)
-			if index, ok := d.menu.Clicked(gtx); ok && index >= 0 && index < len(d.playlists) {
-				d.add(e, d.playlists[index].ID)
-			}
-			return dims
+			gtx.Constraints.Max.Y = min(gtx.Constraints.Max.Y, gtx.Dp(280))
+			return d.scroll.Layout(gtx, e.Th, len(d.playlists), func(gtx layout.Context, index int) layout.Dimensions {
+				playlist := d.playlists[index]
+				button := d.playlistButton(playlist.ID)
+				if button.Clicked(gtx) {
+					d.add(e, playlist.ID)
+				}
+				button.Kind, button.Icon, button.Label = kit.PlaqueQuiet, look.Icon.Playlist, playlist.Title
+				return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+					layout.Rigid(func(gtx layout.Context) layout.Dimensions { return button.Layout(gtx, e.Th.Theme) }),
+					layout.Rigid(layout.Spacer{Height: unit.Dp(4)}.Layout),
+				)
+			})
 		}))
 	}
-	return layout.Flex{Axis: layout.Vertical}.Layout(gtx, children...)
+	return layout.Flex{Axis: layout.Vertical, Alignment: layout.Start}.Layout(gtx, children...)
 }
 
-// Layout renders the Add to playlist dialog and performs its daemon calls.
+// Layout draws the Add to playlist dialog and dispatches its actions.
 func (d *AddToPlaylistDialog) Layout(gtx layout.Context, e *env.Env) layout.Dimensions {
 	if d.Open && !d.wasOpen {
 		d.loaded, d.loading, d.err = false, false, ""
 		d.playlists = nil
+		d.buttons = nil
 		d.newTitle.SetText("New playlist")
 	}
 	d.wasOpen = d.Open
-	if d.Open {
+	if d.Open && !d.createOnly {
 		d.load(e)
 	}
 	if d.cancel.Clicked(gtx) {
 		d.Open = false
 	}
+	d.cancel.Kind, d.cancel.Label = kit.PlaqueQuiet, "Cancel"
 	d.dialog.Open = d.Open
-	dims := d.dialog.Layout(gtx, e.Th, "Add to playlist", func(gtx layout.Context) layout.Dimensions {
-		return d.body(gtx, e)
-	}, func(gtx layout.Context) layout.Dimensions {
-		return d.cancel.Layout(gtx, e.Th, lithic.Quiet, nil, "Cancel")
-	})
-	if d.dialog.Closed(gtx) {
+	d.dialog.Width = 560
+	title := "Add to playlist"
+	if d.createOnly {
+		title = "New playlist"
+	}
+	dims := d.dialog.Layout(gtx, e.Th.Theme, title,
+		func(gtx layout.Context) layout.Dimensions { return d.body(gtx, e) },
+		func(gtx layout.Context) layout.Dimensions { return d.cancel.Layout(gtx, e.Th.Theme) },
+	)
+	if d.dialog.Closed() {
 		d.Open = false
 	}
 	d.Open = d.dialog.Open
@@ -171,25 +218,41 @@ func (d *AddToPlaylistDialog) Layout(gtx layout.Context, e *env.Env) layout.Dime
 	return dims
 }
 
-// EditPlaylistDialog edits owned playlist metadata, cover, and deletion.
+// NewPlaylistDialog creates an empty playlist and opens it.
+type NewPlaylistDialog struct {
+	Open bool
+	add  AddToPlaylistDialog
+}
+
+// Layout draws the new playlist dialog and dispatches its actions.
+func (d *NewPlaylistDialog) Layout(gtx layout.Context, e *env.Env) layout.Dimensions {
+	d.add.Open = d.Open
+	d.add.Tracks = nil
+	d.add.createOnly = true
+	dimensions := d.add.Layout(gtx, e)
+	d.Open = d.add.Open
+	return dimensions
+}
+
+// EditPlaylistDialog edits owned playlist metadata and protected deletion.
 type EditPlaylistDialog struct {
 	Open bool
 	Page *model.PlaylistPage
 
-	dialog      lithic.Dialog
-	title       lithic.TextField
-	description lithic.TextField
-	public      lithic.Toggle
-	save        lithic.Button
-	cover       lithic.Button
-	delete      lithic.Button
-	cancel      lithic.Button
+	dialog      kit.Dialog
+	title       kit.TextField
+	description kit.TextField
+	public      kit.Toggle
+	save        kit.Plaque
+	cover       kit.Plaque
+	delete      kit.Plaque
+	cancel      kit.Plaque
 	initialized *model.PlaylistPage
 }
 
 func playlistTitle(page *model.PlaylistPage) string {
-	if page != nil && page.Title != nil {
-		return *page.Title
+	if page != nil && page.Title != nil && strings.TrimSpace(*page.Title) != "" {
+		return strings.TrimSpace(*page.Title)
 	}
 	return "Playlist"
 }
@@ -200,11 +263,7 @@ func (d *EditPlaylistDialog) initialize() {
 	}
 	d.initialized = d.Page
 	d.title.SetText(playlistTitle(d.Page))
-	if d.Page.Description != nil {
-		d.description.SetText(*d.Page.Description)
-	} else {
-		d.description.SetText("")
-	}
+	d.description.SetText(textValue(d.Page.Description))
 	d.public.Value = d.Page.Privacy != nil && strings.EqualFold(*d.Page.Privacy, "PUBLIC")
 }
 
@@ -218,6 +277,11 @@ func currentPlaylistID(e *env.Env) string {
 func (d *EditPlaylistDialog) savePlaylist(e *env.Env) {
 	id := currentPlaylistID(e)
 	name := strings.TrimSpace(d.title.Text())
+	if name == "" {
+		d.title.Error = "Name this playlist"
+		return
+	}
+	d.title.Error = ""
 	description := strings.TrimSpace(d.description.Text())
 	public := d.public.Value
 	act.Call[protocol.Null](e, protocol.MethodEditPlaylistDetails, protocol.EditPlaylistDetailsParams{
@@ -266,7 +330,7 @@ func (d *EditPlaylistDialog) changeCover(e *env.Env) {
 	})
 }
 
-func deleteConfirmCopy(id, name string) (title, body, typeToConfirm string) {
+func deleteConfirmCopy(id, name string) (title, body, proof string) {
 	if !strings.HasPrefix(id, model.LocalPlaylistPrefix) {
 		return "Delete this playlist?", "This removes it from your account. It can't be undone.", ""
 	}
@@ -279,8 +343,8 @@ func (d *EditPlaylistDialog) deletePlaylist(e *env.Env) {
 	}
 	name := playlistTitle(d.Page)
 	id := currentPlaylistID(e)
-	title, body, typeToConfirm := deleteConfirmCopy(id, name)
-	e.Confirm(title, body, "Delete", typeToConfirm, func() {
+	title, body, proof := deleteConfirmCopy(id, name)
+	e.Confirm(title, body, "Delete", proof, func() {
 		act.Call[protocol.Null](e, protocol.MethodDeletePlaylist, protocol.PlaylistIDParams{PlaylistID: id}, func(_ protocol.Null, err error) {
 			if err != nil {
 				if e.Toast != nil {
@@ -301,22 +365,19 @@ func (d *EditPlaylistDialog) deletePlaylist(e *env.Env) {
 }
 
 func (d *EditPlaylistDialog) body(gtx layout.Context, e *env.Env) layout.Dimensions {
+	d.title.Label, d.title.Placeholder = "Title", "Playlist title"
+	d.description.Label, d.description.Placeholder = "Description", "Describe this playlist"
+	d.public.Label = "Public playlist"
 	return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
-		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			return d.title.Layout(gtx, e.Th, "Title", "Playlist title", "", "")
-		}),
-		layout.Rigid(layout.Spacer{Height: e.Th.Sp.S4}.Layout),
-		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			return d.description.Layout(gtx, e.Th, "Description", "Describe this playlist", "", "")
-		}),
-		layout.Rigid(layout.Spacer{Height: e.Th.Sp.S4}.Layout),
-		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			return d.public.Layout(gtx, e.Th, "Public playlist")
-		}),
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions { return d.title.Layout(gtx, e.Th.Theme) }),
+		layout.Rigid(layout.Spacer{Height: unit.Dp(21)}.Layout),
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions { return d.description.Layout(gtx, e.Th.Theme) }),
+		layout.Rigid(layout.Spacer{Height: unit.Dp(21)}.Layout),
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions { return d.public.Layout(gtx, e.Th.Theme) }),
 	)
 }
 
-// Layout renders the owned-playlist editor and protected delete action.
+// Layout draws the owned-playlist editor and its actions.
 func (d *EditPlaylistDialog) Layout(gtx layout.Context, e *env.Env) layout.Dimensions {
 	if d.Open {
 		d.initialize()
@@ -333,24 +394,20 @@ func (d *EditPlaylistDialog) Layout(gtx layout.Context, e *env.Env) layout.Dimen
 	if d.cancel.Clicked(gtx) {
 		d.Open = false
 	}
+	d.delete.Kind, d.delete.Icon, d.delete.Label = kit.PlaqueDangerLine, look.Icon.Remove, "Delete"
+	d.cover.Kind, d.cover.Icon, d.cover.Label = kit.PlaqueQuiet, look.Icon.Album, "Change cover"
+	d.cancel.Kind, d.cancel.Label = kit.PlaqueQuiet, "Cancel"
+	d.save.Kind, d.save.Label = kit.PlaqueGold, "Save"
 	d.dialog.Open = d.Open
-	dims := d.dialog.Layout(gtx, e.Th, "Edit playlist", func(gtx layout.Context) layout.Dimensions {
-		return d.body(gtx, e)
-	},
-		func(gtx layout.Context) layout.Dimensions {
-			return d.delete.Layout(gtx, e.Th, lithic.DangerLine, lithic.Icon("delete"), "Delete")
-		},
-		func(gtx layout.Context) layout.Dimensions {
-			return d.cover.Layout(gtx, e.Th, lithic.Quiet, lithic.Icon("album"), "Change cover")
-		},
-		func(gtx layout.Context) layout.Dimensions {
-			return d.cancel.Layout(gtx, e.Th, lithic.Quiet, nil, "Cancel")
-		},
-		func(gtx layout.Context) layout.Dimensions {
-			return d.save.Layout(gtx, e.Th, lithic.Gold, nil, "Save")
-		},
+	d.dialog.Width = 620
+	dims := d.dialog.Layout(gtx, e.Th.Theme, "Edit playlist",
+		func(gtx layout.Context) layout.Dimensions { return d.body(gtx, e) },
+		func(gtx layout.Context) layout.Dimensions { return d.delete.Layout(gtx, e.Th.Theme) },
+		func(gtx layout.Context) layout.Dimensions { return d.cover.Layout(gtx, e.Th.Theme) },
+		func(gtx layout.Context) layout.Dimensions { return d.cancel.Layout(gtx, e.Th.Theme) },
+		func(gtx layout.Context) layout.Dimensions { return d.save.Layout(gtx, e.Th.Theme) },
 	)
-	if d.dialog.Closed(gtx) {
+	if d.dialog.Closed() {
 		d.Open = false
 	}
 	d.Open = d.dialog.Open

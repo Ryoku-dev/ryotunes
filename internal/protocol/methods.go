@@ -199,6 +199,8 @@ const (
 	MethodSeek = "seek"
 	// MethodSetAlbumSaved changes album library membership.
 	MethodSetAlbumSaved = "set_album_saved"
+	// MethodSetArtistSubscribed changes an artist channel subscription.
+	MethodSetArtistSubscribed = "set_artist_subscribed"
 	// MethodSetAudioFx replaces playback effects.
 	MethodSetAudioFx = "set_audio_fx"
 	// MethodSetDownloadSettings replaces download policy.
@@ -367,6 +369,7 @@ var Methods = []Method{
 	def[TokenParams, model.SearchPage](MethodSearchPageMore, "Continue a track search page."),
 	def[SeekParams, Null](MethodSeek, "Change playback position."),
 	def[SetAlbumSavedParams, Null](MethodSetAlbumSaved, "Change album library membership."),
+	def[SetArtistSubscribedParams, SetArtistSubscribedResult](MethodSetArtistSubscribed, "Change an artist channel subscription."),
 	def[model.AudioFx, Null](MethodSetAudioFx, "Replace playback effects."),
 	def[SetDownloadSettingsParams, model.DownloadSettings](MethodSetDownloadSettings, "Replace download policy."),
 	def[SetPersonalParams, Null](MethodSetPersonal, "Replace renderer-owned personalization."),

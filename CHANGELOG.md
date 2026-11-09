@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Ryotunes is laid out like a music player now: your playlists sit in the sidebar, the queue and lyrics open beside the music and the player stays along the bottom, with a now playing view for big artwork and lyrics.
+- The Ryoku mark is back, the provider switcher sits on top with the provider icons again, and the app takes on the provider's colour when you switch.
+- Search is one field in the top bar, with recent searches and suggestions while you type.
+- Play, likes, track changes, seeking, panels and provider switches have small animations, and nothing moves while you are not doing anything.
+- The Discord toggle is back in the top bar, artists can be subscribed to again, and Settings has its missing rows back: sound, watched folders, playlist import and export, diagnostics and the engine version.
+- Fixed trackpad scrolling trailing behind your fingers, the sound popover getting cut off at the bottom of the window, the volume being hard to drag, a narrow window hiding the page behind the queue, and Ryotunes not opening again while something else was listening to its events.
 - Fixed remote playback stalling or skipping during back-to-back loads, restored live playback events, made daemon shutdown deterministic, and applied proxy changes across every network-backed source and download.
 
 ## v2.0.0 - 2026-11-08

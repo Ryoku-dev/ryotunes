@@ -11,11 +11,14 @@ import (
 
 	gioapp "gioui.org/app"
 
+	"github.com/ryoku-dev/ryoku/docs/lithic/library/go/anim"
+	"github.com/ryoku-dev/ryoku/docs/lithic/library/go/palette"
+	libtheme "github.com/ryoku-dev/ryoku/docs/lithic/library/go/theme"
 	"github.com/ryoku-dev/ryotunes/internal/client/art"
 	"github.com/ryoku-dev/ryotunes/internal/client/conn"
-	"github.com/ryoku-dev/ryotunes/internal/client/lithic"
 	"github.com/ryoku-dev/ryotunes/internal/client/state"
 	"github.com/ryoku-dev/ryotunes/internal/client/ui/demo"
+	"github.com/ryoku-dev/ryotunes/internal/client/ui/look"
 	"github.com/ryoku-dev/ryotunes/internal/protocol"
 )
 
@@ -31,6 +34,7 @@ type Options struct {
 	PNG           string
 	Width, Height int
 	Route         string
+	Query         string
 	Panel         string
 	Mode          string
 	Mini          bool
@@ -38,7 +42,7 @@ type Options struct {
 
 // Run owns the Ryotunes client until its windows close or a PNG has been written.
 func Run(options Options) error {
-	if _, err := parseMode(options.Mode); err != nil {
+	if err := parseMode(options.Mode); err != nil {
 		return err
 	}
 
@@ -119,22 +123,25 @@ type clientRuntime struct {
 	store    *state.Store
 	art      *art.Cache
 	hub      invalidationHub
-	themeMu  sync.RWMutex
-	theme    *lithic.Theme
+	themeMu  sync.Mutex
+	theme    *look.Theme
 	mode     string
 	tempDir  string
 	serveErr chan error
+	quit     chan struct{}
+	quitOnce sync.Once
 
-	paletteMu     sync.Mutex
-	paletteCancel context.CancelFunc
-	paletteMode   lithic.Mode
-	paletteFile   string
-	paletteReady  bool
+	paletteAppearance string
+	paletteFile       string
+	pendingRoles      *palette.Roles
 }
 
 func startRuntime(options Options) (*clientRuntime, error) {
 	ctx, cancel := context.WithCancel(context.Background())
-	runtime := &clientRuntime{ctx: ctx, cancel: cancel, mode: options.Mode, serveErr: make(chan error, 1)}
+	runtime := &clientRuntime{
+		ctx: ctx, cancel: cancel, mode: options.Mode,
+		serveErr: make(chan error, 1), quit: make(chan struct{}),
+	}
 
 	socketPath := protocol.SocketPath()
 	if options.Demo {
@@ -176,9 +183,22 @@ func startRuntime(options Options) (*clientRuntime, error) {
 	runtime.store = state.NewEmpty()
 	_ = runtime.store.LoadClientPreferences()
 	runtime.art = art.New(art.Options{Invalidate: runtime.hub.Invalidate})
-	runtime.theme = lithic.New(lithic.FromPalette(lithic.LoadPalette(lithic.Follow)), lithic.Shaper())
-	runtime.syncPalettePreferences(runtime.store.Snapshot().Client)
+	preferences := runtime.store.Snapshot().Client
+	appearance := runtime.modeValue(preferences)
+	density := clientDensity(preferences)
+	runtime.theme = look.NewTheme(look.Roles(appearance, preferences.PaletteFile), density)
+	runtime.paletteAppearance, runtime.paletteFile = appearance, preferences.PaletteFile
 
+	go look.Watch(runtime.ctx, func() (string, string) {
+		preferences := runtime.store.Snapshot().Client
+		return runtime.modeValue(preferences), preferences.PaletteFile
+	}, func(roles palette.Roles) {
+		runtime.themeMu.Lock()
+		copied := roles
+		runtime.pendingRoles = &copied
+		runtime.themeMu.Unlock()
+		runtime.hub.Invalidate()
+	})
 	go runtime.drain()
 	return runtime, nil
 }
@@ -203,70 +223,48 @@ func (r *clientRuntime) modeValue(preferences state.ClientPreferences) string {
 	switch preferences.Appearance {
 	case "dark", "light":
 		return preferences.Appearance
-	}
-	settings := r.store.Snapshot().Settings
-	if value := settings["appearance"]; value == "dark" || value == "light" {
-		return value
-	}
-	if value := settings["theme"]; value == "dark" || value == "light" {
-		return value
-	}
-	return "follow"
-}
-
-func (r *clientRuntime) syncPalettePreferences(preferences state.ClientPreferences) {
-	selected, _ := parseMode(r.modeValue(preferences))
-	file := preferences.PaletteFile
-
-	r.paletteMu.Lock()
-	if r.paletteReady && r.paletteMode == selected && r.paletteFile == file {
-		r.paletteMu.Unlock()
-		return
-	}
-	if r.paletteCancel != nil {
-		r.paletteCancel()
-	}
-	watchContext, cancel := context.WithCancel(r.ctx)
-	r.paletteCancel = cancel
-	r.paletteMode, r.paletteFile, r.paletteReady = selected, file, true
-	r.paletteMu.Unlock()
-
-	roles := lithic.FromPalette(lithic.LoadPalette(selected, file))
-	r.themeMu.Lock()
-	density := r.theme.Density
-	r.theme = lithic.New(roles, lithic.Shaper())
-	r.theme.Density = density
-	r.themeMu.Unlock()
-	r.hub.Invalidate()
-
-	go func(mode lithic.Mode, paletteFile string) {
-		_ = lithic.Watch(watchContext, func() lithic.Mode { return mode }, func(roles lithic.Roles) {
-			r.paletteMu.Lock()
-			current := r.paletteReady && r.paletteMode == mode && r.paletteFile == paletteFile
-			r.paletteMu.Unlock()
-			if !current {
-				return
-			}
-			r.themeMu.Lock()
-			density := r.theme.Density
-			r.theme = lithic.New(roles, lithic.Shaper())
-			r.theme.Density = density
-			r.themeMu.Unlock()
-			r.hub.Invalidate()
-		}, paletteFile)
-	}(selected, file)
-}
-
-func parseMode(value string) (lithic.Mode, error) {
-	switch value {
-	case "", "follow":
-		return lithic.Follow, nil
-	case "dark":
-		return lithic.Dark, nil
-	case "light":
-		return lithic.Light, nil
 	default:
-		return lithic.Follow, fmt.Errorf("invalid palette mode %q: use follow, dark, or light", value)
+		return "follow"
+	}
+}
+
+func clientDensity(preferences state.ClientPreferences) libtheme.Density {
+	if preferences.Density == "compact" {
+		return libtheme.Compact
+	}
+	return libtheme.Comfortable
+}
+
+func (r *clientRuntime) applyClientTheme(preferences state.ClientPreferences) *look.Theme {
+	appearance, file := r.modeValue(preferences), preferences.PaletteFile
+	var roles *palette.Roles
+	if appearance != r.paletteAppearance || file != r.paletteFile {
+		resolved := look.Roles(appearance, file)
+		roles = &resolved
+	}
+
+	r.themeMu.Lock()
+	if roles != nil {
+		r.theme.SetRoles(*roles)
+		r.paletteAppearance, r.paletteFile = appearance, file
+		r.pendingRoles = nil
+	} else if r.pendingRoles != nil {
+		r.theme.SetRoles(*r.pendingRoles)
+		r.pendingRoles = nil
+	}
+	r.theme.Density = clientDensity(preferences)
+	theme := r.theme
+	r.themeMu.Unlock()
+	anim.SetReduce(preferences.ReduceMotion)
+	return theme
+}
+
+func parseMode(value string) error {
+	switch value {
+	case "", "follow", "dark", "light":
+		return nil
+	default:
+		return fmt.Errorf("invalid palette mode %q: use follow, dark, or light", value)
 	}
 }
 
@@ -282,6 +280,10 @@ func (r *clientRuntime) drain() {
 			r.store.ApplySnapshot(snapshot)
 		case event, ok := <-r.client.Events():
 			if !ok {
+				return
+			}
+			if event.Event == protocol.EventQuit {
+				r.quitOnce.Do(func() { close(r.quit) })
 				return
 			}
 			_ = r.store.Apply(event.Event, event.Data)

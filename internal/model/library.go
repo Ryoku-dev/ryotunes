@@ -143,12 +143,14 @@ type LogEntry struct {
 	Message   string `json:"message"`
 }
 
-// LogsResult is a filtered diagnostics result.
+// LogsResult is a filtered diagnostics result and daemon runtime summary.
 type LogsResult struct {
-	Entries   []LogEntry `json:"entries"`
-	Total     int        `json:"total"`
-	Errors    int        `json:"errors"`
-	Warnings  int        `json:"warnings"`
-	Path      string     `json:"path"`
-	FileBytes int64      `json:"fileBytes"`
+	Entries       []LogEntry `json:"entries"`
+	Total         int        `json:"total"`
+	Errors        int        `json:"errors"`
+	Warnings      int        `json:"warnings"`
+	Path          string     `json:"path"`
+	FileBytes     int64      `json:"fileBytes"`
+	EngineVersion string     `json:"engineVersion"`
+	MPRIS         bool       `json:"mpris"`
 }

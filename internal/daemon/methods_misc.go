@@ -32,6 +32,7 @@ func show(_ context.Context, a *App, _ protocol.Null) (protocol.Null, error) {
 	return protocol.Null{}, a.Server.Show()
 }
 func quit(_ context.Context, a *App, _ protocol.Null) (protocol.Null, error) {
+	a.Bus.Emit(protocol.EventQuit, nil)
 	return protocol.Null{}, nil
 }
 func getLogs(_ context.Context, a *App, p protocol.GetLogsParams) (model.LogsResult, error) {
@@ -54,10 +55,15 @@ func getLogs(_ context.Context, a *App, p protocol.GetLogsParams) (model.LogsRes
 	if limit > 2000 {
 		limit = 2000
 	}
+	var result model.LogsResult
 	if a.Diag == nil {
-		return diag.Query(level, source, query, limit), nil
+		result = diag.Query(level, source, query, limit)
+	} else {
+		result = a.Diag.Query(level, source, query, limit)
 	}
-	return a.Diag.Query(level, source, query, limit), nil
+	result.EngineVersion = a.EngineVersion
+	result.MPRIS = a.MPRIS != nil
+	return result, nil
 }
 func logClientError(_ context.Context, a *App, p protocol.LogClientErrorParams) (protocol.Null, error) {
 	target, level := "client", "error"

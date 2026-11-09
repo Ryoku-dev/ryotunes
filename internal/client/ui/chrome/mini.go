@@ -10,231 +10,316 @@ import (
 	"gioui.org/op"
 	"gioui.org/op/clip"
 	"gioui.org/op/paint"
-	"gioui.org/widget"
+	"gioui.org/text"
 
-	"github.com/ryoku-dev/ryotunes/internal/client/lithic"
+	"github.com/ryoku-dev/ryoku/docs/lithic/library/go/kit"
+	"github.com/ryoku-dev/ryoku/docs/lithic/library/go/palette"
+	"github.com/ryoku-dev/ryotunes/internal/client/state"
+	"github.com/ryoku-dev/ryotunes/internal/client/ui/act"
 	"github.com/ryoku-dev/ryotunes/internal/client/ui/env"
+	"github.com/ryoku-dev/ryotunes/internal/client/ui/look"
+	"github.com/ryoku-dev/ryotunes/internal/client/ui/widgets"
+	"github.com/ryoku-dev/ryotunes/internal/model"
 	"github.com/ryoku-dev/ryotunes/internal/protocol"
 )
 
 // Mini owns the complete Ryotunes Mini window content.
 type Mini struct {
-	lyrics          LyricsPanel
-	seek            lithic.Slider
-	seekWasDragging bool
-	artMode         lithic.Button
-	lyricsMode      lithic.Button
-	previous        lithic.IconButton
-	playPause       lithic.IconButton
-	next            lithic.IconButton
-	restore         lithic.IconButton
-	showLyrics      bool
+	expand    kit.IconPlaque
+	expandTip look.Tip
+	close     kit.IconPlaque
+	closeTip  look.Tip
+
+	artClick   kit.Click
+	art        look.ArtView
+	titleSwap  look.Swap
+	artistSwap look.Swap
+	lyrics     Lyrics
+	showLyrics bool
+
+	seek      look.Scrubber
+	transport transport
+	like      kit.IconPlaque
+	likeFill  look.Fill
+	likeTip   look.Tip
+	lyricsAct kit.IconPlaque
+	lyricsTip look.Tip
+	volume    volumeControl
+
+	trackID      string
+	seekTarget   float64
+	seekOrigin   float64
+	seekUntil    time.Time
+	seekHold     bool
+	seekDragging bool
+
+	pendingAction system.Action
+	hasAction     bool
 }
 
-// Layout renders the compact artwork, lyrics, seek, and transport surface.
-func (m *Mini) Layout(gtx layout.Context, e *env.Env) layout.Dimensions {
-	state := e.Store.Snapshot()
-	lithic.FillCutTop(gtx.Ops, image.Rectangle{Max: gtx.Constraints.Max}, gtx.Dp(e.Th.Cut.Large), e.Th.R.Stone1)
-	if state.Playback.Now == nil {
-		return layout.Center.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+// Layout renders the 360 by 420 mini player window.
+func (mini *Mini) Layout(gtx layout.Context, e *env.Env) layout.Dimensions {
+	size := gtx.Constraints.Max
+	paint.FillShape(gtx.Ops, e.Th.R.Stone1, clip.Rect(image.Rectangle{Max: size}).Op())
+	snapshot := e.Store.Snapshot()
+	mini.reconcileSeek(gtx, e, snapshot.Playback.Position, playbackTrackID(snapshot.Playback.Now))
+
+	dimensions := layout.Flex{Axis: layout.Vertical, Alignment: layout.Middle}.Layout(gtx,
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions { return mini.layoutStrip(gtx, e) }),
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			if snapshot.Playback.Now == nil {
+				return layout.Center.Layout(gtx, kit.Text(e.Th.Theme, e.Th.T.Title, e.Th.R.Fg, "Nothing playing"))
+			}
+			return mini.layoutStage(gtx, e, snapshot.Playback.Now)
+		}),
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			if snapshot.Playback.Now == nil {
+				return layout.Dimensions{}
+			}
+			return layout.Inset{Top: 14, Bottom: 13, Left: 13, Right: 13}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+				return mini.layoutDetails(gtx, e, snapshot)
+			})
+		}),
+	)
+	if mini.artClick.Clicked(gtx) {
+		e.Nav.ToggleNowPlaying()
+	}
+	return dimensions
+}
+
+// WindowAction returns and clears a pending mini window-control action.
+func (mini *Mini) WindowAction() (system.Action, bool) {
+	action, ok := mini.pendingAction, mini.hasAction
+	mini.pendingAction, mini.hasAction = 0, false
+	return action, ok
+}
+
+func (mini *Mini) layoutStrip(gtx layout.Context, e *env.Env) layout.Dimensions {
+	gtx.Constraints.Min.Y, gtx.Constraints.Max.Y = gtx.Dp(32), gtx.Dp(32)
+	mini.expand.Small, mini.expand.Kind, mini.expand.Icon, mini.expand.Description = true, kit.PlaqueQuiet, look.Icon.Expand, "Expand"
+	mini.close.Small, mini.close.Kind, mini.close.Icon, mini.close.Description = true, kit.PlaqueQuiet, look.Icon.Close, "Close"
+	dimensions := layout.Inset{Left: 8, Right: 8}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+		return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
+			layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+				size := gtx.Constraints.Max
+				area := clip.Rect(image.Rectangle{Max: size}).Push(gtx.Ops)
+				system.ActionInputOp(system.ActionMove).Add(gtx.Ops)
+				area.Pop()
+				return layout.Dimensions{Size: size}
+			}),
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				return mini.expandTip.Layout(gtx, e.Th, e.Overlays, "Expand", func(gtx layout.Context) layout.Dimensions {
+					return mini.expand.Layout(gtx, e.Th.Theme)
+				})
+			}),
+			layout.Rigid(layout.Spacer{Width: 4}.Layout),
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				return mini.closeTip.Layout(gtx, e.Th, e.Overlays, "Close", func(gtx layout.Context) layout.Dimensions {
+					return mini.close.Layout(gtx, e.Th.Theme)
+				})
+			}),
+		)
+	})
+	if mini.expand.Clicked(gtx) {
+		e.Nav.ToggleMini()
+	}
+	if mini.close.Clicked(gtx) {
+		mini.pendingAction, mini.hasAction = system.ActionClose, true
+	}
+	return dimensions
+}
+
+func (mini *Mini) layoutStage(gtx layout.Context, e *env.Env, now *model.PlaybackTrack) layout.Dimensions {
+	side := min(gtx.Dp(184), min(gtx.Constraints.Max.X, gtx.Constraints.Max.Y))
+	gtx.Constraints = layout.Exact(image.Pt(side, side))
+	if mini.showLyrics {
+		return mini.lyrics.Layout(gtx, e, LyricsCompact)
+	}
+	return mini.artClick.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+		return mini.art.Layout(gtx, e.Th, e.Art, optionalString(now.Thumbnail), image.Pt(side, side), look.Shape{Cut: 7}, e.Th.Motion.Navigate)
+	})
+}
+
+func (mini *Mini) layoutDetails(gtx layout.Context, e *env.Env, snapshot state.State) layout.Dimensions {
+	now := snapshot.Playback.Now
+	key := now.VideoID
+	track := trackFromPlayback(now, e.Store.CurrentTrack())
+	provider := model.ProviderOf(track.VideoID)
+	canRate := provider != model.ProviderLocal && provider != model.ProviderRadio
+	return layout.Flex{Axis: layout.Vertical, Alignment: layout.Middle}.Layout(gtx,
+		layout.Rigid(miniFixedHeight(gtx.Dp(40), func(gtx layout.Context) layout.Dimensions {
 			return layout.Flex{Axis: layout.Vertical, Alignment: layout.Middle}.Layout(gtx,
-				layout.Rigid(lithic.Text(e.Th, e.Th.T.Title, e.Th.R.Fg, "Nothing playing")),
-				layout.Rigid(layout.Spacer{Height: e.Th.Sp.S2}.Layout),
-				layout.Rigid(lithic.Text(e.Th, e.Th.T.Body, e.Th.R.Fg3, "Play a track from the main window.")),
-				layout.Rigid(layout.Spacer{Height: e.Th.Sp.S4}.Layout),
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					dims := m.restore.Layout(gtx, e.Th, lithic.Quiet, lithic.Icon("open_in_new"), "Restore main window")
-					if m.restore.Clicked(gtx) {
-						e.Nav.ToggleMini()
-					}
-					return dims
+					return mini.titleSwap.Layout(gtx, e.Th, key, 8, e.Th.Motion.Navigate, func(gtx layout.Context, _ string) layout.Dimensions {
+						return (kit.Label{Style: e.Th.T.Row, Color: e.Th.R.Fg, MaxLines: 1, Align: text.Middle}).Layout(gtx, e.Th.Theme, track.Title)
+					})
+				}),
+				layout.Rigid(layout.Spacer{Height: 2}.Layout),
+				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+					return mini.artistSwap.Layout(gtx, e.Th, key, 8, e.Th.Motion.Navigate, func(gtx layout.Context, _ string) layout.Dimensions {
+						return (kit.Label{Style: e.Th.T.Caption, Color: e.Th.R.Fg2, MaxLines: 1, Align: text.Middle}).Layout(gtx, e.Th.Theme, track.Artists)
+					})
 				}),
 			)
-		})
-	}
+		})),
+		layout.Rigid(layout.Spacer{Height: 13}.Layout),
+		layout.Rigid(miniFixedHeight(gtx.Dp(18), func(gtx layout.Context) layout.Dimensions {
+			return mini.layoutSeek(gtx, e, snapshot)
+		})),
+		layout.Rigid(layout.Spacer{Height: 13}.Layout),
+		layout.Rigid(miniFixedHeight(gtx.Dp(40), func(gtx layout.Context) layout.Dimensions {
+			return mini.transport.Layout(gtx, e, snapshot)
+		})),
+		layout.Rigid(layout.Spacer{Height: 5}.Layout),
+		layout.Rigid(miniFixedHeight(gtx.Dp(48), func(gtx layout.Context) layout.Dimensions {
+			return mini.layoutBottom(gtx, e, snapshot, track, canRate)
+		})),
+	)
+}
 
-	height := gtx.Constraints.Max.Y
-	stageHeight := max(gtx.Dp(150), int(float32(height)*.48))
-	stageHeight = min(stageHeight, max(0, height-gtx.Dp(190)))
-	if stageHeight <= 0 {
-		stageHeight = max(0, height/2)
+func (mini *Mini) layoutSeek(gtx layout.Context, e *env.Env, snapshot state.State) layout.Dimensions {
+	duration := snapshot.Playback.Duration
+	if duration <= 0 {
+		return layout.Center.Layout(gtx, kit.Claim(e.Th.Theme, palette.Alive, "Live"))
 	}
-	bodyInset := layout.Inset{Top: e.Th.Sp.S3, Right: e.Th.Sp.S4, Bottom: e.Th.Sp.S3, Left: e.Th.Sp.S4}
-	title := state.Playback.Now.Title
-	if title == "" {
-		title = "Current track"
-	}
-	artists := state.Playback.Now.Artists
-	if artists == "" {
-		artists = "Waiting for metadata"
-	}
-
-	dims := layout.Flex{Axis: layout.Vertical}.Layout(gtx,
-		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			gtx.Constraints.Min.Y = stageHeight
-			gtx.Constraints.Max.Y = stageHeight
-			if m.showLyrics {
-				return layout.Inset{Top: e.Th.Sp.S3, Right: e.Th.Sp.S3, Bottom: e.Th.Sp.S3, Left: e.Th.Sp.S3}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-					return m.lyrics.LayoutCompact(gtx, e)
-				})
-			}
-			return m.layoutArt(gtx, e, state.Playback.Now.Thumbnail)
-		}),
+	position := e.Store.PositionAt(gtx.Now)
+	value := float32(min(max(position/duration, 0), 1))
+	return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
+		layout.Rigid(playerTimeBox(e, widgets.Duration(position), text.End)),
+		layout.Rigid(layout.Spacer{Width: 8}.Layout),
 		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-			return bodyInset.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-				return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
-					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-						return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
-							layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-								return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
-									layout.Rigid(lithic.Text(e.Th, e.Th.T.Title, e.Th.R.Fg, title)),
-									layout.Rigid(lithic.Text(e.Th, e.Th.T.Caption, e.Th.R.Fg3, artists)),
-								)
-							}),
-							layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-								dims := m.restore.Layout(gtx, e.Th, lithic.Quiet, lithic.Icon("open_in_new"), "Restore main window")
-								if m.restore.Clicked(gtx) {
-									e.Nav.ToggleMini()
-								}
-								return dims
-							}),
-						)
-					}),
-					layout.Rigid(layout.Spacer{Height: e.Th.Sp.S2}.Layout),
-					layout.Rigid(func(gtx layout.Context) layout.Dimensions { return m.layoutSeek(gtx, e) }),
-					layout.Rigid(layout.Spacer{Height: e.Th.Sp.S2}.Layout),
-					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-						return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
-							layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-								kind := lithic.Quiet
-								if !m.showLyrics {
-									kind = lithic.On
-								}
-								m.artMode.Small = true
-								dims := m.artMode.Layout(gtx, e.Th, kind, lithic.Icon("album"), "Art")
-								if m.artMode.Clicked(gtx) {
-									m.showLyrics = false
-								}
-								return dims
-							}),
-							layout.Rigid(layout.Spacer{Width: e.Th.Sp.S2}.Layout),
-							layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-								kind := lithic.Quiet
-								if m.showLyrics {
-									kind = lithic.On
-								}
-								m.lyricsMode.Small = true
-								dims := m.lyricsMode.Layout(gtx, e.Th, kind, lithic.Icon("lyrics"), "Lyrics")
-								if m.lyricsMode.Clicked(gtx) {
-									m.showLyrics = true
-								}
-								return dims
-							}),
-							layout.Flexed(1, func(layout.Context) layout.Dimensions { return layout.Dimensions{} }),
-							layout.Rigid(func(gtx layout.Context) layout.Dimensions { return m.layoutTransport(gtx, e) }),
-						)
+			fill := e.Th.R.Fg2
+			if !snapshot.Playback.Paused {
+				fill = e.Th.Src.Ink
+			}
+			dimensions := mini.seek.Layout(gtx, e.Th, value, look.ScrubberStyle{
+				Fill:      fill,
+				Bubble:    func(fraction float32) string { return widgets.Duration(float64(fraction) * duration) },
+				WheelStep: float32(min(1, 5/duration)),
+			})
+			fraction, dragging := mini.seek.Dragging()
+			if dragging {
+				preview := float64(fraction) * duration
+				e.Store.SetSeekDrag(&preview)
+			}
+			committedFraction, committed := mini.seek.Committed()
+			if committed {
+				mini.seekTarget = float64(committedFraction) * duration
+				mini.seekOrigin = snapshot.Playback.Position
+				mini.seekUntil = gtx.Now.Add(seekSafetyTimeout)
+				mini.seekHold = true
+				e.Store.SetSeekDrag(&mini.seekTarget)
+				callVoid(e, protocol.MethodSeek, protocol.SeekParams{Position: mini.seekTarget})
+				gtx.Execute(op.InvalidateCmd{At: mini.seekUntil})
+			} else if mini.seekDragging && !dragging {
+				e.Store.SetSeekDrag(nil)
+			}
+			mini.seekDragging = dragging
+			mini.requestProgressFrame(gtx, e, duration, dimensions.Size.X, snapshot.Playback.Paused)
+			return dimensions
+		}),
+		layout.Rigid(layout.Spacer{Width: 8}.Layout),
+		layout.Rigid(playerTimeBox(e, widgets.Duration(duration), text.Start)),
+	)
+}
+
+func (mini *Mini) layoutBottom(gtx layout.Context, e *env.Env, snapshot state.State, track model.Track, canRate bool) layout.Dimensions {
+	mini.lyricsAct.Small, mini.lyricsAct.Icon, mini.lyricsAct.Description = true, look.Icon.Lyrics, "Lyrics"
+	mini.lyricsAct.Kind = kit.PlaqueQuiet
+	if mini.showLyrics {
+		mini.lyricsAct.Kind = kit.PlaqueOn
+	}
+	dimensions := layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			if !canRate {
+				return layout.Dimensions{}
+			}
+			mini.like.Small, mini.like.Kind, mini.like.Icon, mini.like.Description = true, kit.PlaqueQuiet, nil, "Like"
+			liked := snapshot.Rating == model.RatingLike
+			return mini.likeTip.Layout(gtx, e.Th, e.Overlays, "Like", func(gtx layout.Context) layout.Dimensions {
+				return layout.Stack{Alignment: layout.Center}.Layout(gtx,
+					layout.Stacked(func(gtx layout.Context) layout.Dimensions { return mini.like.Layout(gtx, e.Th.Theme) }),
+					layout.Expanded(func(gtx layout.Context) layout.Dimensions {
+						return layout.Center.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+							return mini.likeFill.Layout(gtx, e.Th, liked,
+								func(gtx layout.Context) layout.Dimensions { return look.Icon.HeartOutline.Layout(gtx, e.Th.R.Fg2) },
+								func(gtx layout.Context) layout.Dimensions { return look.Icon.Heart.Layout(gtx, e.Th.Src.Ink) },
+							)
+						})
 					}),
 				)
 			})
 		}),
+		layout.Rigid(layout.Spacer{Width: 4}.Layout),
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			return mini.lyricsTip.Layout(gtx, e.Th, e.Overlays, "Lyrics", func(gtx layout.Context) layout.Dimensions {
+				return mini.lyricsAct.Layout(gtx, e.Th.Theme)
+			})
+		}),
+		layout.Flexed(1, layout.Spacer{}.Layout),
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions { return mini.volume.Layout(gtx, e, gtx.Dp(100)) }),
 	)
-	if !state.Playback.Paused && !m.showLyrics {
-		nextSecond := gtx.Now.Truncate(time.Second).Add(time.Second)
-		gtx.Execute(op.InvalidateCmd{At: nextSecond})
-	}
-	return dims
-}
-
-func (m *Mini) layoutArt(gtx layout.Context, e *env.Env, thumbnail *string) layout.Dimensions {
-	size := gtx.Constraints.Max
-	cut := gtx.Dp(e.Th.Cut.Large)
-	path := lithic.CutPath(gtx.Ops, image.Rectangle{Max: size}, cut, cut, 0, 0)
-	mask := clip.Outline{Path: path}.Op().Push(gtx.Ops)
-	paint.Fill(gtx.Ops, e.Th.R.Stone3)
-	if thumbnail != nil && *thumbnail != "" && e.Art != nil {
-		imageOp, ok := e.Art.Get(*thumbnail, max(size.X, size.Y))
-		if ok {
-			widget.Image{Src: imageOp, Fit: widget.Cover, Position: layout.Center}.Layout(gtx)
-		} else {
-			m.layoutArtPlaceholder(gtx, e)
+	if canRate && mini.like.Clicked(gtx) {
+		rating := model.RatingLike
+		if snapshot.Rating == model.RatingLike {
+			rating = model.RatingIndifferent
 		}
-	} else {
-		m.layoutArtPlaceholder(gtx, e)
+		act.Rate(e, track, rating)
 	}
-	system.ActionInputOp(system.ActionMove).Add(gtx.Ops)
-	mask.Pop()
-	return layout.Dimensions{Size: size}
+	if mini.lyricsAct.Clicked(gtx) {
+		mini.showLyrics = !mini.showLyrics
+	}
+	return dimensions
 }
 
-func (m *Mini) layoutArtPlaceholder(gtx layout.Context, e *env.Env) layout.Dimensions {
-	return layout.Center.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-		size := min(gtx.Constraints.Max.X, gtx.Constraints.Max.Y) / 4
-		if size <= 0 {
-			return layout.Dimensions{}
-		}
-		gtx.Constraints = layout.Exact(image.Pt(size, size))
-		return lithic.Icon("album").Layout(gtx, e.Th.R.Fg3)
-	})
+func miniFixedHeight(height int, content layout.Widget) layout.Widget {
+	return func(gtx layout.Context) layout.Dimensions {
+		gtx.Constraints.Min.Y, gtx.Constraints.Max.Y = height, height
+		return layout.Center.Layout(gtx, content)
+	}
 }
 
-func (m *Mini) layoutSeek(gtx layout.Context, e *env.Env) layout.Dimensions {
-	state := e.Store.Snapshot()
-	duration := state.Playback.Duration
+func (mini *Mini) reconcileSeek(gtx layout.Context, e *env.Env, position float64, trackID string) {
+	if mini.trackID != trackID {
+		mini.trackID = trackID
+		mini.seekHold = false
+		e.Store.SetSeekDrag(nil)
+		return
+	}
+	if !mini.seekHold {
+		return
+	}
+	passed := math.Abs(position-mini.seekTarget) <= .5
+	if mini.seekTarget > mini.seekOrigin {
+		passed = passed || position >= mini.seekTarget
+	} else if mini.seekTarget < mini.seekOrigin {
+		passed = passed || position <= mini.seekTarget
+	}
+	if passed || !gtx.Now.Before(mini.seekUntil) {
+		mini.seekHold = false
+		e.Store.SetSeekDrag(nil)
+	}
+}
+
+func (mini *Mini) requestProgressFrame(gtx layout.Context, e *env.Env, duration float64, trackPixels int, paused bool) {
+	if paused || duration <= 0 || trackPixels <= 0 {
+		return
+	}
+	pixelDelay := time.Duration(duration / float64(trackPixels) * float64(time.Second))
+	if pixelDelay < 250*time.Millisecond {
+		pixelDelay = 250 * time.Millisecond
+	}
 	position := e.Store.PositionAt(gtx.Now)
-	wasDragging := m.seek.Dragging()
-	if !wasDragging && !m.seekWasDragging {
-		if duration > 0 {
-			m.seek.Value = float32(min(1, max(0, position/duration)))
-		} else {
-			m.seek.Value = 0
-		}
+	secondDelay := time.Duration((1 - (position - math.Floor(position))) * float64(time.Second))
+	if secondDelay <= 0 {
+		secondDelay = time.Second
 	}
-	before := m.seek.Value
-	dims := m.seek.Layout(gtx, e.Th, 0, float32(duration))
-	dragging := m.seek.Dragging()
-	changedClick := !wasDragging && !dragging && math.Abs(float64(m.seek.Value-before)) > .0001
-	released := m.seekWasDragging && !dragging
-	if duration > 0 && (changedClick || released) {
-		miniCall(e, protocol.MethodSeek, protocol.SeekParams{Position: float64(m.seek.Value) * duration})
-	}
-	m.seekWasDragging = dragging
-	return dims
+	gtx.Execute(op.InvalidateCmd{At: gtx.Now.Add(min(pixelDelay, secondDelay))})
 }
 
-func (m *Mini) layoutTransport(gtx layout.Context, e *env.Env) layout.Dimensions {
-	paused := e.Store.Snapshot().Playback.Paused
-	return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
-		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			m.previous.Small = true
-			dims := m.previous.Layout(gtx, e.Th, lithic.Quiet, lithic.Icon("skip_previous"), "Previous")
-			if m.previous.Clicked(gtx) {
-				miniCall(e, protocol.MethodPrevTrack, protocol.Null{})
-			}
-			return dims
-		}),
-		layout.Rigid(layout.Spacer{Width: e.Th.Sp.S2}.Layout),
-		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			icon, description := "pause", "Pause"
-			if paused {
-				icon, description = "play", "Play"
-			}
-			dims := m.playPause.Layout(gtx, e.Th, lithic.Gold, lithic.Icon(icon), description)
-			if m.playPause.Clicked(gtx) {
-				miniCall(e, protocol.MethodTogglePause, protocol.Null{})
-			}
-			return dims
-		}),
-		layout.Rigid(layout.Spacer{Width: e.Th.Sp.S2}.Layout),
-		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			m.next.Small = true
-			dims := m.next.Layout(gtx, e.Th, lithic.Quiet, lithic.Icon("skip_next"), "Next")
-			if m.next.Clicked(gtx) {
-				miniCall(e, protocol.MethodNextTrack, protocol.Null{})
-			}
-			return dims
-		}),
-	)
-}
-func miniCall(e *env.Env, method string, params any) {
-	callVoid(e, method, params)
+func playbackTrackID(now *model.PlaybackTrack) string {
+	if now == nil {
+		return ""
+	}
+	return now.VideoID
 }

@@ -1,75 +1,100 @@
 # Ryotunes design
 
-Ryotunes applies the [Ryoku Lithic specification](https://github.com/ryoku-dev/ryoku/tree/main/docs/lithic) through `internal/client/lithic`. The specification defines the roles, cuts, type, components and motion. This document describes how those rules map to the music player.
+Ryotunes draws with the shared Lithic library from the Ryoku repository,
+`github.com/ryoku-dev/ryoku/docs/lithic/library/go` (`palette`, `theme`, `anim`,
+`kit`, `tokens`). The language itself lives in the Ryoku repo under
+`docs/lithic/`; its `layout.md` describes the player window archetype this app
+is the reference for. `internal/client/ui/look` holds what is ours: the theme
+with the source colour, the Ryoku mark, provider glyphs, the frame geometry,
+scrolling, scrubbers, artwork and the small motions playback needs.
+`internal/client/ui/CONTRACT.md` has every measurement.
 
 ## Window layout
 
-The main window has four persistent regions:
+The window is laid out like a music player, not like a list and detail tool:
 
-1. The rail holds Home, Search, Library, Radio, Downloads and Settings.
-2. The work pane holds the current route and its list or detail content.
-3. The right panel holds Queue or Lyrics and may be closed when more work-pane space is needed.
-4. The player bar spans the bottom and keeps transport, progress, volume and the current track available across routes.
+1. A top bar on the ground: the Ryoku mark, back and forward, the one search
+   field, the Discord toggle, the provider switcher and window controls.
+2. The sidebar: Home, Library, Radio and Downloads, then your playlists, with
+   Settings at the bottom. It becomes an icon rail on medium widths and a
+   bottom bar on compact ones.
+3. The content pane with the current page.
+4. The side panel with Queue, Lyrics and Together. It docks while the content
+   keeps 560 dp and becomes a sheet when it would not.
+5. The player bar across the bottom: what plays on the left, transport over the
+   progress in the centre, panels, volume and sound on the right.
 
-The mini player is a second window in the same process. It reads the same client store and does not create a second playback state.
+The now playing view takes the space between the two bars with large artwork
+and lyrics. The mini player is a second window, "Ryotunes Mini", in the same
+process and the same state.
 
-At narrow widths, regions change structure rather than shrinking the wide layout until it clips. Window and pane corners use the shared cut primitives. Content such as album art may remain square.
+Structure changes at the size-class boundaries (760 and 1280 dp) instead of
+squeezing the wide layout. Entering the compact class closes a docked panel so
+it never covers the page.
 
-## Selection and action
+## Selection, action and source
 
-Bone means the current place. Use the selection role for:
+Bone is where you are: the current destination, the selected row, the active
+tab and any toggle that is on.
 
-- the current route in the rail;
-- the playing row in a track list;
-- the current Queue or Lyrics panel choice;
-- the selected filter, tab or picker value.
+Gold is play. The player bar's play and pause always carries it, and a page
+may spend one more gold on the action that plays it, such as Play on an album.
+Radio, download, navigation and state never take gold.
 
-Gold is reserved for Play and Save. It does not mark navigation, playback state, decoration or passive information. Other actions use the line, quiet or danger variants from the Lithic kit.
+The active provider's brand colour is identity, not state. It tints the
+switcher's active cell, the field behind page titles and the now playing view,
+the progress, liked hearts, the playing track and the sung words in lyrics.
+Text and marks use the brand re-toned to 4.5:1 on `stone2`. Local files and
+radio use lapis. The brand colours and the Ryoku orange are the only colour
+literals in the client, in `look/brand.go`.
 
-## Mineral fields
-
-The selected album, artist or playlist begins with a mineral field. The field contains artwork, the name, a short proof such as artist, year or track count, and the relevant actions. It is a state-bearing header, not a decorative gradient or artwork wash.
-
-Downloads, authentication and playback states use the Lithic state minerals with a shape and a plain label:
+## State
 
 | Tone | Ryotunes use |
 |---|---|
-| Jade | ready, connected, playing or downloaded |
-| Lapis | connecting, buffering, scanning or downloading |
-| Amber | paused, waiting, sign-in required or attention needed |
-| Jasper | failed, expired, unavailable or destructive |
-| Idle vein | stopped, disconnected or not started |
+| Jade | saved, connected, live stream |
+| Lapis | downloading, connecting, scanning |
+| Amber | paused, waiting, sign-in needed |
+| Jasper | failed, expired, unavailable |
+| Idle vein | stopped, not started |
 
-Colour never carries a state by itself. Keep the word and the notch, flake or field when space becomes tight.
+Colour never carries a state alone; keep the word and the flake or notch. A
+fact that is not known is left out instead of shown as a dash.
 
 ## Type
 
-The selected album, artist, playlist or route may own the one large title in a view. Use the shared working sizes everywhere else.
+The page's title or hero name is the one large title in a view. Space Mono is
+only for data: durations, counts, bitrates and versions.
 
-Space Mono is for literal data:
+## Motion
 
-- track and elapsed durations;
-- track, result and download counts;
-- provider, playlist and room identifiers;
-- bitrate, sample rate and other measured values.
+Motion answers a press, a hover, a navigation or a playback change and then
+stops: the play button morphs, a liked heart fills, artwork crossfades when
+the track changes, a scrubber thickens and shows its handle under the pointer,
+the provider plate glides and the source colour retints, the side panel
+unfolds, the active lyric line glides into place. Each uses the library's
+chisel curve and duration tokens and is instant under reduced motion.
 
-Titles, labels and prose use the shared Lithic text roles rather than the data face.
+Nothing moves at rest. While playing, only the progress and the elapsed time
+ask for frames, and only when the fill would move by a pixel or the second
+changes.
 
-## Motion and idle work
+Scrolling applies every delta at once. Gio cannot tell a wheel from a
+trackpad, so the client never guesses a wheel from the size of a delta.
 
-Motion answers a press, selection, navigation or state change and then stops. Use the shared chisel curve and duration tokens. Do not add ambient movement, stagger list rows, spin idle icons or request frames for a hidden surface.
+## Overlays
 
-Reduced motion makes the same state transition immediate. An idle window with a still pointer and no live work requests no frames. Queue position and playback time come from daemon events; the client does not run a permanent transport loop when hidden.
+Popovers, menus, tips and pickers are placed in window coordinates by the
+client's own overlay host, so a popover from the player bar opens above it and
+stays inside the window. The library's popover, tooltip and picker measure
+inside the slot that opens them, which squeezes them in nested layouts, and
+its row list eases trackpad deltas that look like wheel notches; Ryotunes uses
+neither.
 
 ## Palette
 
-Ryotunes has roles, not standalone colour rules. The palette resolver follows the Ryoku sources in this order:
-
-1. `$XDG_CONFIG_HOME/ryoku/shell.json` `themePalette` for a named scheme;
-2. `$XDG_CACHE_HOME/ryoku/colors.json` for the live wallpaper role set;
-3. `$XDG_CONFIG_HOME/ryoku/theme.json` for whether wallpaper colours are active;
-4. the Lithic signature fallback when no Ryoku palette is available.
-
-Settings can pin dark or light neutrals while continuing to use palette accents. An optional Material role-set JSON file can override the palette roles. That palette file replaces the 1.x skin system; it does not change layout, type, cuts or motion.
-
-Palette changes are watched and applied to both windows. A palette change under the same state snaps to the new roles. Mineral field motion is for a state change, not a wallpaper change.
+Ryotunes has roles, not colour rules of its own. The library resolves the
+Ryoku palette (`shell.json` named scheme, then the wallpaper role set, then
+the Lithic signature fallback) and watches it. Settings can force dark or
+light, or point at a palette JSON file of the same shape. A palette change
+snaps to the new roles in both windows.

@@ -7,12 +7,10 @@ import (
 	"runtime"
 	"strings"
 
-	"gioui.org/layout"
-	"gioui.org/widget"
-
-	"github.com/ryoku-dev/ryotunes/internal/client/lithic"
+	"github.com/ryoku-dev/ryoku/docs/lithic/library/go/kit"
 	"github.com/ryoku-dev/ryotunes/internal/client/ui/act"
 	"github.com/ryoku-dev/ryotunes/internal/client/ui/env"
+	"github.com/ryoku-dev/ryotunes/internal/client/ui/look"
 	"github.com/ryoku-dev/ryotunes/internal/model"
 	"github.com/ryoku-dev/ryotunes/internal/protocol"
 )
@@ -23,10 +21,10 @@ const diagnosticsLimit = 2000
 type Page struct {
 	route env.Route
 
-	search        lithic.Search
-	levelFilters  lithic.Filters
-	sourceFilters lithic.Filters
-	list          widget.List
+	search        kit.Search
+	levelFilters  kit.Filters
+	sourceFilters kit.Filters
+	scroll        look.Scroller
 	rows          map[string]*logRow
 
 	levelIndex  int
@@ -35,7 +33,6 @@ type Page struct {
 	logs        model.LogsResult
 	hello       protocol.Hello
 	dataDir     string
-	palette     string
 	renderer    string
 
 	loaded      bool
@@ -44,23 +41,18 @@ type Page struct {
 	error       string
 	request     uint64
 
-	openLogs lithic.Button
-	copyAll  lithic.Button
-	retry    lithic.Button
+	openLogs kit.Plaque
+	copyAll  kit.Plaque
+	retry    kit.Plaque
 }
 
 // New constructs a lazy diagnostics page.
 func New(r env.Route) env.Page {
 	p := &Page{
-		route:    r,
-		list:     widget.List{List: layout.List{Axis: layout.Vertical}},
-		rows:     make(map[string]*logRow),
-		palette:  lithic.LoadPalette(lithic.Follow).Source,
+		route: r, rows: make(map[string]*logRow), dataDir: dataDirectory(),
 		renderer: "Gio · " + runtime.GOOS + "/" + runtime.GOARCH,
 	}
-	p.search.SingleLine = true
 	p.search.Submit = true
-	p.dataDir = dataDirectory()
 	return p
 }
 
@@ -83,21 +75,17 @@ func (p *Page) ensureLoaded(e *env.Env) {
 func (p *Page) fetch(e *env.Env) {
 	p.request++
 	request := p.request
-	p.loading = true
-	p.error = ""
-	p.palette = lithic.LoadPalette(lithic.Follow).Source
+	p.loading, p.error = true, ""
 	level, source, limit := levelValue(p.levelIndex), sourceValue(p.sourceIndex), diagnosticsLimit
-	query := strings.TrimSpace(p.query)
 	params := protocol.GetLogsParams{Level: &level, Source: &source, Limit: &limit}
-	if query != "" {
+	if query := strings.TrimSpace(p.query); query != "" {
 		params.Query = &query
 	}
 	act.Call[model.LogsResult](e, protocol.MethodGetLogs, params, func(result model.LogsResult, err error) {
 		if request != p.request {
 			return
 		}
-		p.loading = false
-		p.loaded = true
+		p.loading, p.loaded = false, true
 		if err != nil {
 			p.error = err.Error()
 			return
@@ -105,12 +93,11 @@ func (p *Page) fetch(e *env.Env) {
 		p.logs = result
 	})
 	act.Call[protocol.Hello](e, protocol.MethodHello, protocol.Null{}, func(result protocol.Hello, err error) {
-		if request != p.request {
-			return
-		}
-		p.helloLoaded = err == nil
-		if err == nil {
-			p.hello = result
+		if request == p.request {
+			p.helloLoaded = err == nil
+			if err == nil {
+				p.hello = result
+			}
 		}
 	})
 }

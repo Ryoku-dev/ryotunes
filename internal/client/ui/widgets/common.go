@@ -1,112 +1,86 @@
 package widgets
 
 import (
-	"image"
+	"strings"
 
-	"gioui.org/layout"
-	"gioui.org/unit"
-	"gioui.org/widget"
-
-	"github.com/ryoku-dev/ryotunes/internal/client/art"
-	"github.com/ryoku-dev/ryotunes/internal/client/lithic"
-	"github.com/ryoku-dev/ryotunes/internal/client/ui/env"
 	"github.com/ryoku-dev/ryotunes/internal/model"
 )
 
-// Art draws artwork from the shared cache inside a cut cover.
-func Art(gtx layout.Context, e *env.Env, url string, size unit.Dp, cut unit.Dp) layout.Dimensions {
-	px := gtx.Dp(size)
-	bounds := image.Pt(px, px)
-	gtx.Constraints = layout.Exact(bounds)
-	roles := e.Th.R
-	lithic.FillCut(gtx.Ops, image.Rectangle{Max: bounds}, gtx.Dp(cut), roles.Stone3)
-	img := art.Placeholder()
-	if e != nil && e.Art != nil && url != "" {
-		img, _ = e.Art.Get(url, px)
+func textValue(value *string) string {
+	if value == nil {
+		return ""
 	}
-	return lithic.CutImage(gtx, img, gtx.Dp(cut), widget.Cover)
+	return strings.TrimSpace(*value)
 }
 
-// ProviderBadge returns a compact provider flake and word.
-func ProviderBadge(e *env.Env, provider model.Provider) layout.Widget {
-	label := ""
+func browseKey(item model.BrowseItem) string {
+	if item.ID != "" {
+		return strings.ToLower(item.Kind) + "\x00" + item.ID
+	}
+	return strings.ToLower(item.Kind) + "\x00" + item.Title
+}
+
+func browseKind(item model.BrowseItem) string {
+	kind := strings.ToLower(strings.TrimSpace(item.Kind))
+	switch kind {
+	case "song", "track", "video":
+		return "Song"
+	case "album", "single", "ep":
+		return "Album"
+	case "artist", "channel", "user":
+		return "Artist"
+	case "playlist", "mix":
+		return "Playlist"
+	case "station", "radio":
+		return "Station"
+	default:
+		if kind == "" {
+			return ""
+		}
+		return strings.ToUpper(kind[:1]) + kind[1:]
+	}
+}
+
+func browseSubtitle(item model.BrowseItem) string {
+	if subtitle := textValue(item.Subtitle); subtitle != "" {
+		return subtitle
+	}
+	return browseKind(item)
+}
+
+func browseIsArtist(item model.BrowseItem) bool {
+	switch strings.ToLower(strings.TrimSpace(item.Kind)) {
+	case "artist", "channel", "user":
+		return true
+	default:
+		return false
+	}
+}
+
+func browseIsTrack(item model.BrowseItem) bool {
+	switch strings.ToLower(strings.TrimSpace(item.Kind)) {
+	case "song", "track", "video", "station", "radio":
+		return true
+	default:
+		return false
+	}
+}
+
+// IsLikedCollection reports provider and local aliases for the built-in liked-songs collection.
+func IsLikedCollection(item model.BrowseItem, provider model.Provider) bool {
+	id := strings.TrimSpace(item.ID)
+	switch {
+	case id == model.LocalLikedPlaylistID:
+		return true
+	case strings.EqualFold(id, "LOCAL:liked"), strings.EqualFold(id, "RYOTUNES_LIKED"):
+		return true
+	}
 	switch provider {
 	case model.ProviderYouTube:
-		label = "YouTube"
+		return strings.EqualFold(id, "VLLM") || strings.EqualFold(id, "LM")
 	case model.ProviderSpotify:
-		label = "Spotify"
-	case model.ProviderSoundCloud:
-		label = "SoundCloud"
-	case model.ProviderTidal:
-		label = "TIDAL"
-	case model.ProviderLocal:
-		label = "Local"
-	case model.ProviderRadio:
-		label = "Radio"
+		return strings.EqualFold(id, "spotify:playlist:liked") || strings.EqualFold(id, "liked")
+	default:
+		return false
 	}
-	return func(gtx layout.Context) layout.Dimensions {
-		if label == "" {
-			return layout.Dimensions{}
-		}
-		return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
-			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-				return lithic.Flake(gtx, e.Th, lithic.Idle, 0, 8)
-			}),
-			layout.Rigid(layout.Spacer{Width: e.Th.Sp.S2}.Layout),
-			layout.Rigid(lithic.Text(e.Th, e.Th.T.Caption, e.Th.R.Fg3, label)),
-		)
-	}
-}
-
-// PageHeader returns a page title, optional sentence, and trailing actions.
-func PageHeader(e *env.Env, title, sentence string, trailing layout.Widget) layout.Widget {
-	return func(gtx layout.Context) layout.Dimensions {
-		copy := func(gtx layout.Context) layout.Dimensions {
-			children := []layout.FlexChild{
-				layout.Rigid(lithic.Text(e.Th, e.Th.T.Section, e.Th.R.Fg, title)),
-			}
-			if sentence != "" {
-				children = append(children,
-					layout.Rigid(layout.Spacer{Height: e.Th.Sp.S2}.Layout),
-					layout.Rigid(lithic.Text(e.Th, e.Th.T.Body, e.Th.R.Fg2, sentence)),
-				)
-			}
-			return layout.Flex{Axis: layout.Vertical}.Layout(gtx, children...)
-		}
-		children := []layout.FlexChild{layout.Flexed(1, copy)}
-		if trailing != nil {
-			children = append(children,
-				layout.Rigid(layout.Spacer{Width: e.Th.Sp.S4}.Layout),
-				layout.Rigid(trailing),
-			)
-		}
-		return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx, children...)
-	}
-}
-
-// Loading returns a static Lithic loading skeleton.
-func Loading(e *env.Env) layout.Widget {
-	return func(gtx layout.Context) layout.Dimensions {
-		return layout.Inset{Top: e.Th.Sp.S4, Right: e.Th.Sp.S4, Bottom: e.Th.Sp.S4, Left: e.Th.Sp.S4}.Layout(gtx, lithic.Skeleton(e.Th, 5))
-	}
-}
-
-// Failed returns an error empty state with an optional retry plaque.
-func Failed(e *env.Env, message string, retry *lithic.Button) layout.Widget {
-	return func(gtx layout.Context) layout.Dimensions {
-		actions := []lithic.EmptyAction{}
-		if retry != nil {
-			actions = append(actions, lithic.EmptyAction{Button: retry, Kind: lithic.Line, Icon: lithic.Icon("refresh"), Label: "Try again"})
-		}
-		return lithic.Empty(e.Th, lithic.Icon("error"), "Could not load", message, actions...)(gtx)
-	}
-}
-
-// EmptyState returns a centred next-step state.
-func EmptyState(e *env.Env, icon, title, body string, actions ...lithic.EmptyAction) layout.Widget {
-	glyph := lithic.Icon(icon)
-	if glyph == nil {
-		glyph = lithic.Icon("info")
-	}
-	return lithic.Empty(e.Th, glyph, title, body, actions...)
 }

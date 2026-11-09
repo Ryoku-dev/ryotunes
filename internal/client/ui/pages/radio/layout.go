@@ -1,164 +1,315 @@
 package radio
 
 import (
-	"fmt"
-	"image"
+	"sort"
 	"strings"
 
 	"gioui.org/layout"
-	"gioui.org/widget"
+	"gioui.org/unit"
 
-	"github.com/ryoku-dev/ryotunes/internal/client/lithic"
+	"github.com/ryoku-dev/ryoku/docs/lithic/library/go/kit"
+	"github.com/ryoku-dev/ryotunes/internal/client/state"
 	"github.com/ryoku-dev/ryotunes/internal/client/ui/env"
+	"github.com/ryoku-dev/ryotunes/internal/client/ui/look"
 	"github.com/ryoku-dev/ryotunes/internal/client/ui/widgets"
+	"github.com/ryoku-dev/ryotunes/internal/model"
 )
+
+type stationGroup struct {
+	title    string
+	stations []model.RadioStation
+}
 
 // Layout renders the directory and starts its first request only once visible.
 func (p *Page) Layout(gtx layout.Context, e *env.Env) layout.Dimensions {
 	p.ensureLoaded(e)
-	for {
-		event, ok := p.search.Update(gtx)
-		if !ok {
-			break
-		}
-		if submit, ok := event.(widget.SubmitEvent); ok {
-			query := normalizedQuery(submit.Text)
-			p.search.SetText(query)
-			p.load(e, query)
-		}
+	if selected, changed := p.filters.Changed(); changed && selected >= 0 && selected < len(radioFilters) {
+		p.selected = selected
+		p.scroll.ScrollTo(0)
 	}
 	if p.retry.Clicked(gtx) {
-		p.load(e, p.query)
+		p.load(e)
 	}
-	if p.moreRetry.Clicked(gtx) {
+	if p.moreTry.Clicked(gtx) {
 		p.loadMore(e)
 	}
 
-	inset := layout.Inset{Top: e.Th.Sp.S4, Right: e.Th.Sp.S5, Bottom: e.Th.Sp.S5, Left: e.Th.Sp.S5}
-	return inset.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-		return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
-			layout.Rigid(widgets.PageHeader(e, "Airwaves", p.meta(), nil)),
-			layout.Rigid(layout.Spacer{Height: e.Th.Sp.S3}.Layout),
-			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-				gtx.Constraints.Max.X = min(gtx.Constraints.Max.X, gtx.Dp(520))
-				return p.search.Layout(gtx, e.Th, "Search stations by name…", "Enter")
-			}),
-			layout.Rigid(layout.Spacer{Height: e.Th.Sp.S4}.Layout),
-			layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-				return p.content(gtx, e)
-			}),
-		)
-	})
-}
-
-func (p *Page) meta() string {
-	count := len(p.stations)
-	if p.query == "" {
-		if !p.loaded {
-			return "Top stations"
+	snapshot := e.Store.Snapshot()
+	inset := look.ContentInset(e.Th.Class)
+	width := int(gtx.Metric.PxToDp(gtx.Constraints.Max.X - 2*gtx.Dp(inset)))
+	children := []layout.Widget{
+		widgets.PageHeader(e, "Radio", "Live stations from around the world.", nil),
+		p.controls(e),
+	}
+	switch {
+	case p.loading && !p.loaded:
+		children = append(children, widgets.Loading(e, widgets.LoadingGrid))
+	case p.error != "" && len(p.stations) == 0:
+		children = append(children, widgets.Failed(e, p.error, &p.retry))
+	default:
+		groups := p.groups(snapshot.Personal, normalizedQuery(p.filter.Text()))
+		if stationGroupCount(groups) == 0 {
+			children = append(children, p.empty(e))
+		} else {
+			playing := ""
+			if snapshot.Playback.Now != nil {
+				playing = strings.TrimPrefix(snapshot.Playback.Now.VideoID, "RYOTUNES_RADIO:")
+			}
+			children = append(children, p.groupWidgets(e, snapshot.Personal, groups, max(1, width), playing)...)
 		}
-		return fmt.Sprintf("Top stations · %d %s", count, stationWord(count))
+		if footer := p.footer(e); footer != nil {
+			children = append(children, footer)
+		}
 	}
-	if !p.loaded {
-		return fmt.Sprintf("Results for “%s”", p.query)
-	}
-	return fmt.Sprintf("Results for “%s” · %d %s", p.query, count, stationWord(count))
-}
 
-func stationWord(count int) string {
-	if count == 1 {
-		return "station"
-	}
-	return "stations"
-}
-
-func (p *Page) content(gtx layout.Context, e *env.Env) layout.Dimensions {
-	if strings.TrimSpace(p.search.Text()) == "" && p.query != "" && !p.loading {
-		p.load(e, "")
-	}
-	if p.loading && len(p.stations) == 0 {
-		return radioState(gtx, e, "Tuning", "Finding live stations.", "Trying available Radio Browser mirrors without blocking the player.", nil)
-	}
-	if p.error != "" {
-		return radioState(gtx, e, "Signal lost", "Radio directory unavailable.", p.error, func(gtx layout.Context) layout.Dimensions {
-			return p.retry.Layout(gtx, e.Th, lithic.Line, lithic.Icon("refresh"), "Try again")
+	return layout.Inset{Bottom: unit.Dp(21)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+		return p.scroll.Layout(gtx, e.Th, len(children), func(gtx layout.Context, index int) layout.Dimensions {
+			if index >= len(children)-2 {
+				p.loadMore(e)
+			}
+			bottom := unit.Dp(21)
+			if index == len(children)-1 {
+				bottom = 0
+			}
+			if index == 0 {
+				return layout.Inset{Bottom: bottom}.Layout(gtx, children[index])
+			}
+			return layout.Inset{Right: inset, Bottom: bottom, Left: inset}.Layout(gtx, children[index])
 		})
-	}
-	if p.loaded && len(p.stations) == 0 {
-		return widgets.EmptyState(e, "radio", "No stations found.", "Try a shorter station name or return to the popular directory.")(gtx)
-	}
+	})
+}
 
-	nowID := ""
-	if snapshot := e.Store.Snapshot(); snapshot.Playback.Now != nil {
-		nowID = snapshot.Playback.Now.VideoID
-	}
-	count := len(p.stations) + 1
-	dims := p.list.Layout(gtx, count, func(gtx layout.Context, index int) layout.Dimensions {
-		if index == len(p.stations) {
-			return p.footer(gtx, e)
+func (p *Page) controls(e *env.Env) layout.Widget {
+	return func(gtx layout.Context) layout.Dimensions {
+		p.filters.Labels = radioFilters
+		p.filters.Selected = p.selected
+		filters := func(gtx layout.Context) layout.Dimensions { return p.filters.Layout(gtx, e.Th.Theme) }
+		field := func(gtx layout.Context) layout.Dimensions {
+			gtx.Constraints.Min.X = min(gtx.Constraints.Max.X, gtx.Dp(260))
+			gtx.Constraints.Max.X = min(gtx.Constraints.Max.X, gtx.Dp(320))
+			return p.filter.Layout(gtx, e.Th.Theme)
 		}
-		station := p.stations[index]
-		row := p.rows[station.StationUUID]
-		if row == nil {
-			row = &stationRow{}
-			p.rows[station.StationUUID] = row
+		if gtx.Metric.PxToDp(gtx.Constraints.Max.X) >= 1000 {
+			return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
+				layout.Flexed(1, filters),
+				layout.Rigid(layout.Spacer{Width: unit.Dp(21)}.Layout),
+				layout.Rigid(field),
+			)
 		}
-		playing := nowID == "RYOTUNES_RADIO:"+station.StationUUID
-		return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
-			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-				return row.layout(gtx, e, station, playing)
-			}),
-			layout.Rigid(layout.Spacer{Height: e.Th.Sp.S1}.Layout),
+		return layout.Flex{Axis: layout.Vertical, Alignment: layout.Start}.Layout(gtx,
+			layout.Rigid(filters),
+			layout.Rigid(layout.Spacer{Height: unit.Dp(13)}.Layout),
+			layout.Rigid(field),
 		)
-	})
-	if p.hasMore && !p.more && p.moreErr == "" && p.list.Position.First+p.list.Position.Count >= len(p.stations)-4 {
-		p.loadMore(e)
 	}
-	return dims
 }
 
-func (p *Page) footer(gtx layout.Context, e *env.Env) layout.Dimensions {
-	gtx.Constraints.Min.Y = min(gtx.Constraints.Max.Y, gtx.Dp(56))
-	return layout.Center.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-		switch {
-		case p.more:
-			return lithic.Text(e.Th, e.Th.T.Body, e.Th.R.Fg2, "Finding more…")(gtx)
-		case p.moreErr != "":
-			return layout.Flex{Axis: layout.Vertical, Alignment: layout.Middle}.Layout(gtx,
-				layout.Rigid(lithic.Text(e.Th, e.Th.T.Caption, e.Th.R.Jasper, p.moreErr)),
-				layout.Rigid(layout.Spacer{Height: e.Th.Sp.S2}.Layout),
-				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					return p.moreRetry.Layout(gtx, e.Th, lithic.Quiet, lithic.Icon("refresh"), "Try again")
-				}),
-			)
-		case p.hasMore:
-			return lithic.Text(e.Th, e.Th.T.Body, e.Th.R.Fg2, "More stations load as you reach them.")(gtx)
-		default:
-			return lithic.Text(e.Th, e.Th.T.MonoSm, e.Th.R.Fg3, "End of this signal set")(gtx)
+func (p *Page) groups(personal state.Personal, query string) []stationGroup {
+	stations := p.filteredStations(personal)
+	if query != "" {
+		needle := strings.ToLower(query)
+		filtered := stations[:0]
+		for _, station := range stations {
+			if strings.Contains(strings.ToLower(station.Name), needle) {
+				filtered = append(filtered, station)
+			}
 		}
-	})
+		stations = filtered
+	}
+	if p.selected < 3 {
+		return []stationGroup{{stations: stations}}
+	}
+	by := make(map[string][]model.RadioStation)
+	for _, station := range stations {
+		key := strings.TrimSpace(station.Country)
+		if p.selected == 4 {
+			key = firstGenre(station.Tags)
+		}
+		if key == "" {
+			key = "Other"
+		}
+		by[key] = append(by[key], station)
+	}
+	titles := make([]string, 0, len(by))
+	for title := range by {
+		titles = append(titles, title)
+	}
+	sort.Strings(titles)
+	groups := make([]stationGroup, 0, len(titles))
+	for _, title := range titles {
+		stations := by[title]
+		sort.SliceStable(stations, func(i, j int) bool { return strings.ToLower(stations[i].Name) < strings.ToLower(stations[j].Name) })
+		groups = append(groups, stationGroup{title: title, stations: stations})
+	}
+	return groups
 }
 
-func radioState(gtx layout.Context, e *env.Env, title, body, detail string, action layout.Widget) layout.Dimensions {
-	gtx.Constraints.Min = image.Point{}
-	return layout.Center.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-		children := []layout.FlexChild{
-			layout.Rigid(lithic.Text(e.Th, e.Th.T.Title, e.Th.R.Fg, title)),
-			layout.Rigid(layout.Spacer{Height: e.Th.Sp.S2}.Layout),
-			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-				return lithic.Label{Style: e.Th.T.Body, Color: e.Th.R.Fg2, MaxLines: 3}.Layout(gtx, e.Th, body)
-			}),
-			layout.Rigid(layout.Spacer{Height: e.Th.Sp.S1}.Layout),
-			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-				return lithic.Label{Style: e.Th.T.Caption, Color: e.Th.R.Fg3, MaxLines: 4}.Layout(gtx, e.Th, detail)
-			}),
+func (p *Page) filteredStations(personal state.Personal) []model.RadioStation {
+	switch p.selected {
+	case 1:
+		return favouriteStations(personal, p.stations)
+	case 2:
+		return recentStations(personal, p.stations)
+	default:
+		return append([]model.RadioStation(nil), p.stations...)
+	}
+}
+
+func favouriteStations(personal state.Personal, catalogue []model.RadioStation) []model.RadioStation {
+	lookup := stationLookup(catalogue)
+	out := make([]model.RadioStation, 0)
+	for _, item := range personal.Saved {
+		if item.Kind != "station" {
+			continue
 		}
-		if action != nil {
-			children = append(children,
-				layout.Rigid(layout.Spacer{Height: e.Th.Sp.S3}.Layout),
-				layout.Rigid(action),
+		station := lookup[strings.TrimPrefix(item.ID, "RYOTUNES_RADIO:")]
+		if station.StationUUID == "" {
+			station = stationFromBrowse(item)
+		}
+		if station.StationUUID != "" {
+			out = append(out, station)
+		}
+	}
+	return out
+}
+
+func recentStations(personal state.Personal, catalogue []model.RadioStation) []model.RadioStation {
+	lookup := stationLookup(catalogue)
+	out := make([]model.RadioStation, 0)
+	for _, recent := range state.RecentItems(personal, 0) {
+		if recent.Kind != "station" {
+			continue
+		}
+		station := lookup[strings.TrimPrefix(recent.ID, "RYOTUNES_RADIO:")]
+		if station.StationUUID == "" {
+			station = stationFromBrowse(recent.BrowseItem)
+		}
+		if station.StationUUID != "" {
+			out = append(out, station)
+		}
+	}
+	return out
+}
+
+func stationLookup(stations []model.RadioStation) map[string]model.RadioStation {
+	lookup := make(map[string]model.RadioStation, len(stations))
+	for _, station := range stations {
+		lookup[station.StationUUID] = station
+	}
+	return lookup
+}
+
+func firstGenre(tags string) string {
+	for _, tag := range strings.Split(tags, ",") {
+		if tag = strings.TrimSpace(tag); tag != "" {
+			return tag
+		}
+	}
+	return ""
+}
+
+func stationGroupCount(groups []stationGroup) int {
+	count := 0
+	for _, group := range groups {
+		count += len(group.stations)
+	}
+	return count
+}
+
+func (p *Page) groupWidgets(e *env.Env, personal state.Personal, groups []stationGroup, width int, playing string) []layout.Widget {
+	children := make([]layout.Widget, 0)
+	columns := stationColumns(width)
+	for _, group := range groups {
+		if group.title != "" {
+			title := group.title
+			children = append(children, kit.Text(e.Th.Theme, e.Th.T.Section, e.Th.R.Fg, title))
+		}
+		rows := (len(group.stations) + columns - 1) / columns
+		for row := range rows {
+			start := row * columns
+			end := min(len(group.stations), start+columns)
+			stations := group.stations[start:end]
+			children = append(children, func(gtx layout.Context) layout.Dimensions {
+				return p.stationRow(gtx, e, personal, stations, columns, playing)
+			})
+		}
+	}
+	return children
+}
+
+func stationColumns(width int) int {
+	switch {
+	case width >= 1100:
+		return 4
+	case width >= 820:
+		return 3
+	case width >= 520:
+		return 2
+	default:
+		return 1
+	}
+}
+
+func (p *Page) stationRow(gtx layout.Context, e *env.Env, personal state.Personal, stations []model.RadioStation, columns int, playing string) layout.Dimensions {
+	children := make([]layout.FlexChild, 0, columns*2-1)
+	for index, station := range stations {
+		station := station
+		tile := p.tile(station)
+		favourite := p.favourite(personal, station)
+		children = append(children, layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+			return tile.layout(gtx, e, p, station, station.StationUUID == playing, favourite)
+		}))
+		if index+1 < columns {
+			children = append(children, layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout))
+		}
+	}
+	for index := len(stations); index < columns; index++ {
+		children = append(children, layout.Flexed(1, func(layout.Context) layout.Dimensions { return layout.Dimensions{} }))
+		if index+1 < columns {
+			children = append(children, layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout))
+		}
+	}
+	return layout.Flex{Axis: layout.Horizontal}.Layout(gtx, children...)
+}
+
+func (p *Page) tile(station model.RadioStation) *stationTile {
+	tile := p.tiles[station.StationUUID]
+	if tile == nil {
+		tile = new(stationTile)
+		p.tiles[station.StationUUID] = tile
+	}
+	return tile
+}
+
+func (p *Page) empty(e *env.Env) layout.Widget {
+	switch p.selected {
+	case 1:
+		return widgets.EmptyState(e, look.Icon.HeartOutline, "No favourite stations", "Hover a station and choose the heart to keep it here.")
+	case 2:
+		return widgets.EmptyState(e, look.Icon.Radio, "No recent stations", "Stations you play show here.")
+	default:
+		return widgets.EmptyState(e, look.Icon.Radio, "No stations found.", "Try a shorter station name or another catalogue view.")
+	}
+}
+
+func (p *Page) footer(e *env.Env) layout.Widget {
+	switch {
+	case p.more:
+		return kit.Text(e.Th.Theme, e.Th.T.Proof, e.Th.R.Fg2, "Finding more stations...")
+	case p.moreErr != "":
+		p.moreTry.Kind = kit.PlaqueLine
+		p.moreTry.Label = "Try again"
+		p.moreTry.Icon = look.Icon.Refresh
+		return func(gtx layout.Context) layout.Dimensions {
+			return layout.Flex{Axis: layout.Vertical, Alignment: layout.Start}.Layout(gtx,
+				layout.Rigid(kit.Text(e.Th.Theme, e.Th.T.Proof, e.Th.R.Jasper, p.moreErr)),
+				layout.Rigid(layout.Spacer{Height: unit.Dp(8)}.Layout),
+				layout.Rigid(func(gtx layout.Context) layout.Dimensions { return p.moreTry.Layout(gtx, e.Th.Theme) }),
 			)
 		}
-		return layout.Flex{Axis: layout.Vertical, Alignment: layout.Middle}.Layout(gtx, children...)
-	})
+	case p.hasMore:
+		return kit.Text(e.Th.Theme, e.Th.T.Proof, e.Th.R.Fg3, "More stations load as you reach them.")
+	default:
+		return nil
+	}
 }

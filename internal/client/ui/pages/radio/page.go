@@ -1,80 +1,71 @@
-// Package radio implements the demand-driven internet radio directory page.
+// Package radio implements the internet radio catalogue page.
 package radio
 
 import (
-	"strings"
-
-	"gioui.org/layout"
-	"gioui.org/widget"
-
-	"github.com/ryoku-dev/ryotunes/internal/client/lithic"
+	"encoding/json"
+	"github.com/ryoku-dev/ryoku/docs/lithic/library/go/kit"
+	"github.com/ryoku-dev/ryotunes/internal/client/state"
 	"github.com/ryoku-dev/ryotunes/internal/client/ui/act"
 	"github.com/ryoku-dev/ryotunes/internal/client/ui/env"
+	"github.com/ryoku-dev/ryotunes/internal/client/ui/look"
 	"github.com/ryoku-dev/ryotunes/internal/model"
 	"github.com/ryoku-dev/ryotunes/internal/protocol"
+	"strings"
+	"time"
 )
 
 const pageSize = 36
 
+var radioFilters = []string{"Popular", "Favourites", "Recent", "By country", "By genre"}
+
 // Page is the retained internet-radio directory surface.
 type Page struct {
-	route env.Route
+	scroll  look.Scroller
+	filter  kit.TextField
+	filters kit.Filters
+	tiles   map[string]*stationTile
+	retry   kit.Plaque
+	moreTry kit.Plaque
+	saver   radioSaver
 
-	search lithic.Search
-	list   widget.List
-	rows   map[string]*stationRow
-
-	stations  []model.RadioStation
-	query     string
-	error     string
-	moreErr   string
-	loaded    bool
-	loading   bool
-	more      bool
-	retry     lithic.Button
-	moreRetry lithic.Button
-	hasMore   bool
-	request   uint64
+	selected int
+	stations []model.RadioStation
+	error    string
+	moreErr  string
+	loaded   bool
+	loading  bool
+	more     bool
+	hasMore  bool
+	request  uint64
 }
 
 // New constructs a retained radio page without fetching the directory.
 func New(r env.Route) env.Page {
-	p := &Page{
-		route: r,
-		list:  widget.List{List: layout.List{Axis: layout.Vertical}},
-		rows:  make(map[string]*stationRow),
-	}
-	p.search.SingleLine = true
-	p.search.Submit = true
-	if q := normalizedQuery(r.Query); q != "" {
-		p.search.SetText(q)
+	p := &Page{tiles: make(map[string]*stationTile)}
+	p.filter.SingleLine = true
+	p.filter.Label = "Filter stations"
+	p.filter.Placeholder = "Station name"
+	if query := normalizedQuery(r.Query); query != "" {
+		p.filter.SetText(query)
 	}
 	return p
 }
 
-// Title returns the page title.
 func (p *Page) Title() string { return "Radio" }
 
-// Refresh reloads the first directory page for the current search.
-func (p *Page) Refresh(e *env.Env) {
-	p.load(e, normalizedQuery(p.search.Text()))
-}
+func (p *Page) Refresh(e *env.Env) { p.load(e) }
 
-func normalizedQuery(value string) string {
-	return strings.Join(strings.Fields(value), " ")
-}
+func normalizedQuery(value string) string { return strings.Join(strings.Fields(value), " ") }
 
 func (p *Page) ensureLoaded(e *env.Env) {
 	if !p.loaded && !p.loading {
-		p.load(e, normalizedQuery(p.search.Text()))
+		p.load(e)
 	}
 }
 
-func (p *Page) load(e *env.Env, query string) {
+func (p *Page) load(e *env.Env) {
 	p.request++
 	request := p.request
-	p.query = query
-	p.search.SetText(query)
 	p.error = ""
 	p.moreErr = ""
 	p.loaded = false
@@ -82,13 +73,8 @@ func (p *Page) load(e *env.Env, query string) {
 	p.more = false
 	p.hasMore = false
 	p.stations = nil
-
 	offset, limit := 0, pageSize
-	params := protocol.RadioStationsParams{Offset: &offset, Limit: &limit}
-	if query != "" {
-		params.Query = &query
-	}
-	act.Call[[]model.RadioStation](e, protocol.MethodRadioStations, params, func(stations []model.RadioStation, err error) {
+	act.Call[[]model.RadioStation](e, protocol.MethodRadioStations, protocol.RadioStationsParams{Offset: &offset, Limit: &limit}, func(stations []model.RadioStation, err error) {
 		if request != p.request {
 			return
 		}
@@ -98,7 +84,7 @@ func (p *Page) load(e *env.Env, query string) {
 			p.error = err.Error()
 			return
 		}
-		p.stations = stations
+		p.stations = dedupeStations(stations)
 		p.hasMore = len(stations) == pageSize
 	})
 }
@@ -111,12 +97,7 @@ func (p *Page) loadMore(e *env.Env) {
 	p.moreErr = ""
 	request := p.request
 	offset, limit := len(p.stations), pageSize
-	params := protocol.RadioStationsParams{Offset: &offset, Limit: &limit}
-	if p.query != "" {
-		query := p.query
-		params.Query = &query
-	}
-	act.Call[[]model.RadioStation](e, protocol.MethodRadioStations, params, func(stations []model.RadioStation, err error) {
+	act.Call[[]model.RadioStation](e, protocol.MethodRadioStations, protocol.RadioStationsParams{Offset: &offset, Limit: &limit}, func(stations []model.RadioStation, err error) {
 		if request != p.request {
 			return
 		}
@@ -125,7 +106,118 @@ func (p *Page) loadMore(e *env.Env) {
 			p.moreErr = err.Error()
 			return
 		}
-		p.stations = append(p.stations, stations...)
+		p.stations = dedupeStations(append(p.stations, stations...))
 		p.hasMore = len(stations) == pageSize
+	})
+}
+
+func dedupeStations(stations []model.RadioStation) []model.RadioStation {
+	seen := make(map[string]struct{}, len(stations))
+	out := make([]model.RadioStation, 0, len(stations))
+	for _, station := range stations {
+		if station.StationUUID == "" {
+			continue
+		}
+		if _, exists := seen[station.StationUUID]; exists {
+			continue
+		}
+		seen[station.StationUUID] = struct{}{}
+		out = append(out, station)
+	}
+	return out
+}
+
+func (p *Page) favourite(personal state.Personal, station model.RadioStation) bool {
+	id := stationPersonalID(station.StationUUID)
+	for _, item := range personal.Saved {
+		if item.Kind == "station" && item.ID == id {
+			return true
+		}
+	}
+	return false
+}
+
+func (p *Page) toggleFavourite(e *env.Env, station model.RadioStation) {
+	id := stationPersonalID(station.StationUUID)
+	changed := e.Store.UpdatePersonal(func(personal *state.Personal) bool {
+		for index, item := range personal.Saved {
+			if item.Kind == "station" && item.ID == id {
+				personal.Saved = append(personal.Saved[:index], personal.Saved[index+1:]...)
+				return true
+			}
+		}
+		personal.Saved = append(personal.Saved, stationBrowse(station))
+		return true
+	})
+	if changed {
+		p.saver.queue(e)
+	}
+}
+
+func (p *Page) recordRecent(e *env.Env, station model.RadioStation) {
+	now := e.Now
+	if now.IsZero() {
+		now = time.Now()
+	}
+	item := stationBrowse(station)
+	changed := e.Store.UpdatePersonal(func(personal *state.Personal) bool {
+		if personal.Recent == nil {
+			personal.Recent = make(map[string]state.RecentItem)
+		}
+		personal.Recent[item.ID] = state.RecentItem{BrowseItem: item, At: now.UnixMilli()}
+		return true
+	})
+	if changed {
+		p.saver.queue(e)
+	}
+}
+
+func (p *Page) playStation(e *env.Env, station model.RadioStation) {
+	act.Call[protocol.Null](e, protocol.MethodPlayRadioStation, protocol.PlayRadioStationParams{StationUUID: station.StationUUID}, func(_ protocol.Null, err error) {
+		if err != nil {
+			if e.Toast != nil {
+				e.Toast(err.Error(), env.ToastError)
+			}
+			return
+		}
+		p.recordRecent(e, station)
+		if e.Toast != nil {
+			e.Toast("Playing "+station.Name, env.ToastSuccess)
+		}
+	})
+}
+
+type radioSaver struct {
+	saving bool
+	queued bool
+}
+
+func (s *radioSaver) queue(e *env.Env) {
+	if s.saving {
+		s.queued = true
+		return
+	}
+	s.start(e)
+}
+
+func (s *radioSaver) start(e *env.Env) {
+	raw, err := state.MarshalPersonal(e.Store.Snapshot().Personal)
+	if err != nil {
+		if e.Toast != nil {
+			e.Toast("Could not save", env.ToastError)
+		}
+		return
+	}
+	e.Store.MarkPersonalSave(json.RawMessage(raw))
+	s.saving = true
+	s.queued = false
+	act.Call[protocol.Null](e, protocol.MethodSetPersonal, protocol.SetPersonalParams{Personal: raw}, func(_ protocol.Null, err error) {
+		s.saving = false
+		if err != nil && e.Toast != nil {
+			e.Toast("Could not save", env.ToastError)
+		}
+		if s.queued {
+			s.start(e)
+		}
 	})
 }

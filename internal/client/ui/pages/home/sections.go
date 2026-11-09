@@ -2,180 +2,183 @@ package home
 
 import (
 	"fmt"
+	"strings"
 
 	"gioui.org/layout"
 	"gioui.org/unit"
 
-	"github.com/ryoku-dev/ryotunes/internal/client/lithic"
 	"github.com/ryoku-dev/ryotunes/internal/client/state"
 	"github.com/ryoku-dev/ryotunes/internal/client/ui/env"
+	"github.com/ryoku-dev/ryotunes/internal/client/ui/look"
 	"github.com/ryoku-dev/ryotunes/internal/client/ui/widgets"
 	"github.com/ryoku-dev/ryotunes/internal/model"
 )
 
 func (p *page) content(e *env.Env, snapshot state.State) []layout.Widget {
-	children := make([]layout.Widget, 0, 10+len(p.feed.Sections))
-	if len(snapshot.Queue.Items) != 0 {
-		children = append(children, section(e, "Continue listening", p.continueListening(e, snapshot)))
+	children := []layout.Widget{p.header(e, snapshot)}
+	if p.loading && !p.loaded {
+		return append(children, widgets.Loading(e, widgets.LoadingGrid))
 	}
+	if p.errorText != "" && !p.loaded {
+		return append(children, widgets.Failed(e, p.errorText, &p.retry))
+	}
+
+	if len(p.feed.Chips) > 1 {
+		children = append(children, p.feedFiltersLayout(e))
+	}
+	if quick := p.quickItems(snapshot.Personal); len(quick) != 0 {
+		children = append(children, p.quickGrid(e, quick))
+	}
+
 	recent := recentItems(snapshot.Personal)
-	if len(recent) == 0 {
-		children = append(children, section(e, "Recently played", lithic.Text(e.Th, e.Th.T.Body, e.Th.R.Fg2, "Play something and it will appear here.")))
-	} else {
+	if len(recent) != 0 {
 		children = append(children, func(gtx layout.Context) layout.Dimensions {
-			return p.recentShelf.Layout(gtx, e, model.Shelf{Title: "Recently played", Items: recent})
+			return p.recent.Layout(gtx, e, "Jump back in", recent, nil)
 		})
 	}
-	children = append(children, section(e, "Shortcuts", p.shortcutsLayout(e, snapshot.Personal)))
-	children = append(children, section(e, "Picked for you", p.pickedLayout(e, snapshot.Personal)))
+	picked := state.PickedForYou(p.feed, snapshot.Personal)
+	if len(picked) != 0 {
+		children = append(children, func(gtx layout.Context) layout.Dimensions {
+			return p.picked.Layout(gtx, e, "Picked for you", picked, nil)
+		})
+	}
+
 	if snapshot.Provider == model.ProviderTidal && !snapshot.Tidal.SignedIn {
-		children = append(children, widgets.EmptyState(e, "login", "Sign in to Tidal", "Sign in from Settings to see your Tidal home feed."))
+		children = append(children, widgets.EmptyState(e, look.Icon.Person, "Sign in to TIDAL", "Sign in from Settings to see your TIDAL home feed."))
 	} else {
-		if len(p.feed.Chips) != 0 {
-			children = append(children, p.feedChips(e))
-		}
-		for index, shelf := range p.feed.Sections {
+		for index := range p.feed.Sections {
+			shelf := p.feed.Sections[index]
+			if len(shelf.Items) == 0 {
+				continue
+			}
 			key := fmt.Sprintf("%d:%s", index, shelf.Title)
 			view := p.shelves[key]
 			if view == nil {
-				view = &widgets.Shelf{}
+				view = new(widgets.Shelf)
 				p.shelves[key] = view
 			}
-			modelShelf := shelf
+			var more *env.Route
+			if shelf.MoreBrowseID != nil && strings.TrimSpace(*shelf.MoreBrowseID) != "" {
+				route := env.Route{Kind: env.RouteList, ID: *shelf.MoreBrowseID, Title: shelf.Title}
+				if shelf.MoreParams != nil {
+					route.Params = *shelf.MoreParams
+				}
+				more = &route
+			}
+			title, items, route := shelf.Title, shelf.Items, more
 			children = append(children, func(gtx layout.Context) layout.Dimensions {
-				return view.Layout(gtx, e, modelShelf)
+				return view.Layout(gtx, e, title, items, route)
 			})
 		}
 	}
-	children = append(children, section(e, "Listening insights", p.insights.layout(e)))
+	if facts := p.insights.layout(e); facts != nil {
+		children = append(children, facts)
+	}
 	return children
 }
 
-func (p *page) continueListening(e *env.Env, snapshot state.State) layout.Widget {
+func (p *page) quickGrid(e *env.Env, items []model.BrowseItem) layout.Widget {
 	return func(gtx layout.Context) layout.Dimensions {
-		index := snapshot.Queue.CurrentIndex
-		if index < 0 || index >= len(snapshot.Queue.Items) {
-			index = 0
+		width := int(gtx.Metric.PxToDp(gtx.Constraints.Max.X))
+		columns := 2
+		if width >= 1100 {
+			columns = 4
+		} else if width >= 820 {
+			columns = 3
 		}
-		track := snapshot.Queue.Items[index]
-		return lithic.Slab(gtx, e.Th.R.Stone1, e.Th.Cut.Mid, func(gtx layout.Context) layout.Dimensions {
-			copy := layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-				children := []layout.FlexChild{
-					layout.Rigid(lithic.Text(e.Th, e.Th.T.Title, e.Th.R.Fg, track.Title)),
-					layout.Rigid(layout.Spacer{Height: unit.Dp(4)}.Layout),
-					layout.Rigid(lithic.Text(e.Th, e.Th.T.Body, e.Th.R.Fg2, track.Artists)),
+		rows := (len(items) + columns - 1) / columns
+		rowWidgets := make([]layout.FlexChild, 0, rows*2)
+		for row := range rows {
+			start := row * columns
+			end := min(len(items), start+columns)
+			rowWidgets = append(rowWidgets, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				children := make([]layout.FlexChild, 0, columns*2-1)
+				for column := range columns {
+					if column > 0 {
+						children = append(children, layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout))
+					}
+					index := start + column
+					if index >= end {
+						children = append(children, layout.Flexed(1, func(layout.Context) layout.Dimensions { return layout.Dimensions{} }))
+						continue
+					}
+					item := items[index]
+					tile := p.tile(item)
+					children = append(children, layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+						return tile.Layout(gtx, e, item)
+					}))
 				}
-				if snapshot.Playback.Duration > 0 {
-					proof := widgets.Duration(e.Store.PositionAt(e.Now)) + " of " + widgets.Duration(snapshot.Playback.Duration)
-					children = append(children,
-						layout.Rigid(layout.Spacer{Height: unit.Dp(4)}.Layout),
-						layout.Rigid(lithic.Text(e.Th, e.Th.T.MonoSm, e.Th.R.Fg3, proof)),
-					)
-				}
-				return layout.Flex{Axis: layout.Vertical, Alignment: layout.Start}.Layout(gtx, children...)
-			})
-			return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle, Gap: gtx.Dp(13)}.Layout(gtx,
-				layout.Rigid(widgets.ProviderBadge(e, model.ProviderOf(track.VideoID))),
-				copy,
-				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					return p.resume.Layout(gtx, e.Th, lithic.Gold, lithic.Icon("play"), "Resume queue")
-				}),
-			)
-		})
+				return layout.Flex{Axis: layout.Horizontal}.Layout(gtx, children...)
+			}))
+			if row+1 < rows {
+				rowWidgets = append(rowWidgets, layout.Rigid(layout.Spacer{Height: unit.Dp(8)}.Layout))
+			}
+		}
+		return layout.Flex{Axis: layout.Vertical}.Layout(gtx, rowWidgets...)
 	}
 }
 
-func recentItems(personal state.Personal) []model.BrowseItem {
-	picked := make(map[string]struct{}, len(personal.Picks))
-	for _, pick := range personal.Picks {
-		picked[pick.ID] = struct{}{}
+func (p *page) tile(item model.BrowseItem) *widgets.QuickTile {
+	key := strings.ToLower(item.Kind) + "\x00" + item.ID
+	tile := p.tiles[key]
+	if tile == nil {
+		tile = new(widgets.QuickTile)
+		p.tiles[key] = tile
 	}
+	return tile
+}
+
+func (p *page) quickItems(personal state.Personal) []model.BrowseItem {
+	lookup := make(map[string]model.BrowseItem)
+	for _, pick := range personal.Picks {
+		lookup[pick.ID] = pick.BrowseItem
+	}
+	for _, item := range personal.Saved {
+		lookup[item.ID] = item
+	}
+	for _, recent := range state.RecentItems(personal, 0) {
+		lookup[recent.ID] = recent.BrowseItem
+	}
+	for _, shelf := range p.feed.Sections {
+		for _, item := range shelf.Items {
+			lookup[item.ID] = item
+		}
+	}
+
+	out := make([]model.BrowseItem, 0, 8)
+	seen := make(map[string]struct{})
+	appendItem := func(item model.BrowseItem) {
+		if len(out) == 8 || item.ID == "" {
+			return
+		}
+		if _, exists := seen[item.ID]; exists {
+			return
+		}
+		seen[item.ID] = struct{}{}
+		out = append(out, item)
+	}
+	for _, id := range personal.Pins {
+		appendItem(lookup[id])
+	}
+	for _, pick := range personal.Picks {
+		appendItem(pick.BrowseItem)
+	}
+	for _, recent := range state.RecentItems(personal, 0) {
+		appendItem(recent.BrowseItem)
+	}
+	return out
+}
+
+func recentItems(personal state.Personal) []model.BrowseItem {
 	items := make([]model.BrowseItem, 0, 12)
 	for _, recent := range state.RecentItems(personal, 0) {
-		item := model.BrowseItem{
-			Kind:       recent.Kind,
-			ID:         recent.ID,
-			Title:      recent.Title,
-			Subtitle:   recent.Subtitle,
-			Thumbnail:  recent.Thumbnail,
-			Duration:   recent.Duration,
-			ArtistRuns: recent.ArtistRuns,
-			PlayCount:  recent.PlayCount,
-			IsVideo:    recent.IsVideo,
-			IsUpload:   recent.IsUpload,
-			Explicit:   recent.Explicit,
-		}
-		if _, exists := picked[item.ID]; exists {
+		if recent.Kind == "station" || recent.ID == "" {
 			continue
 		}
-		switch item.Kind {
-		case "song", "album", "playlist":
-			items = append(items, item)
-		}
+		items = append(items, recent.BrowseItem)
 		if len(items) == 12 {
 			break
 		}
 	}
 	return items
-}
-
-func (p *page) pickedLayout(e *env.Env, personal state.Personal) layout.Widget {
-	items := state.PickedForYou(p.feed, personal)
-	provider := providerLabel(p.loadedProvider)
-	var sentence string
-	switch {
-	case len(items) == 0:
-		sentence = "Nothing new to surface here yet. This fills in as your " + provider + " feed grows."
-	case hasListeningHistory(personal):
-		sentence = "Based on your recent listening and shortcuts, with room for different artists. Ranked on your device."
-	default:
-		sentence = "A varied selection from " + provider + ". Your listening will help shape future picks."
-	}
-	return func(gtx layout.Context) layout.Dimensions {
-		return layout.Flex{Axis: layout.Vertical, Alignment: layout.Start}.Layout(gtx,
-			layout.Rigid(lithic.Text(e.Th, e.Th.T.Body, e.Th.R.Fg2, sentence)),
-			layout.Rigid(layout.Spacer{Height: unit.Dp(13)}.Layout),
-			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-				if len(items) == 0 {
-					return layout.Dimensions{}
-				}
-				return p.pickedGrid.Layout(gtx, e, items)
-			}),
-		)
-	}
-}
-
-func (p *page) feedChips(e *env.Env) layout.Widget {
-	return func(gtx layout.Context) layout.Dimensions {
-		labels := make([]string, len(p.feed.Chips))
-		selected := 0
-		for i, chip := range p.feed.Chips {
-			labels[i] = chip.Title
-			if chip.Params == p.feedParams {
-				selected = i
-			}
-		}
-		return p.feedFilters.Layout(gtx, e.Th, labels, nil, selected)
-	}
-}
-
-func providerLabel(provider model.Provider) string {
-	switch provider {
-	case model.ProviderYouTube:
-		return "YouTube Music"
-	case model.ProviderSpotify:
-		return "Spotify"
-	case model.ProviderSoundCloud:
-		return "SoundCloud"
-	case model.ProviderTidal:
-		return "Tidal"
-	case model.ProviderLocal:
-		return "your local library"
-	default:
-		return "your feed"
-	}
-}
-
-func hasListeningHistory(personal state.Personal) bool {
-	return len(personal.Recent) != 0 || len(personal.Artists) != 0
 }

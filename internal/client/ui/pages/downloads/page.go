@@ -2,31 +2,33 @@
 package downloads
 
 import (
-	"gioui.org/layout"
-	"gioui.org/widget"
-
-	"github.com/ryoku-dev/ryotunes/internal/client/lithic"
+	"github.com/ryoku-dev/ryoku/docs/lithic/library/go/kit"
 	"github.com/ryoku-dev/ryotunes/internal/client/ui/env"
+	"github.com/ryoku-dev/ryotunes/internal/client/ui/look"
 )
 
 // Page is the retained downloads queue and history surface.
 type Page struct {
-	route env.Route
-	list  widget.List
+	route  env.Route
+	scroll look.Scroller
+	filter kit.Filters
 
+	filterIndex int
 	rows        map[string]*downloadRow
 	collections map[string]*collectionCard
 
-	openFolder lithic.Button
-	clear      lithic.Button
-	settings   lithic.Button
+	openFolder kit.Plaque
+	clear      kit.Plaque
+	settings   kit.Plaque
+
+	usedRevision int64
+	usedBytes    int64
 }
 
 // New constructs a downloads page backed entirely by the live client store.
 func New(r env.Route) env.Page {
 	return &Page{
 		route:       r,
-		list:        widget.List{List: layout.List{Axis: layout.Vertical}},
 		rows:        make(map[string]*downloadRow),
 		collections: make(map[string]*collectionCard),
 	}

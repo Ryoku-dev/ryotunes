@@ -5,121 +5,122 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
-	"strconv"
 	"strings"
 
 	"gioui.org/layout"
+	"gioui.org/unit"
 
-	"github.com/ryoku-dev/ryotunes/internal/client/lithic"
+	"github.com/ryoku-dev/ryoku/docs/lithic/library/go/anim"
+	"github.com/ryoku-dev/ryoku/docs/lithic/library/go/kit"
+	libtheme "github.com/ryoku-dev/ryoku/docs/lithic/library/go/theme"
 	"github.com/ryoku-dev/ryotunes/internal/client/state"
 	"github.com/ryoku-dev/ryotunes/internal/client/ui/env"
+	"github.com/ryoku-dev/ryotunes/internal/client/ui/look"
 	"github.com/ryoku-dev/ryotunes/internal/model"
 )
 
 var (
-	appearanceLabels = []string{"Follow desktop", "Dark", "Light"}
-	appearanceValues = []string{"desktop", "dark", "light"}
+	appearanceLabels = []string{"Follow Ryoku", "Dark", "Light"}
+	appearanceValues = []string{"follow", "dark", "light"}
 	densityLabels    = []string{"Comfortable", "Compact"}
 	densityValues    = []string{"comfortable", "compact"}
+	motionLabels     = []string{"Full", "Reduced"}
 )
 
 func (p *page) layoutAppearance(gtx layout.Context, e *env.Env, snapshot state.State) layout.Dimensions {
 	preferences := snapshot.Client
 	p.appearance.palette.sync(preferences.PaletteFile)
-	p.appearance.palette.field.Mono = true
-
 	mode := indexOf(appearanceValues, preferences.Appearance, 0)
+	if preferences.Appearance == "desktop" {
+		mode = 0
+	}
 	density := indexOf(densityValues, preferences.Density, 0)
 	scale := settingInt(snapshot.Settings, model.SettingUIScale, 100)
-	romanize := settingBool(snapshot.Settings, model.SettingLyricsRomanize, false)
-
 	return settingRows(gtx,
-		settingRow(e.Th, "Colour mode", "Follow the Ryoku desktop, or pin dark or light neutral stones.", func(gtx layout.Context) layout.Dimensions {
-			dims := p.appearance.mode.Layout(gtx, e.Th, "", appearanceLabels, mode)
-			if selected, ok := p.appearance.mode.Changed(gtx); ok {
+		settingRow(e.Th, "Colours", "Follow Ryoku, or pin dark or light stones while keeping the live palette accents.", func(gtx layout.Context) layout.Dimensions {
+			dims := p.appearance.colours.Layout(gtx, e.Th, e.Overlays, appearanceLabels, mode)
+			if selected, ok := p.appearance.colours.Changed(); ok {
 				preferences.Appearance = appearanceValues[selected]
 				saveClientPreferences(e, preferences)
 				applyAppearance(e, preferences.Appearance, preferences.PaletteFile)
 			}
 			return dims
 		}),
-		settingRow(e.Th, "Density", "Compact changes resource rows from 56 dp to 48 dp. Controls and type stay the same.", func(gtx layout.Context) layout.Dimensions {
-			dims := p.appearance.density.Layout(gtx, e.Th, "", densityLabels, density)
-			if selected, ok := p.appearance.density.Changed(gtx); ok {
+		settingRow(e.Th, "Palette file", "Choose a Ryoku palette JSON, or clear it to use the live desktop palette.", func(gtx layout.Context) layout.Dimensions {
+			p.appearance.palette.field.Mono = true
+			p.appearance.palette.field.Placeholder = "/path/to/colors.json"
+			p.appearance.usePalette.Kind, p.appearance.usePalette.Label = kit.PlaqueLine, "Use palette"
+			p.appearance.clearPalette.Kind, p.appearance.clearPalette.Label = kit.PlaqueQuiet, "None"
+			if p.appearance.usePalette.Clicked(gtx) {
+				path := strings.TrimSpace(p.appearance.palette.field.Text())
+				if err := validatePaletteFile(path); err != nil {
+					e.Toast(err.Error(), env.ToastError)
+				} else {
+					preferences.PaletteFile = path
+					saveClientPreferences(e, preferences)
+					applyAppearance(e, preferences.Appearance, path)
+				}
+			}
+			if p.appearance.clearPalette.Clicked(gtx) {
+				preferences.PaletteFile = ""
+				p.appearance.palette.field.SetText("")
+				saveClientPreferences(e, preferences)
+				applyAppearance(e, preferences.Appearance, "")
+			}
+			return layout.Flex{Axis: layout.Vertical, Alignment: layout.End}.Layout(gtx,
+				layout.Rigid(func(gtx layout.Context) layout.Dimensions { return p.appearance.palette.field.Layout(gtx, e.Th.Theme) }),
+				layout.Rigid(layout.Spacer{Height: unit.Dp(8)}.Layout),
+				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+					return layout.Flex{Axis: layout.Horizontal}.Layout(gtx,
+						layout.Rigid(func(gtx layout.Context) layout.Dimensions { return p.appearance.usePalette.Layout(gtx, e.Th.Theme) }),
+						layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
+						layout.Rigid(func(gtx layout.Context) layout.Dimensions { return p.appearance.clearPalette.Layout(gtx, e.Th.Theme) }),
+					)
+				}),
+			)
+		}),
+		settingRow(e.Th, "Density", "Compact changes resource rows from 56 dp to 48 dp.", func(gtx layout.Context) layout.Dimensions {
+			dims := p.appearance.density.Layout(gtx, e.Th, e.Overlays, densityLabels, density)
+			if selected, ok := p.appearance.density.Changed(); ok {
 				preferences.Density = densityValues[selected]
 				if preferences.Density == "compact" {
-					e.Th.Density = lithic.Compact
+					e.Th.Density = libtheme.Compact
 				} else {
-					e.Th.Density = lithic.Comfortable
+					e.Th.Density = libtheme.Comfortable
 				}
 				saveClientPreferences(e, preferences)
 			}
 			return dims
 		}),
-		settingRow(e.Th, "Reduce motion", "Make selection, hover and state changes immediate. Nothing animates at rest either way.", func(gtx layout.Context) layout.Dimensions {
-			p.appearance.reduce.Value = preferences.ReduceMotion
-			before := p.appearance.reduce.Value
-			dims := p.appearance.reduce.Layout(gtx, e.Th, "")
-			if p.appearance.reduce.Value != before {
-				preferences.ReduceMotion = p.appearance.reduce.Value
-				lithic.SetReduce(preferences.ReduceMotion)
+		settingRow(e.Th, "Motion", "Reduced motion makes state and selection changes immediate.", func(gtx layout.Context) layout.Dimensions {
+			selected := 0
+			if preferences.ReduceMotion {
+				selected = 1
+			}
+			dims := p.appearance.motion.Layout(gtx, e.Th, e.Overlays, motionLabels, selected)
+			if changed, ok := p.appearance.motion.Changed(); ok {
+				preferences.ReduceMotion = changed == 1
+				anim.SetReduce(preferences.ReduceMotion)
 				saveClientPreferences(e, preferences)
 			}
 			return dims
 		}),
-		toggleSettingRow(e, &p.appearance.lowResource, snapshot.Settings, model.SettingLowResourceMode, false,
-			"Low resource mode", "Disable speculative stream warming and reduce automatic Home, network work and decorative motion."),
-		settingRow(e.Th, "Interface scale", "Preferred renderer scale, persisted for every Ryotunes client on this account.", func(gtx layout.Context) layout.Dimensions {
-			p.appearance.scale.Value = scale
-			p.appearance.scale.Min = 80
-			p.appearance.scale.Max = 140
-			p.appearance.scale.Step = 10
-			dims := p.appearance.scale.Layout(gtx, e.Th, "%")
+		settingRow(e.Th, "UI scale", "Preferred renderer scale, persisted for every Ryotunes client on this account.", func(gtx layout.Context) layout.Dimensions {
+			p.appearance.scale.Value, p.appearance.scale.Min, p.appearance.scale.Max = scale, 80, 140
+			p.appearance.scale.Step, p.appearance.scale.Unit = 10, "%"
+			dims := p.appearance.scale.Layout(gtx, e.Th.Theme)
 			if p.appearance.scale.Changed() {
 				setSetting(e, model.SettingUIScale, intString(p.appearance.scale.Value), "", nil)
 			}
 			return dims
 		}),
-		settingRow(e.Th, "Romanized lyrics", "Show romanized readings when the lyrics service provides them.", func(gtx layout.Context) layout.Dimensions {
-			p.appearance.romanize.Value = romanize
-			before := p.appearance.romanize.Value
-			dims := p.appearance.romanize.Layout(gtx, e.Th, "")
-			if p.appearance.romanize.Value != before {
-				setSetting(e, model.SettingLyricsRomanize, boolString(p.appearance.romanize.Value), "", nil)
-			}
-			return dims
-		}),
-		settingRow(e.Th, "Palette file", "Optional Material role-set file. Leave blank to use the live Ryoku palette.", func(gtx layout.Context) layout.Dimensions {
-			return layout.Flex{Axis: layout.Vertical, Alignment: layout.End, Gap: gtx.Dp(8)}.Layout(gtx,
-				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					return p.appearance.palette.field.Layout(gtx, e.Th, "", "/path/to/colors.json", "", "")
-				}),
-				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					if p.appearance.savePalette.Clicked(gtx) {
-						path := strings.TrimSpace(p.appearance.palette.field.Text())
-						if err := validatePaletteFile(path); err != nil {
-							e.Toast(err.Error(), env.ToastError)
-						} else {
-							preferences.PaletteFile = path
-							saveClientPreferences(e, preferences)
-							applyAppearance(e, preferences.Appearance, preferences.PaletteFile)
-						}
-					}
-					return p.appearance.savePalette.Layout(gtx, e.Th, lithic.Line, nil, "Use palette")
-				}),
-			)
-		}),
+		toggleSettingRow(e, &p.appearance.lowResource, snapshot.Settings, model.SettingLowResourceMode, false,
+			"Low resource mode", "Disable speculative stream warming and reduce automatic Home and network work."),
 	)
 }
 
-func applyAppearance(e *env.Env, value, paletteFile string) {
-	mode := lithic.Follow
-	if value == "dark" {
-		mode = lithic.Dark
-	} else if value == "light" {
-		mode = lithic.Light
-	}
-	e.Th.R = lithic.FromPalette(lithic.LoadPalette(mode, paletteFile))
+func applyAppearance(e *env.Env, appearance, paletteFile string) {
+	e.Th.SetRoles(look.Roles(appearance, paletteFile))
 }
 
 func validatePaletteFile(path string) error {
@@ -162,8 +163,4 @@ func hasPaletteColour(value any) bool {
 		}
 	}
 	return false
-}
-
-func intString(value int) string {
-	return strconv.Itoa(value)
 }

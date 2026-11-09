@@ -4,14 +4,17 @@ import (
 	"strings"
 
 	"gioui.org/layout"
+	"gioui.org/widget"
 
-	"github.com/ryoku-dev/ryotunes/internal/client/lithic"
+	"github.com/ryoku-dev/ryoku/docs/lithic/library/go/kit"
+	"github.com/ryoku-dev/ryoku/docs/lithic/library/go/palette"
 	"github.com/ryoku-dev/ryotunes/internal/client/ui/env"
+	"github.com/ryoku-dev/ryotunes/internal/client/ui/look"
 	"github.com/ryoku-dev/ryotunes/internal/model"
 )
 
 type logRow struct {
-	row lithic.Row
+	tablet kit.Tablet
 }
 
 func (r *logRow) layout(gtx layout.Context, e *env.Env, entry model.LogEntry) layout.Dimensions {
@@ -23,32 +26,20 @@ func (r *logRow) layout(gtx layout.Context, e *env.Env, entry model.LogEntry) la
 	if entry.Target != "" {
 		facts += " · " + entry.Target
 	}
-	return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
-		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			return r.row.Layout(gtx, e.Th, lithic.RowContent{
-				Mark: func(gtx layout.Context) layout.Dimensions {
-					return lithic.Icon(icon).Layout(gtx, e.Th.R.Stone(tone))
-				},
-				Title:     entry.Message,
-				Facts:     facts,
-				FactsMono: true,
-				Claim:     claim,
-				Tone:      tone,
-				Progress:  -1,
-			}, false, false)
-		}),
-		layout.Rigid(layout.Spacer{Height: e.Th.Sp.S1}.Layout),
-	)
+	return r.tablet.Layout(gtx, e.Th.Theme, kit.TabletContent{
+		Mark:  func(gtx layout.Context) layout.Dimensions { return icon.Layout(gtx, e.Th.R.Stone(tone)) },
+		Title: entry.Message, Facts: facts, FactsMono: true, Claim: claim, Tone: tone, Progress: -1,
+	}, false, false)
 }
 
-func logLevel(level string) (lithic.Tone, string, string) {
+func logLevel(level string) (palette.Tone, string, *widget.Icon) {
 	switch strings.ToLower(strings.TrimSpace(level)) {
 	case "error":
-		return lithic.Bad, "Error", "error"
+		return palette.Failed, "Error", look.Icon.Close
 	case "warn", "warning":
-		return lithic.Attention, "Warning", "warning"
+		return palette.Attention, "Warning", look.Icon.Tune
 	default:
-		return lithic.Alive, "Info", "info"
+		return palette.Alive, "Info", look.Icon.Check
 	}
 }
 

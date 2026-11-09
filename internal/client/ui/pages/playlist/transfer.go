@@ -6,18 +6,19 @@ import (
 
 	"gioui.org/layout"
 
-	"github.com/ryoku-dev/ryotunes/internal/client/lithic"
+	"github.com/ryoku-dev/ryoku/docs/lithic/library/go/kit"
 	"github.com/ryoku-dev/ryotunes/internal/client/ui/act"
 	"github.com/ryoku-dev/ryotunes/internal/client/ui/env"
+	"github.com/ryoku-dev/ryotunes/internal/client/ui/look"
 	"github.com/ryoku-dev/ryotunes/internal/model"
 	"github.com/ryoku-dev/ryotunes/internal/protocol"
 )
 
 type exportDialog struct {
-	dialog lithic.Dialog
-	path   lithic.TextField
-	cancel lithic.Button
-	export lithic.Button
+	dialog kit.Dialog
+	path   kit.TextField
+	cancel kit.Plaque
+	export kit.Plaque
 	err    string
 	busy   bool
 	title  string
@@ -30,7 +31,7 @@ func (d *exportDialog) Open(title string) {
 	d.path.SetText(defaultExportName(title))
 }
 
-func (d *exportDialog) Layout(gtx layout.Context, e *env.Env, p *Page) {
+func (d *exportDialog) Layout(gtx layout.Context, e *env.Env, p *Page) layout.Dimensions {
 	if d.cancel.Clicked(gtx) {
 		d.dialog.Open = false
 	}
@@ -59,20 +60,21 @@ func (d *exportDialog) Layout(gtx layout.Context, e *env.Env, p *Page) {
 			})
 		}
 	}
-	body := func(gtx layout.Context) layout.Dimensions {
-		d.path.Mono = true
-		return d.path.Layout(gtx, e.Th, "File path", "/home/you/Music/playlist.json", "Ryotunes playlist files end in .json.", d.err)
-	}
-	cancel := func(gtx layout.Context) layout.Dimensions {
-		return d.cancel.Layout(gtx, e.Th, lithic.Quiet, nil, "Cancel")
-	}
-	exportAction := func(gtx layout.Context) layout.Dimensions {
-		if d.busy {
-			gtx = gtx.Disabled()
-		}
-		return d.export.Layout(gtx, e.Th, lithic.Gold, lithic.Icon("download_for_offline"), "Export")
-	}
-	d.dialog.Layout(gtx, e.Th, "Export playlist", body, cancel, exportAction)
+	d.path.Label = "File path"
+	d.path.Placeholder = "/home/you/Music/playlist.json"
+	d.path.Help = "Ryotunes playlist files end in .json."
+	d.path.Error = d.err
+	d.path.Mono = true
+	d.cancel.Kind, d.cancel.Label = kit.PlaqueQuiet, "Cancel"
+	d.export.Kind, d.export.Icon, d.export.Label = kit.PlaqueLine, look.Icon.Download, "Export"
+	d.export.Busy = d.busy
+	d.dialog.Width = 560
+	dims := d.dialog.Layout(gtx, e.Th.Theme, "Export playlist",
+		func(gtx layout.Context) layout.Dimensions { return d.path.Layout(gtx, e.Th.Theme) },
+		func(gtx layout.Context) layout.Dimensions { return d.cancel.Layout(gtx, e.Th.Theme) },
+		func(gtx layout.Context) layout.Dimensions { return d.export.Layout(gtx, e.Th.Theme) },
+	)
+	return dims
 }
 
 func defaultExportName(title string) string {
@@ -145,12 +147,7 @@ func (p *Page) enqueueDownloads(e *env.Env, items []model.Track) {
 	entries := make([]model.DownloadCollectionEntry, 0, len(items))
 	for _, track := range items {
 		entries = append(entries, model.DownloadCollectionEntry{
-			VideoID:        track.VideoID,
-			Title:          track.Title,
-			Artists:        track.Artists,
-			Thumbnail:      value(track.Thumbnail),
-			Collection:     &collection,
-			CollectionKind: &kind,
+			VideoID: track.VideoID, Title: track.Title, Artists: track.Artists, Thumbnail: value(track.Thumbnail), Collection: &collection, CollectionKind: &kind,
 		})
 	}
 	act.Call[model.DownloadCollectionResult](e, protocol.MethodEnqueueCollection, protocol.EnqueueCollectionParams{Entries: entries}, func(result model.DownloadCollectionResult, err error) {

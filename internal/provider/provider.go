@@ -77,6 +77,11 @@ type AlbumSaver interface {
 	SetAlbumSaved(ctx context.Context, albumID string, saved bool) error
 }
 
+// ArtistSubscriber follows or unfollows an artist channel.
+type ArtistSubscriber interface {
+	SetArtistSubscribed(ctx context.Context, channelID string, subscribed bool) error
+}
+
 // PlaylistEditor edits account playlists.
 type PlaylistEditor interface {
 	CreatePlaylist(ctx context.Context, title string) (string, error)

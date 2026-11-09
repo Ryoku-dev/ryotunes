@@ -6,19 +6,20 @@ import (
 	"gioui.org/layout"
 	"gioui.org/unit"
 
-	"github.com/ryoku-dev/ryotunes/internal/client/lithic"
+	"github.com/ryoku-dev/ryoku/docs/lithic/library/go/kit"
 	"github.com/ryoku-dev/ryotunes/internal/client/ui/act"
 	"github.com/ryoku-dev/ryotunes/internal/client/ui/env"
+	"github.com/ryoku-dev/ryotunes/internal/client/ui/look"
 	"github.com/ryoku-dev/ryotunes/internal/client/ui/widgets"
 	"github.com/ryoku-dev/ryotunes/internal/model"
 	"github.com/ryoku-dev/ryotunes/internal/protocol"
 )
 
 type page struct {
-	route env.Route
-	list  layout.List
-	grid  widgets.CardGrid
-	retry lithic.Button
+	route  env.Route
+	scroll look.Scroller
+	grid   widgets.Grid
+	retry  kit.Plaque
 
 	items   []model.BrowseItem
 	started bool
@@ -29,13 +30,11 @@ type page struct {
 }
 
 // New returns a retained generic browse-grid page.
-func New(r env.Route) env.Page {
-	return &page{route: r, list: layout.List{Axis: layout.Vertical}}
-}
+func New(r env.Route) env.Page { return &page{route: r} }
 
 func (p *page) Title() string {
-	if strings.TrimSpace(p.route.Title) != "" {
-		return strings.TrimSpace(p.route.Title)
+	if title := strings.TrimSpace(p.route.Title); title != "" {
+		return title
 	}
 	return "Browse"
 }
@@ -49,28 +48,35 @@ func (p *page) Layout(gtx layout.Context, e *env.Env) layout.Dimensions {
 	if !p.started {
 		p.fetch(e)
 	}
+	inset := look.ContentInset(e.Th.Class)
+	width := int(gtx.Metric.PxToDp(gtx.Constraints.Max.X - 2*gtx.Dp(inset)))
 	children := []layout.Widget{widgets.PageHeader(e, p.Title(), "", nil)}
 	switch {
 	case p.loading && !p.loaded:
-		children = append(children, func(gtx layout.Context) layout.Dimensions {
-			return layout.Flex{Axis: layout.Vertical, Alignment: layout.Middle}.Layout(gtx,
-				layout.Rigid(widgets.Loading(e)),
-				layout.Rigid(layout.Spacer{Height: unit.Dp(13)}.Layout),
-				layout.Rigid(lithic.Text(e.Th, e.Th.T.Body, e.Th.R.Fg2, "Loading…")),
-			)
-		})
+		children = append(children, widgets.Loading(e, widgets.LoadingGrid))
 	case p.error != "" && !p.loaded:
 		children = append(children, widgets.Failed(e, p.error, &p.retry))
 	case len(p.items) == 0:
-		children = append(children, widgets.EmptyState(e, "library", "Nothing here.", "This collection has no items."))
+		children = append(children, widgets.EmptyState(e, look.Icon.Library, "Nothing here.", "This collection has no items."))
 	default:
-		children = append(children, func(gtx layout.Context) layout.Dimensions {
-			return p.grid.Layout(gtx, e, p.items)
-		})
+		rows := p.grid.Rows(max(1, width), len(p.items))
+		for row := range rows {
+			row := row
+			children = append(children, func(gtx layout.Context) layout.Dimensions {
+				return p.grid.Row(gtx, e, p.items, row)
+			})
+		}
 	}
-	return layout.Inset{Top: unit.Dp(34), Right: unit.Dp(34), Bottom: unit.Dp(55), Left: unit.Dp(34)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-		return p.list.Layout(gtx, len(children), func(gtx layout.Context, index int) layout.Dimensions {
-			return layout.Inset{Bottom: unit.Dp(34)}.Layout(gtx, children[index])
+	return layout.Inset{Bottom: unit.Dp(21)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+		return p.scroll.Layout(gtx, e.Th, len(children), func(gtx layout.Context, index int) layout.Dimensions {
+			bottom := unit.Dp(21)
+			if index == len(children)-1 {
+				bottom = 0
+			}
+			if index == 0 {
+				return layout.Inset{Bottom: bottom}.Layout(gtx, children[index])
+			}
+			return layout.Inset{Right: inset, Bottom: bottom, Left: inset}.Layout(gtx, children[index])
 		})
 	})
 }

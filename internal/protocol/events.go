@@ -33,6 +33,8 @@ const (
 	EventAudioFx = "audio-fx"
 	// EventShow asks the subscribed client to raise its window.
 	EventShow = "show"
+	// EventQuit asks subscribed clients to close before the daemon exits.
+	EventQuit = "quit"
 	// EventAuthChanged replaces the YouTube account snapshot.
 	EventAuthChanged = "auth-changed"
 	// EventSpotifyAuth reports Spotify authorization progress.

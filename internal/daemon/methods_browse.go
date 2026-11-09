@@ -25,6 +25,7 @@ func init() {
 	register(protocol.MethodSearchCardsMore, typed(searchCardsMore))
 	register(protocol.MethodGetAlbum, typed(getAlbum))
 	register(protocol.MethodGetArtist, typed(getArtist))
+	register(protocol.MethodSetArtistSubscribed, typed(setArtistSubscribed))
 	register(protocol.MethodGetSCUser, typed(getSCUser))
 	register(protocol.MethodGetBrowseGrid, typed(getBrowseGrid))
 	register(protocol.MethodGetPlaylist, typed(getPlaylist))

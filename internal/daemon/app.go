@@ -75,6 +75,7 @@ func New(ctx context.Context, bootstrapLog *slog.Logger) (_ *App, err error) {
 		return nil, err
 	}
 	a.Player.SetPositionCadence(time.Second)
+	a.EngineVersion = a.Player.EngineVersion()
 
 	kv := a.Store.KV()
 	disabled := make([]string, len(settings.DisabledStreamClients))

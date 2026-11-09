@@ -102,6 +102,24 @@ func DefaultAudioFx() AudioFx {
 	return AudioFx{Speed: 1}
 }
 
+// PresetName returns the named sound preset matching these values.
+func (fx AudioFx) PresetName() string {
+	switch fx {
+	case AudioFx{Speed: 1}:
+		return "Flat"
+	case AudioFx{Speed: .85, Semitones: -2, Reverb: .35}:
+		return "Slowed and reverb"
+	case AudioFx{Speed: 1.25, Semitones: 3}:
+		return "Nightcore"
+	case AudioFx{Speed: 1, Bass: 6}:
+		return "Bass boost"
+	case AudioFx{Speed: 1, Width: 1}:
+		return "Wide"
+	default:
+		return "Custom"
+	}
+}
+
 // PlaybackParams changes tempo and pitch without altering the other effects bands.
 type PlaybackParams struct {
 	Speed     float64 `json:"speed"`

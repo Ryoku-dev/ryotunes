@@ -2,87 +2,124 @@ package radio
 
 import (
 	"fmt"
+	"image"
+	"image/color"
 	"strings"
 
 	"gioui.org/layout"
+	"gioui.org/op/paint"
 	"gioui.org/unit"
+	"gioui.org/widget"
 
-	"github.com/ryoku-dev/ryotunes/internal/client/lithic"
-	"github.com/ryoku-dev/ryotunes/internal/client/ui/act"
+	"github.com/ryoku-dev/ryoku/docs/lithic/library/go/kit"
+	"github.com/ryoku-dev/ryoku/docs/lithic/library/go/palette"
 	"github.com/ryoku-dev/ryotunes/internal/client/ui/env"
-	"github.com/ryoku-dev/ryotunes/internal/client/ui/widgets"
+	"github.com/ryoku-dev/ryotunes/internal/client/ui/look"
 	"github.com/ryoku-dev/ryotunes/internal/model"
-	"github.com/ryoku-dev/ryotunes/internal/protocol"
 )
 
-type stationRow struct {
-	row      lithic.Row
-	play     lithic.Button
-	homepage lithic.Button
+type stationTile struct {
+	click     kit.Click
+	favourite kit.Click
+	hover     look.Hover
+	fill      look.Fill
+	art       look.ArtView
+	reveal    float32
 }
 
-func (r *stationRow) layout(gtx layout.Context, e *env.Env, station model.RadioStation, playing bool) layout.Dimensions {
-	if r.play.Clicked(gtx) || r.row.DoubleClicked(gtx) {
-		playStation(e, station)
+func (t *stationTile) layout(gtx layout.Context, e *env.Env, page *Page, station model.RadioStation, playing, favourite bool) layout.Dimensions {
+	favouriteClicked := t.favourite.Clicked(gtx)
+	if favouriteClicked {
+		page.toggleFavourite(e, station)
 	}
-	if r.homepage.Clicked(gtx) && station.Homepage != "" {
-		act.Call[protocol.Null](e, protocol.MethodOpenExternal, protocol.URLParams{URL: station.Homepage}, func(_ protocol.Null, err error) {
-			if err != nil && e.Toast != nil {
-				e.Toast(err.Error(), env.ToastError)
-			}
+	if t.click.Clicked(gtx) && !favouriteClicked {
+		page.playStation(e, station)
+	}
+
+	size := gtx.Constraints.Constrain(image.Pt(gtx.Constraints.Max.X, gtx.Dp(88)))
+	tileGTX := gtx
+	tileGTX.Constraints = layout.Exact(size)
+	dims, reveal := t.hover.Layout(tileGTX, e.Th, func(gtx layout.Context) layout.Dimensions {
+		return t.click.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+			plane := palette.Mix(e.Th.R.Stone1, e.Th.R.Stone3, t.reveal)
+			return kit.Slab(gtx, plane, e.Th.Cut.Small, func(gtx layout.Context) layout.Dimensions {
+				return layout.Inset{Top: unit.Dp(16), Right: unit.Dp(13), Bottom: unit.Dp(16), Left: unit.Dp(13)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+					artSize := gtx.Dp(56)
+					children := []layout.FlexChild{
+						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+							return t.art.Layout(gtx, e.Th, e.Art, station.Favicon, image.Pt(artSize, artSize), look.Shape{Cut: 6}, e.Th.Motion.Navigate)
+						}),
+						layout.Rigid(layout.Spacer{Width: unit.Dp(13)}.Layout),
+						layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+							copy := []layout.FlexChild{layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+								return kit.Label{Style: e.Th.T.Label, Color: e.Th.R.Fg, MaxLines: 1}.Layout(gtx, e.Th.Theme, station.Name)
+							})}
+							if facts := stationFacts(station); facts != "" {
+								copy = append(copy,
+									layout.Rigid(layout.Spacer{Height: unit.Dp(4)}.Layout),
+									layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+										return kit.Label{Style: e.Th.T.MonoSm, Color: e.Th.R.Fg3, MaxLines: 1}.Layout(gtx, e.Th.Theme, facts)
+									}),
+								)
+							}
+							return layout.Flex{Axis: layout.Vertical, Alignment: layout.Start}.Layout(gtx, copy...)
+						}),
+					}
+					if playing {
+						children = append(children,
+							layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
+							layout.Rigid(iconLayout(look.Icon.VolumeUp, e.Th.Src.Ink, unit.Dp(20))),
+						)
+					}
+					if favourite || t.reveal > 0 {
+						children = append(children,
+							layout.Rigid(layout.Spacer{Width: unit.Dp(4)}.Layout),
+							layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+								alpha := t.reveal
+								if favourite {
+									alpha = 1
+								}
+								opacity := paint.PushOpacity(gtx.Ops, alpha)
+								gtx.Constraints = layout.Exact(image.Pt(gtx.Dp(32), gtx.Dp(32)))
+								dims := t.favourite.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+									return layout.Center.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+										return t.fill.Layout(gtx, e.Th, favourite,
+											iconLayout(look.Icon.HeartOutline, e.Th.R.Fg2, unit.Dp(18)),
+											iconLayout(look.Icon.Heart, e.Th.Src.Ink, unit.Dp(18)),
+										)
+									})
+								})
+								opacity.Pop()
+								return dims
+							}),
+						)
+					}
+					return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx, children...)
+				})
+			})
 		})
-	}
-
-	r.play.Small = true
-	r.homepage.Small = true
-	actions := func(gtx layout.Context) layout.Dimensions {
-		return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
-			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-				if station.Homepage == "" {
-					return layout.Dimensions{}
-				}
-				return r.homepage.Layout(gtx, e.Th, lithic.Quiet, lithic.Icon("open_in_new"), "Homepage")
-			}),
-			layout.Rigid(layout.Spacer{Width: e.Th.Sp.S2}.Layout),
-			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-				return r.play.Layout(gtx, e.Th, lithic.Line, lithic.Icon("play"), "Play")
-			}),
-		)
-	}
-
-	tone, claim := lithic.Idle, ""
-	if playing {
-		tone, claim = lithic.Alive, "Live"
-	}
-	mark := func(gtx layout.Context) layout.Dimensions {
-		if station.Favicon != "" {
-			return widgets.Art(gtx, e, station.Favicon, unit.Dp(32), unit.Dp(6))
-		}
-		icon := lithic.Icon("radio")
-		if icon == nil {
-			return layout.Dimensions{Size: gtx.Constraints.Min}
-		}
-		return icon.Layout(gtx, e.Th.R.Fg2)
-	}
-	return r.row.Layout(gtx, e.Th, lithic.RowContent{
-		Mark:      mark,
-		Title:     station.Name,
-		Facts:     stationFacts(station),
-		FactsMono: true,
-		Claim:     claim,
-		Tone:      tone,
-		Progress:  -1,
-		Action:    actions,
-	}, false, false)
+	})
+	t.reveal = reveal
+	return dims
 }
+
+func iconLayout(icon *widget.Icon, ink paletteColor, size unit.Dp) layout.Widget {
+	return func(gtx layout.Context) layout.Dimensions {
+		pixels := gtx.Dp(size)
+		gtx.Constraints = layout.Exact(image.Pt(pixels, pixels))
+		if icon == nil {
+			return layout.Dimensions{Size: image.Pt(pixels, pixels)}
+		}
+		return icon.Layout(gtx, ink)
+	}
+}
+
+type paletteColor = color.NRGBA
 
 func stationFacts(station model.RadioStation) string {
-	facts := make([]string, 0, 4)
+	facts := make([]string, 0, 2)
 	if country := strings.TrimSpace(station.Country); country != "" {
 		facts = append(facts, country)
-	}
-	if tags := strings.TrimSpace(station.Tags); tags != "" {
-		facts = append(facts, tags)
 	}
 	codec := strings.TrimSpace(station.Codec)
 	if codec != "" && station.Bitrate > 0 {
@@ -95,15 +132,32 @@ func stationFacts(station model.RadioStation) string {
 	return strings.Join(facts, " · ")
 }
 
-func playStation(e *env.Env, station model.RadioStation) {
-	act.Call[protocol.Null](e, protocol.MethodPlayRadioStation, protocol.PlayRadioStationParams{StationUUID: station.StationUUID}, func(_ protocol.Null, err error) {
-		if e.Toast == nil {
-			return
-		}
-		if err != nil {
-			e.Toast(err.Error(), env.ToastError)
-			return
-		}
-		e.Toast("Playing "+station.Name, env.ToastSuccess)
-	})
+func stationPersonalID(uuid string) string { return "RYOTUNES_RADIO:" + strings.TrimSpace(uuid) }
+
+func stationBrowse(station model.RadioStation) model.BrowseItem {
+	item := model.BrowseItem{Kind: "station", ID: stationPersonalID(station.StationUUID), Title: station.Name}
+	if country := strings.TrimSpace(station.Country); country != "" {
+		item.Subtitle = &country
+	}
+	if favicon := strings.TrimSpace(station.Favicon); favicon != "" {
+		item.Thumbnail = &favicon
+	}
+	if facts := strings.TrimSpace(stationFacts(model.RadioStation{Codec: station.Codec, Bitrate: station.Bitrate})); facts != "" {
+		item.PlayCount = &facts
+	}
+	return item
+}
+
+func stationFromBrowse(item model.BrowseItem) model.RadioStation {
+	station := model.RadioStation{StationUUID: strings.TrimPrefix(item.ID, "RYOTUNES_RADIO:"), Name: item.Title}
+	if item.Subtitle != nil {
+		station.Country = strings.TrimSpace(*item.Subtitle)
+	}
+	if item.Thumbnail != nil {
+		station.Favicon = strings.TrimSpace(*item.Thumbnail)
+	}
+	if item.PlayCount != nil {
+		station.Codec = strings.TrimSpace(*item.PlayCount)
+	}
+	return station
 }

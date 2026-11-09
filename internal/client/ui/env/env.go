@@ -6,14 +6,15 @@ package env
 
 import (
 	"context"
+	"image"
 	"time"
 
 	"gioui.org/layout"
 
 	"github.com/ryoku-dev/ryotunes/internal/client/art"
 	"github.com/ryoku-dev/ryotunes/internal/client/conn"
-	"github.com/ryoku-dev/ryotunes/internal/client/lithic"
 	"github.com/ryoku-dev/ryotunes/internal/client/state"
+	"github.com/ryoku-dev/ryotunes/internal/client/ui/look"
 	"github.com/ryoku-dev/ryotunes/internal/model"
 )
 
@@ -59,11 +60,10 @@ type Panel string
 
 // Right panel modes; PanelNone hides it.
 const (
-	PanelNone       Panel = ""
-	PanelQueue      Panel = "queue"
-	PanelLyrics     Panel = "lyrics"
-	PanelNowPlaying Panel = "now-playing"
-	PanelListen     Panel = "listen-together"
+	PanelNone   Panel = ""
+	PanelQueue  Panel = "queue"
+	PanelLyrics Panel = "lyrics"
+	PanelListen Panel = "listen-together"
 )
 
 // Nav is the router surface pages use. The shell implements it.
@@ -71,25 +71,31 @@ type Nav interface {
 	Push(r Route)
 	Replace(r Route)
 	Back() bool
+	Forward() bool
+	CanBack() bool
+	CanForward() bool
 	Current() Route
 	Stack() []Route
 	OpenPanel(p Panel)
 	TogglePanel(p Panel)
 	Panel() Panel
+	NowPlaying() bool
+	ToggleNowPlaying()
 	ToggleMini()
-	OpenPalette()
 	FocusSearch()
+	OpenSound(anchor image.Rectangle)
 }
 
 // Env is passed to every Layout call. Pages keep their own widget state
 // and read everything else from here.
 type Env struct {
-	Th    *lithic.Theme
-	Store *state.Store
-	Conn  *conn.Client
-	Nav   Nav
-	Art   *art.Cache
-	Now   time.Time
+	Th       *look.Theme
+	Overlays *look.Overlays
+	Store    *state.Store
+	Conn     *conn.Client
+	Nav      Nav
+	Art      *art.Cache
+	Now      time.Time
 	// Toast shows a placard; the shell owns the stack.
 	Toast func(message string, kind ToastKind)
 	// Go runs fn off the UI goroutine and invalidates the window when it
@@ -108,7 +114,8 @@ type MenuTarget struct {
 	Card     *model.BrowseItem
 	Playlist *model.PlaylistPage
 	// Context tells the menu where the item sits (a playlist id when the
-	// row can be removed from it, "queue" when it can be removed from the queue).
+	// row can be removed from it, "queue" when it can be removed from the
+	// queue, or "add-to-playlist" for the dedicated full-window dialog).
 	Context    string
 	QueueIndex int
 }
@@ -117,11 +124,16 @@ type MenuTarget struct {
 // they are on the stack so scroll and selection survive navigation.
 type Page interface {
 	Layout(gtx layout.Context, e *Env) layout.Dimensions
-	// Title is what the title bar and the command palette show.
+	// Title is what the title bar and route history show.
 	Title() string
 }
 
 // Refresher is a page that can reload itself (Ctrl R).
 type Refresher interface {
 	Refresh(e *Env)
+}
+
+// Filterer is a page whose own collection filter can take keyboard focus.
+type Filterer interface {
+	FocusFilter(gtx layout.Context)
 }

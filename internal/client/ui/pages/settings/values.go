@@ -51,6 +51,8 @@ func settingSet(settings model.SettingsSnapshot, key model.SettingKey) map[strin
 
 func boolString(value bool) string { return strconv.FormatBool(value) }
 
+func intString(value int) string { return strconv.Itoa(value) }
+
 func indexOf(values []string, value string, fallback int) int {
 	for i, candidate := range values {
 		if candidate == value {

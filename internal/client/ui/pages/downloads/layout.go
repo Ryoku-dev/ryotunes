@@ -2,185 +2,264 @@ package downloads
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
+	"strconv"
 	"strings"
-	"unicode"
-	"unicode/utf8"
 
 	"gioui.org/layout"
+	"gioui.org/unit"
 
-	"github.com/ryoku-dev/ryotunes/internal/client/lithic"
+	"github.com/ryoku-dev/ryoku/docs/lithic/library/go/kit"
 	"github.com/ryoku-dev/ryotunes/internal/client/ui/env"
+	"github.com/ryoku-dev/ryotunes/internal/client/ui/look"
 	"github.com/ryoku-dev/ryotunes/internal/client/ui/widgets"
 	"github.com/ryoku-dev/ryotunes/internal/model"
 )
 
-type listEntryKind uint8
-
 const (
-	entryActiveHeader listEntryKind = iota
-	entryActiveEmpty
-	entryDownload
-	entryHistoryHeader
-	entryHistoryNote
-	entryHistoryEmpty
+	downloadFilterAll = iota
+	downloadFilterActive
+	downloadFilterSaved
+	downloadFilterFailed
 )
 
-type listEntry struct {
-	kind listEntryKind
-	item downloadItem
-}
-
-// Layout renders the event-driven queue and latest terminal history.
+// Layout renders the live queue and terminal download history.
 func (p *Page) Layout(gtx layout.Context, e *env.Env) layout.Dimensions {
 	snapshot := e.Store.Snapshot().Downloads
-	active, history, activeCount, queuedCount := projectDownloads(snapshot.Jobs)
-	historyCount := terminalCount(snapshot.Jobs)
-	connected := e.Conn != nil && e.Conn.Connected()
+	p.updateUsedSpace(snapshot.Jobs)
+	counts := downloadFilterCounts(snapshot.Jobs)
+	p.filter.Labels = []string{"All", "Active", "Saved", "Failed"}
+	p.filter.Counts = counts
+	p.filter.Selected = p.filterIndex
+	if selected, ok := p.filter.Changed(); ok {
+		p.filterIndex = selected
+		p.scroll.ScrollTo(0)
+	}
+	p.handleActions(gtx, e, snapshot.Jobs)
+	items := filteredDownloads(snapshot.Jobs, p.filterIndex)
+	inset := look.ContentInset(e.Th.Class)
+	count := 2 + max(1, len(items))
+	return p.scroll.Layout(gtx, e.Th, count, func(gtx layout.Context, index int) layout.Dimensions {
+		if index == 0 {
+			return p.layoutHeader(gtx, e, counts[downloadFilterActive], counts[downloadFilterSaved])
+		}
+		return layout.Inset{Right: inset, Left: inset}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+			if index == 1 {
+				return p.layoutControls(gtx, e)
+			}
+			rowIndex := index - 2
+			slot := func(gtx layout.Context) layout.Dimensions {
+				return p.layoutDownloadSlot(gtx, e, snapshot.Jobs, items, rowIndex)
+			}
+			if index+1 == count {
+				return layout.Inset{Bottom: inset}.Layout(gtx, slot)
+			}
+			return slot(gtx)
+		})
+	})
+}
 
+func (p *Page) handleActions(gtx layout.Context, e *env.Env, jobs []model.DownloadEntry) {
 	if p.openFolder.Clicked(gtx) {
 		openDownloadFolder(e)
 	}
-	if p.clear.Clicked(gtx) && historyCount > 0 && e.Confirm != nil {
-		e.Confirm(
-			"Clear download history?",
-			"Latest 200 downloads. Clearing history keeps your music files.",
-			"Clear history",
-			"",
-			func() { clearHistory(e) },
-		)
+	if p.clear.Clicked(gtx) && terminalCount(jobs) > 0 && e.Confirm != nil {
+		e.Confirm("Clear download history?", "Clearing history keeps your music files.", "Clear history", "", func() { clearHistory(e) })
 	}
 	if p.settings.Clicked(gtx) {
 		e.Nav.Push(env.Route{Kind: env.RouteSettings, Params: "downloads"})
 	}
-
-	inset := layout.Inset{Top: e.Th.Sp.S4, Right: e.Th.Sp.S5, Bottom: e.Th.Sp.S5, Left: e.Th.Sp.S5}
-	return inset.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-		return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
-			layout.Rigid(widgets.PageHeader(e, "Downloads", downloadsSentence(snapshot.ActiveCount, snapshot.QueuedCount), p.headerActions(e, historyCount))),
-			layout.Rigid(layout.Spacer{Height: e.Th.Sp.S2}.Layout),
-			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-				return lithic.Label{Style: e.Th.T.Body, Color: e.Th.R.Fg2, MaxLines: 2}.Layout(gtx, e.Th, downloadsSubtitle(snapshot.Jobs))
-			}),
-			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-				if connected {
-					return layout.Dimensions{}
-				}
-				return quietDownloadLine(gtx, e, "Disconnected from Ryotunes. This list will update when it reconnects. Interrupted downloads can be retried.")
-			}),
-			layout.Rigid(layout.Spacer{Height: e.Th.Sp.S4}.Layout),
-			layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-				if len(snapshot.Jobs) == 0 {
-					title := "No downloads yet"
-					body := "Save a track with the download arrow beside its heart in the player. Downloads keep running when you close the window."
-					if !connected {
-						title = "Not connected"
-						body = "Your download history will update when Ryotunes reconnects."
-					}
-					return widgets.EmptyState(e, "download", title, body)(gtx)
-				}
-				entries := makeDownloadEntries(active, history)
-				return p.list.Layout(gtx, len(entries), func(gtx layout.Context, index int) layout.Dimensions {
-					return p.layoutEntry(gtx, e, entries[index], activeCount+queuedCount, historyCount)
-				})
-			}),
-		)
-	})
 }
 
-func (p *Page) headerActions(e *env.Env, historyCount int) layout.Widget {
-	return func(gtx layout.Context) layout.Dimensions {
-		children := []layout.FlexChild{
-			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-				return p.openFolder.Layout(gtx, e.Th, lithic.Line, lithic.Icon("folder"), "Open folder")
-			}),
-		}
-		if historyCount > 0 {
-			children = append(children,
-				layout.Rigid(layout.Spacer{Width: e.Th.Sp.S2}.Layout),
+func (p *Page) layoutHeader(gtx layout.Context, e *env.Env, active, saved int) layout.Dimensions {
+	cut := gtx.Dp(e.Th.Cut.Large)
+	inset := look.ContentInset(e.Th.Class)
+	return look.Field(gtx, e.Th, [4]int{cut, cut, 0, 0}, func(gtx layout.Context) layout.Dimensions {
+		return layout.Inset{Top: inset, Right: inset, Bottom: inset, Left: inset}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+			return layout.Flex{Axis: layout.Vertical, Alignment: layout.Start}.Layout(gtx,
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					return p.clear.Layout(gtx, e.Th, lithic.Quiet, lithic.Icon("delete_sweep"), "Clear history")
+					return kit.Label{Style: e.Th.T.Section, Color: e.Th.R.Fg, MaxLines: 1}.Layout(gtx, e.Th.Theme, "Downloads")
+				}),
+				layout.Rigid(layout.Spacer{Height: unit.Dp(4)}.Layout),
+				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+					return kit.Sentence(gtx, e.Th.Theme, e.Th.T.Proof, e.Th.R.Fg2, []kit.Span{
+						{Text: strconv.Itoa(active), Mono: true}, {Text: " downloading, "},
+						{Text: strconv.Itoa(saved), Mono: true}, {Text: " saved"},
+					})
 				}),
 			)
-		}
-		children = append(children,
-			layout.Rigid(layout.Spacer{Width: e.Th.Sp.S2}.Layout),
-			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-				return p.settings.Layout(gtx, e.Th, lithic.Quiet, lithic.Icon("settings"), "Settings")
-			}),
-		)
-		return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx, children...)
-	}
-}
-
-func makeDownloadEntries(active, history []downloadItem) []listEntry {
-	entries := make([]listEntry, 0, len(active)+len(history)+5)
-	entries = append(entries, listEntry{kind: entryActiveHeader})
-	if len(active) == 0 {
-		entries = append(entries, listEntry{kind: entryActiveEmpty})
-	} else {
-		for _, item := range active {
-			entries = append(entries, listEntry{kind: entryDownload, item: item})
-		}
-	}
-	entries = append(entries, listEntry{kind: entryHistoryHeader}, listEntry{kind: entryHistoryNote})
-	if len(history) == 0 {
-		entries = append(entries, listEntry{kind: entryHistoryEmpty})
-	} else {
-		for _, item := range history {
-			entries = append(entries, listEntry{kind: entryDownload, item: item})
-		}
-	}
-	return entries
-}
-
-func (p *Page) layoutEntry(gtx layout.Context, e *env.Env, entry listEntry, activeCount, historyCount int) layout.Dimensions {
-	switch entry.kind {
-	case entryActiveHeader:
-		return lithic.GroupHeader(e.Th, "Active and queued", activeCount)(gtx)
-	case entryActiveEmpty:
-		return quietDownloadLine(gtx, e, "Nothing downloading right now.")
-	case entryHistoryHeader:
-		return lithic.GroupHeader(e.Th, "History", historyCount)(gtx)
-	case entryHistoryNote:
-		return quietDownloadLine(gtx, e, "Latest 200 downloads. Clearing history keeps your music files.")
-	case entryHistoryEmpty:
-		return quietDownloadLine(gtx, e, "Finished downloads will appear here.")
-	default:
-		if entry.item.collection != nil {
-			group := *entry.item.collection
-			card := p.collections[group.key]
-			if card == nil {
-				card = &collectionCard{}
-				p.collections[group.key] = card
-			}
-			return card.layout(gtx, e, group, p.rows)
-		}
-		if entry.item.job == nil {
-			return layout.Dimensions{}
-		}
-		job := *entry.item.job
-		row := p.rows[job.ID]
-		if row == nil {
-			row = &downloadRow{}
-			p.rows[job.ID] = row
-		}
-		return row.layout(gtx, e, job)
-	}
-}
-
-func quietDownloadLine(gtx layout.Context, e *env.Env, text string) layout.Dimensions {
-	return layout.Inset{Left: e.Th.Sp.S3, Right: e.Th.Sp.S3, Top: e.Th.Sp.S2, Bottom: e.Th.Sp.S3}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-		return lithic.Label{Style: e.Th.T.Body, Color: e.Th.R.Fg3, MaxLines: 3}.Layout(gtx, e.Th, text)
+		})
 	})
 }
 
-func downloadsSubtitle(jobs []model.DownloadEntry) string {
+func (p *Page) layoutControls(gtx layout.Context, e *env.Env) layout.Dimensions {
+	p.openFolder.Kind, p.openFolder.Icon, p.openFolder.Label = kit.PlaqueQuiet, look.Icon.Folder, "Open folder"
+	p.clear.Kind, p.clear.Label = kit.PlaqueQuiet, "Clear history"
+	p.settings.Kind, p.settings.Icon, p.settings.Label = kit.PlaqueQuiet, look.Icon.Settings, "Settings"
+	children := []layout.FlexChild{
+		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions { return p.filter.Layout(gtx, e.Th.Theme) }),
+		layout.Rigid(layout.Spacer{Width: unit.Dp(13)}.Layout),
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions { return p.openFolder.Layout(gtx, e.Th.Theme) }),
+	}
+	if p.filter.Counts[downloadFilterSaved]+p.filter.Counts[downloadFilterFailed] > 0 && e.Th.Class != look.Compact {
+		children = append(children,
+			layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions { return p.clear.Layout(gtx, e.Th.Theme) }),
+		)
+	}
+	if e.Th.Class != look.Compact {
+		children = append(children,
+			layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions { return p.settings.Layout(gtx, e.Th.Theme) }),
+		)
+	}
+	return layout.Inset{Top: unit.Dp(21), Bottom: unit.Dp(21)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+		return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx, children...)
+	})
+}
+
+func (p *Page) layoutDownloadSlot(gtx layout.Context, e *env.Env, jobs []model.DownloadEntry, items []downloadItem, index int) layout.Dimensions {
+	wide := gtx.Constraints.Max.X >= gtx.Dp(1000)
+	factsWidth := gtx.Dp(300)
+	gap := gtx.Dp(34)
+	rowWidth := gtx.Constraints.Max.X
+	if wide {
+		rowWidth -= factsWidth + gap
+	}
+	row := func(gtx layout.Context) layout.Dimensions {
+		gtx.Constraints.Min.X, gtx.Constraints.Max.X = rowWidth, rowWidth
+		if len(items) == 0 {
+			if index > 0 {
+				return layout.Dimensions{}
+			}
+			return widgets.EmptyState(e, look.Icon.Download, "No downloads here", "Tracks matching this filter will appear here.")(gtx)
+		}
+		return p.layoutItem(gtx, e, items[index])
+	}
+	if !wide || index > 0 {
+		return layout.Inset{Bottom: unit.Dp(4)}.Layout(gtx, row)
+	}
+	return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Start}.Layout(gtx,
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions { return layout.Inset{Bottom: unit.Dp(4)}.Layout(gtx, row) }),
+		layout.Rigid(layout.Spacer{Width: unit.Dp(34)}.Layout),
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			gtx.Constraints.Min.X, gtx.Constraints.Max.X = factsWidth, factsWidth
+			return kit.Section(e.Th.Theme, "Storage", func(gtx layout.Context) layout.Dimensions {
+				return kit.SlabContent(gtx, e.Th.Theme, kit.Facts(e.Th.Theme, downloadFacts(jobs, p.usedBytes)))
+			})(gtx)
+		}),
+	)
+}
+
+func (p *Page) layoutItem(gtx layout.Context, e *env.Env, item downloadItem) layout.Dimensions {
+	if item.collection != nil {
+		group := *item.collection
+		card := p.collections[group.key]
+		if card == nil {
+			card = new(collectionCard)
+			p.collections[group.key] = card
+		}
+		return card.layout(gtx, e, group, p.rows)
+	}
+	if item.job == nil {
+		return layout.Dimensions{}
+	}
+	job := *item.job
+	row := p.rows[job.ID]
+	if row == nil {
+		row = new(downloadRow)
+		p.rows[job.ID] = row
+	}
+	return row.layout(gtx, e, job)
+}
+
+func filteredDownloads(jobs []model.DownloadEntry, selected int) []downloadItem {
+	active, history, _, _ := projectDownloads(jobs)
+	switch selected {
+	case downloadFilterActive:
+		return active
+	case downloadFilterSaved:
+		return collapseCollections(filterJobs(jobs, func(status model.DownloadStatus) bool { return status == model.DownloadStatusCompleted }), "saved")
+	case downloadFilterFailed:
+		return collapseCollections(filterJobs(jobs, func(status model.DownloadStatus) bool {
+			return status == model.DownloadStatusFailed || status == model.DownloadStatusCancelled
+		}), "failed")
+	default:
+		return append(active, history...)
+	}
+}
+
+func filterJobs(jobs []model.DownloadEntry, keep func(model.DownloadStatus) bool) []model.DownloadEntry {
+	filtered := make([]model.DownloadEntry, 0, len(jobs))
 	for _, job := range jobs {
-		if path := strings.TrimSpace(job.Settings.Path); path != "" {
-			return "Saving to " + path
+		if keep(job.Status) {
+			filtered = append(filtered, job)
 		}
 	}
-	return "Save a track with the download arrow beside its heart in the player."
+	return filtered
+}
+
+func downloadFilterCounts(jobs []model.DownloadEntry) []int {
+	counts := make([]int, 4)
+	counts[downloadFilterAll] = len(jobs)
+	for _, job := range jobs {
+		switch job.Status {
+		case model.DownloadStatusDownloading, model.DownloadStatusQueued:
+			counts[downloadFilterActive]++
+		case model.DownloadStatusCompleted:
+			counts[downloadFilterSaved]++
+		case model.DownloadStatusFailed, model.DownloadStatusCancelled:
+			counts[downloadFilterFailed]++
+		}
+	}
+	return counts
+}
+
+func downloadFacts(jobs []model.DownloadEntry, used int64) []kit.Fact {
+	location, format := "Not set", "Original"
+	for _, job := range jobs {
+		if path := strings.TrimSpace(job.Settings.Path); path != "" {
+			location = path
+		}
+		if job.Settings.Format != "" {
+			format = strings.ToUpper(string(job.Settings.Format))
+		}
+		if location != "Not set" && format != "Original" {
+			break
+		}
+	}
+	return []kit.Fact{
+		{Label: "Location", Value: location, Mono: true},
+		{Label: "Used space", Value: formatBytes(used), Mono: true},
+		{Label: "Format", Value: format},
+	}
+}
+
+func (p *Page) updateUsedSpace(jobs []model.DownloadEntry) {
+	var revision int64
+	for _, job := range jobs {
+		if job.Status != model.DownloadStatusCompleted || job.FilePath == nil {
+			continue
+		}
+		if job.FinishedAt != nil {
+			revision += *job.FinishedAt
+		}
+		revision += int64(len(*job.FilePath))
+	}
+	if revision == p.usedRevision {
+		return
+	}
+	p.usedRevision = revision
+	p.usedBytes = 0
+	for _, job := range jobs {
+		if job.Status != model.DownloadStatusCompleted || job.FilePath == nil {
+			continue
+		}
+		if info, err := os.Stat(filepath.Clean(*job.FilePath)); err == nil && info.Mode().IsRegular() {
+			p.usedBytes += info.Size()
+		}
+	}
 }
 
 func terminalCount(jobs []model.DownloadEntry) int {
@@ -193,27 +272,20 @@ func terminalCount(jobs []model.DownloadEntry) int {
 	return min(count, 200)
 }
 
-func downloadsSentence(active, queued int) string {
-	if active == 0 && queued == 0 {
-		return "Nothing downloading right now."
+func formatBytes(bytes int64) string {
+	const (
+		kib = int64(1024)
+		mib = 1024 * kib
+		gib = 1024 * mib
+	)
+	switch {
+	case bytes >= gib:
+		return fmt.Sprintf("%.1f GiB", float64(bytes)/float64(gib))
+	case bytes >= mib:
+		return fmt.Sprintf("%.1f MiB", float64(bytes)/float64(mib))
+	case bytes >= kib:
+		return fmt.Sprintf("%.1f KiB", float64(bytes)/float64(kib))
+	default:
+		return fmt.Sprintf("%d B", bytes)
 	}
-	parts := make([]string, 0, 2)
-	if active > 0 {
-		parts = append(parts, countSentence(active, "downloading"))
-	}
-	if queued > 0 {
-		parts = append(parts, countSentence(queued, "waiting"))
-	}
-	return strings.Join(parts, " ")
-}
-
-func countSentence(count int, state string) string {
-	value := fmt.Sprintf("%d", count)
-	words := []string{"Zero", "One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight", "Nine"}
-	if count >= 0 && count < len(words) {
-		value = words[count]
-	} else if first, size := utf8.DecodeRuneInString(value); first != utf8.RuneError {
-		value = string(unicode.ToUpper(first)) + value[size:]
-	}
-	return value + " " + state + "."
 }

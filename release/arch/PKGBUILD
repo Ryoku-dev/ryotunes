@@ -26,7 +26,7 @@ depends=(
   'vulkan-icd-loader'
   'mesa'
 )
-makedepends=('go')
+makedepends=('go' 'vulkan-headers')
 install=ryotunes.install
 options=(!debug)
 source=()

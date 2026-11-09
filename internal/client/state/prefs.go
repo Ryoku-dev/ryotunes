@@ -11,20 +11,14 @@ import (
 type ClientPreferences struct {
 	WindowWidth  int    `json:"windowWidth"`
 	WindowHeight int    `json:"windowHeight"`
-	WindowX      int    `json:"windowX,omitempty"`
-	WindowY      int    `json:"windowY,omitempty"`
 	PanelOpen    bool   `json:"panelOpen"`
 	PanelTab     string `json:"panelTab"`
-	SidebarOpen  bool   `json:"sidebarOpen"`
 	ZoomPercent  int    `json:"zoomPercent"`
 	Appearance   string `json:"appearance"`
 	Density      string `json:"density"`
 	ReduceMotion bool   `json:"reduceMotion"`
 	PaletteFile  string `json:"paletteFile,omitempty"`
-	Skin         string `json:"skin,omitempty"`
 	Decorations  bool   `json:"decorations"`
-	MiniRight    int    `json:"miniRight"`
-	MiniBottom   int    `json:"miniBottom"`
 	Route        string `json:"route,omitempty"`
 	MiniOpen     bool   `json:"miniOpen"`
 }
@@ -32,8 +26,8 @@ type ClientPreferences struct {
 // DefaultClientPreferences returns safe defaults for malformed or absent state.
 func DefaultClientPreferences() ClientPreferences {
 	return ClientPreferences{
-		PanelOpen: true, PanelTab: "queue", SidebarOpen: true, ZoomPercent: 110,
-		Appearance: "desktop", Density: "comfortable", Decorations: true,
+		WindowWidth: 1280, WindowHeight: 800, PanelTab: "queue", ZoomPercent: 100,
+		Appearance: "follow", Density: "comfortable", Decorations: true,
 	}
 }
 
@@ -64,14 +58,19 @@ func LoadClientPreferences() (ClientPreferences, error) {
 	if json.Unmarshal(data, &preferences) != nil {
 		return defaults, nil
 	}
+	if preferences.WindowWidth < 480 || preferences.WindowHeight < 560 {
+		preferences.WindowWidth, preferences.WindowHeight = defaults.WindowWidth, defaults.WindowHeight
+	}
 	if preferences.ZoomPercent < 80 || preferences.ZoomPercent > 140 || preferences.ZoomPercent%10 != 0 {
 		preferences.ZoomPercent = defaults.ZoomPercent
 	}
-	if preferences.PanelTab != "queue" && preferences.PanelTab != "lyrics" {
+	if preferences.PanelTab != "queue" && preferences.PanelTab != "lyrics" && preferences.PanelTab != "listen-together" {
 		preferences.PanelTab = defaults.PanelTab
 	}
 	switch preferences.Appearance {
-	case "desktop", "dark", "light":
+	case "desktop":
+		preferences.Appearance = "follow"
+	case "follow", "dark", "light":
 	default:
 		preferences.Appearance = defaults.Appearance
 	}

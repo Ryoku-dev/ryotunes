@@ -2,192 +2,159 @@ package downloads
 
 import (
 	"fmt"
+	"image"
 	"path/filepath"
 	"strings"
 
 	"gioui.org/layout"
 	"gioui.org/unit"
+	"gioui.org/widget"
 
-	"github.com/ryoku-dev/ryotunes/internal/client/lithic"
+	"github.com/ryoku-dev/ryoku/docs/lithic/library/go/kit"
+	"github.com/ryoku-dev/ryoku/docs/lithic/library/go/palette"
 	"github.com/ryoku-dev/ryotunes/internal/client/ui/env"
-	"github.com/ryoku-dev/ryotunes/internal/client/ui/widgets"
+	"github.com/ryoku-dev/ryotunes/internal/client/ui/look"
 	"github.com/ryoku-dev/ryotunes/internal/model"
 )
 
 type downloadRow struct {
-	row    lithic.Row
-	action lithic.Button
+	tablet   kit.Tablet
+	action   kit.Plaque
+	progress kit.BladeProgress
 }
 
 type collectionCard struct {
-	row      lithic.Row
-	primary  lithic.Button
-	expand   lithic.Button
+	tablet   kit.Tablet
+	action   kit.Plaque
 	expanded bool
+	progress kit.BladeProgress
 }
 
 func (r *downloadRow) layout(gtx layout.Context, e *env.Env, job model.DownloadEntry) layout.Dimensions {
-	if r.action.Clicked(gtx) || r.row.DoubleClicked(gtx) {
+	if r.action.Clicked(gtx) || r.tablet.DoubleClicked(gtx) {
 		primaryDownloadAction(e, job)
 	}
 	tone, claim, proof, progress, showProgress, action, icon := downloadPresentation(job)
-	r.action.Small = true
+	r.action.Kind, r.action.Icon, r.action.Label, r.action.Small = kit.PlaqueQuiet, icon, action, true
 	mark := func(gtx layout.Context) layout.Dimensions {
+		size := gtx.Constraints.Max
+		if size.X <= 0 || size.Y <= 0 {
+			size = image.Pt(gtx.Dp(48), gtx.Dp(48))
+		}
 		if job.Thumbnail != "" {
-			return widgets.Art(gtx, e, job.Thumbnail, unit.Dp(32), unit.Dp(6))
+			return look.Art(gtx, e.Th, e.Art, job.Thumbnail, size, look.Shape{Cut: unit.Dp(6)})
 		}
-		return lithic.Icon("download").Layout(gtx, e.Th.R.Fg2)
+		return layout.Center.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+			return look.Icon.Download.Layout(gtx, e.Th.R.Fg2)
+		})
 	}
-	facts := strings.TrimSpace(job.Artists)
-	if source := strings.TrimSpace(job.Source); source != "" {
-		if facts != "" {
-			facts += " · "
-		}
-		facts += source
+	content := kit.TabletContent{
+		Mark: mark, Title: job.Title, Facts: strings.TrimSpace(job.Artists),
+		Claim: claim, Proof: proof, Tone: tone, Progress: -1, Action: &r.action,
 	}
-	row := func(gtx layout.Context) layout.Dimensions {
-		return r.row.Layout(gtx, e.Th, lithic.RowContent{
-			Mark:     mark,
-			Title:    job.Title,
-			Facts:    facts,
-			Claim:    claim,
-			Proof:    proof,
-			Tone:     tone,
-			Progress: -1,
-			Action: func(gtx layout.Context) layout.Dimensions {
-				return r.action.Layout(gtx, e.Th, lithic.Quiet, lithic.Icon(icon), action)
-			},
-		}, false, false)
-	}
-	children := []layout.FlexChild{layout.Rigid(row)}
+	children := []layout.FlexChild{layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+		return r.tablet.Layout(gtx, e.Th.Theme, content, false, false)
+	})}
 	if showProgress {
+		r.progress.Fraction, r.progress.Active = progress, job.Status == model.DownloadStatusDownloading
 		children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			return layout.Inset{Left: 16, Right: 12, Top: 4}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-				return lithic.BladeProgress(gtx, e.Th, progress, false)
+			return layout.Inset{Left: unit.Dp(16), Right: unit.Dp(12), Top: unit.Dp(4)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+				return r.progress.Layout(gtx, e.Th.Theme)
 			})
 		}))
 	}
-	if len(job.Warnings) > 0 {
-		children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			return layout.Inset{Left: 16, Right: 12, Top: 4}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-				return lithic.Label{Style: e.Th.T.Caption, Color: e.Th.R.Fg3, MaxLines: 2}.Layout(gtx, e.Th, strings.Join(job.Warnings, " · "))
-			})
-		}))
-	}
-	children = append(children, layout.Rigid(layout.Spacer{Height: e.Th.Sp.S1}.Layout))
 	return layout.Flex{Axis: layout.Vertical}.Layout(gtx, children...)
 }
 
-func downloadPresentation(job model.DownloadEntry) (lithic.Tone, string, string, float64, bool, string, string) {
+func downloadPresentation(job model.DownloadEntry) (palette.Tone, string, string, float64, bool, string, *widget.Icon) {
 	switch job.Status {
 	case model.DownloadStatusDownloading:
 		progress := max(0, min(100, job.Progress))
-		return lithic.Busy, "Downloading", fmt.Sprintf("%d%%", progress), float64(progress) / 100, true, "Cancel", "close"
+		return palette.Becoming, "Downloading", fmt.Sprintf("%d%%", progress), float64(progress) / 100, true, "Cancel", look.Icon.Close
 	case model.DownloadStatusQueued:
-		return lithic.Attention, "Waiting", "Waiting in queue", 0, true, "Cancel", "close"
+		return palette.Attention, "Waiting", "Queued", 0, true, "Cancel", look.Icon.Close
 	case model.DownloadStatusCompleted:
 		proof := "Saved"
-		if job.FilePath != nil && *job.FilePath != "" {
+		if job.FilePath != nil && strings.TrimSpace(*job.FilePath) != "" {
 			proof = filepath.Base(*job.FilePath)
 		}
-		return lithic.Alive, "Saved", proof, -1, false, "Open", "folder"
+		return palette.Alive, "Saved", proof, -1, false, "Show in folder", look.Icon.Folder
 	case model.DownloadStatusFailed:
 		proof := "Download failed"
 		if job.Error != nil && strings.TrimSpace(*job.Error) != "" {
 			proof = strings.TrimSpace(*job.Error)
 		}
-		return lithic.Bad, "Failed", proof, -1, false, "Retry", "refresh"
+		return palette.Failed, "Failed", proof, -1, false, "Retry", look.Icon.Refresh
 	default:
-		return lithic.Idle, "Cancelled", "Cancelled", -1, false, "Retry", "refresh"
+		return palette.Idle, "Cancelled", "Ready to retry", -1, false, "Retry", look.Icon.Refresh
 	}
 }
 
 func (c *collectionCard) layout(gtx layout.Context, e *env.Env, group downloadCollection, rows map[string]*downloadRow) layout.Dimensions {
-	if c.expand.Clicked(gtx) {
-		c.expanded = !c.expanded
-	}
 	stats := statsFor(group.jobs)
-	if c.primary.Clicked(gtx) || c.row.DoubleClicked(gtx) {
+	if c.action.Clicked(gtx) || c.tablet.DoubleClicked(gtx) {
 		actOnCollection(e, group.jobs, stats)
 	}
-	c.primary.Small = true
-	c.expand.Small = true
-	tone, claim, proof, progress, showProgress, action, icon := collectionPresentation(stats, len(group.jobs))
-	row := func(gtx layout.Context) layout.Dimensions {
-		return c.row.Layout(gtx, e.Th, lithic.RowContent{
-			Mark: func(gtx layout.Context) layout.Dimensions {
-				return lithic.Icon("album").Layout(gtx, e.Th.R.Fg2)
-			},
-			Title:    group.label,
-			Facts:    stats.summary(),
-			Claim:    claim,
-			Proof:    proof,
-			Tone:     tone,
-			Progress: -1,
-			Action: func(gtx layout.Context) layout.Dimensions {
-				return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
-					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-						return c.primary.Layout(gtx, e.Th, lithic.Quiet, lithic.Icon(icon), action)
-					}),
-					layout.Rigid(layout.Spacer{Width: e.Th.Sp.S2}.Layout),
-					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-						expandIcon, label := "expand_more", "Expand"
-						if c.expanded {
-							expandIcon, label = "expand_less", "Collapse"
-						}
-						return c.expand.Layout(gtx, e.Th, lithic.Quiet, lithic.Icon(expandIcon), label)
-					}),
-				)
-			},
-		}, false, false)
+	if c.tablet.Clicked(gtx) {
+		c.expanded = !c.expanded
 	}
-	children := []layout.FlexChild{layout.Rigid(row)}
+	tone, claim, proof, progress, showProgress, action, icon := collectionPresentation(stats, len(group.jobs))
+	c.action.Kind, c.action.Icon, c.action.Label, c.action.Small = kit.PlaqueQuiet, icon, action, true
+	content := kit.TabletContent{
+		Mark:  func(gtx layout.Context) layout.Dimensions { return look.Icon.Album.Layout(gtx, e.Th.R.Fg2) },
+		Title: group.label, Facts: stats.summary(), Claim: claim, Proof: proof,
+		Tone: tone, Progress: -1, Action: &c.action,
+	}
+	children := []layout.FlexChild{layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+		return c.tablet.Layout(gtx, e.Th.Theme, content, false, false)
+	})}
 	if showProgress {
+		c.progress.Fraction, c.progress.Active = progress, stats.moving > 0
 		children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			return layout.Inset{Left: 16, Right: 12, Top: 4}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-				return lithic.BladeProgress(gtx, e.Th, progress, false)
+			return layout.Inset{Left: unit.Dp(16), Right: unit.Dp(12), Top: unit.Dp(4)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+				return c.progress.Layout(gtx, e.Th.Theme)
 			})
 		}))
 	}
 	if c.expanded {
 		children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			return layout.Inset{Left: e.Th.Sp.S4, Top: e.Th.Sp.S2}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-				return layout.Flex{Axis: layout.Vertical}.Layout(gtx, collectionChildren(e, gtx, group.jobs, rows)...)
+			return layout.Inset{Left: unit.Dp(21), Top: unit.Dp(8)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+				return layout.Flex{Axis: layout.Vertical}.Layout(gtx, collectionChildren(e, group.jobs, rows)...)
 			})
 		}))
 	}
-	children = append(children, layout.Rigid(layout.Spacer{Height: e.Th.Sp.S1}.Layout))
 	return layout.Flex{Axis: layout.Vertical}.Layout(gtx, children...)
 }
 
-func collectionChildren(e *env.Env, gtx layout.Context, jobs []model.DownloadEntry, rows map[string]*downloadRow) []layout.FlexChild {
-	children := make([]layout.FlexChild, 0, len(jobs))
+func collectionChildren(e *env.Env, jobs []model.DownloadEntry, rows map[string]*downloadRow) []layout.FlexChild {
+	children := make([]layout.FlexChild, 0, len(jobs)*2)
 	for i := range jobs {
 		job := jobs[i]
 		row := rows[job.ID]
 		if row == nil {
-			row = &downloadRow{}
+			row = new(downloadRow)
 			rows[job.ID] = row
 		}
-		children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			return row.layout(gtx, e, job)
-		}))
+		children = append(children,
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions { return row.layout(gtx, e, job) }),
+			layout.Rigid(layout.Spacer{Height: unit.Dp(4)}.Layout),
+		)
 	}
 	return children
 }
 
-func collectionPresentation(stats downloadStats, total int) (lithic.Tone, string, string, float64, bool, string, string) {
+func collectionPresentation(stats downloadStats, total int) (palette.Tone, string, string, float64, bool, string, *widget.Icon) {
 	switch {
 	case stats.moving > 0:
-		return lithic.Busy, "Downloading", fmt.Sprintf("Downloading %d of %d", stats.done+stats.moving, total), float64(stats.average) / 100, true, "Cancel", "close"
+		return palette.Becoming, "Downloading", fmt.Sprintf("%d of %d", stats.done+stats.moving, total), float64(stats.average) / 100, true, "Cancel", look.Icon.Close
 	case stats.waiting > 0:
-		return lithic.Attention, "Waiting", fmt.Sprintf("%d waiting", stats.waiting), 0, true, "Cancel", "close"
+		return palette.Attention, "Waiting", fmt.Sprintf("%d queued", stats.waiting), 0, true, "Cancel", look.Icon.Close
 	case stats.failed > 0:
-		return lithic.Bad, "Failed", fmt.Sprintf("%d failed", stats.failed), -1, false, "Retry", "refresh"
+		return palette.Failed, "Failed", fmt.Sprintf("%d failed", stats.failed), -1, false, "Retry", look.Icon.Refresh
 	case stats.done > 0:
-		return lithic.Alive, "Saved", fmt.Sprintf("%d saved", stats.done), -1, false, "Open folder", "folder"
+		return palette.Alive, "Saved", fmt.Sprintf("%d saved", stats.done), -1, false, "Show in folder", look.Icon.Folder
 	default:
-		return lithic.Idle, "Cancelled", fmt.Sprintf("%d cancelled", stats.cancelled), -1, false, "Retry", "refresh"
+		return palette.Idle, "Cancelled", fmt.Sprintf("%d cancelled", stats.cancelled), -1, false, "Retry", look.Icon.Refresh
 	}
 }
 

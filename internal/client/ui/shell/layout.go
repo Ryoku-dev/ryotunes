@@ -2,191 +2,275 @@ package shell
 
 import (
 	"image"
+	"image/color"
 
 	gioapp "gioui.org/app"
+	"gioui.org/io/event"
+	"gioui.org/io/pointer"
 	"gioui.org/layout"
 	"gioui.org/op"
 	"gioui.org/op/clip"
 	"gioui.org/op/paint"
 
-	"github.com/ryoku-dev/ryotunes/internal/client/lithic"
+	"github.com/ryoku-dev/ryoku/docs/lithic/library/go/anim"
+	"github.com/ryoku-dev/ryoku/docs/lithic/library/go/kit"
+	"github.com/ryoku-dev/ryotunes/internal/client/ui/chrome"
 	"github.com/ryoku-dev/ryotunes/internal/client/ui/env"
-)
-
-const (
-	compactWidth  = 760
-	expandedWidth = 1280
+	"github.com/ryoku-dev/ryotunes/internal/client/ui/look"
 )
 
 func (s *uiShell) layout(gtx layout.Context, e *env.Env, widthDP float32) layout.Dimensions {
 	size := gtx.Constraints.Max
-	playerHeight := min(size.Y, gtx.Dp(88))
-	contentHeight := max(0, size.Y-playerHeight)
-	layoutAt(gtx, image.Pt(0, contentHeight), image.Pt(size.X, playerHeight), func(gtx layout.Context) layout.Dimensions {
-		return s.layoutPlayer(gtx, e)
-	})
-	// Size classes follow the window's compositor dp, not the user's content zoom.
-	if widthDP < compactWidth {
-		s.layoutCompact(gtx, e, contentHeight)
+	paint.Fill(gtx.Ops, e.Th.R.Ground)
+	class := look.ClassFor(widthDP)
+	e.Th.Class = class
+	s.reconcileProvider(gtx, e)
+
+	panel := e.Nav.Panel()
+	dockEligible := panelDockEligible(widthDP, class)
+	panel = s.reconcileFramePanel(class, panel, dockEligible)
+	docked := panel != env.PanelNone && dockEligible && !e.Nav.NowPlaying()
+
+	s.panelMotion.Duration = e.Th.Motion.Unfold
+	s.panelMotion.Ease = anim.EaseChisel
+	dockTarget := float32(0)
+	if docked {
+		dockTarget = 1
+	}
+	s.panelMotion.Set(gtx, dockTarget)
+	panelProgress := s.panelMotion.Value(gtx)
+
+	gap := gtx.Dp(look.Gap)
+	margin := gap
+	topHeight := min(size.Y, gtx.Dp(look.TopBar))
+	playerHeight := gtx.Dp(look.PlayerBar)
+	bottomNavHeight := 0
+	if class == look.Compact {
+		playerHeight = gtx.Dp(look.PlayerCompact)
+		bottomNavHeight = gtx.Dp(look.BottomNav)
+	}
+	playerY := max(topHeight, size.Y-margin-playerHeight-bottomNavHeight)
+	panesBottom := max(topHeight, playerY-gap)
+
+	sidebarPaneWidth := 0
+	if class == look.Expanded {
+		sidebarPaneWidth = gtx.Dp(look.SidebarExpanded)
+	} else if class == look.Medium {
+		sidebarPaneWidth = gtx.Dp(look.SidebarMedium)
+	}
+	sidebarColumn := 0
+	contentX := margin
+	if sidebarPaneWidth > 0 {
+		sidebarColumn = margin + sidebarPaneWidth
+		contentX = sidebarColumn + gap
+	}
+
+	panelWidth := int(float32(gtx.Dp(look.Panel)) * panelProgress)
+	panelGap := 0
+	if panelWidth > 0 {
+		panelGap = gap
+	}
+	contentRight := max(contentX, size.X-margin-panelWidth-panelGap)
+	contentRect := image.Rect(contentX, topHeight, contentRight, panesBottom)
+	frameContentRect := contentRect
+	sidebarRect := image.Rect(margin, topHeight, margin+sidebarPaneWidth, panesBottom)
+	panelRect := image.Rect(size.X-margin-panelWidth, topHeight, size.X-margin, panesBottom)
+
+	if e.Nav.NowPlaying() {
+		contentRect = image.Rect(margin, topHeight, size.X-margin, panesBottom)
+		s.layoutPaneRect(gtx, contentRect, gtx.Dp(e.Th.Cut.Large), e.Th.R.Stone2, func(gtx layout.Context) layout.Dimensions {
+			return s.layoutContent(gtx, e)
+		})
 	} else {
-		s.layoutWide(gtx, e, contentHeight, widthDP >= expandedWidth)
-	}
-	return layout.Dimensions{Size: size}
-}
-
-func (s *uiShell) layoutWide(gtx layout.Context, e *env.Env, height int, expanded bool) {
-	width := gtx.Constraints.Max.X
-	railWidth := gtx.Dp(72)
-	if expanded {
-		railWidth = gtx.Dp(88)
-	}
-	gap := gtx.Dp(8)
-	top := gtx.Dp(10)
-	paneHeight := max(0, height-top)
-	layoutAt(gtx, image.Pt(0, top), image.Pt(railWidth, paneHeight), func(gtx layout.Context) layout.Dimensions {
-		return s.layoutPane(gtx, e, false, false, func(gtx layout.Context) layout.Dimensions {
-			return s.rail.Layout(gtx, e, expanded)
-		})
-	})
-
-	contentX := railWidth + gap
-	panel := e.Nav.Panel()
-	showPanel := panel != env.PanelNone
-	panelWidth := 0
-	if showPanel {
-		panelWidth = min(gtx.Dp(360), max(0, width-contentX-gap))
-		showPanel = panelWidth > 0
-	}
-	workWidth := width - contentX
-	if showPanel {
-		workWidth -= panelWidth + gap
-	}
-	layoutAt(gtx, image.Pt(contentX, top), image.Pt(workWidth, paneHeight), func(gtx layout.Context) layout.Dimensions {
-		return s.layoutPane(gtx, e, true, true, s.workPane(e))
-	})
-	if showPanel {
-		panelX := contentX + workWidth + gap
-		layoutAt(gtx, image.Pt(panelX, top), image.Pt(panelWidth, paneHeight), func(gtx layout.Context) layout.Dimensions {
-			return s.layoutPane(gtx, e, false, false, s.panelPane(e, panel))
-		})
-	}
-}
-
-func (s *uiShell) layoutCompact(gtx layout.Context, e *env.Env, height int) {
-	width := gtx.Constraints.Max.X
-	top := gtx.Dp(10)
-	gap := gtx.Dp(8)
-	bottomHeight := min(gtx.Dp(64), max(0, height-top))
-	paneHeight := max(0, height-top-bottomHeight-gap)
-	panel := e.Nav.Panel()
-	layoutAt(gtx, image.Pt(0, top), image.Pt(width, paneHeight), func(gtx layout.Context) layout.Dimensions {
-		return s.layoutPane(gtx, e, true, true, s.workPane(e))
-	})
-	if panel != env.PanelNone {
-		layoutAt(gtx, image.Pt(0, top), image.Pt(width, paneHeight), func(gtx layout.Context) layout.Dimensions {
-			return s.layoutPane(gtx, e, false, true, func(gtx layout.Context) layout.Dimensions {
-				return s.layoutCompactPanel(gtx, e, panel)
+		if sidebarPaneWidth > 0 {
+			s.layoutPaneRect(gtx, sidebarRect, gtx.Dp(e.Th.Cut.Large), e.Th.R.Stone1, func(gtx layout.Context) layout.Dimensions {
+				return s.sidebar.Layout(gtx, e, class)
 			})
+		}
+		s.layoutPaneRect(gtx, contentRect, gtx.Dp(e.Th.Cut.Large), e.Th.R.Stone2, func(gtx layout.Context) layout.Dimensions {
+			return s.layoutContent(gtx, e)
 		})
-	}
-	layoutAt(gtx, image.Pt(0, height-bottomHeight), image.Pt(width, bottomHeight), func(gtx layout.Context) layout.Dimensions {
-		paint.Fill(gtx.Ops, e.Th.R.Stone1)
-		return s.rail.LayoutBottom(gtx, e)
-	})
-}
-
-func (s *uiShell) workPane(e *env.Env) layout.Widget {
-	return func(gtx layout.Context) layout.Dimensions {
-		page := s.page(e.Nav.Current())
-		return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
-			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-				gtx.Constraints.Min.Y = min(gtx.Constraints.Max.Y, gtx.Dp(56))
-				gtx.Constraints.Max.Y = gtx.Constraints.Min.Y
-				return s.title.Layout(gtx, e, page)
-			}),
-			layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-				return page.Layout(gtx, e)
-			}),
-		)
-	}
-}
-
-func (s *uiShell) panelPane(e *env.Env, panel env.Panel) layout.Widget {
-	return func(gtx layout.Context) layout.Dimensions {
-		switch panel {
-		case env.PanelLyrics:
-			return s.lyrics.Layout(gtx, e)
-		case env.PanelListen:
-			return s.listen.Layout(gtx, e)
-		case env.PanelNowPlaying:
-			return s.nowPlaying.Layout(gtx, e)
-		default:
-			return s.queue.Layout(gtx, e)
+		if panelWidth > 0 {
+			opacity := paint.PushOpacity(gtx.Ops, panelProgress)
+			s.layoutPaneRect(gtx, panelRect, gtx.Dp(e.Th.Cut.Large), e.Th.R.Stone1, func(gtx layout.Context) layout.Dimensions {
+				return s.rightPanel.Layout(gtx, e)
+			})
+			opacity.Pop()
+		}
+		if panel != env.PanelNone && !docked {
+			s.layoutPanelSheet(gtx, e, contentRect, class)
+		} else {
+			s.sheetMotion.Duration = e.Th.Motion.MenuOut
+			s.sheetMotion.Set(gtx, 0)
+			_ = s.sheetMotion.Value(gtx)
 		}
 	}
-}
 
-func (s *uiShell) layoutCompactPanel(gtx layout.Context, e *env.Env, panel env.Panel) layout.Dimensions {
-	dims := layout.Flex{Axis: layout.Vertical}.Layout(gtx,
-		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			height := min(gtx.Constraints.Max.Y, gtx.Dp(48))
-			gtx.Constraints.Min.Y = height
-			gtx.Constraints.Max.Y = height
-			return layout.Inset{Right: 13}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-				return layout.E.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-					return s.panelClose.Layout(gtx, e.Th, lithic.Quiet, lithic.Icon("close"), "Close panel")
-				})
-			})
-		}),
-		layout.Flexed(1, s.panelPane(e, panel)),
-	)
-	if s.panelClose.Clicked(gtx) {
-		e.Nav.OpenPanel(env.PanelNone)
-	}
-	return dims
-}
-
-func (s *uiShell) layoutPlayer(gtx layout.Context, e *env.Env) layout.Dimensions {
-	size := gtx.Constraints.Max
-	path := e.Th.Cut.Large
-	clipStack := clip.Outline{Path: cutTopPath(gtx, size, gtx.Dp(path))}.Op().Push(gtx.Ops)
-	paint.Fill(gtx.Ops, e.Th.R.Stone1)
-	dims := s.player.Layout(gtx, e)
-	clipStack.Pop()
-	return dims
-}
-
-func (s *uiShell) layoutPane(gtx layout.Context, e *env.Env, work, controls bool, body layout.Widget) layout.Dimensions {
-	size := gtx.Constraints.Max
-	path := cutTopPath(gtx, size, gtx.Dp(e.Th.Cut.Large))
-	stack := clip.Outline{Path: path}.Op().Push(gtx.Ops)
-	plane := e.Th.R.Stone1
-	if work {
-		plane = e.Th.R.Stone2
-	}
-	paint.Fill(gtx.Ops, plane)
-
-	strip := 0
-	if !s.config.Decorated && s.config.Mode != gioapp.Fullscreen {
-		strip = min(size.Y, gtx.Dp(32))
-		move := clip.Rect{Max: image.Pt(size.X, strip)}.Push(gtx.Ops)
-		s.decor.MoveArea(gtx.Ops)
-		move.Pop()
-	}
-	bodyHeight := max(0, size.Y-strip)
-	layoutAt(gtx, image.Pt(0, strip), image.Pt(size.X, bodyHeight), body)
-	if controls && strip > 0 {
-		macro := op.Record(gtx.Ops)
-		controlsWidth := min(size.X, gtx.Dp(116))
-		layoutAt(gtx, image.Pt(size.X-controlsWidth-gtx.Dp(6), 0), image.Pt(controlsWidth, strip), func(gtx layout.Context) layout.Dimensions {
-			return s.decor.Layout(gtx, e.Th, s.config.Mode)
+	playerRect := image.Rect(margin, playerY, size.X-margin, playerY+playerHeight)
+	s.layoutPaneRect(gtx, playerRect, gtx.Dp(e.Th.Cut.Large), e.Th.R.Stone1, func(gtx layout.Context) layout.Dimensions {
+		if class == look.Compact {
+			return s.player.LayoutCompact(gtx, e)
+		}
+		return s.player.Layout(gtx, e)
+	})
+	if class == look.Compact {
+		bottomRect := image.Rect(0, size.Y-bottomNavHeight, size.X, size.Y)
+		s.layoutPaneRect(gtx, bottomRect, gtx.Dp(e.Th.Cut.Large), e.Th.R.Stone1, func(gtx layout.Context) layout.Dimensions {
+			return s.bottomNav.Layout(gtx, e)
 		})
-		op.Defer(gtx.Ops, macro.Stop())
 	}
-	stack.Pop()
+
+	frame := chrome.Frame{
+		Class: class, Sidebar: sidebarColumn, Content: frameContentRect,
+		Decorated: s.config.Decorated, Maximized: s.config.Mode == gioapp.Maximized,
+	}
+	layoutAt(gtx, image.Point{}, image.Pt(size.X, topHeight), func(gtx layout.Context) layout.Dimensions {
+		return s.topBar.Layout(gtx, e, frame)
+	})
+	if action, ok := s.topBar.WindowAction(); ok {
+		s.performWindowAction(action)
+	}
 	return layout.Dimensions{Size: size}
 }
 
-func cutTopPath(gtx layout.Context, size image.Point, cut int) clip.PathSpec {
-	return lithic.CutPath(gtx.Ops, image.Rectangle{Max: size}, cut, cut, 0, 0)
+func (s *uiShell) reconcileProvider(gtx layout.Context, e *env.Env) {
+	provider := e.Store.Snapshot().Provider
+	if provider != e.Th.Src.Provider {
+		e.Th.SetProvider(gtx, provider)
+	}
+	e.Th.Animate(gtx)
+}
+
+func panelDockEligible(widthDP float32, class look.Class) bool {
+	sidebar := float32(0)
+	switch class {
+	case look.Expanded:
+		sidebar = float32(look.SidebarExpanded)
+	case look.Medium:
+		sidebar = float32(look.SidebarMedium)
+	default:
+		return false
+	}
+	return widthDP-sidebar-float32(look.Panel)-3*float32(look.Gap) >= float32(look.ContentMinWithPanel)
+}
+
+func (s *uiShell) reconcileFramePanel(class look.Class, panel env.Panel, dockEligible bool) env.Panel {
+	if !s.classReady {
+		s.lastClass, s.lastDocked, s.classReady = class, panel != env.PanelNone && dockEligible, true
+		return panel
+	}
+	if class == look.Compact && s.lastClass != look.Compact && s.lastDocked && panel != env.PanelNone {
+		s.rememberedPanel = panel
+		s.nav.OpenPanel(env.PanelNone)
+		panel = env.PanelNone
+	}
+	if class != look.Compact && s.lastClass == look.Compact && dockEligible && panel == env.PanelNone && s.rememberedPanel != env.PanelNone {
+		panel = s.rememberedPanel
+		s.rememberedPanel = env.PanelNone
+		s.nav.OpenPanel(panel)
+	}
+	s.lastClass = class
+	s.lastDocked = panel != env.PanelNone && dockEligible
+	return panel
+}
+
+func (s *uiShell) layoutContent(gtx layout.Context, e *env.Env) layout.Dimensions {
+	route := e.Nav.Current()
+	key := routeKey(route) + "\x1e" + string(e.Th.Src.Provider)
+	page := s.page(route)
+	widget := layout.Widget(func(gtx layout.Context) layout.Dimensions {
+		return page.Layout(gtx, e)
+	})
+	if e.Nav.NowPlaying() {
+		now := e.Store.Snapshot().Playback.Now
+		trackID := ""
+		if now != nil {
+			trackID = now.VideoID
+		}
+		key = "\x00now-playing\x1e" + trackID
+		widget = func(gtx layout.Context) layout.Dimensions { return s.nowPlaying.Layout(gtx, e) }
+	}
+	if s.transitionWidgets == nil {
+		s.transitionWidgets = make(map[string]layout.Widget)
+	}
+	s.transitionWidgets[key] = widget
+	return s.contentSwap.Layout(gtx, e.Th, key, 8, e.Th.Motion.Navigate, func(gtx layout.Context, selected string) layout.Dimensions {
+		if content := s.transitionWidgets[selected]; content != nil {
+			return content(gtx)
+		}
+		return layout.Dimensions{}
+	})
+}
+
+func (s *uiShell) layoutPanelSheet(gtx layout.Context, e *env.Env, content image.Rectangle, class look.Class) {
+	s.sheetMotion.Duration = e.Th.Motion.MenuIn
+	s.sheetMotion.Ease = anim.EaseChisel
+	if !s.sheetReady {
+		s.sheetMotion.Set(gtx, 0)
+		s.sheetReady = true
+	}
+	s.sheetMotion.Set(gtx, 1)
+	progress := s.sheetMotion.Value(gtx)
+	if progress <= 0 || content.Empty() {
+		return
+	}
+	for {
+		raw, ok := gtx.Event(pointer.Filter{Target: &s.sheetOutside, Kinds: pointer.Press})
+		if !ok {
+			break
+		}
+		if _, ok := raw.(pointer.Event); ok {
+			e.Nav.OpenPanel(env.PanelNone)
+			gtx.Execute(op.InvalidateCmd{})
+		}
+	}
+	catcherOffset := op.Offset(content.Min).Push(gtx.Ops)
+	catcher := clip.Rect(image.Rectangle{Max: content.Size()}).Push(gtx.Ops)
+	event.Op(gtx.Ops, &s.sheetOutside)
+	catcher.Pop()
+	catcherOffset.Pop()
+
+	width := min(gtx.Dp(look.Panel), content.Dx())
+	if class == look.Compact {
+		width = content.Dx()
+	}
+	rect := image.Rect(content.Max.X-width, content.Min.Y, content.Max.X, content.Max.Y)
+	travel := int(float32(gtx.Dp(6)) * (1 - progress))
+	rect = rect.Add(image.Pt(travel, 0))
+	opacity := paint.PushOpacity(gtx.Ops, progress)
+	s.layoutPaneRect(gtx, rect, gtx.Dp(e.Th.Cut.Large), e.Th.R.Stone4, func(gtx layout.Context) layout.Dimensions {
+		return s.rightPanel.Layout(gtx, e)
+	})
+	opacity.Pop()
+}
+
+func (s *uiShell) layoutPaneRect(gtx layout.Context, rectangle image.Rectangle, cut int, plane color.NRGBA, body layout.Widget) {
+	if rectangle.Empty() {
+		return
+	}
+	layoutAt(gtx, rectangle.Min, rectangle.Size(), func(gtx layout.Context) layout.Dimensions {
+		bounds := image.Rectangle{Max: gtx.Constraints.Max}
+		if bounds.Dx() < 2*cut || bounds.Dy() < 2*cut {
+			cut = 0
+		}
+		path := kit.CutPath(gtx.Ops, bounds, cut, cut, 0, 0)
+		kit.FillCutTop(gtx.Ops, bounds, cut, plane)
+		stack := clip.Outline{Path: path}.Op().Push(gtx.Ops)
+		dimensions := body(gtx)
+		stack.Pop()
+		return dimensions
+	})
+}
+
+func layoutAt(gtx layout.Context, at, size image.Point, widget layout.Widget) layout.Dimensions {
+	size.X = max(0, size.X)
+	size.Y = max(0, size.Y)
+	offset := op.Offset(at).Push(gtx.Ops)
+	area := clip.Rect(image.Rectangle{Max: size}).Push(gtx.Ops)
+	child := gtx
+	child.Constraints = layout.Exact(size)
+	widget(child)
+	area.Pop()
+	offset.Pop()
+	return layout.Dimensions{Size: size}
 }

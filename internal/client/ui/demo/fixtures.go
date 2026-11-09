@@ -14,10 +14,18 @@ import (
 	"github.com/ryoku-dev/ryotunes/internal/protocol"
 )
 
+// Catalogue IDs are bare YouTube Music identifiers used by demo detail routes.
+const (
+	ArtistID   = "UCkA2M8xJQ6nR5vT9sP3wL7q"
+	AlbumID    = "MPREb_KiteMineralLines"
+	PlaylistID = "PL_KiteNightSignals"
+)
+
 type fixtures struct {
 	snapshot protocol.Snapshot
 	tracks   []model.Track
 	cards    []model.BrowseItem
+	library  []model.BrowseItem
 	feed     model.Feed
 	playlist model.PlaylistPage
 	album    model.AlbumPage
@@ -33,99 +41,237 @@ func makeFixtures(directory string) (fixtures, error) {
 	if err != nil {
 		return fixtures{}, err
 	}
+
 	tracks := make([]model.Track, 12)
 	titles := []string{"Stone in the water", "Night train", "Soft voltage", "Aperture", "Borrowed light", "Still room", "Northbound", "Paper satellite", "Low tide", "Signal path", "Warm circuit", "After image"}
 	artists := []string{"Kite Assembly", "Mira North", "Glass Harbour", "Low Weather"}
 	for index := range tracks {
-		album := []string{"Mineral lines", "Distance studies", "Quiet machines"}[index%3]
+		albumName := []string{"Mineral lines", "Distance studies", "Quiet machines"}[index%3]
 		duration := fmt.Sprintf("%d:%02d", 3+index%3, (index*13+17)%60)
+		if index == 0 {
+			duration = "3:18"
+		}
 		thumbnail := artwork[index%len(artwork)]
 		albumID := fmt.Sprintf("album-%d", index%3+1)
 		artistID := fmt.Sprintf("artist-%d", index%len(artists)+1)
+		plays := fmt.Sprintf("%d.%dM", 1+index/4, 2+index%7)
+		rating := model.RatingIndifferent
+		if index == 0 {
+			rating = model.RatingLike
+		}
 		tracks[index] = model.Track{
 			VideoID: fmt.Sprintf("demo-track-%02d", index+1), Title: titles[index], Artists: artists[index%len(artists)],
-			ArtistID: &artistID, Album: &album, AlbumID: &albumID, Duration: &duration, Thumbnail: &thumbnail,
+			ArtistID: &artistID, Album: &albumName, AlbumID: &albumID, Duration: &duration, Thumbnail: &thumbnail,
 			ArtistRuns: []model.Artist{{Text: artists[index%len(artists)], ID: &artistID}}, Explicit: index == 7,
+			PlayCount: &plays, Plays: &plays, Rating: &rating,
 		}
 	}
+
 	cards := make([]model.BrowseItem, 32)
 	kinds := []string{"album", "artist", "playlist", "song"}
 	for index := range cards {
+		kind := kinds[index%len(kinds)]
 		subtitle := artists[index%len(artists)]
 		thumbnail := artwork[index%len(artwork)]
-		cards[index] = model.BrowseItem{Kind: kinds[index%len(kinds)], ID: fmt.Sprintf("demo-%s-%02d", kinds[index%len(kinds)], index+1), Title: titles[index%len(titles)], Subtitle: &subtitle, Thumbnail: &thumbnail}
+		title := fmt.Sprintf("%s %d", map[string]string{"album": "Record", "artist": "Artist", "playlist": "Mix", "song": "Track"}[kind], index/4+1)
+		cards[index] = model.BrowseItem{
+			Kind: kind, ID: fmt.Sprintf("demo-%s-%02d", kind, index+1), Title: title,
+			Subtitle: &subtitle, Thumbnail: &thumbnail, Explicit: kind == "song" && index%8 == 7,
+		}
 	}
-	shelves := make([]model.Shelf, 4)
-	for index, title := range []string{"Continue listening", "Picked for you", "Familiar artists", "Forgotten favourites"} {
+	shelves := make([]model.Shelf, 3)
+	for index, title := range []string{"New from your artists", "Deep focus", "Evening records"} {
 		more := fmt.Sprintf("demo-shelf-%d", index+1)
 		shelves[index] = model.Shelf{Title: title, Items: append([]model.BrowseItem(nil), cards[index*8:index*8+8]...), MoreBrowseID: &more}
 	}
-	feed := model.Feed{Chips: []model.FeedChip{{Title: "Energise", Params: "energy"}, {Title: "Focus", Params: "focus"}, {Title: "Unwind", Params: "unwind"}}, Sections: shelves}
+	feed := model.Feed{
+		Chips:    []model.FeedChip{{Title: "Energise", Params: "energy"}, {Title: "Focus", Params: "focus"}, {Title: "Unwind", Params: "unwind"}},
+		Sections: shelves,
+	}
 
-	queue := model.QueueSnapshot{Items: append([]model.Track(nil), tracks...), CurrentIndex: 0, PlayedFrom: 0, Repeat: model.RepeatOff}
-	queue.Items[1].Queued = true
-	queue.Items[2].Queued = true
-	now := model.PlaybackTrack{VideoID: tracks[0].VideoID, Title: tracks[0].Title, Artists: tracks[0].Artists, ArtistID: tracks[0].ArtistID, ArtistRuns: tracks[0].ArtistRuns, Thumbnail: tracks[0].Thumbnail, Duration: tracks[0].Duration, StreamClient: "demo"}
+	likedSubtitle := "128 songs"
+	liked := model.BrowseItem{Kind: "playlist", ID: "RYOTUNES_LIKED", Title: "Liked songs", Subtitle: &likedSubtitle, Thumbnail: &artwork[7]}
+	library := []model.BrowseItem{liked}
+	library = append(library, cardsOfKind(cards, "playlist")[:8]...)
+
+	sourceName := "Mineral lines"
+	queue := model.QueueSnapshot{
+		Items: append([]model.Track(nil), tracks[:11]...), CurrentIndex: 0, PlayedFrom: 0,
+		Repeat: model.RepeatOff, SourceName: &sourceName,
+	}
+	for index := 1; index <= 6; index++ {
+		queue.Items[index].Queued = true
+		queue.Items[index].QueuedFrom = &sourceName
+	}
+	for index := 7; index < len(queue.Items); index++ {
+		queue.Items[index].Autoplay = true
+	}
+	now := model.PlaybackTrack{
+		VideoID: tracks[0].VideoID, Title: tracks[0].Title, Artists: tracks[0].Artists,
+		ArtistID: tracks[0].ArtistID, ArtistRuns: tracks[0].ArtistRuns, Thumbnail: tracks[0].Thumbnail,
+		Duration: tracks[0].Duration, StreamClient: "Web Remixed", Rating: tracks[0].Rating,
+		Plays: tracks[0].Plays, Genre: new("Alternative"),
+	}
 	settings := model.SettingsSnapshot{
-		"volume": "68", "proxy": "", "quality": "AUTO", "enable_history": "true", "discord_rpc": "false",
-		"close_to_tray": "true", "autostart": "false", "autoplay": "true", "prevent_duplicates": "true",
-		"lyrics_boidu": "true", "lyrics_romanize": "false", "low_resource_mode": "false",
-		"disabled_stream_clients": "", "ui_scale": "110", "discord_presence_name": "Ryotunes",
+		"volume": "68", "proxy": "", "quality": "AUTO", "enable_history": "true", "discord_rpc": "true",
+		"close_to_tray": "true", "autostart": "true", "autoplay": "true", "prevent_duplicates": "true",
+		"lyrics_boidu": "true", "lyrics_romanize": "true", "low_resource_mode": "false",
+		"disabled_stream_clients": "", "ui_scale": "100", "discord_presence_name": "Ryotunes",
 	}
 	name, handle, email, channel := "Nero", "@nero", "nero@example.invalid", "demo-channel"
 	account := model.Account{SignedIn: true, Name: &name, Handle: &handle, Email: &email, ChannelID: &channel}
+
 	nowUnix := time.Now().Unix()
-	completedPath := filepath.Join(directory, "Stone in the water.opus")
+	downloadSettings := model.DownloadSettings{Path: filepath.Join(directory, "Music"), Format: model.DownloadOpus, Workers: 2, OrganizeByArtist: true, EmbedMetadata: true}
+	if err := os.MkdirAll(downloadSettings.Path, 0o700); err != nil {
+		return fixtures{}, err
+	}
 	collection, collectionKind := "Mineral lines", "album"
-	finishedAt := nowUnix - 7000
-	downloads := model.DownloadSnapshot{Jobs: []model.DownloadEntry{
-		{ID: "demo-download-1", VideoID: tracks[3].VideoID, Title: tracks[3].Title, Artists: tracks[3].Artists, Thumbnail: *tracks[3].Thumbnail, Status: model.DownloadStatusDownloading, Progress: 62, Source: "YouTube", Collection: &collection, CollectionKind: &collectionKind, CreatedAt: nowUnix - 90},
-		{ID: "demo-download-2", VideoID: tracks[0].VideoID, Title: tracks[0].Title, Artists: tracks[0].Artists, Thumbnail: *tracks[0].Thumbnail, Status: model.DownloadStatusCompleted, Progress: 100, Source: "YouTube", FilePath: &completedPath, CreatedAt: nowUnix - 7200, FinishedAt: &finishedAt},
-	}, ActiveCount: 1}
+	downloads := model.DownloadSnapshot{ActiveCount: 2}
+	for index, progress := range []int{62, 28} {
+		track := tracks[index+3]
+		downloads.Jobs = append(downloads.Jobs, model.DownloadEntry{
+			ID: fmt.Sprintf("demo-download-active-%d", index+1), VideoID: track.VideoID, Title: track.Title,
+			Artists: track.Artists, Thumbnail: *track.Thumbnail, Status: model.DownloadStatusDownloading,
+			Progress: progress, Source: "YouTube Music", Collection: &collection, CollectionKind: &collectionKind,
+			CreatedAt: nowUnix - int64(90+index*45), Settings: downloadSettings,
+		})
+	}
+	for index := range 6 {
+		track := tracks[index]
+		path := filepath.Join(downloadSettings.Path, fmt.Sprintf("%02d %s.opus", index+1, track.Title))
+		file, createErr := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600)
+		if createErr != nil {
+			return fixtures{}, createErr
+		}
+		size := int64(4+index) * 1024 * 1024
+		if truncateErr := file.Truncate(size); truncateErr != nil {
+			_ = file.Close()
+			return fixtures{}, truncateErr
+		}
+		if closeErr := file.Close(); closeErr != nil {
+			return fixtures{}, closeErr
+		}
+		finishedAt := nowUnix - int64(3600+index*900)
+		downloads.Jobs = append(downloads.Jobs, model.DownloadEntry{
+			ID: fmt.Sprintf("demo-download-saved-%d", index+1), VideoID: track.VideoID, Title: track.Title,
+			Artists: track.Artists, Thumbnail: *track.Thumbnail, Status: model.DownloadStatusCompleted,
+			Progress: 100, Source: "YouTube Music", FilePath: &path, CreatedAt: finishedAt - 120,
+			FinishedAt: &finishedAt, Settings: downloadSettings,
+		})
+	}
+	failure := "The source stopped responding. Retry when the connection is stable."
+	failedTrack := tracks[8]
+	downloads.Jobs = append(downloads.Jobs, model.DownloadEntry{
+		ID: "demo-download-failed", VideoID: failedTrack.VideoID, Title: failedTrack.Title,
+		Artists: failedTrack.Artists, Thumbnail: *failedTrack.Thumbnail, Status: model.DownloadStatusFailed,
+		Progress: 41, Error: &failure, Source: "YouTube Music", CreatedAt: nowUnix - 500, Settings: downloadSettings,
+	})
 
-	title, subtitle, description, privacy, cover := "Mineral lines", "Kite Assembly · 12 songs", "A patient record made from room tone, wire and low light.", "PRIVATE", artwork[0]
-	playlist := model.PlaylistPage{Title: &title, Subtitle: &subtitle, Thumbnail: &artwork[0], Description: &description, Privacy: &privacy, Cover: &cover, Items: append([]model.Track(nil), tracks...), Owned: true}
-	album := playlist
-	artistName, subscribers, topID := "Kite Assembly", "128K subscribers", "demo-top-songs"
-	artist := model.ArtistPage{Name: &artistName, Thumbnail: &artwork[2], Description: &description, Subscribers: &subscribers, ChannelID: "demo-artist", TopSongs: append([]model.Track(nil), tracks[:5]...), TopSongsID: &topID, Sections: []model.ArtistSection{{Title: "Albums", Items: append([]model.BrowseItem(nil), cards[:8]...)}}}
-
-	lyrics := model.Lyrics{Source: "demo", Synced: true}
-	for index, line := range []string{"Stone in the water", "A line beneath the blue", "Every quiet signal", "Finds another room", "Hold the borrowed light", "Let the night train through", "Nothing has to hurry", "Nothing has to prove"} {
-		start := uint64(index * 12000)
-		end := start + 11000
-		lyrics.Lines = append(lyrics.Lines, model.LyricsLine{TimeMS: &start, EndTimeMS: &end, Text: line})
+	description, privacy := "A patient record made from room tone, wire and low light.", "PRIVATE"
+	selectedSort := model.PlaylistSortNewest
+	playlistTitle, playlistSubtitle := "Night signals", "12 songs · 46 min"
+	playlist := model.PlaylistPage{
+		Title: &playlistTitle, Subtitle: &playlistSubtitle, Thumbnail: &artwork[1], Description: &description,
+		Privacy: &privacy, Cover: &artwork[1], Items: append([]model.Track(nil), tracks...), Owned: true,
+		SortMenu: &model.PlaylistSortMenu{Selected: &selectedSort, Editable: true},
+	}
+	albumTitle, albumSubtitle := "Mineral lines", "Kite Assembly · 2026 · 12 songs · 46 min"
+	album := model.AlbumPage{
+		Title: &albumTitle, Subtitle: &albumSubtitle, Thumbnail: &artwork[0], Description: &description,
+		Cover: &artwork[0], Items: append([]model.Track(nil), tracks...),
+	}
+	artistName, subscribers, listeners, topID, radioID := "Kite Assembly", "128K subscribers", "482K monthly listeners", "demo-top-songs", "demo-artist-radio"
+	sectionTitles := []string{"Albums", "Singles and EPs", "Videos", "Featured on", "Fans also like"}
+	sectionKinds := []string{"album", "album", "song", "playlist", "artist"}
+	artistSections := make([]model.ArtistSection, len(sectionTitles))
+	for index := range artistSections {
+		items := cardsOfKind(cards, sectionKinds[index])
+		more := fmt.Sprintf("demo-artist-section-%d", index+1)
+		artistSections[index] = model.ArtistSection{Title: sectionTitles[index], Items: append([]model.BrowseItem(nil), items...), MoreBrowseID: &more}
+	}
+	artist := model.ArtistPage{
+		Name: &artistName, Thumbnail: &artwork[2], Description: &description, Subscribers: &subscribers,
+		MonthlyListeners: &listeners, ChannelID: ArtistID, Subscribed: false, RadioPlaylistID: &radioID,
+		TopSongs: append([]model.Track(nil), tracks[:5]...), TopSongsID: &topID, Sections: artistSections,
 	}
 
-	radio := make([]model.RadioStation, 10)
+	lyrics := model.Lyrics{Source: "YouTube Music", Synced: true}
+	lyricText := []string{"Stone in the water", "A line beneath the blue", "Every quiet signal", "Finds another room", "Hold the borrowed light", "Let the night train through", "Nothing has to hurry", "Nothing has to prove", "Turn toward the shoreline", "Hear the copper ring", "Carry what is quiet", "Leave the current singing"}
+	for index, line := range lyricText {
+		start := uint64(45_000 + index*10_000)
+		end := start + 9_000
+		romanized := fmt.Sprintf("Reading %02d", index+1)
+		words := []model.LyricsWord{{Text: line, StartMS: start, EndMS: end}}
+		lyrics.Lines = append(lyrics.Lines, model.LyricsLine{TimeMS: &start, EndTimeMS: &end, Text: line, Words: words, Romanized: &romanized})
+	}
+
+	radio := make([]model.RadioStation, 12)
+	countries := []string{"Japan", "Iceland", "Canada", "Germany"}
+	codecs := []string{"AAC", "MP3", "OGG"}
+	tags := []string{"ambient", "jazz", "electronic", "classical"}
 	for index := range radio {
-		radio[index] = model.RadioStation{StationUUID: fmt.Sprintf("demo-radio-%d", index+1), Name: fmt.Sprintf("Signal %02d", index+1), Country: []string{"Japan", "Iceland", "Canada"}[index%3], Tags: []string{"ambient", "jazz", "electronic"}[index%3], Codec: "AAC", Bitrate: int64(128 + index%3*64), Favicon: artwork[index%len(artwork)]}
+		radio[index] = model.RadioStation{
+			StationUUID: fmt.Sprintf("demo-radio-%d", index+1), Name: fmt.Sprintf("Signal %02d", index+1),
+			StreamURL: "https://radio.invalid/stream", URL: "https://radio.invalid/stream",
+			Homepage: "https://radio.invalid", Country: countries[index%len(countries)], CountryCode: []string{"JP", "IS", "CA", "DE"}[index%4],
+			Tags: tags[index%len(tags)], Codec: codecs[index%len(codecs)], Bitrate: int64(96 + index%4*32),
+			Votes: int64(90 + index*13), ClickCount: int64(500 + index*71), Favicon: artwork[index%len(artwork)],
+		}
 	}
-	logs := model.LogsResult{Entries: []model.LogEntry{{Timestamp: time.Now().Format(time.RFC3339), Level: "info", Source: "demo", Message: "Demo daemon ready"}}, Total: 1, Path: filepath.Join(directory, "demo.log")}
-	stats := model.ListeningStats{Period: model.ListeningWeek, Plays: 42, KnownDurationSeconds: 9820, TopArtists: []model.ArtistPlayCount{{Name: "Kite Assembly", Plays: 14}}, TopTracks: []model.TrackPlayCount{{Title: tracks[0].Title, Artists: tracks[0].Artists, Plays: 6}}}
+	logEntries := []model.LogEntry{
+		{Timestamp: time.Now().Add(-3 * time.Minute).Format(time.RFC3339), Level: "info", Source: "daemon", Target: "player", Message: "Playback restored"},
+		{Timestamp: time.Now().Add(-2 * time.Minute).Format(time.RFC3339), Level: "warn", Source: "daemon", Target: "provider:youtube", Message: "Stream fallback selected"},
+		{Timestamp: time.Now().Add(-time.Minute).Format(time.RFC3339), Level: "error", Source: "client", Target: "art", Message: "One cover was unavailable"},
+	}
+	logs := model.LogsResult{
+		Entries: logEntries, Total: len(logEntries), Errors: 1, Warnings: 1, Path: filepath.Join(directory, "demo.log"),
+		FileBytes: 18432, EngineVersion: "mpv 0.40.0", MPRIS: true,
+	}
+	stats := model.ListeningStats{
+		Period: model.ListeningWeek, Plays: 42, KnownDurationSeconds: 9820,
+		TopArtists: []model.ArtistPlayCount{{Name: "Kite Assembly", Plays: 14}},
+		TopTracks:  []model.TrackPlayCount{{Title: tracks[0].Title, Artists: tracks[0].Artists, Plays: 6}},
+	}
+
 	manual := true
 	personalState := state.EmptyPersonal()
-	personalState.Picks = []state.Pick{
-		{BrowseItem: cards[2], LastUsedAt: time.Now().Add(-2 * time.Hour).UnixMilli(), Manual: &manual},
-		{BrowseItem: cards[6], LastUsedAt: time.Now().Add(-24 * time.Hour).UnixMilli(), Manual: &manual},
+	for index := 0; index < 4; index++ {
+		personalState.Picks = append(personalState.Picks, state.Pick{
+			BrowseItem: cards[index*4+2], LastUsedAt: time.Now().Add(-time.Duration(index+1) * time.Hour).UnixMilli(), Manual: &manual,
+		})
 	}
-	personalState.Saved = append(personalState.Saved, cards[0], cards[5])
-	personalState.Pins = []string{cards[2].ID, cards[6].ID}
-	recentItem := model.BrowseItem{Kind: "song", ID: tracks[0].VideoID, Title: tracks[0].Title, Subtitle: &tracks[0].Artists, Thumbnail: tracks[0].Thumbnail}
-	personalState.Recent[tracks[0].VideoID] = state.RecentItem{BrowseItem: recentItem, ArtistID: tracks[0].ArtistID, At: time.Now().Add(-40 * time.Minute).UnixMilli()}
-	if tracks[0].ArtistID != nil {
-		personalState.Artists[*tracks[0].ArtistID] = state.ArtistStat{Name: tracks[0].Artists, Count: 7, LastPlayedAt: time.Now().Add(-40 * time.Minute).UnixMilli()}
+	personalState.Saved = append(personalState.Saved, library...)
+	personalState.Pins = []string{library[1].ID, library[2].ID, library[3].ID}
+	for index := 0; index < 4; index++ {
+		track := tracks[index]
+		item := model.BrowseItem{Kind: "song", ID: track.VideoID, Title: track.Title, Subtitle: &track.Artists, Thumbnail: track.Thumbnail}
+		personalState.Recent[track.VideoID] = state.RecentItem{BrowseItem: item, ArtistID: track.ArtistID, At: time.Now().Add(-time.Duration(index+1) * 20 * time.Minute).UnixMilli()}
+	}
+	for index, artistName := range artists {
+		artistID := fmt.Sprintf("artist-%d", index+1)
+		personalState.Artists[artistID] = state.ArtistStat{Name: artistName, Count: 7 - index, LastPlayedAt: time.Now().Add(-time.Duration(index+1) * time.Hour).UnixMilli()}
 	}
 	personalState.Home.Order = []string{"shortcuts", "continue-listening", "picked-for-you"}
 	personal, err := state.MarshalPersonal(personalState)
 	if err != nil {
 		return fixtures{}, err
 	}
+	premium := true
+	spotifyName, soundcloudName, tidalName, tidalQuality := "Nero on Spotify", "nero", "Nero", "LOSSLESS"
 	snapshot := protocol.Snapshot{
-		Playback: model.PlaybackSnapshot{Now: &now, Position: 74, Duration: 247, Volume: 68}, Queue: queue, Settings: settings,
-		Auth: account, AudioFx: model.DefaultAudioFx(), Provider: model.ProviderYouTube, Downloads: downloads, Personal: personal,
-		LT: model.LTState{Status: "idle", ServerURL: "wss://sync.ryotunes.invalid", Users: []model.LTUser{}, Queue: []model.LTTrack{}},
+		Playback: model.PlaybackSnapshot{Now: &now, Paused: true, Position: 105, Duration: 198, Volume: 68},
+		Queue:    queue, Settings: settings, Auth: account, AudioFx: model.DefaultAudioFx(),
+		Provider: model.ProviderYouTube, Downloads: downloads, Personal: personal,
+		Spotify:    model.SpotifyStatus{SignedIn: true, Stored: true, Name: &spotifyName, Premium: &premium},
+		SoundCloud: model.SoundCloudStatus{SignedIn: true, Name: &soundcloudName},
+		Tidal:      model.TidalStatus{SignedIn: true, Name: &tidalName, Quality: &tidalQuality, HasCredentials: true},
+		LT:         model.LTState{Status: "idle", ServerURL: "wss://sync.ryotunes.invalid", Users: []model.LTUser{}, Queue: []model.LTTrack{}},
 	}
-	return fixtures{snapshot: snapshot, tracks: tracks, cards: cards, feed: feed, playlist: playlist, album: album, artist: artist, lyrics: lyrics, radio: radio, logs: logs, stats: stats}, nil
+	return fixtures{
+		snapshot: snapshot, tracks: tracks, cards: cards, library: library, feed: feed,
+		playlist: playlist, album: album, artist: artist, lyrics: lyrics, radio: radio, logs: logs, stats: stats,
+	}, nil
 }
 
 func writeArtwork(directory string) ([]string, error) {

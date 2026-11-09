@@ -248,6 +248,17 @@ type SetAlbumSavedParams struct {
 	Saved      bool   `json:"saved"`
 }
 
+// SetArtistSubscribedParams changes an artist channel subscription.
+type SetArtistSubscribedParams struct {
+	ID         string `json:"id"`
+	Subscribed bool   `json:"subscribed"`
+}
+
+// SetArtistSubscribedResult reports the provider-confirmed subscription state.
+type SetArtistSubscribedResult struct {
+	Subscribed bool `json:"subscribed"`
+}
+
 // PlaylistTrackParams identifies a playlist and track.
 type PlaylistTrackParams struct {
 	PlaylistID string `json:"playlistId"`

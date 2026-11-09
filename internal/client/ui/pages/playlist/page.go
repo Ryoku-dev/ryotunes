@@ -3,42 +3,57 @@ package playlist
 
 import (
 	"fmt"
+	"image"
+	"image/color"
 	"strconv"
 	"strings"
 
 	"gioui.org/layout"
+	"gioui.org/op"
 	"gioui.org/unit"
 
-	"github.com/ryoku-dev/ryotunes/internal/client/lithic"
+	"github.com/ryoku-dev/ryoku/docs/lithic/library/go/kit"
+	"github.com/ryoku-dev/ryotunes/internal/client/state"
 	"github.com/ryoku-dev/ryotunes/internal/client/ui/act"
 	"github.com/ryoku-dev/ryotunes/internal/client/ui/env"
+	"github.com/ryoku-dev/ryotunes/internal/client/ui/look"
 	"github.com/ryoku-dev/ryotunes/internal/client/ui/widgets"
 	"github.com/ryoku-dev/ryotunes/internal/model"
 	"github.com/ryoku-dev/ryotunes/internal/protocol"
 )
 
 var sortLabels = []string{"Default", "Newest first", "Oldest first", "Title", "Artist", "Album"}
+var playlistMoreItems = []kit.MenuItem{
+	{Icon: look.Icon.More, Label: "Playlist actions"},
+	{Icon: look.Icon.Download, Label: "Export to file"},
+}
+var playlistMoreEditableItems = []kit.MenuItem{
+	{Icon: look.Icon.More, Label: "Playlist actions"},
+	{Icon: look.Icon.Download, Label: "Export to file"},
+	{Icon: look.Icon.Settings, Label: "Edit playlist"},
+}
+
 var sortValues = []model.PlaylistSort{model.PlaylistSortDefault, model.PlaylistSortNewest, model.PlaylistSortOldest, model.PlaylistSortTitle, model.PlaylistSortArtist, model.PlaylistSortAlbum}
 
 // Page is a retained playlist detail surface.
 type Page struct {
 	route      env.Route
 	hero       widgets.Hero
-	list       widgets.TrackList
-	filter     lithic.Search
-	sortPicker lithic.Picker
+	scroll     look.Scroller
+	table      widgets.TrackTable
+	sortChoice look.Choice
 
-	play      lithic.Button
-	shuffle   lithic.Button
-	addQueue  lithic.Button
-	download  lithic.Button
-	edit      lithic.Button
-	more      lithic.Button
-	retry     lithic.Button
-	moreRetry lithic.Button
+	play      kit.Plaque
+	shuffle   kit.IconPlaque
+	save      kit.IconPlaque
+	download  kit.IconPlaque
+	more      kit.IconPlaque
+	retry     kit.Plaque
+	moreRetry kit.Plaque
 
-	morePopover  lithic.Popover
-	moreMenu     lithic.Menu
+	moreMenu     kit.Menu
+	moreTag      int
+	itemMenu     widgets.ItemMenu
 	editDialog   widgets.EditPlaylistDialog
 	exportDialog exportDialog
 
@@ -52,17 +67,19 @@ type Page struct {
 	request     uint64
 	seenTokens  map[string]struct{}
 	libraryRev  uint64
+	meta        []kit.Span
+	trackIDs    map[string]struct{}
 }
 
 // New constructs a playlist detail page for r.ID.
 func New(r env.Route) env.Page {
-	return &Page{route: r, seenTokens: make(map[string]struct{})}
+	return &Page{route: r, seenTokens: make(map[string]struct{}), trackIDs: make(map[string]struct{})}
 }
 
 // Title returns the loaded playlist title.
 func (p *Page) Title() string {
-	if p.page.Title != nil && *p.page.Title != "" {
-		return *p.page.Title
+	if title := value(p.page.Title); title != "" {
+		return title
 	}
 	if p.route.Title != "" {
 		return p.route.Title
@@ -94,90 +111,118 @@ func (p *Page) Refresh(e *env.Env) {
 			return
 		}
 		p.page = page
+		p.refreshDerived()
 	})
 }
 
-// Layout renders playlist metadata, controls, sorting, filtering, and tracks.
+// Layout renders one virtualised scroller containing the hero and table.
 func (p *Page) Layout(gtx layout.Context, e *env.Env) layout.Dimensions {
-	state := e.Store.Snapshot()
+	stateSnapshot := e.Store.Snapshot()
 	if !p.loaded {
 		p.Refresh(e)
-	} else if p.libraryRev != state.LibraryRevision {
-		if state.ChangedLibraryID == "" || state.ChangedLibraryID == p.route.ID {
+	} else if p.libraryRev != stateSnapshot.LibraryRevision {
+		if stateSnapshot.ChangedLibraryID == "" || stateSnapshot.ChangedLibraryID == p.route.ID {
 			if !p.loading {
 				p.Refresh(e)
 			}
 		} else {
-			p.libraryRev = state.LibraryRevision
+			p.libraryRev = stateSnapshot.LibraryRevision
 		}
 	}
 	p.handleActions(gtx, e)
-	if selected, ok := p.sortPicker.Changed(gtx); ok && !p.sortPending && selected >= 0 && selected < len(sortValues) {
+	if selected, ok := p.sortChoice.Changed(); ok && !p.sortPending && selected >= 0 && selected < len(sortValues) {
 		p.setSort(e, sortValues[selected])
 	}
-
 	if p.loading && p.page.Title == nil {
-		return widgets.Loading(e)(gtx)
+		return widgets.Loading(e, widgets.LoadingHero)(gtx)
 	}
 	if p.errText != "" && p.page.Title == nil {
 		return widgets.Failed(e, p.errText, &p.retry)(gtx)
 	}
-	items, indices := p.filtered()
-	dims := layout.Flex{Axis: layout.Vertical}.Layout(gtx,
-		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			return p.hero.Layout(gtx, e, widgets.HeroContent{
-				Art:     value(p.page.Thumbnail),
-				Collage: strings.HasPrefix(value(p.page.Thumbnail), model.CollageThumbnailPrefix),
-				Kicker:  playlistKicker(p.route.ID),
-				Name:    p.Title(),
-				Proof:   value(p.page.Subtitle),
-				Facts:   playlistFacts(p.page.Items),
-				Tone:    lithic.Idle,
-				Acts:    p.layoutActs(e),
-			})
-		}),
-		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			return layout.Inset{Left: 34, Right: 34, Top: 21, Bottom: 13}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-				return layout.Flex{Axis: layout.Horizontal, Alignment: layout.End}.Layout(gtx,
-					layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-						return p.filter.Layout(gtx, e.Th, "Filter", "/")
-					}),
-					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-						if p.page.SortMenu == nil || !p.page.SortMenu.Editable || isDevice(p.route.ID) {
-							return layout.Dimensions{}
-						}
-						return layout.Inset{Left: 13}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-							if p.sortPending {
-								gtx = gtx.Disabled()
-							}
-							return p.sortPicker.Layout(gtx, e.Th, "Sort", sortLabels, sortIndex(p.selectedSort()))
-						})
-					}),
-				)
-			})
-		}),
-		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-			return layout.Inset{Left: 34, Right: 34, Bottom: 34}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-				if len(items) == 0 && strings.TrimSpace(p.filter.Text()) != "" {
-					return widgets.EmptyState(e, "search_off", "No tracks match “"+strings.TrimSpace(p.filter.Text())+"”.", "Clear the filter to see the whole playlist.")(gtx)
-				}
-				return p.list.Layout(gtx, e, items, widgets.TrackListOpts{
-					ShowArt:   true,
-					ShowAlbum: true,
-					Context:   p.route.ID,
-					Footer:    p.layoutFooter(e),
-					OnEnd:     func() { p.loadMore(e) },
-					OnPlay: func(i int) {
-						if i >= 0 && i < len(indices) {
-							act.PlayCollection(e, p.page.Items, indices[i], p.route.ID, p.Title(), false, p.page.Continuation)
-						}
-					},
-				})
-			})
-		}),
-	)
+
+	items := p.page.Items
+	sortInHero := gtx.Constraints.Max.X >= gtx.Dp(800) || len(items) == 0
+	if len(items) == 0 {
+		dims := p.scroll.Layout(gtx, e.Th, 2, func(gtx layout.Context, index int) layout.Dimensions {
+			if index == 0 {
+				return p.layoutHero(gtx, e, sortInHero)
+			}
+			return p.inset(e, 0, 34, widgets.EmptyState(e, look.Icon.Playlist, "No tracks in this playlist", "Add a song and it will appear here."))(gtx)
+		})
+		p.editDialog.Layout(gtx, e)
+		p.exportDialog.Layout(gtx, e, p)
+		return dims
+	}
+
+	opts := widgets.TrackTableOpts{
+		Columns:      widgets.ColArt | widgets.ColAlbum,
+		Context:      p.route.ID,
+		SourceID:     p.route.ID,
+		SourceName:   p.Title(),
+		SourceItems:  p.page.Items,
+		DisplayItems: items,
+		Continuation: p.page.Continuation,
+	}
+	count := len(items) + 3
+	dims := p.scroll.Layout(gtx, e.Th, count, func(gtx layout.Context, index int) layout.Dimensions {
+		switch {
+		case index == 0:
+			return p.layoutHero(gtx, e, sortInHero)
+		case index == 1:
+			return p.inset(e, 0, 0, func(gtx layout.Context) layout.Dimensions {
+				return p.layoutTableHeader(gtx, e, opts, sortInHero)
+			})(gtx)
+		case index < len(items)+2:
+			row := index - 2
+			return p.inset(e, 0, 0, func(gtx layout.Context) layout.Dimensions { return p.table.Row(gtx, e, items, row, opts) })(gtx)
+		default:
+			return p.inset(e, 13, 34, p.layoutFooter(e))(gtx)
+		}
+	})
 	p.editDialog.Layout(gtx, e)
 	p.exportDialog.Layout(gtx, e, p)
+	return dims
+}
+
+func (p *Page) inset(e *env.Env, top, bottom unit.Dp, body layout.Widget) layout.Widget {
+	return func(gtx layout.Context) layout.Dimensions {
+		inset := look.ContentInset(e.Th.Class)
+		return layout.Inset{Left: inset, Right: inset, Top: top, Bottom: bottom}.Layout(gtx, body)
+	}
+}
+
+func (p *Page) layoutHero(gtx layout.Context, e *env.Env, sortInHero bool) layout.Dimensions {
+	return p.hero.Layout(gtx, e, widgets.HeroContent{
+		Art:     value(p.page.Thumbnail),
+		Collage: strings.HasPrefix(value(p.page.Thumbnail), model.CollageThumbnailPrefix),
+		Kind:    playlistKind(p.route.ID),
+		Title:   p.Title(),
+		Meta:    p.meta,
+		Acts:    p.layoutActs(e, sortInHero),
+	})
+}
+
+func (p *Page) sortAvailable() bool {
+	return p.page.SortMenu != nil && p.page.SortMenu.Editable && !isDevice(p.route.ID)
+}
+func (p *Page) layoutTableHeader(gtx layout.Context, e *env.Env, opts widgets.TrackTableOpts, sortInHero bool) layout.Dimensions {
+	if sortInHero || !p.sortAvailable() {
+		return p.table.Header(gtx, e, opts)
+	}
+	headerGTX := gtx
+	headerGTX.Constraints.Min.Y = max(headerGTX.Constraints.Min.Y, gtx.Dp(40))
+	dims := p.table.Header(headerGTX, e, opts)
+	width := min(gtx.Dp(128), dims.Size.X)
+	choiceGTX := gtx
+	choiceGTX.Constraints.Min = image.Pt(width, 0)
+	choiceGTX.Constraints.Max = image.Pt(width, dims.Size.Y)
+	x := max(0, dims.Size.X-gtx.Dp(125)-width)
+	offset := op.Offset(image.Pt(x, 0)).Push(gtx.Ops)
+	if p.sortPending {
+		choiceGTX = choiceGTX.Disabled()
+	}
+	p.sortChoice.Layout(choiceGTX, e.Th, e.Overlays, sortLabels, sortIndex(p.selectedSort()))
+	offset.Pop()
 	return dims
 }
 
@@ -189,131 +234,174 @@ func (p *Page) handleActions(gtx layout.Context, e *env.Env) {
 		p.loadMore(e)
 	}
 	if p.play.Clicked(gtx) && len(p.page.Items) > 0 {
-		act.PlayCollection(e, p.page.Items, 0, p.route.ID, p.Title(), false, p.page.Continuation)
+		if p.collectionPlaying(e) {
+			act.Call[protocol.Null](e, protocol.MethodTogglePause, protocol.Null{}, func(_ protocol.Null, err error) {
+				if err != nil {
+					e.Toast(err.Error(), env.ToastError)
+				}
+			})
+		} else {
+			act.PlayCollection(e, p.page.Items, 0, p.route.ID, p.Title(), false, p.page.Continuation)
+		}
 	}
 	if p.shuffle.Clicked(gtx) && len(p.page.Items) > 0 {
 		act.PlayCollection(e, p.page.Items, 0, p.route.ID, p.Title(), true, p.page.Continuation)
 	}
-	if p.addQueue.Clicked(gtx) {
-		act.AddToQueue(e, p.page.Items, p.Title())
+	if p.save.Clicked(gtx) {
+		p.setSaved(e, !p.saved(e))
 	}
 	if p.download.Clicked(gtx) {
 		p.confirmDownload(e)
 	}
-	if p.edit.Clicked(gtx) {
-		p.editDialog.Page = &p.page
-		p.editDialog.Open = true
-	}
-	if p.more.Clicked(gtx) {
-		p.morePopover.Open = !p.morePopover.Open
+	if p.more.Clicked(gtx) && e.Overlays != nil {
+		anchor := e.Overlays.AnchorOf(&p.more.Clickable, image.Pt(gtx.Dp(40), gtx.Dp(40)))
+		e.Overlays.Open(&p.moreTag, anchor, look.Placement{Prefer: look.Below, Align: look.End}, p.layoutMore(e))
 	}
 }
 
-func (p *Page) layoutActs(e *env.Env) layout.Widget {
+func (p *Page) collectionPlaying(e *env.Env) bool {
+	stateSnapshot := e.Store.Snapshot()
+	return !stateSnapshot.Playback.Paused && stateSnapshot.Playback.Now != nil && stateSnapshot.Queue.SourceName != nil && *stateSnapshot.Queue.SourceName == p.Title()
+}
+
+func (p *Page) saved(e *env.Env) bool {
+	for _, item := range e.Store.Snapshot().Personal.Saved {
+		if item.ID == p.route.ID && strings.EqualFold(item.Kind, "playlist") {
+			return true
+		}
+	}
+	return false
+}
+
+func (p *Page) setSaved(e *env.Env, save bool) {
+	card := model.BrowseItem{Kind: "playlist", ID: p.route.ID, Title: p.Title(), Thumbnail: p.page.Thumbnail, Subtitle: p.page.Subtitle}
+	changed := e.Store.UpdatePersonal(func(personal *state.Personal) bool {
+		for index, item := range personal.Saved {
+			if item.ID != card.ID || !strings.EqualFold(item.Kind, card.Kind) {
+				continue
+			}
+			if save {
+				return false
+			}
+			personal.Saved = append(personal.Saved[:index], personal.Saved[index+1:]...)
+			return true
+		}
+		if !save {
+			return false
+		}
+		personal.Saved = append(personal.Saved, card)
+		return true
+	})
+	if !changed {
+		return
+	}
+	if save {
+		e.Toast("Saved to library", env.ToastSuccess)
+	} else {
+		e.Toast("Removed from library", env.ToastSuccess)
+	}
+}
+
+func (p *Page) layoutActs(e *env.Env, sortInHero bool) layout.Widget {
 	return func(gtx layout.Context) layout.Dimensions {
-		editable := playlistEditable(p.route.ID, p.page.Owned)
-		return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
-			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-				return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
-					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-						if len(p.page.Items) == 0 {
-							gtx = gtx.Disabled()
-						}
-						return p.play.Layout(gtx, e.Th, lithic.Gold, lithic.Icon("play_arrow"), "Play")
-					}),
-					layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
-					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-						return p.shuffle.Layout(gtx, e.Th, lithic.Line, lithic.Icon("shuffle"), "Shuffle")
-					}),
-					layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
-					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-						return p.addQueue.Layout(gtx, e.Th, lithic.Line, lithic.Icon("queue_music"), "Add to queue")
-					}),
-					layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
-					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-						return p.download.Layout(gtx, e.Th, lithic.Line, lithic.Icon("download"), "Download")
-					}),
-				)
-			}),
-			layout.Rigid(layout.Spacer{Height: unit.Dp(8)}.Layout),
-			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-				return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
-					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-						if !editable {
-							return layout.Dimensions{}
-						}
-						return p.edit.Layout(gtx, e.Th, lithic.Quiet, lithic.Icon("edit"), "Edit")
-					}),
-					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-						if !editable {
-							return layout.Dimensions{}
-						}
-						return layout.Spacer{Width: unit.Dp(8)}.Layout(gtx)
-					}),
-					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-						return p.layoutMore(gtx, e, editable)
-					}),
-				)
-			}),
+		playing := p.collectionPlaying(e)
+		p.play.Kind, p.play.Icon, p.play.Label = kit.PlaqueGold, look.Icon.Play, "Play"
+		if playing {
+			p.play.Icon, p.play.Label = look.Icon.Pause, "Pause"
+		}
+		p.shuffle.Kind, p.shuffle.Icon, p.shuffle.Description = kit.PlaqueQuiet, look.Icon.Shuffle, "Shuffle playlist"
+		p.save.Kind, p.save.Icon, p.save.Description = kit.PlaqueQuiet, look.Icon.HeartOutline, "Save playlist"
+		if p.saved(e) {
+			p.save.Icon, p.save.Description = look.Icon.Heart, "Remove playlist from library"
+		}
+		p.download.Kind, p.download.Icon, p.download.Description = kit.PlaqueQuiet, look.Icon.Download, "Download playlist"
+		active, progress, current, complete := playlistDownload(e, p.Title(), p.trackIDs, len(p.page.Items))
+		if active {
+			p.download.Notch = e.Th.R.Lapis
+		} else {
+			p.download.Notch = color.NRGBA{}
+		}
+		if active {
+			p.download.Description = fmt.Sprintf("Downloading %d of %d", current, len(p.page.Items))
+		} else if complete {
+			p.download.Icon, p.download.Description = look.Icon.DownloadDone, "Saved"
+		}
+		p.more.Kind, p.more.Icon, p.more.Description = kit.PlaqueQuiet, look.Icon.More, "More playlist actions"
+		play := layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			if len(p.page.Items) == 0 {
+				gtx = gtx.Disabled()
+			}
+			return p.play.Layout(gtx, e.Th.Theme)
+		})
+		gap := layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout)
+		shuffle := layout.Rigid(func(gtx layout.Context) layout.Dimensions { return p.shuffle.Layout(gtx, e.Th.Theme) })
+		save := layout.Rigid(func(gtx layout.Context) layout.Dimensions { return p.save.Layout(gtx, e.Th.Theme) })
+		download := layout.Rigid(func(gtx layout.Context) layout.Dimensions { return p.layoutDownload(gtx, e, active, progress) })
+		more := layout.Rigid(func(gtx layout.Context) layout.Dimensions { return p.more.Layout(gtx, e.Th.Theme) })
+		if p.sortAvailable() && sortInHero {
+			choice := layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				if p.sortPending {
+					gtx = gtx.Disabled()
+				}
+				gtx.Constraints.Max.X = min(gtx.Constraints.Max.X, gtx.Dp(128))
+				return p.sortChoice.Layout(gtx, e.Th, e.Overlays, sortLabels, sortIndex(p.selectedSort()))
+			})
+			return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
+				play, gap, shuffle, gap, save, gap, download, gap, more, gap, choice,
+			)
+		}
+		return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
+			play, gap, shuffle, gap, save, gap, download, gap, more,
 		)
 	}
 }
 
-func (p *Page) layoutMore(gtx layout.Context, e *env.Env, editable bool) layout.Dimensions {
-	return p.morePopover.Layout(gtx,
-		func(gtx layout.Context) layout.Dimensions {
-			return p.more.Layout(gtx, e.Th, lithic.Quiet, lithic.Icon("more_horiz"), "More")
-		},
-		func(gtx layout.Context) layout.Dimensions {
-			items := []lithic.MenuItem{
-				{Icon: lithic.Icon("more_horiz"), Label: "Other playlist actions"},
-				{Icon: lithic.Icon("download_for_offline"), Label: "Export to file"},
-			}
-			if editable {
-				items = append(items, lithic.MenuItem{Icon: lithic.Icon("delete"), Label: "Delete playlist", Danger: true})
-			}
-			dims := p.moreMenu.Layout(gtx, e.Th, items)
-			if index, ok := p.moreMenu.Clicked(gtx); ok {
-				p.morePopover.Open = false
-				switch index {
-				case 0:
-					if e.Menu != nil {
-						e.Menu(env.MenuTarget{Playlist: &p.page, Context: p.route.ID})
-					}
-				case 1:
-					p.exportDialog.Open(p.Title())
-				case 2:
-					if editable {
-						p.confirmDelete(e)
-					}
+func (p *Page) layoutDownload(gtx layout.Context, e *env.Env, active bool, progress int) layout.Dimensions {
+	dims := p.download.Layout(gtx, e.Th.Theme)
+	if !active {
+		return dims
+	}
+	height := max(1, gtx.Dp(2))
+	cut := gtx.Dp(e.Th.Cut.Small)
+	width := max(1, dims.Size.X-cut*2)
+	progressGTX := gtx
+	progressGTX.Constraints = layout.Exact(image.Pt(width, height))
+	offset := op.Offset(image.Pt(cut, dims.Size.Y-height)).Push(gtx.Ops)
+	kit.BladeProgress{Fraction: float64(progress) / 100}.Layout(progressGTX, e.Th.Theme)
+	offset.Pop()
+	return dims
+}
+
+func (p *Page) layoutMore(e *env.Env) layout.Widget {
+	return func(gtx layout.Context) layout.Dimensions {
+		editable := playlistEditable(p.route.ID, p.page.Owned)
+		items := playlistMoreItems
+		if editable {
+			items = playlistMoreEditableItems
+		}
+		dims := p.moreMenu.Layout(gtx, e.Th.Theme, items)
+		if index, ok := p.moreMenu.Clicked(gtx); ok {
+			e.Overlays.Close(&p.moreTag)
+			switch index {
+			case 0:
+				target := env.MenuTarget{Playlist: &p.page, Context: p.route.ID}
+				p.itemMenu.OpenAt(e, target, e.Overlays.Press())
+			case 1:
+				p.exportDialog.Open(p.Title())
+			case 2:
+				if editable {
+					p.editDialog.Page, p.editDialog.Open = &p.page, true
 				}
 			}
-			return dims
-		},
-	)
-}
-
-func (p *Page) confirmDelete(e *env.Env) {
-	body := "This removes it from your account. It can't be undone."
-	if isDevice(p.route.ID) {
-		body = "This removes it from this device. It can't be undone."
+			gtx.Execute(op.InvalidateCmd{})
+		}
+		return dims
 	}
-	typeToConfirm := p.Title()
-	e.Confirm("Delete this playlist?", body, "Delete", typeToConfirm, func() {
-		act.Call[protocol.Null](e, protocol.MethodDeletePlaylist, protocol.PlaylistIDParams{PlaylistID: p.route.ID}, func(_ protocol.Null, err error) {
-			if err != nil {
-				e.Toast(err.Error(), env.ToastError)
-				return
-			}
-			e.Toast(p.Title()+" deleted", env.ToastSuccess)
-			e.Nav.Back()
-		})
-	})
 }
 
-func (p *Page) setSort(e *env.Env, sortValue model.PlaylistSort) {
+func (p *Page) setSort(e *env.Env, value model.PlaylistSort) {
 	p.sortPending = true
-	act.Call[protocol.Null](e, protocol.MethodSetPlaylistSort, protocol.SetPlaylistSortParams{PlaylistID: p.route.ID, Sort: sortValue}, func(_ protocol.Null, err error) {
+	act.Call[protocol.Null](e, protocol.MethodSetPlaylistSort, protocol.SetPlaylistSortParams{PlaylistID: p.route.ID, Sort: value}, func(_ protocol.Null, err error) {
 		p.sortPending = false
 		if err != nil {
 			e.Toast(err.Error(), env.ToastError)
@@ -322,7 +410,7 @@ func (p *Page) setSort(e *env.Env, sortValue model.PlaylistSort) {
 		if p.page.SortMenu == nil {
 			p.page.SortMenu = &model.PlaylistSortMenu{Editable: true}
 		}
-		p.page.SortMenu.Selected = &sortValue
+		p.page.SortMenu.Selected = &value
 		p.Refresh(e)
 	})
 }
@@ -335,9 +423,9 @@ func (p *Page) selectedSort() model.PlaylistSort {
 }
 
 func sortIndex(value model.PlaylistSort) int {
-	for i, candidate := range sortValues {
+	for index, candidate := range sortValues {
 		if candidate == value {
-			return i
+			return index
 		}
 	}
 	return 0
@@ -365,50 +453,82 @@ func (p *Page) loadMore(e *env.Env) {
 		}
 		p.page.Items = append(p.page.Items, more.Items...)
 		p.page.Continuation = more.Continuation
+		p.refreshDerived()
 	})
 }
 
 func (p *Page) layoutFooter(e *env.Env) layout.Widget {
 	return func(gtx layout.Context) layout.Dimensions {
 		if p.loadingMore {
-			return layout.Inset{Top: 13, Bottom: 13}.Layout(gtx, lithic.Text(e.Th, e.Th.T.Body, e.Th.R.Fg2, "Loading more…"))
+			return kit.Text(e.Th.Theme, e.Th.T.Body, e.Th.R.Fg2, "Loading more…")(gtx)
 		}
 		if p.moreError != "" {
-			return layout.Inset{Top: 13, Bottom: 13}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-				return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
-					layout.Flexed(1, lithic.Text(e.Th, e.Th.T.Body, e.Th.R.Jasper, p.moreError)),
-					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-						return p.moreRetry.Layout(gtx, e.Th, lithic.Quiet, nil, "Try again")
-					}),
-				)
-			})
+			p.moreRetry.Kind, p.moreRetry.Label = kit.PlaqueQuiet, "Try again"
+			return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
+				layout.Flexed(1, kit.Text(e.Th.Theme, e.Th.T.Body, e.Th.R.Jasper, p.moreError)),
+				layout.Rigid(func(gtx layout.Context) layout.Dimensions { return p.moreRetry.Layout(gtx, e.Th.Theme) }),
+			)
+		}
+		if p.page.Continuation != nil && *p.page.Continuation != "" {
+			p.loadMore(e)
+			return kit.Text(e.Th.Theme, e.Th.T.Body, e.Th.R.Fg2, "Loading more…")(gtx)
 		}
 		return layout.Dimensions{}
 	}
 }
 
-func (p *Page) filtered() ([]model.Track, []int) {
-	query := strings.ToLower(strings.TrimSpace(p.filter.Text()))
-	if query == "" {
-		indices := make([]int, len(p.page.Items))
-		for i := range indices {
-			indices[i] = i
-		}
-		return p.page.Items, indices
+func (p *Page) refreshDerived() {
+	p.meta = playlistMeta(p.page)
+	clear(p.trackIDs)
+	for _, track := range p.page.Items {
+		p.trackIDs[track.VideoID] = struct{}{}
 	}
-	items := make([]model.Track, 0, len(p.page.Items))
-	indices := make([]int, 0, len(p.page.Items))
-	for i, track := range p.page.Items {
-		if strings.Contains(strings.ToLower(track.Title), query) || strings.Contains(strings.ToLower(track.Artists), query) || strings.Contains(strings.ToLower(value(track.Album)), query) {
-			items = append(items, track)
-			indices = append(indices, i)
-		}
-	}
-	return items, indices
 }
 
-func playlistKicker(id string) string {
-	if id == "VLLM" || id == "spotify:playlist:liked" || id == "liked" {
+func playlistMeta(page model.PlaylistPage) []kit.Span {
+	meta := make([]kit.Span, 0, 7)
+	appendMeta := func(text string, mono bool) {
+		if strings.TrimSpace(text) == "" {
+			return
+		}
+		if len(meta) > 0 {
+			meta = append(meta, kit.Span{Text: " · "})
+		}
+		meta = append(meta, kit.Span{Text: text, Mono: mono})
+	}
+	appendMeta(playlistByline(value(page.Subtitle)), false)
+	appendMeta(trackCount(len(page.Items)), true)
+	appendMeta(collectionDuration(totalDuration(page.Items)), true)
+	return meta
+}
+func playlistByline(subtitle string) string {
+	parts := strings.Split(subtitle, "·")
+	kept := parts[:0]
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part != "" && !playlistFact(part) {
+			kept = append(kept, part)
+		}
+	}
+	return strings.Join(kept, " · ")
+}
+
+func playlistFact(part string) bool {
+	lower := strings.ToLower(part)
+	hasDigit := strings.IndexFunc(lower, func(r rune) bool { return r >= '0' && r <= '9' }) >= 0
+	if !hasDigit {
+		return false
+	}
+	return strings.Contains(lower, "song") ||
+		strings.Contains(lower, "track") ||
+		strings.Contains(lower, " min") ||
+		strings.Contains(lower, "minute") ||
+		strings.Contains(lower, " hr") ||
+		strings.Contains(lower, "hour")
+}
+
+func playlistKind(id string) string {
+	if id == "VLLM" || id == "spotify:playlist:liked" || id == "liked" || id == model.LocalLikedPlaylistID {
 		return "Your library"
 	}
 	switch id {
@@ -416,9 +536,6 @@ func playlistKicker(id string) string {
 		return "Smart playlist"
 	}
 	if isDevice(id) {
-		if id == model.LocalLikedPlaylistID {
-			return "Your library"
-		}
 		return "Local playlist"
 	}
 	return "Playlist"
@@ -434,12 +551,20 @@ func playlistEditable(id string, owned bool) bool {
 	}
 }
 
-func playlistFacts(items []model.Track) []string {
-	facts := []string{fmt.Sprintf("%d tracks", len(items))}
-	if seconds := totalDuration(items); seconds > 0 {
-		facts = append(facts, widgets.Duration(float64(seconds)))
+func collectionDuration(seconds int) string {
+	if seconds <= 0 {
+		return ""
 	}
-	return facts
+	minutes := (seconds + 30) / 60
+	if minutes < 60 {
+		return fmt.Sprintf("%d min", minutes)
+	}
+	hours := minutes / 60
+	minutes %= 60
+	if minutes == 0 {
+		return fmt.Sprintf("%d hr", hours)
+	}
+	return fmt.Sprintf("%d hr %d min", hours, minutes)
 }
 
 func totalDuration(items []model.Track) int {
@@ -465,11 +590,45 @@ func totalDuration(items []model.Track) int {
 	return total
 }
 
+func playlistDownload(e *env.Env, title string, ids map[string]struct{}, itemCount int) (active bool, progress, current int, complete bool) {
+	matched, completed, totalProgress := 0, 0, 0
+	for _, job := range e.Store.Snapshot().Downloads.Jobs {
+		_, trackMatch := ids[job.VideoID]
+		collectionMatch := job.Collection != nil && *job.Collection == title
+		if !trackMatch && !collectionMatch {
+			continue
+		}
+		switch job.Status {
+		case model.DownloadStatusQueued:
+			active = true
+			matched++
+		case model.DownloadStatusDownloading:
+			active = true
+			matched++
+			current++
+			totalProgress += min(max(job.Progress, 0), 100)
+		case model.DownloadStatusCompleted:
+			matched++
+			completed++
+			current++
+			totalProgress += 100
+		}
+	}
+	if itemCount > 0 {
+		progress = totalProgress / itemCount
+		current = min(current, itemCount)
+	} else if matched > 0 {
+		progress = totalProgress / matched
+	}
+	complete = itemCount > 0 && completed >= itemCount
+	return active, progress, current, complete
+}
+
 func isDevice(id string) bool { return strings.HasPrefix(id, model.LocalPlaylistPrefix) }
 
 func value(v *string) string {
 	if v == nil {
 		return ""
 	}
-	return *v
+	return strings.TrimSpace(*v)
 }

@@ -5,7 +5,7 @@ import (
 
 	"gioui.org/layout"
 
-	"github.com/ryoku-dev/ryotunes/internal/client/lithic"
+	"github.com/ryoku-dev/ryoku/docs/lithic/library/go/kit"
 	"github.com/ryoku-dev/ryotunes/internal/client/ui/act"
 	"github.com/ryoku-dev/ryotunes/internal/client/ui/env"
 	"github.com/ryoku-dev/ryotunes/internal/model"
@@ -19,10 +19,11 @@ var (
 
 func (p *page) layoutDownloads(gtx layout.Context, e *env.Env) layout.Dimensions {
 	p.download.path.sync(p.downloads.Path)
-	p.download.path.field.Mono = true
 	return settingRows(gtx,
 		settingRow(e.Th, "Destination", "An absolute path, or ~/ for your home folder. Missing folders are created when needed.", func(gtx layout.Context) layout.Dimensions {
-			return p.download.path.field.Layout(gtx, e.Th, "", "/home/you/Music", "", "")
+			p.download.path.field.Mono = true
+			p.download.path.field.Placeholder = "/home/you/Music"
+			return p.download.path.field.Layout(gtx, e.Th.Theme)
 		}),
 		settingRow(e.Th, "Format", "Keep the original stream, or transcode it to MP3, Opus or FLAC.", func(gtx layout.Context) layout.Dimensions {
 			selected := 0
@@ -32,42 +33,39 @@ func (p *page) layoutDownloads(gtx layout.Context, e *env.Env) layout.Dimensions
 					break
 				}
 			}
-			dims := p.download.format.Layout(gtx, e.Th, "", downloadFormatLabels, selected)
-			if changed, ok := p.download.format.Changed(gtx); ok {
+			dims := p.download.format.Layout(gtx, e.Th, e.Overlays, downloadFormatLabels, selected)
+			if changed, ok := p.download.format.Changed(); ok {
 				p.downloads.Format = downloadFormatValues[changed]
 			}
 			return dims
 		}),
 		settingRow(e.Th, "Artist subfolders", "Put each artist's downloads in a separate folder.", func(gtx layout.Context) layout.Dimensions {
 			p.download.artistFolders.Value = p.downloads.OrganizeByArtist
-			before := p.download.artistFolders.Value
-			dims := p.download.artistFolders.Layout(gtx, e.Th, "")
-			if p.download.artistFolders.Value != before {
+			dims := p.download.artistFolders.Layout(gtx, e.Th.Theme)
+			if p.download.artistFolders.Changed() {
 				p.downloads.OrganizeByArtist = p.download.artistFolders.Value
 			}
 			return dims
 		}),
 		settingRow(e.Th, "Embed metadata", "Write track metadata, cover art and lyrics into the completed download.", func(gtx layout.Context) layout.Dimensions {
 			p.download.embedMetadata.Value = p.downloads.EmbedMetadata
-			before := p.download.embedMetadata.Value
-			dims := p.download.embedMetadata.Layout(gtx, e.Th, "")
-			if p.download.embedMetadata.Value != before {
+			dims := p.download.embedMetadata.Layout(gtx, e.Th.Theme)
+			if p.download.embedMetadata.Changed() {
 				p.downloads.EmbedMetadata = p.download.embedMetadata.Value
 			}
 			return dims
 		}),
 		settingRow(e.Th, "Simultaneous downloads", "Run one to four downloads at the same time.", func(gtx layout.Context) layout.Dimensions {
 			p.download.workers.Value = max(1, p.downloads.Workers)
-			p.download.workers.Min = 1
-			p.download.workers.Max = 4
-			p.download.workers.Step = 1
-			dims := p.download.workers.Layout(gtx, e.Th, "")
+			p.download.workers.Min, p.download.workers.Max, p.download.workers.Step = 1, 4, 1
+			dims := p.download.workers.Layout(gtx, e.Th.Theme)
 			if p.download.workers.Changed() {
 				p.downloads.Workers = p.download.workers.Value
 			}
 			return dims
 		}),
-		settingRow(e.Th, "Save download settings", "Changes apply to downloads queued after they are saved.", func(gtx layout.Context) layout.Dimensions {
+		settingRow(e.Th, "Download settings", "Changes apply to downloads queued after they are saved.", func(gtx layout.Context) layout.Dimensions {
+			p.download.save.Kind, p.download.save.Label = kit.PlaqueLine, "Save"
 			if p.download.save.Clicked(gtx) {
 				settings := p.downloads
 				settings.Path = strings.TrimSpace(p.download.path.field.Text())
@@ -81,7 +79,7 @@ func (p *page) layoutDownloads(gtx layout.Context, e *env.Env) layout.Dimensions
 					e.Toast("Download settings saved", env.ToastSuccess)
 				})
 			}
-			return p.download.save.Layout(gtx, e.Th, lithic.Gold, nil, "Save")
+			return p.download.save.Layout(gtx, e.Th.Theme)
 		}),
 	)
 }

@@ -24,7 +24,6 @@ func (p *page) fetchHome(e *env.Env) {
 	if provider == model.ProviderTidal && !snapshot.Tidal.SignedIn {
 		p.loading = false
 		p.loaded = true
-		p.loadedProvider = provider
 		p.feed = model.Feed{}
 		return
 	}
@@ -33,7 +32,6 @@ func (p *page) fetchHome(e *env.Env) {
 			return
 		}
 		p.loading = false
-		p.loadedProvider = provider
 		if err != nil {
 			p.errorText = err.Error()
 			return

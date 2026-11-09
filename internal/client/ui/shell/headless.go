@@ -17,6 +17,7 @@ import (
 
 	"github.com/ryoku-dev/ryotunes/internal/client/ui/act"
 	"github.com/ryoku-dev/ryotunes/internal/client/ui/env"
+	"github.com/ryoku-dev/ryotunes/internal/client/ui/look"
 )
 
 func (r *clientRuntime) renderPNG(options Options) error {
@@ -27,18 +28,18 @@ func (r *clientRuntime) renderPNG(options Options) error {
 	defer window.Release()
 
 	preferences := r.store.Snapshot().Client
-	initial := parseRoute(preferences.Route)
-	if options.Route != "" {
-		initial = parseRoute(options.Route)
-	}
+	initial := initialRoute(preferences.Route, options)
 	panel := env.PanelNone
-	if options.Width >= compactWidth && preferences.PanelOpen {
+	if look.ClassFor(float32(options.Width)) != look.Compact && preferences.PanelOpen {
 		panel = parsePanel(preferences.PanelTab)
 	}
 	if options.Panel != "" {
 		panel = parsePanel(options.Panel)
 	}
-	shell := newShell(r, nil, initial, panel, options.Mini)
+	shell := newShell(r, initial, panel, options.Mini, options.Width, options.Height)
+	if panelOpensNowPlaying(options.Panel) {
+		shell.nav.nowPlaying = true
+	}
 
 	var dirty atomic.Bool
 	dirty.Store(true)
@@ -86,7 +87,9 @@ func (r *clientRuntime) renderPNG(options Options) error {
 		act.PendingClipboard(gtx)
 		paint.Fill(gtx.Ops, theme.R.Ground)
 		if options.Mini {
+			shell.reconcileProvider(gtx, e)
 			shell.mini.Layout(gtx, e)
+			shell.layoutOverlays(gtx, e)
 		} else {
 			shell.layout(gtx, e, windowWidthDP)
 			shell.layoutOverlays(gtx, e)

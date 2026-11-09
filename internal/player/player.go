@@ -44,6 +44,7 @@ type Player struct {
 	cadence  atomic.Int64
 	asyncID  atomic.Uint64
 	fxState  atomic.Pointer[model.AudioFx]
+	engine   atomic.Pointer[string]
 
 	fx       model.AudioFx
 	loudness *float64
@@ -86,6 +87,18 @@ func New(o Options) (*Player, error) {
 		return nil, err
 	}
 	return p, nil
+}
+
+// EngineVersion returns the libmpv version reported by the running engine.
+func (p *Player) EngineVersion() string {
+	if p == nil {
+		return ""
+	}
+	version := p.engine.Load()
+	if version == nil {
+		return ""
+	}
+	return *version
 }
 
 // Load replaces the current playlist with s, starting at startAt seconds in the requested pause state.
@@ -321,6 +334,8 @@ func (p *Player) run(o Options, ready chan<- error) {
 		close(p.closed)
 		return
 	}
+	version := m.GetPropertyString("mpv-version")
+	p.engine.Store(&version)
 	defer func() {
 		m.TerminateDestroy()
 		close(p.events)

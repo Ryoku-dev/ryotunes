@@ -18,17 +18,19 @@ func errorMessage(err error, fallback string) string {
 }
 
 func toastError(e *env.Env, err error, fallback string) {
-	e.Toast(errorMessage(err, fallback), env.ToastError)
+	if e.Toast != nil {
+		e.Toast(errorMessage(err, fallback), env.ToastError)
+	}
 }
 
-func setSetting(e *env.Env, key model.SettingKey, value string, success string, done func()) {
+func setSetting(e *env.Env, key model.SettingKey, value, success string, done func()) {
 	act.Call[protocol.Null](e, protocol.MethodSetSetting, protocol.SetSettingParams{Key: string(key), Value: value}, func(_ protocol.Null, err error) {
 		if err != nil {
 			toastError(e, err, "Could not save setting")
 			return
 		}
 		e.Store.SetSetting(string(key), value)
-		if success != "" {
+		if success != "" && e.Toast != nil {
 			e.Toast(success, env.ToastSuccess)
 		}
 		if done != nil {
@@ -39,7 +41,7 @@ func setSetting(e *env.Env, key model.SettingKey, value string, success string, 
 
 func saveClientPreferences(e *env.Env, preferences state.ClientPreferences) {
 	e.Store.SetClientPreferences(preferences)
-	if err := e.Store.SaveClientPreferences(); err != nil {
+	if err := e.Store.SaveClientPreferences(); err != nil && e.Toast != nil {
 		e.Toast(errorMessage(err, "Could not save client preferences"), env.ToastError)
 	}
 }
@@ -71,7 +73,6 @@ func (p *page) Refresh(e *env.Env) {
 		p.loading = false
 		if err != nil {
 			p.loadError = errorMessage(err, "Could not load settings")
-			e.Toast(p.loadError, env.ToastError)
 			return
 		}
 		e.Store.ReplaceSettings(settings)
@@ -104,7 +105,34 @@ func (p *page) Refresh(e *env.Env) {
 	})
 	act.Call[protocol.Hello](e, protocol.MethodHello, protocol.Null{}, func(hello protocol.Hello, err error) {
 		if generation == p.generation && err == nil {
-			p.daemonVersion = hello.Daemon
+			p.daemonVersion, p.protocol = hello.Daemon, hello.Protocol
 		}
+	})
+	limit := 1
+	act.Call[model.LogsResult](e, protocol.MethodGetLogs, protocol.GetLogsParams{Limit: &limit}, func(result model.LogsResult, err error) {
+		if generation == p.generation && err == nil {
+			p.diagnostics = result
+		}
+	})
+	p.local.busy = false
+	p.loadLocal(e, generation)
+}
+
+func (p *page) loadLocal(e *env.Env, generation uint64) {
+	if p.local.busy {
+		return
+	}
+	p.local.busy = true
+	act.Call[model.LocalLibrary](e, protocol.MethodGetLocalLibrary, protocol.Null{}, func(local model.LocalLibrary, err error) {
+		if generation != p.generation {
+			return
+		}
+		p.local.busy, p.local.loaded = false, true
+		if err != nil {
+			p.local.errorMessage = err.Error()
+			return
+		}
+		p.local.errorMessage = ""
+		p.local.library = local
 	})
 }

@@ -10,7 +10,6 @@ import (
 	"net"
 	"os"
 	"path/filepath"
-	"strings"
 	"sync/atomic"
 	"time"
 
@@ -106,7 +105,7 @@ func noDeadline(ctx context.Context) time.Time {
 func (s *demoServer) result(method string, params json.RawMessage) any {
 	switch method {
 	case protocol.MethodHello:
-		return protocol.Hello{Protocol: protocol.Version, Daemon: "demo", Clients: int(s.subscribed.Load())}
+		return protocol.Hello{Protocol: protocol.Version, Daemon: "2.1.0-demo", Clients: int(s.subscribed.Load())}
 	case protocol.MethodSubscribe:
 		return s.data.snapshot
 	case protocol.MethodGetPlayback:
@@ -126,7 +125,7 @@ func (s *demoServer) result(method string, params json.RawMessage) any {
 	case protocol.MethodGetDownloads:
 		return s.data.snapshot.Downloads
 	case protocol.MethodGetDownloadSettings:
-		return model.DownloadSettings{Path: filepath.Dir(s.data.logs.Path), Format: model.DownloadOpus, Workers: 2, OrganizeByArtist: true, EmbedMetadata: true}
+		return s.data.snapshot.Downloads.Jobs[0].Settings
 	case protocol.MethodGetPersonal:
 		return protocol.PersonalResult{Personal: s.data.snapshot.Personal}
 	case protocol.MethodLTGetState:
@@ -140,18 +139,17 @@ func (s *demoServer) result(method string, params json.RawMessage) any {
 	case protocol.MethodGetHome, protocol.MethodGetHomeMore:
 		return s.data.feed
 	case protocol.MethodSearch:
-		return filterTracks(s.data.tracks, queryFrom(params))
+		return append([]model.Track(nil), s.data.tracks...)
 	case protocol.MethodSearchPage, protocol.MethodSearchPageMore:
-		return model.SearchPage{Items: filterTracks(s.data.tracks, queryFrom(params))}
+		return model.SearchPage{Items: append([]model.Track(nil), s.data.tracks...)}
 	case protocol.MethodSearchAll, protocol.MethodSearchAllMore:
-		cards := filterCards(s.data.cards, queryFrom(params))
-		return searchAll(cards)
+		return searchAll(s.data.cards)
 	case protocol.MethodSearchCards:
-		return filterCards(s.data.cards, queryFrom(params))
+		return append([]model.BrowseItem(nil), s.data.cards...)
 	case protocol.MethodSearchCardsPage, protocol.MethodSearchCardsMore:
-		return model.CardsPage{Items: filterCards(s.data.cards, queryFrom(params))}
+		return model.CardsPage{Items: append([]model.BrowseItem(nil), s.data.cards...)}
 	case protocol.MethodGetLibrary:
-		return cardsOfKind(s.data.cards, "playlist")
+		return append([]model.BrowseItem(nil), s.data.library...)
 	case protocol.MethodGetLibraryAlbums:
 		return cardsOfKind(s.data.cards, "album")
 	case protocol.MethodGetLibraryArtists:
@@ -172,7 +170,11 @@ func (s *demoServer) result(method string, params json.RawMessage) any {
 	case protocol.MethodRadioStations:
 		return append([]model.RadioStation(nil), s.data.radio...)
 	case protocol.MethodGetLocalLibrary:
-		return model.LocalLibrary{Folders: []string{"/home/demo/Music"}, Albums: cardsOfKind(s.data.cards, "album"), Artists: cardsOfKind(s.data.cards, "artist"), Songs: append([]model.Track(nil), s.data.tracks...)}
+		return model.LocalLibrary{
+			Folders: []string{filepath.Join(filepath.Dir(s.data.logs.Path), "Music"), filepath.Join(filepath.Dir(s.data.logs.Path), "Archive")},
+			Albums:  cardsOfKind(s.data.cards, "album"), Artists: cardsOfKind(s.data.cards, "artist"),
+			Songs: append([]model.Track(nil), s.data.tracks...),
+		}
 	case protocol.MethodGetLogs:
 		return s.data.logs
 	case protocol.MethodListeningStats:
@@ -186,46 +188,18 @@ func (s *demoServer) result(method string, params json.RawMessage) any {
 	case protocol.MethodGetStreamClients:
 		return []model.StreamClient{model.StreamClientWebRemix, model.StreamClientVisionOS, model.StreamClientAndroidVR165}
 	case protocol.MethodCheckForUpdates:
-		return model.UpdateInfo{CurrentVersion: "2.0.0-demo"}
+		return model.UpdateInfo{
+			CurrentVersion: "2.0.0-demo", LatestVersion: new("2.1.0-demo"), Available: true,
+			ReleaseURL: "https://github.com/ryoku-dev/ryotunes/releases", Notes: "Refined player window and provider controls.",
+			CanInstall: true,
+		}
 	case protocol.MethodDiscordStatus:
-		return model.DiscordStatus{Status: "Disabled"}
+		return model.DiscordStatus{Enabled: true, Status: "Connected"}
 	case protocol.MethodLastfmStatus:
-		return model.LastfmStatus{}
+		return model.LastfmStatus{Configured: true, Connected: true, Username: new("nero")}
 	default:
 		return nil
 	}
-}
-
-func queryFrom(raw json.RawMessage) string {
-	var query protocol.QueryParams
-	_ = json.Unmarshal(raw, &query)
-	return strings.ToLower(strings.TrimSpace(query.Query))
-}
-
-func filterTracks(items []model.Track, query string) []model.Track {
-	if query == "" {
-		return append([]model.Track(nil), items...)
-	}
-	filtered := make([]model.Track, 0, len(items))
-	for _, item := range items {
-		if strings.Contains(strings.ToLower(item.Title+" "+item.Artists), query) {
-			filtered = append(filtered, item)
-		}
-	}
-	return filtered
-}
-
-func filterCards(items []model.BrowseItem, query string) []model.BrowseItem {
-	if query == "" {
-		return append([]model.BrowseItem(nil), items...)
-	}
-	filtered := make([]model.BrowseItem, 0, len(items))
-	for _, item := range items {
-		if strings.Contains(strings.ToLower(item.Title+" "+dereference(item.Subtitle)), query) {
-			filtered = append(filtered, item)
-		}
-	}
-	return filtered
 }
 
 func cardsOfKind(items []model.BrowseItem, kind string) []model.BrowseItem {

@@ -7,20 +7,19 @@ import (
 	"time"
 
 	gioapp "gioui.org/app"
-	"gioui.org/io/event"
-	"gioui.org/io/pointer"
 	"gioui.org/io/system"
 	"gioui.org/layout"
 	"gioui.org/op"
-	"gioui.org/op/clip"
 	"gioui.org/op/paint"
 	"gioui.org/unit"
 
-	"github.com/ryoku-dev/ryotunes/internal/client/lithic"
+	"github.com/ryoku-dev/ryoku/docs/lithic/library/go/anim"
+	"github.com/ryoku-dev/ryoku/docs/lithic/library/go/kit"
 	"github.com/ryoku-dev/ryotunes/internal/client/state"
 	"github.com/ryoku-dev/ryotunes/internal/client/ui/act"
 	"github.com/ryoku-dev/ryotunes/internal/client/ui/chrome"
 	"github.com/ryoku-dev/ryotunes/internal/client/ui/env"
+	"github.com/ryoku-dev/ryotunes/internal/client/ui/look"
 	"github.com/ryoku-dev/ryotunes/internal/client/ui/widgets"
 )
 
@@ -30,23 +29,23 @@ type postQueue struct {
 	invalidate func()
 }
 
-func (q *postQueue) Post(fn func()) {
+func (queue *postQueue) Post(fn func()) {
 	if fn == nil {
 		return
 	}
-	q.mu.Lock()
-	q.pending = append(q.pending, fn)
-	q.mu.Unlock()
-	if q.invalidate != nil {
-		q.invalidate()
+	queue.mu.Lock()
+	queue.pending = append(queue.pending, fn)
+	queue.mu.Unlock()
+	if queue.invalidate != nil {
+		queue.invalidate()
 	}
 }
 
-func (q *postQueue) Drain() {
-	q.mu.Lock()
-	pending := q.pending
-	q.pending = nil
-	q.mu.Unlock()
+func (queue *postQueue) Drain() {
+	queue.mu.Lock()
+	pending := queue.pending
+	queue.pending = nil
+	queue.mu.Unlock()
 	for _, fn := range pending {
 		fn()
 	}
@@ -59,58 +58,69 @@ type confirmRequest struct {
 
 type uiShell struct {
 	runtime *clientRuntime
-	window  *gioapp.Window
 	posts   postQueue
 	nav     *navigator
 	pages   map[string]env.Page
 	config  gioapp.Config
 
+	topBar     chrome.TopBar
+	sidebar    chrome.Sidebar
+	bottomNav  chrome.BottomNav
 	player     chrome.PlayerBar
-	queue      chrome.QueuePanel
-	lyrics     chrome.LyricsPanel
+	sound      chrome.Sound
+	rightPanel chrome.RightPanel
 	nowPlaying chrome.NowPlaying
-	listen     chrome.ListenPanel
 	mini       chrome.Mini
 
-	rail       rail
-	title      titleBar
-	panelClose lithic.IconButton
-	decor      decorations
-	overlays   overlayState
-	itemMenu   widgets.ItemMenu
-	menuTarget *env.MenuTarget
-	menuPoint  image.Point
-	pointerTag int
-	pointer    image.Point
+	overlays          look.Overlays
+	placards          kit.Placard
+	confirm           kit.Confirm
+	confirmReq        *confirmRequest
+	itemMenu          widgets.ItemMenu
+	soundTag          struct{}
+	sheetOutside      struct{}
+	panelMotion       anim.Tween
+	sheetMotion       anim.Tween
+	sheetReady        bool
+	contentSwap       look.Swap
+	transitionWidgets map[string]layout.Widget
+
+	classReady      bool
+	lastClass       look.Class
+	lastDocked      bool
+	rememberedPanel env.Panel
 
 	prefsMu   sync.Mutex
 	prefsSave chan struct{}
-	miniMu    sync.Mutex
-	miniWin   *gioapp.Window
-	closed    bool
+
+	windowMu    sync.Mutex
+	window      *gioapp.Window
+	currentMini bool
+	nextWindow  *gioapp.Window
+	nextMini    bool
+	quitting    bool
+	mainWidth   int
+	mainHeight  int
 }
 
-func newShell(runtime *clientRuntime, window *gioapp.Window, initial env.Route, panel env.Panel, mini bool) *uiShell {
-	shell := &uiShell{runtime: runtime, window: window, pages: make(map[string]env.Page), prefsSave: make(chan struct{}, 1)}
+func newShell(runtime *clientRuntime, initial env.Route, panel env.Panel, mini bool, width, height int) *uiShell {
+	shell := &uiShell{
+		runtime: runtime, pages: make(map[string]env.Page), prefsSave: make(chan struct{}, 1),
+		mainWidth: width, mainHeight: height,
+	}
 	shell.posts.invalidate = runtime.hub.Invalidate
 	shell.nav = newNavigator(initial, panel, mini, runtime.hub.Invalidate)
 	shell.nav.onChange = shell.persistNavigation
-	shell.nav.onMini = shell.setMini
-	shell.decor.window = window
-	if window != nil {
-		go shell.preferenceWriter()
-	}
+	shell.nav.onMini = shell.requestWindow
+	go shell.preferenceWriter()
 	return shell
 }
 
-func (r *clientRuntime) runWindows(options Options) error {
-	preferences := r.store.Snapshot().Client
-	initial := parseRoute(preferences.Route)
-	if options.Route != "" {
-		initial = parseRoute(options.Route)
-	}
+func (runtime *clientRuntime) runWindows(options Options) error {
+	preferences := runtime.store.Snapshot().Client
+	initial := initialRoute(preferences.Route, options)
 	panel := env.PanelNone
-	if options.Width >= compactWidth && preferences.PanelOpen {
+	if look.ClassFor(float32(options.Width)) != look.Compact && preferences.PanelOpen {
 		panel = parsePanel(preferences.PanelTab)
 	}
 	if options.Panel != "" {
@@ -118,122 +128,272 @@ func (r *clientRuntime) runWindows(options Options) error {
 	}
 	mini := options.Mini || preferences.MiniOpen
 
-	var window gioapp.Window
-	window.Option(
-		gioapp.Title("Ryotunes"),
-		gioapp.Size(unit.Dp(options.Width), unit.Dp(options.Height)),
-		gioapp.MinSize(unit.Dp(640), unit.Dp(520)),
-		gioapp.Decorated(false),
-	)
-	removeWindow := r.hub.Add(window.Invalidate)
-	defer removeWindow()
-	unsubscribe := r.store.Subscribe(r.hub.Invalidate)
+	shell := newShell(runtime, initial, panel, mini, options.Width, options.Height)
+	if panelOpensNowPlaying(options.Panel) {
+		shell.nav.nowPlaying = true
+	}
+	shell.persistNavigation()
+	unsubscribe := runtime.store.Subscribe(runtime.hub.Invalidate)
 	defer unsubscribe()
 
-	shell := newShell(r, &window, initial, panel, mini)
-	shell.persistNavigation()
-	if mini {
-		shell.setMini(true)
+	window := shell.newWindow(mini)
+	go func() {
+		select {
+		case <-runtime.quit:
+			shell.quitWindows()
+		case <-runtime.ctx.Done():
+		}
+	}()
+	for {
+		if err := shell.runWindow(window, mini); err != nil {
+			shell.flushPreferences()
+			return err
+		}
+		shell.windowMu.Lock()
+		next := shell.nextWindow
+		nextMini := shell.nextMini
+		quitting := shell.quitting
+		shell.nextWindow = nil
+		shell.window = nil
+		shell.windowMu.Unlock()
+		if quitting && next != nil {
+			next.Perform(system.ActionClose)
+			next = nil
+		}
+		if next == nil {
+			shell.setMiniPreference(false)
+			shell.flushPreferences()
+			return nil
+		}
+		window, mini = next, nextMini
 	}
-	return shell.runMain()
 }
 
-func (s *uiShell) runMain() error {
+func (s *uiShell) newWindow(mini bool) *gioapp.Window {
+	window := new(gioapp.Window)
+	if mini {
+		window.Option(
+			gioapp.Title("Ryotunes Mini"),
+			gioapp.Size(unit.Dp(360), unit.Dp(420)),
+			gioapp.MinSize(unit.Dp(300), unit.Dp(320)),
+			gioapp.Decorated(false),
+		)
+		return window
+	}
+	preferences := s.runtime.store.Snapshot().Client
+	width, height := preferences.WindowWidth, preferences.WindowHeight
+	if s.mainWidth > 0 && s.mainHeight > 0 {
+		width, height = s.mainWidth, s.mainHeight
+		s.mainWidth, s.mainHeight = 0, 0
+	}
+	window.Option(
+		gioapp.Title("Ryotunes"),
+		gioapp.Size(unit.Dp(width), unit.Dp(height)),
+		gioapp.MinSize(unit.Dp(480), unit.Dp(560)),
+		gioapp.Decorated(!preferences.Decorations),
+	)
+	return window
+}
+
+func (s *uiShell) runWindow(window *gioapp.Window, mini bool) error {
+	s.windowMu.Lock()
+	s.window, s.currentMini = window, mini
+	s.config = gioapp.Config{}
+	quitting := s.quitting
+	s.windowMu.Unlock()
+	if quitting {
+		window.Perform(system.ActionClose)
+	}
+	removeWindow := s.runtime.hub.Add(window.Invalidate)
+	defer removeWindow()
+
 	var operations op.Ops
 	for {
-		event := s.window.Event()
-		switch event := event.(type) {
+		raw := window.Event()
+		switch event := raw.(type) {
 		case gioapp.ConfigEvent:
 			s.config = event.Config
 		case gioapp.FrameEvent:
-			// the config carries pixels; only a frame knows the metric to turn them into dp
-			s.persistWindowSize(s.config, event.Metric)
+			if !mini {
+				s.persistWindowSize(s.config, event.Metric)
+			}
 			s.posts.Drain()
-			s.frame(event, &operations)
+			if s.runtime.store.ConsumeShow() {
+				if mini {
+					s.requestWindow(false)
+				} else {
+					window.Option(gioapp.Windowed.Option())
+					window.Perform(system.ActionRaise)
+				}
+			}
+			if mini {
+				s.frameMini(event, &operations)
+			} else {
+				s.frameMain(event, &operations)
+			}
 			event.Frame(&operations)
 		case gioapp.DestroyEvent:
-			s.miniMu.Lock()
-			s.closed = true
-			if s.miniWin != nil {
-				s.miniWin.Perform(system.ActionClose)
-			}
-			s.miniMu.Unlock()
-			s.flushPreferences()
 			return event.Err
 		}
 	}
 }
 
-func (s *uiShell) frame(frame gioapp.FrameEvent, operations *op.Ops) {
+func (s *uiShell) frameMain(frame gioapp.FrameEvent, operations *op.Ops) {
 	gtx := gioapp.NewContext(operations, frame)
 	windowWidthDP := float32(gtx.Metric.PxToDp(gtx.Constraints.Max.X))
 	preferences := s.runtime.store.Snapshot().Client
+	scaleMetric(&gtx, preferences)
+	theme := s.runtime.applyClientTheme(preferences)
+	e := s.environment(gtx.Now, theme)
+	act.PendingClipboard(gtx)
+	if s.nav.takeSearchFocus() {
+		s.topBar.FocusSearch(gtx)
+	}
+	s.layout(gtx, e, windowWidthDP)
+	s.handleKeys(gtx, e)
+	s.layoutOverlays(gtx, e)
+}
+
+func (s *uiShell) frameMini(frame gioapp.FrameEvent, operations *op.Ops) {
+	gtx := gioapp.NewContext(operations, frame)
+	preferences := s.runtime.store.Snapshot().Client
+	scaleMetric(&gtx, preferences)
+	theme := s.runtime.applyClientTheme(preferences)
+	e := s.environment(gtx.Now, theme)
+	act.PendingClipboard(gtx)
+	paint.Fill(gtx.Ops, theme.R.Ground)
+	s.reconcileProvider(gtx, e)
+	s.mini.Layout(gtx, e)
+	if action, ok := s.mini.WindowAction(); ok {
+		s.performWindowAction(action)
+	}
+	s.handleKeys(gtx, e)
+	s.layoutOverlays(gtx, e)
+}
+
+func scaleMetric(gtx *layout.Context, preferences state.ClientPreferences) {
 	scale := float32(preferences.ZoomPercent) / 100
 	if scale <= 0 {
 		scale = 1
 	}
 	gtx.Metric.PxPerDp *= scale
 	gtx.Metric.PxPerSp *= scale
-	th := s.runtime.applyClientTheme(preferences)
-
-	e := s.environment(gtx.Now, th)
-	act.PendingClipboard(gtx)
-	paint.Fill(gtx.Ops, th.R.Ground)
-	s.trackPointer(gtx)
-	s.layout(gtx, e, windowWidthDP)
-	s.layoutOverlays(gtx, e)
-	s.handleKeys(gtx, e)
-	if s.runtime.store.ConsumeShow() {
-		s.window.Option(gioapp.Windowed.Option())
-		s.window.Perform(system.ActionRaise)
-	}
 }
 
-func (s *uiShell) environment(now time.Time, theme *lithic.Theme) *env.Env {
-	return &env.Env{
-		Th: theme, Store: s.runtime.store, Conn: s.runtime.client, Nav: s.nav, Art: s.runtime.art, Now: now,
-		Toast: func(message string, kind env.ToastKind) {
-			s.posts.Post(func() { s.overlays.placards.Push(time.Now(), message, "") })
-		},
-		Go: func(fn func(context.Context)) {
-			if fn == nil {
+func (s *uiShell) environment(now time.Time, theme *look.Theme) *env.Env {
+	e := &env.Env{
+		Th: theme, Overlays: &s.overlays, Store: s.runtime.store, Conn: s.runtime.client,
+		Nav: s.nav, Art: s.runtime.art, Now: now,
+	}
+	e.Toast = func(message string, _ env.ToastKind) {
+		s.posts.Post(func() { s.placards.Push(time.Now(), message, "") })
+	}
+	e.Go = func(fn func(context.Context)) {
+		if fn == nil {
+			return
+		}
+		go func() {
+			fn(s.runtime.ctx)
+			s.runtime.hub.Invalidate()
+		}()
+	}
+	e.Confirm = func(title, body, action, required string, run func()) {
+		s.posts.Post(func() {
+			s.confirmReq = &confirmRequest{title: title, body: body, action: action, required: required, run: run}
+			s.confirm.Dialog.Open = true
+		})
+	}
+	e.Menu = func(target env.MenuTarget) {
+		s.posts.Post(func() {
+			if target.Context == "add-to-playlist" && target.Track != nil {
+				s.itemMenu.OpenAdd(*target.Track)
 				return
 			}
-			go func() {
-				fn(s.runtime.ctx)
-				s.runtime.hub.Invalidate()
-			}()
-		},
-		Confirm: func(title, body, action, required string, run func()) {
-			s.posts.Post(func() {
-				s.overlays.confirmRequest = &confirmRequest{title: title, body: body, action: action, required: required, run: run}
-				s.overlays.confirm.Dialog.Open = true
-			})
-		},
-		Menu: func(target env.MenuTarget) {
-			s.posts.Post(func() {
-				targetCopy := target
-				s.menuTarget = &targetCopy
-				s.menuPoint = s.pointer
-				s.overlays.menu.Open = true
-			})
-		},
+			s.itemMenu.OpenAt(e, target, e.Overlays.Press())
+		})
+	}
+	s.nav.onSound = func(anchor image.Rectangle) {
+		e.Overlays.Open(&s.soundTag, anchor, look.Placement{
+			Prefer: look.Above, Align: look.End, Width: 340,
+		}, func(gtx layout.Context) layout.Dimensions {
+			return s.sound.Layout(gtx, e)
+		})
+	}
+	return e
+}
+
+func (s *uiShell) requestWindow(mini bool) {
+	s.windowMu.Lock()
+	if s.quitting {
+		s.windowMu.Unlock()
+		return
+	}
+	if s.window == nil {
+		s.windowMu.Unlock()
+		return
+	}
+	if s.currentMini == mini {
+		s.window.Perform(system.ActionRaise)
+		s.windowMu.Unlock()
+		return
+	}
+	if s.nextWindow != nil {
+		s.windowMu.Unlock()
+		return
+	}
+	s.nextMini = mini
+	s.nextWindow = s.newWindow(mini)
+	current := s.window
+	s.windowMu.Unlock()
+	s.setMiniPreference(mini)
+	current.Perform(system.ActionClose)
+}
+
+func (s *uiShell) quitWindows() {
+	s.windowMu.Lock()
+	s.quitting = true
+	current, next := s.window, s.nextWindow
+	s.nextWindow = nil
+	s.windowMu.Unlock()
+	if next != nil && next != current {
+		next.Perform(system.ActionClose)
+	}
+	if current != nil {
+		current.Perform(system.ActionClose)
 	}
 }
 
-func (s *uiShell) trackPointer(gtx layout.Context) {
-	for {
-		event, ok := gtx.Event(pointer.Filter{Target: &s.pointerTag, Kinds: pointer.Move | pointer.Drag | pointer.Press})
-		if !ok {
-			break
-		}
-		if event, ok := event.(pointer.Event); ok {
-			s.pointer = event.Position.Round()
-		}
+func (s *uiShell) setMiniPreference(mini bool) {
+	s.nav.mu.Lock()
+	s.nav.mini = mini
+	s.nav.mu.Unlock()
+	s.persistNavigation()
+}
+
+func (s *uiShell) performWindowAction(action system.Action) {
+	s.windowMu.Lock()
+	window := s.window
+	s.windowMu.Unlock()
+	if window == nil {
+		return
 	}
-	area := clip.Rect{Max: gtx.Constraints.Max}.Push(gtx.Ops)
-	event.Op(gtx.Ops, &s.pointerTag)
-	area.Pop()
+	// gio's wayland Perform only knows Close, the window modes have to go through Option
+	remaining := action
+	if action&system.ActionMaximize != 0 {
+		window.Option(gioapp.Maximized.Option())
+		remaining &^= system.ActionMaximize
+	}
+	if action&system.ActionUnmaximize != 0 {
+		window.Option(gioapp.Windowed.Option())
+		remaining &^= system.ActionUnmaximize
+	}
+	if action&system.ActionFullscreen != 0 {
+		window.Option(gioapp.Fullscreen.Option())
+		remaining &^= system.ActionFullscreen
+	}
+	if remaining != 0 {
+		window.Perform(remaining)
+	}
 }
 
 func (s *uiShell) persistWindowSize(config gioapp.Config, metric unit.Metric) {
@@ -256,13 +416,14 @@ func (s *uiShell) persistNavigation() {
 	preferences.Route = persistedRoute(s.nav.Current())
 	panel := s.nav.Panel()
 	preferences.PanelOpen = panel != env.PanelNone
-	if panel == env.PanelQueue || panel == env.PanelLyrics {
+	if panel != env.PanelNone {
 		preferences.PanelTab = string(panel)
 	}
 	preferences.MiniOpen = s.nav.miniOpen()
 	s.runtime.store.SetClientPreferences(preferences)
 	s.savePreferences()
 }
+
 func (s *uiShell) savePreferences() {
 	select {
 	case s.prefsSave <- struct{}{}:
@@ -302,104 +463,4 @@ func (s *uiShell) flushPreferences() {
 	s.prefsMu.Lock()
 	defer s.prefsMu.Unlock()
 	_ = s.runtime.store.SaveClientPreferences()
-}
-
-func (r *clientRuntime) applyClientTheme(preferences state.ClientPreferences) *lithic.Theme {
-	r.syncPalettePreferences(preferences)
-	density := lithic.Comfortable
-	if preferences.Density == "compact" {
-		density = lithic.Compact
-	}
-	r.themeMu.Lock()
-	if r.theme.Density != density {
-		theme := lithic.New(r.theme.R, lithic.Shaper())
-		theme.Density = density
-		r.theme = theme
-	}
-	theme := r.theme
-	r.themeMu.Unlock()
-	lithic.SetReduce(preferences.ReduceMotion)
-	return theme
-}
-
-func (s *uiShell) setMini(open bool) {
-	s.miniMu.Lock()
-	defer s.miniMu.Unlock()
-	if s.closed {
-		return
-	}
-	if open {
-		if s.miniWin != nil {
-			s.miniWin.Perform(system.ActionRaise)
-			return
-		}
-		window := new(gioapp.Window)
-		window.Option(gioapp.Title("Ryotunes Mini"), gioapp.Size(360, 420), gioapp.MinSize(300, 320), gioapp.Decorated(false))
-		s.miniWin = window
-		remove := s.runtime.hub.Add(window.Invalidate)
-		go s.runMini(window, remove)
-		s.window.Option(gioapp.Minimized.Option())
-		return
-	}
-	if s.miniWin != nil {
-		s.miniWin.Perform(system.ActionClose)
-	} else {
-		s.restoreMain()
-	}
-}
-
-func (s *uiShell) runMini(window *gioapp.Window, remove func()) {
-	defer remove()
-	var operations op.Ops
-	for {
-		event := window.Event()
-		switch event := event.(type) {
-		case gioapp.FrameEvent:
-			gtx := gioapp.NewContext(&operations, event)
-			preferences := s.runtime.store.Snapshot().Client
-			scale := float32(preferences.ZoomPercent) / 100
-			if scale <= 0 {
-				scale = 1
-			}
-			gtx.Metric.PxPerDp *= scale
-			gtx.Metric.PxPerSp *= scale
-			th := s.runtime.applyClientTheme(preferences)
-			e := s.environment(gtx.Now, th)
-			act.PendingClipboard(gtx)
-			paint.Fill(gtx.Ops, th.R.Ground)
-			s.mini.Layout(gtx, e)
-			event.Frame(&operations)
-		case gioapp.DestroyEvent:
-			s.miniMu.Lock()
-			if s.miniWin == window {
-				s.miniWin = nil
-			}
-			s.nav.mu.Lock()
-			s.nav.mini = false
-			s.nav.mu.Unlock()
-			s.miniMu.Unlock()
-			s.persistNavigation()
-			s.restoreMain()
-			return
-		}
-	}
-}
-
-func (s *uiShell) restoreMain() {
-	s.window.Option(gioapp.Windowed.Option())
-	s.window.Perform(system.ActionRaise)
-	s.runtime.hub.Invalidate()
-}
-
-func layoutAt(gtx layout.Context, at, size image.Point, widget layout.Widget) layout.Dimensions {
-	size.X = max(0, size.X)
-	size.Y = max(0, size.Y)
-	offset := op.Offset(at).Push(gtx.Ops)
-	area := clip.Rect{Max: size}.Push(gtx.Ops)
-	child := gtx
-	child.Constraints = layout.Exact(size)
-	widget(child)
-	area.Pop()
-	offset.Pop()
-	return layout.Dimensions{Size: size}
 }

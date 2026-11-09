@@ -1,10 +1,9 @@
 package settings
 
 import (
-	"gioui.org/layout"
-
-	"github.com/ryoku-dev/ryotunes/internal/client/lithic"
+	"github.com/ryoku-dev/ryoku/docs/lithic/library/go/kit"
 	"github.com/ryoku-dev/ryotunes/internal/client/ui/env"
+	"github.com/ryoku-dev/ryotunes/internal/client/ui/look"
 	"github.com/ryoku-dev/ryotunes/internal/model"
 )
 
@@ -14,18 +13,22 @@ type sectionSpec struct {
 }
 
 var settingsSections = []sectionSpec{
-	{slug: "appearance", title: "Appearance"},
+	{slug: "account", title: "Account"},
 	{slug: "playback", title: "Playback"},
-	{slug: "providers", title: "Providers and accounts"},
+	{slug: "sound", title: "Sound"},
+	{slug: "lyrics", title: "Lyrics"},
 	{slug: "downloads", title: "Downloads"},
+	{slug: "local", title: "Local music"},
+	{slug: "playlists", title: "Playlists"},
+	{slug: "appearance", title: "Appearance"},
 	{slug: "integrations", title: "Integrations"},
 	{slug: "data", title: "Data and storage"},
-	{slug: "local", title: "Local music"},
+	{slug: "diagnostics", title: "Diagnostics"},
 	{slug: "about", title: "About"},
 }
 
 type fieldValue struct {
-	field       lithic.TextField
+	field       kit.TextField
 	source      string
 	initialized bool
 }
@@ -34,8 +37,7 @@ func (f *fieldValue) sync(value string) {
 	current := f.field.Text()
 	if !f.initialized {
 		f.field.SetText(value)
-		f.source = value
-		f.initialized = true
+		f.source, f.initialized = value, true
 		return
 	}
 	if current == value {
@@ -49,113 +51,145 @@ func (f *fieldValue) sync(value string) {
 }
 
 type appearanceControls struct {
-	mode, density                 lithic.Picker
-	reduce, romanize, lowResource lithic.Toggle
-	scale                         lithic.Stepper
-	palette                       fieldValue
-	savePalette                   lithic.Button
+	colours, density, motion look.Choice
+	scale                    kit.Stepper
+	lowResource              kit.Toggle
+	palette                  fieldValue
+	usePalette, clearPalette kit.Plaque
+	tray, autostart          kit.Toggle
 }
 
 type playbackControls struct {
-	autoplay, duplicates, stopAfter, history, wordByWord lithic.Toggle
-	qualityPicker                                        lithic.Picker
-	clients                                              map[model.StreamClient]*lithic.Toggle
+	autoplay, duplicates, stopAfter, history kit.Toggle
+	quality                                  look.Choice
+	clients                                  map[model.StreamClient]*kit.Toggle
 }
 
-type providerControls struct {
-	youtubeSignIn, youtubeSignOut lithic.Button
-	identity                      lithic.Picker
-	spotifySignIn, spotifySignOut lithic.Button
-	soundCloudSignIn              lithic.Button
-	soundCloudSignOut             lithic.Button
+type lyricsControls struct {
+	wordByWord, romanize kit.Toggle
+}
+
+type accountControls struct {
+	youtubeSignIn, youtubeSignOut kit.Plaque
+	identity                      look.Choice
+	spotifySignIn, spotifySignOut kit.Plaque
+	soundCloudSignIn              kit.Plaque
+	soundCloudSignOut             kit.Plaque
 	tidalDeviceID                 fieldValue
 	tidalDeviceSecret             fieldValue
 	tidalPKCEID                   fieldValue
-	tidalSave, tidalSignIn        lithic.Button
-	tidalSignOut                  lithic.Button
-	lastfmConnect                 lithic.Button
-	lastfmDisconnect              lithic.Button
+	tidalSave, tidalSignIn        kit.Plaque
+	tidalSignOut                  kit.Plaque
 }
 
 type downloadControls struct {
 	path          fieldValue
-	format        lithic.Picker
-	artistFolders lithic.Toggle
-	embedMetadata lithic.Toggle
-	workers       lithic.Stepper
-	save          lithic.Button
+	format        look.Choice
+	artistFolders kit.Toggle
+	embedMetadata kit.Toggle
+	workers       kit.Stepper
+	save          kit.Plaque
+}
+
+type localControls struct {
+	path         fieldValue
+	add, rescan  kit.Plaque
+	remove       map[string]*kit.Plaque
+	library      model.LocalLibrary
+	loaded, busy bool
+	errorMessage string
+}
+
+type playlistControls struct {
+	importPath, exportPath fieldValue
+	importButton           kit.Plaque
+	exportButton           kit.Plaque
+	busy                   bool
 }
 
 type integrationControls struct {
-	discord, tray, autostart lithic.Toggle
-	presence                 fieldValue
-	savePresence             lithic.Button
-	proxy                    fieldValue
-	saveProxy                lithic.Button
-	listenURL                fieldValue
-	saveListenURL            lithic.Button
+	discord                         kit.Toggle
+	presence                        fieldValue
+	savePresence                    kit.Plaque
+	lastfmConnect, lastfmDisconnect kit.Plaque
+	listenURL                       fieldValue
+	saveListenURL                   kit.Plaque
 }
 
 type dataControls struct {
-	rotate lithic.Toggle
-	clear  lithic.Button
-	sync   lithic.Button
+	proxy     fieldValue
+	saveProxy kit.Plaque
+	rotate    kit.Toggle
+	clear     kit.Plaque
+	sync      kit.Plaque
+}
+
+type diagnosticsControls struct {
+	open kit.Plaque
 }
 
 type aboutControls struct {
-	check, install, diagnostics lithic.Button
-	links                       [4]lithic.Button
+	check, install, changelog, notes kit.Plaque
+	links                            [4]kit.Plaque
+	showNotes                        bool
 }
 
 type page struct {
-	list lithic.List
+	scroll look.Scroller
+	index  kit.SectionIndex
 
-	sectionButtons, chipButtons []lithic.Button
-	chipList                    layout.List
-	sectionHeights              []int
-	currentSection              int
-	initialSection              int
-	initialScroll               bool
+	sectionHeights []int
+	currentSection int
+	initialSection int
+	initialScroll  bool
+	indexHold      int
 
 	refreshed  bool
 	generation uint64
 	loading    bool
 	loadError  string
 
-	streamClients        []model.StreamClient
-	identities           model.AccountIdentities
-	downloads            model.DownloadSettings
-	discord              model.DiscordStatus
-	lastfm               model.LastfmStatus
-	daemonVersion        string
-	update               *model.UpdateInfo
-	checking, installing bool
-	clearing             bool
-	syncing              bool
+	streamClients []model.StreamClient
+	identities    model.AccountIdentities
+	downloads     model.DownloadSettings
+	discord       model.DiscordStatus
+	lastfm        model.LastfmStatus
+	diagnostics   model.LogsResult
+	daemonVersion string
+	protocol      int
+	update        *model.UpdateInfo
+	checking      bool
+	installing    bool
+	clearing      bool
+	syncing       bool
 
-	appearance       appearanceControls
-	playback         playbackControls
-	providers        providerControls
-	download         downloadControls
-	integrations     integrationControls
-	data             dataControls
-	about            aboutControls
-	localOpen, retry lithic.Button
+	appearance    appearanceControls
+	playback      playbackControls
+	lyrics        lyricsControls
+	accounts      accountControls
+	download      downloadControls
+	local         localControls
+	playlists     playlistControls
+	integrations  integrationControls
+	data          dataControls
+	diagnosticsUI diagnosticsControls
+	about         aboutControls
+	sound         kit.Plaque
+	retry         kit.Plaque
 }
 
 // New creates a retained Settings page for the requested route.
 func New(r env.Route) env.Page {
-	page := &page{
-		sectionButtons: make([]lithic.Button, len(settingsSections)),
-		chipButtons:    make([]lithic.Button, len(settingsSections)),
+	p := &page{
 		sectionHeights: make([]int, len(settingsSections)),
 		initialSection: sectionIndex(r.Params),
+		indexHold:      -1,
 	}
-	page.chipList.Axis = layout.Horizontal
-	page.playback.clients = make(map[model.StreamClient]*lithic.Toggle)
-	page.downloads = model.DownloadSettings{Format: model.DownloadOriginal, Workers: 1, OrganizeByArtist: true, EmbedMetadata: true}
-	page.data.rotate.Value = true
-	return page
+	p.playback.clients = make(map[model.StreamClient]*kit.Toggle)
+	p.local.remove = make(map[string]*kit.Plaque)
+	p.downloads = model.DownloadSettings{Format: model.DownloadOriginal, Workers: 1, OrganizeByArtist: true, EmbedMetadata: true}
+	p.data.rotate.Value = true
+	return p
 }
 
 // Title returns the page title shown by the shell.

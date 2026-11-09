@@ -2,172 +2,187 @@ package chrome
 
 import (
 	"image"
+	"image/color"
 	"math"
 	"time"
 
 	"gioui.org/f32"
-	"gioui.org/io/event"
-	"gioui.org/io/pointer"
 	"gioui.org/layout"
 	"gioui.org/op"
 	"gioui.org/op/clip"
-	"gioui.org/unit"
+	"gioui.org/op/paint"
+	"gioui.org/text"
 
-	"github.com/ryoku-dev/ryotunes/internal/client/lithic"
+	"github.com/ryoku-dev/ryoku/docs/lithic/library/go/kit"
+	"github.com/ryoku-dev/ryoku/docs/lithic/library/go/palette"
 	"github.com/ryoku-dev/ryotunes/internal/client/state"
 	"github.com/ryoku-dev/ryotunes/internal/client/ui/act"
 	"github.com/ryoku-dev/ryotunes/internal/client/ui/env"
+	"github.com/ryoku-dev/ryotunes/internal/client/ui/look"
 	"github.com/ryoku-dev/ryotunes/internal/client/ui/widgets"
 	"github.com/ryoku-dev/ryotunes/internal/model"
 	"github.com/ryoku-dev/ryotunes/internal/protocol"
 )
 
-// PlayerBar renders the persistent transport, seek, track, panel, and sound controls.
+const seekSafetyTimeout = 3 * time.Second
+
+// PlayerBar owns the persistent and compact playback bars.
 type PlayerBar struct {
-	art     lithic.Click
-	artists map[string]*lithic.Click
+	artClick    kit.Click
+	titleClick  kit.Click
+	artistClick kit.Click
+	art         look.ArtView
+	titleSwap   look.Swap
+	artistSwap  look.Swap
 
-	shuffle  lithic.IconButton
-	previous lithic.IconButton
-	play     lithic.IconButton
-	next     lithic.IconButton
-	repeat   lithic.IconButton
-	like     lithic.IconButton
-	download lithic.IconButton
-	stop     lithic.IconButton
-	queue    lithic.IconButton
-	lyrics   lithic.IconButton
-	now      lithic.IconButton
-	mini     lithic.IconButton
-	mute     lithic.IconButton
-	sound    lithic.IconButton
+	like     kit.IconPlaque
+	likeFill look.Fill
+	likeTip  look.Tip
+	download kit.IconPlaque
+	downTip  look.Tip
 
-	seek            lithic.Slider
-	seekWasDragging bool
-	seekPending     bool
-	seekTarget      float64
-	volume          lithic.Slider
-	volumeWasDrag   bool
-	volumePending   bool
-	volumeTarget    int
-	preMute         int
-	volumeWheelTag  int
+	transport transport
+	seek      look.Scrubber
+	volume    volumeControl
 
-	soundPopover lithic.Popover
-	soundPanel   SoundPanel
+	lyrics    kit.IconPlaque
+	lyricsTip look.Tip
+	queue     kit.IconPlaque
+	queueTip  look.Tip
+	now       kit.IconPlaque
+	nowTip    look.Tip
+	mini      kit.IconPlaque
+	miniTip   look.Tip
+	sound     kit.IconPlaque
+	soundTip  look.Tip
 
-	waveformID      string
-	waveformLoading bool
-	waveform        []int
-	wavePoints      []f32.Point
-	waveWidth       int
-	waveHeight      int
-	lastToast       uint64
+	seekTrackID  string
+	seekPending  bool
+	seekDragging bool
+	seekTarget   float64
+	seekOrigin   float64
+	seekUntil    time.Time
+	lastToast    uint64
+
+	compact compactPlayer
 }
 
-// Layout renders an 88 dp playback bar when a track is active.
-func (b *PlayerBar) Layout(gtx layout.Context, e *env.Env) layout.Dimensions {
+// Layout renders the 88 dp three-zone player interior.
+func (bar *PlayerBar) Layout(gtx layout.Context, e *env.Env) layout.Dimensions {
 	snapshot := e.Store.Snapshot()
-	b.forwardToast(e, snapshot.Toast)
-	now := snapshot.Playback.Now
-	if now == nil {
+	bar.forwardToast(e, snapshot.Toast)
+	if snapshot.Playback.Now == nil {
 		return layout.Dimensions{}
 	}
-	current := e.Store.CurrentTrack()
-	track := trackFromPlayback(now, current)
+	track := trackFromPlayback(snapshot.Playback.Now, e.Store.CurrentTrack())
 	provider := model.ProviderOf(track.VideoID)
-	b.requestWaveform(e, track.VideoID, provider)
-	b.reconcile(snapshot)
-	b.pollActions(gtx, e, snapshot, track, provider)
+	bar.reconcileSeek(gtx, e, snapshot, track.VideoID)
 
-	if !snapshot.Playback.Paused {
-		// A visible player owns one coarse playback-clock redraw; hidden windows
-		// do not lay out and therefore never arm this invalidation.
-		gtx.Execute(op.InvalidateCmd{At: gtx.Now.Truncate(time.Second).Add(time.Second)})
-	}
-
+	barWidth := gtx.Constraints.Max.X
 	height := min(gtx.Constraints.Max.Y, gtx.Dp(88))
-	width := gtx.Constraints.Max.X
-	if width <= 0 || height <= 0 {
+	if barWidth <= 0 || height <= 0 {
 		return layout.Dimensions{}
 	}
-	gtx.Constraints = layout.Exact(image.Pt(width, height))
-	lithic.FillCutTop(gtx.Ops, image.Rect(0, 0, width, height), gtx.Dp(16), e.Th.R.Stone1)
+	gtx.Constraints = layout.Exact(image.Pt(barWidth, height))
 
-	compact := width < gtx.Dp(760)
-	leftWidth := min(gtx.Dp(340), width*28/100)
-	rightWidth := min(gtx.Dp(420), width*36/100)
-	if compact {
-		rightWidth = gtx.Dp(176)
-		leftWidth = min(gtx.Dp(360), max(gtx.Dp(240), width-rightWidth-gtx.Dp(204)))
-	} else if width-leftWidth-rightWidth < gtx.Dp(220) {
-		shortfall := gtx.Dp(220) - (width - leftWidth - rightWidth)
-		leftWidth = max(gtx.Dp(150), leftWidth-shortfall/2)
-		rightWidth = max(gtx.Dp(220), rightWidth-(shortfall-shortfall/2))
-	}
+	side := barWidth * 28 / 100
+	side = min(max(side, gtx.Dp(220)), gtx.Dp(360))
+	centre := min(gtx.Dp(560), barWidth-2*side-gtx.Dp(42))
+	centre = max(0, centre)
 
-	return layout.Inset{Top: 8, Bottom: 8, Left: 13, Right: 13}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+	dimensions := layout.Inset{Left: 21, Right: 21}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 		return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
-			layout.Rigid(fixedWidth(leftWidth, func(gtx layout.Context) layout.Dimensions {
-				return b.layoutTrack(gtx, e, snapshot, track, provider, compact)
+			layout.Rigid(fixedPlayerWidth(side, func(gtx layout.Context) layout.Dimensions {
+				return bar.layoutTrack(gtx, e, snapshot, track, provider)
 			})),
-			layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-				return b.layoutTransport(gtx, e, snapshot)
-			}),
-			layout.Rigid(fixedWidth(rightWidth, func(gtx layout.Context) layout.Dimensions {
-				return b.layoutTrailing(gtx, e, snapshot, track, provider, compact)
+			layout.Rigid(fixedPlayerWidth(centre, func(gtx layout.Context) layout.Dimensions {
+				return bar.layoutCentre(gtx, e, snapshot)
+			})),
+			layout.Rigid(fixedPlayerWidth(side, func(gtx layout.Context) layout.Dimensions {
+				return bar.layoutTrailing(gtx, e, snapshot, provider, side)
 			})),
 		)
 	})
+	return dimensions
 }
 
-func (b *PlayerBar) forwardToast(e *env.Env, toast *state.Toast) {
-	if toast == nil || toast.Serial == b.lastToast || e.Toast == nil {
-		return
-	}
-	b.lastToast = toast.Serial
-	kind := env.ToastInfo
-	if toast.Kind == state.ToastError {
-		kind = env.ToastError
-	} else if toast.Kind == state.ToastSuccess {
-		kind = env.ToastSuccess
-	}
-	e.Toast(toast.Message, kind)
-}
+func (bar *PlayerBar) layoutTrack(gtx layout.Context, e *env.Env, snapshot state.State, track model.Track, provider model.Provider) layout.Dimensions {
+	canAct := provider != model.ProviderLocal && provider != model.ProviderRadio
+	key := track.VideoID
+	dimensions := layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			return bar.artClick.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+				size := image.Pt(gtx.Dp(56), gtx.Dp(56))
+				return bar.art.Layout(gtx, e.Th, e.Art, optionalString(track.Thumbnail), size, look.Shape{Cut: 6}, e.Th.Motion.Navigate)
+			})
+		}),
+		layout.Rigid(layout.Spacer{Width: 13}.Layout),
+		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+			return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+					return bar.titleSwap.Layout(gtx, e.Th, key, 8, e.Th.Motion.Navigate, func(gtx layout.Context, _ string) layout.Dimensions {
+						return bar.titleClick.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+							return (kit.Label{Style: e.Th.T.Row, Color: e.Th.R.Fg, MaxLines: 1}).Layout(gtx, e.Th.Theme, track.Title)
+						})
+					})
+				}),
+				layout.Rigid(layout.Spacer{Height: 2}.Layout),
+				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+					return bar.artistSwap.Layout(gtx, e.Th, key, 8, e.Th.Motion.Navigate, func(gtx layout.Context, _ string) layout.Dimensions {
+						return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
+							layout.Rigid(look.ProviderGlyph(provider, 14, look.BrandInk(provider, e.Th.R))),
+							layout.Rigid(layout.Spacer{Width: 4}.Layout),
+							layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+								return bar.artistClick.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+									return (kit.Label{Style: e.Th.T.Caption, Color: e.Th.R.Fg2, MaxLines: 1}).Layout(gtx, e.Th.Theme, track.Artists)
+								})
+							}),
+						)
+					})
+				}),
+			)
+		}),
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			if !canAct {
+				return layout.Dimensions{}
+			}
+			return layout.Inset{Left: 8}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+				return bar.layoutLike(gtx, e, snapshot.Rating == model.RatingLike)
+			})
+		}),
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			if !canAct {
+				return layout.Dimensions{}
+			}
+			return layout.Inset{Left: 4}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+				return bar.layoutDownload(gtx, e, currentDownload(snapshot.Downloads, track.VideoID))
+			})
+		}),
+	)
 
-func (b *PlayerBar) pollActions(gtx layout.Context, e *env.Env, snapshot state.State, track model.Track, provider model.Provider) {
-	if b.art.Clicked(gtx) {
-		e.Nav.TogglePanel(env.PanelNowPlaying)
+	if bar.artClick.Clicked(gtx) {
+		e.Nav.ToggleNowPlaying()
 	}
-	if b.shuffle.Clicked(gtx) {
-		callVoid(e, protocol.MethodToggleShuffle, protocol.Null{})
-	}
-	if b.previous.Clicked(gtx) {
-		callVoid(e, protocol.MethodPrevTrack, protocol.Null{})
-	}
-	if b.play.Clicked(gtx) {
-		callVoid(e, protocol.MethodTogglePause, protocol.Null{})
-	}
-	if b.next.Clicked(gtx) {
-		callVoid(e, protocol.MethodNextTrack, protocol.Null{})
-	}
-	if b.repeat.Clicked(gtx) {
-		next := model.RepeatAll
-		if snapshot.Queue.Repeat == model.RepeatAll {
-			next = model.RepeatOne
-		} else if snapshot.Queue.Repeat == model.RepeatOne {
-			next = model.RepeatOff
+	if bar.titleClick.Clicked(gtx) {
+		if track.AlbumID != nil && *track.AlbumID != "" {
+			act.OpenAlbum(e, *track.AlbumID, optionalString(track.Album))
+		} else {
+			e.Nav.ToggleNowPlaying()
 		}
-		callVoid(e, protocol.MethodSetRepeat, protocol.SetRepeatParams{Mode: next})
 	}
-	if b.like.Clicked(gtx) {
+	if bar.artistClick.Clicked(gtx) {
+		if id, name := firstTrackArtist(track); id != "" {
+			act.OpenArtist(e, id, name)
+		}
+	}
+	if bar.like.Clicked(gtx) {
 		rating := model.RatingLike
 		if snapshot.Rating == model.RatingLike {
 			rating = model.RatingIndifferent
 		}
 		act.Rate(e, track, rating)
 	}
-	if b.download.Clicked(gtx) {
+	if bar.download.Clicked(gtx) {
 		job := currentDownload(snapshot.Downloads, track.VideoID)
 		switch {
 		case job == nil:
@@ -178,436 +193,334 @@ func (b *PlayerBar) pollActions(gtx layout.Context, e *env.Env, snapshot state.S
 			e.Nav.Push(env.Route{Kind: env.RouteDownloads, Title: "Downloads"})
 		}
 	}
-	if b.stop.Clicked(gtx) {
-		callVoid(e, protocol.MethodSetStopAfterCurrent, protocol.SetStopAfterCurrentParams{Enabled: !snapshot.Playback.StopAfterCurrent})
-	}
-	if b.queue.Clicked(gtx) {
-		e.Nav.TogglePanel(env.PanelQueue)
-	}
-	if provider != model.ProviderRadio && b.lyrics.Clicked(gtx) {
-		e.Nav.TogglePanel(env.PanelLyrics)
-	}
-	if b.now.Clicked(gtx) {
-		e.Nav.TogglePanel(env.PanelNowPlaying)
-	}
-	if b.mini.Clicked(gtx) {
-		e.Nav.ToggleMini()
-	}
-	if b.mute.Clicked(gtx) {
-		if b.volumeTarget == 0 {
-			if b.preMute <= 0 {
-				b.preMute = 70
-			}
-			b.setVolume(e, b.preMute)
-		} else {
-			b.preMute = b.volumeTarget
-			b.setVolume(e, 0)
-		}
-	}
-	if b.sound.Clicked(gtx) {
-		b.soundPopover.Open = !b.soundPopover.Open
-		if !b.soundPopover.Open {
-			e.Store.SetVolumeDragging(false)
-			b.soundPanel.volumeOn = false
-		}
-	}
+	return dimensions
 }
 
-func (b *PlayerBar) layoutTrack(gtx layout.Context, e *env.Env, snapshot state.State, track model.Track, provider model.Provider, compact bool) layout.Dimensions {
-	canRate := provider != model.ProviderLocal && provider != model.ProviderRadio
-	canDownload := provider != model.ProviderLocal && provider != model.ProviderRadio
-	return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
-		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			return b.art.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-				return widgets.Art(gtx, e, optionalString(track.Thumbnail), 56, 3)
-			})
-		}),
-		layout.Rigid(layout.Spacer{Width: 13}.Layout),
-		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-			return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
-				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					return (lithic.Label{Style: e.Th.T.Row, Color: e.Th.R.Fg, MaxLines: 1}).Layout(gtx, e.Th, track.Title)
-				}),
-				layout.Rigid(layout.Spacer{Height: 4}.Layout),
-				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					if compact {
-						return b.layoutArtists(gtx, e, track)
-					}
-					return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
-						layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-							return b.layoutArtists(gtx, e, track)
-						}),
-						layout.Rigid(layout.Spacer{Width: 8}.Layout),
-						layout.Rigid(widgets.ProviderBadge(e, provider)),
+func (bar *PlayerBar) layoutLike(gtx layout.Context, e *env.Env, liked bool) layout.Dimensions {
+	bar.like.Small = true
+	bar.like.Kind = kit.PlaqueQuiet
+	bar.like.Icon = nil
+	bar.like.Description = "Like"
+	return bar.likeTip.Layout(gtx, e.Th, e.Overlays, "Like", func(gtx layout.Context) layout.Dimensions {
+		return layout.Stack{Alignment: layout.Center}.Layout(gtx,
+			layout.Stacked(func(gtx layout.Context) layout.Dimensions { return bar.like.Layout(gtx, e.Th.Theme) }),
+			layout.Expanded(func(gtx layout.Context) layout.Dimensions {
+				return layout.Center.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+					return bar.likeFill.Layout(gtx, e.Th, liked,
+						func(gtx layout.Context) layout.Dimensions { return look.Icon.HeartOutline.Layout(gtx, e.Th.R.Fg2) },
+						func(gtx layout.Context) layout.Dimensions { return look.Icon.Heart.Layout(gtx, e.Th.Src.Ink) },
 					)
-				}),
-			)
-		}),
-		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			if !canRate {
-				return layout.Dimensions{}
-			}
-			b.like.Small = true
-			icon := lithic.Icon("favorite_border")
-			kind := lithic.Quiet
-			if snapshot.Rating == model.RatingLike {
-				icon, kind = lithic.Icon("favorite"), lithic.On
-			}
-			return b.like.Layout(gtx, e.Th, kind, icon, "Like")
-		}),
-		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			if !canDownload {
-				return layout.Dimensions{}
-			}
-			return b.layoutDownload(gtx, e, currentDownload(snapshot.Downloads, track.VideoID))
-		}),
-	)
-}
-
-func (b *PlayerBar) layoutArtists(gtx layout.Context, e *env.Env, track model.Track) layout.Dimensions {
-	if b.artists == nil {
-		b.artists = make(map[string]*lithic.Click)
-	}
-	if len(track.ArtistRuns) == 0 {
-		if track.ArtistID == nil {
-			return (lithic.Label{Style: e.Th.T.Caption, Color: e.Th.R.Fg2, MaxLines: 1}).Layout(gtx, e.Th, track.Artists)
-		}
-		track.ArtistRuns = []model.Artist{{Text: track.Artists, ID: track.ArtistID}}
-	}
-	children := make([]layout.FlexChild, 0, len(track.ArtistRuns)*2)
-	for index, artist := range track.ArtistRuns {
-		if index > 0 {
-			children = append(children, layout.Rigid(lithic.Text(e.Th, e.Th.T.Caption, e.Th.R.Fg3, " · ")))
-		}
-		artist := artist
-		if artist.ID == nil || *artist.ID == "" {
-			children = append(children, layout.Rigid(lithic.Text(e.Th, e.Th.T.Caption, e.Th.R.Fg2, artist.Text)))
-			continue
-		}
-		click := b.artists[*artist.ID]
-		if click == nil {
-			click = new(lithic.Click)
-			b.artists[*artist.ID] = click
-		}
-		if click.Clicked(gtx) {
-			act.OpenArtist(e, *artist.ID, artist.Text)
-		}
-		children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			return click.Layout(gtx, lithic.Text(e.Th, e.Th.T.Caption, e.Th.R.Fg2, artist.Text))
-		}))
-	}
-	return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx, children...)
-}
-
-func (b *PlayerBar) layoutTransport(gtx layout.Context, e *env.Env, snapshot state.State) layout.Dimensions {
-	return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
-		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			return layout.Center.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-				b.shuffle.Small, b.previous.Small, b.next.Small, b.repeat.Small = true, true, true, true
-				playIcon := lithic.Icon("play")
-				playDesc := "Play"
-				if !snapshot.Playback.Paused {
-					playIcon, playDesc = lithic.Icon("pause"), "Pause"
-				}
-				repeatIcon, repeatDesc := lithic.Icon("repeat"), "Repeat off"
-				if snapshot.Queue.Repeat == model.RepeatAll {
-					repeatIcon, repeatDesc = lithic.Icon("repeat"), "Repeat all"
-				} else if snapshot.Queue.Repeat == model.RepeatOne {
-					repeatIcon, repeatDesc = lithic.Icon("repeat_one"), "Repeat one"
-				}
-				return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
-					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-						return b.shuffle.Layout(gtx, e.Th, activeKind(snapshot.Queue.Shuffle), lithic.Icon("shuffle"), "Shuffle")
-					}),
-					layout.Rigid(layout.Spacer{Width: 4}.Layout),
-					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-						return b.previous.Layout(gtx, e.Th, lithic.Quiet, lithic.Icon("skip_previous"), "Previous")
-					}),
-					layout.Rigid(layout.Spacer{Width: 4}.Layout),
-					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-						return b.play.Layout(gtx, e.Th, lithic.Gold, playIcon, playDesc)
-					}),
-					layout.Rigid(layout.Spacer{Width: 4}.Layout),
-					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-						return b.next.Layout(gtx, e.Th, lithic.Quiet, lithic.Icon("skip_next"), "Next")
-					}),
-					layout.Rigid(layout.Spacer{Width: 4}.Layout),
-					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-						return b.repeat.Layout(gtx, e.Th, activeKind(snapshot.Queue.Repeat != model.RepeatOff), repeatIcon, repeatDesc)
-					}),
-				)
-			})
-		}),
-		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			return b.layoutSeek(gtx, e, snapshot)
-		}),
-	)
-}
-
-func (b *PlayerBar) layoutSeek(gtx layout.Context, e *env.Env, snapshot state.State) layout.Dimensions {
-	duration := max(0, snapshot.Playback.Duration)
-	position := e.Store.PositionAt(gtx.Now)
-	if !b.seek.Dragging() && !b.seekPending {
-		if duration > 0 {
-			b.seek.Value = float32(position / duration)
-		} else {
-			b.seek.Value = 0
-		}
-	}
-	return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
-		layout.Rigid(fixedWidth(gtx.Dp(50), lithic.Text(e.Th, e.Th.T.MonoSm, e.Th.R.Fg3, formatClock(position)))),
-		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-			before := b.seek.Value
-			size := image.Pt(gtx.Constraints.Max.X, min(gtx.Constraints.Max.Y, gtx.Dp(28)))
-			gtx.Constraints = layout.Exact(size)
-			b.drawWaveform(gtx, e)
-			dims := b.seek.Layout(gtx, e.Th, 0, float32(duration))
-			dragging := b.seek.Dragging()
-			target := float64(b.seek.Value) * duration
-			changed := math.Abs(float64(b.seek.Value-before)) > 0.0001
-			if dragging {
-				e.Store.SetSeekDrag(&target)
-			} else if b.seekWasDragging {
-				e.Store.SetSeekDrag(nil)
-				b.seekTarget, b.seekPending = target, true
-				callVoid(e, protocol.MethodSeek, protocol.SeekParams{Position: target})
-			} else if changed {
-				b.seekTarget, b.seekPending = target, true
-				callVoid(e, protocol.MethodSeek, protocol.SeekParams{Position: target})
-			}
-			b.seekWasDragging = dragging
-			return dims
-		}),
-		layout.Rigid(fixedWidth(gtx.Dp(50), func(gtx layout.Context) layout.Dimensions {
-			return layout.E.Layout(gtx, lithic.Text(e.Th, e.Th.T.MonoSm, e.Th.R.Fg3, formatClock(duration)))
-		})),
-	)
-}
-
-func (b *PlayerBar) layoutTrailing(gtx layout.Context, e *env.Env, snapshot state.State, track model.Track, provider model.Provider, compact bool) layout.Dimensions {
-	panel := e.Nav.Panel()
-	children := make([]layout.FlexChild, 0, 19)
-	appendGap := func(width unit.Dp) {
-		if len(children) > 0 {
-			children = append(children, layout.Rigid(layout.Spacer{Width: width}.Layout))
-		}
-	}
-	children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-		b.stop.Small = true
-		return b.stop.Layout(gtx, e.Th, activeKind(snapshot.Playback.StopAfterCurrent), lithic.Icon("timer"), "Stop after current")
-	}))
-	appendGap(4)
-	children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-		b.queue.Small = true
-		return b.queue.Layout(gtx, e.Th, activeKind(panel == env.PanelQueue), lithic.Icon("queue"), "Queue")
-	}))
-	if !compact {
-		appendGap(4)
-		children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			b.lyrics.Small = true
-			ctx := gtx
-			if provider == model.ProviderRadio {
-				ctx = ctx.Disabled()
-			}
-			return b.lyrics.Layout(ctx, e.Th, activeKind(panel == env.PanelLyrics), lithic.Icon("lyrics"), "Lyrics")
-		}))
-		appendGap(4)
-		children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			b.now.Small = true
-			return b.now.Layout(gtx, e.Th, activeKind(panel == env.PanelNowPlaying), lithic.Icon("equalizer"), "Now playing")
-		}))
-	}
-	appendGap(4)
-	children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-		b.mini.Small = true
-		return b.mini.Layout(gtx, e.Th, lithic.Quiet, lithic.Icon("open_in_new"), "Mini player")
-	}))
-	appendGap(8)
-	children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-		b.mute.Small = true
-		icon := lithic.Icon("volume_up")
-		if b.volumeTarget == 0 {
-			icon = lithic.Icon("volume_off")
-		} else if b.volumeTarget < 50 {
-			icon = lithic.Icon("volume_down")
-		}
-		return b.mute.Layout(gtx, e.Th, lithic.Quiet, icon, "Mute")
-	}))
-	if !compact {
-		children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			gtx.Constraints.Min.X, gtx.Constraints.Max.X = gtx.Dp(84), gtx.Dp(104)
-			return b.layoutVolume(gtx, e)
-		}))
-	}
-	appendGap(4)
-	children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-		return b.soundPopover.Layout(gtx,
-			func(gtx layout.Context) layout.Dimensions {
-				b.sound.Small = true
-				return b.sound.Layout(gtx, e.Th, activeKind(b.soundPopover.Open), lithic.Icon("tune"), "Sound")
-			},
-			func(gtx layout.Context) layout.Dimensions { return b.soundPanel.Layout(gtx, e) },
+				})
+			}),
 		)
-	}))
-	return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle, Spacing: layout.SpaceEnd}.Layout(gtx, children...)
-}
-
-func (b *PlayerBar) layoutVolume(gtx layout.Context, e *env.Env) layout.Dimensions {
-	for {
-		raw, ok := gtx.Event(pointer.Filter{
-			Target: &b.volumeWheelTag, Kinds: pointer.Scroll,
-			ScrollY: pointer.ScrollRange{Min: -1e6, Max: 1e6},
-		})
-		if !ok {
-			break
-		}
-		event, ok := raw.(pointer.Event)
-		if !ok || event.Scroll.Y == 0 {
-			continue
-		}
-		value := b.volumeTarget
-		if event.Scroll.Y < 0 {
-			value += 5
-		} else {
-			value -= 5
-		}
-		b.setVolume(e, value)
-	}
-	before := b.volume.Value
-	dims := b.volume.Layout(gtx, e.Th, 0, 100)
-	region := clip.Rect(image.Rectangle{Max: dims.Size}).Push(gtx.Ops)
-	event.Op(gtx.Ops, &b.volumeWheelTag)
-	region.Pop()
-	dragging := b.volume.Dragging()
-	if dragging != b.volumeWasDrag {
-		e.Store.SetVolumeDragging(dragging)
-		b.volumeWasDrag = dragging
-	}
-	if math.Abs(float64(b.volume.Value-before)) > 0.0001 {
-		b.setVolume(e, int(math.Round(float64(b.volume.Value*100))))
-	}
-	return dims
-}
-
-func (b *PlayerBar) layoutDownload(gtx layout.Context, e *env.Env, job *model.DownloadEntry) layout.Dimensions {
-	b.download.Small = true
-	icon, desc := lithic.Icon("download"), "Download"
-	if job != nil {
-		switch job.Status {
-		case model.DownloadStatusQueued:
-			icon, desc = lithic.Icon("download"), "Queued. Open downloads"
-		case model.DownloadStatusDownloading:
-			icon, desc = lithic.Icon("download"), "Downloading. Open downloads"
-		case model.DownloadStatusCompleted:
-			icon, desc = lithic.Icon("check"), "Downloaded. Open downloads"
-		case model.DownloadStatusFailed:
-			icon, desc = lithic.Icon("error"), "Download failed. Retry"
-		case model.DownloadStatusCancelled:
-			icon, desc = lithic.Icon("refresh"), "Download cancelled. Retry"
-		}
-	}
-	dims := b.download.Layout(gtx, e.Th, lithic.Quiet, icon, desc)
-	if job == nil || (job.Status != model.DownloadStatusQueued && job.Status != model.DownloadStatusDownloading) {
-		return dims
-	}
-	progress := job.Progress
-	if job.Status == model.DownloadStatusQueued && progress == 0 {
-		progress = 4
-	}
-	height := max(1, gtx.Dp(4))
-	y := max(0, dims.Size.Y-height)
-	lithic.FillCut(gtx.Ops, image.Rect(0, y, dims.Size.X, dims.Size.Y), 0, e.Th.R.Stone3)
-	end := dims.Size.X * max(0, min(100, progress)) / 100
-	if end > 0 {
-		lithic.Blade(gtx.Ops, image.Rect(0, y, end, dims.Size.Y), e.Th.R.Lapis)
-	}
-	return dims
-}
-
-func (b *PlayerBar) reconcile(snapshot state.State) {
-	if b.volumeTarget == 0 && !b.volumePending && snapshot.Playback.Volume > 0 {
-		b.volumeTarget = snapshot.Playback.Volume
-		b.preMute = snapshot.Playback.Volume
-	}
-	if b.volumePending {
-		if snapshot.Playback.Volume == b.volumeTarget {
-			b.volumePending = false
-		} else {
-			b.volume.Value = float32(b.volumeTarget) / 100
-		}
-	} else if !b.volume.Dragging() {
-		b.volumeTarget = max(0, min(100, snapshot.Playback.Volume))
-		b.volume.Value = float32(b.volumeTarget) / 100
-	}
-	if b.seekPending && math.Abs(snapshot.Playback.Position-b.seekTarget) < 1.5 {
-		b.seekPending = false
-	}
-}
-
-func (b *PlayerBar) setVolume(e *env.Env, value int) {
-	value = max(0, min(100, value))
-	b.volumeTarget = value
-	b.volume.Value = float32(value) / 100
-	b.volumePending = true
-	callVoid(e, protocol.MethodSetVolume, protocol.SetVolumeParams{Volume: value})
-}
-
-func (b *PlayerBar) requestWaveform(e *env.Env, videoID string, provider model.Provider) {
-	if provider != model.ProviderSoundCloud {
-		b.waveformID, b.waveformLoading, b.waveform = "", false, nil
-		return
-	}
-	if videoID == b.waveformID {
-		return
-	}
-	b.waveformID, b.waveformLoading, b.waveform = videoID, true, nil
-	b.waveWidth, b.waveHeight = 0, 0
-	act.Call[model.Waveform](e, protocol.MethodGetWaveform, protocol.IDParams{ID: videoID}, func(wave model.Waveform, err error) {
-		if b.waveformID != videoID {
-			return
-		}
-		b.waveformLoading = false
-		if err == nil {
-			b.waveform = append(b.waveform[:0], wave.Samples...)
-		}
 	})
 }
 
-func (b *PlayerBar) drawWaveform(gtx layout.Context, e *env.Env) {
-	if len(b.waveform) < 2 {
-		return
-	}
-	width, height := gtx.Constraints.Max.X, gtx.Constraints.Max.Y
-	if width <= 0 || height <= 0 {
-		return
-	}
-	if width != b.waveWidth || height != b.waveHeight || len(b.wavePoints) != len(b.waveform) {
-		b.wavePoints = make([]f32.Point, len(b.waveform))
-		last := max(1, len(b.waveform)-1)
-		for index, sample := range b.waveform {
-			x := float32(index*max(0, width-1)) / float32(last)
-			y := float32(height-2) - float32(max(0, min(100, sample)))*float32(max(1, height-4))/100
-			b.wavePoints[index] = f32.Pt(x, y)
+func (bar *PlayerBar) layoutDownload(gtx layout.Context, e *env.Env, job *model.DownloadEntry) layout.Dimensions {
+	icon := look.Icon.Download
+	ink := e.Th.R.Fg2
+	tip := "Download"
+	progress := -1
+	if job != nil {
+		switch job.Status {
+		case model.DownloadStatusQueued:
+			progress = max(job.Progress, 1)
+			tip = "Downloading " + widgets.Count(progress) + "%"
+		case model.DownloadStatusDownloading:
+			progress = max(0, min(100, job.Progress))
+			tip = "Downloading " + widgets.Count(progress) + "%"
+		case model.DownloadStatusCompleted:
+			icon = look.Icon.DownloadDone
+			ink = e.Th.R.Jade
+			tip = "Saved"
+		case model.DownloadStatusFailed:
+			tip = "Download failed. Retry"
+		case model.DownloadStatusCancelled:
+			tip = "Download cancelled. Retry"
 		}
-		b.waveWidth, b.waveHeight = width, height
 	}
-	var area clip.Path
-	area.Begin(gtx.Ops)
-	area.MoveTo(b.wavePoints[0])
-	for _, point := range b.wavePoints[1:] {
-		area.LineTo(point)
-	}
-	area.LineTo(f32.Pt(float32(width), float32(height)))
-	area.LineTo(f32.Pt(0, float32(height)))
-	area.Close()
-	lithic.Hatch(gtx.Ops, area.End(), image.Rect(0, 0, width, height), max(1, gtx.Dp(6)), max(1, gtx.Dp(1)), lithic.WithAlpha(e.Th.R.Fg, .18))
-	lithic.Polyline(gtx.Ops, b.wavePoints, false, float32(max(1, gtx.Dp(unit.Dp(1)))), e.Th.R.Fg3)
+	bar.download.Small = true
+	bar.download.Kind = kit.PlaqueQuiet
+	bar.download.Icon = nil
+	bar.download.Description = tip
+	return bar.downTip.Layout(gtx, e.Th, e.Overlays, tip, func(gtx layout.Context) layout.Dimensions {
+		return layout.Stack{Alignment: layout.Center}.Layout(gtx,
+			layout.Stacked(func(gtx layout.Context) layout.Dimensions { return bar.download.Layout(gtx, e.Th.Theme) }),
+			layout.Expanded(func(gtx layout.Context) layout.Dimensions {
+				return layout.Center.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+					size := gtx.Dp(18)
+					gtx.Constraints = layout.Exact(image.Pt(size, size))
+					return icon.Layout(gtx, ink)
+				})
+			}),
+			layout.Expanded(func(gtx layout.Context) layout.Dimensions {
+				if progress >= 0 {
+					drawProgressRing(gtx, float32(progress)/100, e.Th.R.Lapis)
+				}
+				return layout.Dimensions{Size: gtx.Constraints.Min}
+			}),
+		)
+	})
 }
 
-func fixedWidth(width int, widget layout.Widget) layout.Widget {
+func (bar *PlayerBar) layoutCentre(gtx layout.Context, e *env.Env, snapshot state.State) layout.Dimensions {
+	return layout.Center.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+		return layout.Flex{Axis: layout.Vertical, Alignment: layout.Middle}.Layout(gtx,
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions { return bar.transport.Layout(gtx, e, snapshot) }),
+			layout.Rigid(layout.Spacer{Height: 6}.Layout),
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions { return bar.layoutSeek(gtx, e, snapshot) }),
+		)
+	})
+}
+
+func (bar *PlayerBar) layoutSeek(gtx layout.Context, e *env.Env, snapshot state.State) layout.Dimensions {
+	duration := max(0, snapshot.Playback.Duration)
+	if duration == 0 {
+		return layout.Center.Layout(gtx, kit.Claim(e.Th.Theme, palette.Alive, "Live"))
+	}
+	position := e.Store.PositionAt(gtx.Now)
+	value := float32(min(max(position/duration, 0), 1))
+	return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
+		layout.Rigid(playerTimeBox(e, widgets.Duration(position), text.End)),
+		layout.Rigid(layout.Spacer{Width: 8}.Layout),
+		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+			fill := e.Th.R.Fg2
+			if !snapshot.Playback.Paused {
+				fill = e.Th.Src.Ink
+			}
+			dimensions := bar.seek.Layout(gtx, e.Th, value, look.ScrubberStyle{
+				Fill: fill,
+				Bubble: func(fraction float32) string {
+					return widgets.Duration(float64(fraction) * duration)
+				},
+				WheelStep: float32(min(1, 5/duration)),
+			})
+			fraction, dragging := bar.seek.Dragging()
+			if dragging {
+				preview := float64(fraction) * duration
+				e.Store.SetSeekDrag(&preview)
+			}
+			committedFraction, committed := bar.seek.Committed()
+			if committed {
+				bar.commitSeek(gtx, e, snapshot, float64(committedFraction)*duration)
+			} else if bar.seekDragging && !dragging {
+				e.Store.SetSeekDrag(nil)
+			}
+			bar.seekDragging = dragging
+			bar.requestProgressFrame(gtx, e, duration, max(1, dimensions.Size.X), snapshot.Playback.Paused)
+			return dimensions
+		}),
+		layout.Rigid(layout.Spacer{Width: 8}.Layout),
+		layout.Rigid(playerTimeBox(e, widgets.Duration(duration), text.Start)),
+	)
+}
+
+func (bar *PlayerBar) layoutTrailing(gtx layout.Context, e *env.Env, snapshot state.State, provider model.Provider, width int) layout.Dimensions {
+	panel := e.Nav.Panel()
+	showAll := width >= gtx.Dp(330)
+	bar.lyrics.Small, bar.lyrics.Icon, bar.lyrics.Description = true, look.Icon.Lyrics, "Lyrics"
+	bar.lyrics.Kind = kit.PlaqueQuiet
+	if panel == env.PanelLyrics {
+		bar.lyrics.Kind = kit.PlaqueOn
+	}
+	bar.queue.Small, bar.queue.Icon, bar.queue.Description = true, look.Icon.Queue, "Queue"
+	bar.queue.Kind = kit.PlaqueQuiet
+	if panel == env.PanelQueue {
+		bar.queue.Kind = kit.PlaqueOn
+	}
+	bar.now.Small, bar.now.Icon, bar.now.Description = true, look.Icon.NowPlaying, "Now playing"
+	bar.now.Kind = kit.PlaqueQuiet
+	if e.Nav.NowPlaying() {
+		bar.now.Kind = kit.PlaqueOn
+	}
+	bar.mini.Small, bar.mini.Icon, bar.mini.Description, bar.mini.Kind = true, look.Icon.Mini, "Mini player", kit.PlaqueQuiet
+	bar.sound.Small, bar.sound.Icon, bar.sound.Description, bar.sound.Kind = true, look.Icon.Tune, "Sound", kit.PlaqueQuiet
+
+	volumeWidth := gtx.Dp(88)
+	if e.Th.Class == look.Expanded {
+		volumeWidth = gtx.Dp(120)
+	}
+	if showAll {
+		volumeWidth = min(volumeWidth, max(gtx.Dp(88), width-gtx.Dp(243)))
+	}
+
+	children := []layout.FlexChild{
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			if provider == model.ProviderRadio {
+				gtx = gtx.Disabled()
+			}
+			return bar.lyricsTip.Layout(gtx, e.Th, e.Overlays, "Lyrics", func(gtx layout.Context) layout.Dimensions {
+				return bar.lyrics.Layout(gtx, e.Th.Theme)
+			})
+		}),
+		layout.Rigid(layout.Spacer{Width: 4}.Layout),
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			return bar.queueTip.Layout(gtx, e.Th, e.Overlays, "Queue", func(gtx layout.Context) layout.Dimensions {
+				return bar.queue.Layout(gtx, e.Th.Theme)
+			})
+		}),
+	}
+	if showAll {
+		children = append(children,
+			layout.Rigid(layout.Spacer{Width: 4}.Layout),
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				return bar.nowTip.Layout(gtx, e.Th, e.Overlays, "Now playing", func(gtx layout.Context) layout.Dimensions {
+					return bar.now.Layout(gtx, e.Th.Theme)
+				})
+			}),
+			layout.Rigid(layout.Spacer{Width: 13}.Layout),
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				return bar.miniTip.Layout(gtx, e.Th, e.Overlays, "Mini player", func(gtx layout.Context) layout.Dimensions {
+					return bar.mini.Layout(gtx, e.Th.Theme)
+				})
+			}),
+		)
+	}
+	var soundSize image.Point
+	children = append(children,
+		layout.Rigid(layout.Spacer{Width: 13}.Layout),
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions { return bar.volume.Layout(gtx, e, volumeWidth) }),
+		layout.Rigid(layout.Spacer{Width: 13}.Layout),
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			dimensions := bar.soundTip.Layout(gtx, e.Th, e.Overlays, "Sound", func(gtx layout.Context) layout.Dimensions {
+				return bar.sound.Layout(gtx, e.Th.Theme)
+			})
+			soundSize = dimensions.Size
+			return dimensions
+		}),
+	)
+	dimensions := layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle, Spacing: layout.SpaceEnd}.Layout(gtx, children...)
+
+	if provider != model.ProviderRadio && bar.lyrics.Clicked(gtx) {
+		e.Nav.TogglePanel(env.PanelLyrics)
+	}
+	if bar.queue.Clicked(gtx) {
+		e.Nav.TogglePanel(env.PanelQueue)
+	}
+	if showAll && bar.now.Clicked(gtx) {
+		e.Nav.ToggleNowPlaying()
+	}
+	if showAll && bar.mini.Clicked(gtx) {
+		e.Nav.ToggleMini()
+	}
+	if bar.sound.Clicked(gtx) && e.Overlays != nil {
+		e.Nav.OpenSound(e.Overlays.AnchorOf(&bar.sound.Clickable, soundSize))
+	}
+	return dimensions
+}
+
+func (bar *PlayerBar) commitSeek(gtx layout.Context, e *env.Env, snapshot state.State, target float64) {
+	target = min(max(target, 0), snapshot.Playback.Duration)
+	bar.seekPending = true
+	bar.seekTarget = target
+	bar.seekOrigin = snapshot.Playback.Position
+	bar.seekUntil = gtx.Now.Add(seekSafetyTimeout)
+	e.Store.SetSeekDrag(&target)
+	gtx.Execute(op.InvalidateCmd{At: bar.seekUntil})
+	callVoid(e, protocol.MethodSeek, protocol.SeekParams{Position: target})
+}
+
+func (bar *PlayerBar) reconcileSeek(gtx layout.Context, e *env.Env, snapshot state.State, trackID string) {
+	if trackID != bar.seekTrackID {
+		bar.seekTrackID = trackID
+		bar.seekPending = false
+		e.Store.SetSeekDrag(nil)
+		return
+	}
+	if !bar.seekPending {
+		return
+	}
+	position := snapshot.Playback.Position
+	passed := math.Abs(position-bar.seekTarget) <= .5
+	if bar.seekTarget > bar.seekOrigin {
+		passed = passed || position >= bar.seekTarget
+	} else if bar.seekTarget < bar.seekOrigin {
+		passed = passed || position <= bar.seekTarget
+	}
+	if passed || !gtx.Now.Before(bar.seekUntil) {
+		bar.seekPending = false
+		e.Store.SetSeekDrag(nil)
+	}
+}
+
+func (bar *PlayerBar) requestProgressFrame(gtx layout.Context, e *env.Env, duration float64, trackPixels int, paused bool) {
+	if paused || duration <= 0 || trackPixels <= 0 {
+		return
+	}
+	pixelDelay := time.Duration(duration / float64(trackPixels) * float64(time.Second))
+	if pixelDelay < 250*time.Millisecond {
+		pixelDelay = 250 * time.Millisecond
+	}
+	position := e.Store.PositionAt(gtx.Now)
+	secondDelay := time.Duration((1 - (position - math.Floor(position))) * float64(time.Second))
+	if secondDelay <= 0 {
+		secondDelay = time.Second
+	}
+	delay := min(pixelDelay, secondDelay)
+	gtx.Execute(op.InvalidateCmd{At: gtx.Now.Add(delay)})
+}
+
+func (bar *PlayerBar) forwardToast(e *env.Env, toast *state.Toast) {
+	if toast == nil || toast.Serial == bar.lastToast || e.Toast == nil {
+		return
+	}
+	bar.lastToast = toast.Serial
+	kind := env.ToastInfo
+	if toast.Kind == state.ToastError {
+		kind = env.ToastError
+	} else if toast.Kind == state.ToastSuccess {
+		kind = env.ToastSuccess
+	}
+	e.Toast(toast.Message, kind)
+}
+
+func playerTimeBox(e *env.Env, value string, align text.Alignment) layout.Widget {
+	return func(gtx layout.Context) layout.Dimensions {
+		return fixedPlayerWidth(gtx.Dp(44), func(gtx layout.Context) layout.Dimensions {
+			return (kit.Label{Style: e.Th.T.Mono, Color: e.Th.R.Fg3, MaxLines: 1, Align: align}).Layout(gtx, e.Th.Theme, value)
+		})(gtx)
+	}
+}
+
+func fixedPlayerWidth(width int, widget layout.Widget) layout.Widget {
 	return func(gtx layout.Context) layout.Dimensions {
 		width = max(0, min(width, gtx.Constraints.Max.X))
 		gtx.Constraints.Min.X, gtx.Constraints.Max.X = width, width
 		return widget(gtx)
 	}
+}
+
+func firstTrackArtist(track model.Track) (string, string) {
+	for _, artist := range track.ArtistRuns {
+		if artist.ID != nil && *artist.ID != "" {
+			return *artist.ID, artist.Text
+		}
+	}
+	if track.ArtistID != nil {
+		return *track.ArtistID, track.Artists
+	}
+	return "", ""
+}
+
+func drawProgressRing(gtx layout.Context, fraction float32, ink color.NRGBA) {
+	fraction = min(max(fraction, 0), 1)
+	if fraction <= 0 {
+		return
+	}
+	size := gtx.Constraints.Min
+	centre := f32.Pt(float32(size.X)/2, float32(size.Y)/2)
+	radius := float32(min(size.X, size.Y))/2 - float32(gtx.Dp(2))
+	steps := max(2, int(math.Ceil(float64(32*fraction))))
+	var path clip.Path
+	path.Begin(gtx.Ops)
+	for index := range steps + 1 {
+		angle := -math.Pi/2 + 2*math.Pi*float64(index)/float64(steps)*float64(fraction)
+		point := f32.Pt(centre.X+radius*float32(math.Cos(angle)), centre.Y+radius*float32(math.Sin(angle)))
+		if index == 0 {
+			path.MoveTo(point)
+		} else {
+			path.LineTo(point)
+		}
+	}
+	paint.FillShape(gtx.Ops, ink, clip.Stroke{Path: path.End(), Width: float32(max(1, gtx.Dp(2)))}.Op())
 }

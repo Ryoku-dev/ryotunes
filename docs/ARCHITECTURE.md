@@ -174,27 +174,40 @@ typed errors and the handler picks the sentence.
 
 ## The client
 
-`internal/client` is a Gio application in Lithic.
+`internal/client` is a Gio application drawn with the shared Lithic library
+(`github.com/ryoku-dev/ryoku/docs/lithic/library/go`).
 
 ```text
 internal/client/
-  lithic/      the Lithic kit for Gio: roles from the Ryoku palette, cut primitives,
-               type, plaque, tablet, field, search, toggle, slider, tabs, filters,
-               menu, popover, dialog, placard, tooltip, chart, flake, blade, list
   conn/        socket client: typed calls, event stream, reconnect, snapshot replay
   state/       reducers: playback, queue, settings, auth, downloads, personal,
-               lyrics, listen together; one Store with Invalidate hooks
+               lyrics, listen together; one Store with Invalidate hooks; the
+               client lock and preferences
   art/         image loading: http, decode off the UI goroutine, downscale, LRU,
                collage for device playlists
-  ui/          the window: rail, panes, router, pages, chrome, mini window
+  ui/
+    look/      the app theme on the library: source colour, Ryoku mark,
+               provider glyphs, icons, frame geometry, overlay host, tips,
+               choices, scrolling, scrubbers, artwork, playback motion
+    env/       what every surface receives: theme, store, connection, router,
+               artwork, overlays, toasts
+    act/       daemon actions shared by every surface
+    widgets/   track table, cards, shelves, grids, quick tiles, hero, menus,
+               playlist dialogs, page states
+    chrome/    top bar, provider switcher, sidebar, bottom bar, player bar,
+               sound, side panel (queue, lyrics, together), now playing, mini
+    pages/     one package per page
+    shell/     windows, frame, router, overlays and keys, single instance
 ```
 
-- One `Store` holds the daemon snapshot plus client-only state (route stack,
-  panel modes, zoom). Reducers are pure functions of (state, event); the
-  frame loop drains a channel and invalidates.
-- Pages are retained structs with their own widget state (`lithic.List`,
-  clicks, tweens), composed from the kit; they never draw a colour or a
-  radius of their own.
+- One `Store` holds the daemon snapshot plus client-only state. Reducers are
+  pure functions of (state, event); the frame loop drains a channel and
+  invalidates.
+- Pages are retained structs with their own widget state, composed from the
+  library's `kit` and `widgets`; they never draw a colour of their own.
+- The client holds an exclusive lock on `$XDG_RUNTIME_DIR/ryotunes/client.lock`
+  while it runs. A second launch asks the daemon to `show` and exits; the
+  daemon's `Show` spawns `ryotunes` when nobody holds the lock.
 - The mini player is a second `app.Window` in the same process titled
   `Ryotunes Mini`; the main window is titled `Ryotunes`. Both read the same
   `Store`.
@@ -203,14 +216,15 @@ internal/client/
 
 ### Lithic
 
-The look is specified in the Ryoku repository, `docs/lithic/`. The client's
-`lithic` package implements it: roles are filled from the live palette
-(`shell.json` `themePalette`, then `colors.json` while `theme.json` follows
-the wallpaper, then the signature fallback), watched with inotify. No colour
-value exists in the client outside the signature fallback and the three
-fixed minerals. Appearance offers Follow desktop, Dark and Light, density,
+The look is specified in the Ryoku repository, `docs/lithic/`, and drawn by
+its Go library. The library fills roles from the live palette (`shell.json`
+`themePalette`, then `colors.json` while following the wallpaper, then the
+signature fallback) and watches it with inotify. The client adds the provider
+brand colours and the Ryoku orange in `look/brand.go`, the only colour
+literals it has. Appearance offers Follow Ryoku, Dark and Light, density,
 reduced motion and an optional palette file (a Material role set, the format
-`colors.json` uses), which is what a Ryotunes skin is now.
+`colors.json` uses). `docs/DESIGN.md` explains how the language maps to the
+music player.
 
 ## Persistence
 

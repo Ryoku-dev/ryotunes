@@ -362,10 +362,8 @@ func (s *Store) applyLocked(name string, data json.RawMessage, now time.Time) er
 		if decode(data, &event) != nil {
 			event.Position = 0
 		}
-		if s.state.SeekDrag == nil {
-			s.state.Playback.Position = clampPosition(s.state.Playback.Duration, event.Position)
-			s.positionSampledAt = now
-		}
+		s.state.Playback.Position = clampPosition(s.state.Playback.Duration, event.Position)
+		s.positionSampledAt = now
 	case protocol.EventDuration:
 		var event protocol.DurationEvent
 		if err := decode(data, &event); err != nil {

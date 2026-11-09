@@ -26,8 +26,8 @@ if git grep -n $'\u2014' -- .; then
   exit 1
 fi
 
-if git grep -nEI '#[0-9a-f]{6}([0-9a-f]{2})?' -- internal/client ':(exclude)internal/client/lithic/roles.go'; then
-  echo 'Client colour literals belong only in internal/client/lithic/roles.go.' >&2
+if git grep -nEI '#[0-9a-f]{6}([0-9a-f]{2})?' -- internal/client ':(exclude)internal/client/ui/look/brand.go'; then
+  echo 'Client colour literals belong only in internal/client/ui/look/brand.go.' >&2
   exit 1
 fi
 

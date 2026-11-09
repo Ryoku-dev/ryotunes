@@ -3,15 +3,19 @@ package album
 
 import (
 	"fmt"
+	"image"
+	"image/color"
 	"strconv"
 	"strings"
 
 	"gioui.org/layout"
+	"gioui.org/op"
 	"gioui.org/unit"
 
-	"github.com/ryoku-dev/ryotunes/internal/client/lithic"
+	"github.com/ryoku-dev/ryoku/docs/lithic/library/go/kit"
 	"github.com/ryoku-dev/ryotunes/internal/client/ui/act"
 	"github.com/ryoku-dev/ryotunes/internal/client/ui/env"
+	"github.com/ryoku-dev/ryotunes/internal/client/ui/look"
 	"github.com/ryoku-dev/ryotunes/internal/client/ui/widgets"
 	"github.com/ryoku-dev/ryotunes/internal/model"
 	"github.com/ryoku-dev/ryotunes/internal/protocol"
@@ -21,17 +25,17 @@ import (
 type Page struct {
 	route  env.Route
 	hero   widgets.Hero
-	list   widgets.TrackList
-	filter lithic.Search
+	scroll look.Scroller
+	table  widgets.TrackTable
 
-	play      lithic.SplitButton
-	artist    lithic.Button
-	addQueue  lithic.Button
-	download  lithic.Button
-	save      lithic.Button
-	more      lithic.Button
-	retry     lithic.Button
-	moreRetry lithic.Button
+	play      kit.Plaque
+	shuffle   kit.IconPlaque
+	save      kit.IconPlaque
+	download  kit.IconPlaque
+	more      kit.IconPlaque
+	retry     kit.Plaque
+	moreRetry kit.Plaque
+	menu      widgets.ItemMenu
 
 	page        model.AlbumPage
 	loaded      bool
@@ -44,17 +48,19 @@ type Page struct {
 	libraryRev  uint64
 	saved       bool
 	savePending bool
+	meta        []kit.Span
+	trackIDs    map[string]struct{}
 }
 
 // New constructs an album detail page for r.ID.
 func New(r env.Route) env.Page {
-	return &Page{route: r, seenTokens: make(map[string]struct{})}
+	return &Page{route: r, seenTokens: make(map[string]struct{}), trackIDs: make(map[string]struct{})}
 }
 
 // Title returns the loaded album title.
 func (p *Page) Title() string {
-	if p.page.Title != nil && *p.page.Title != "" {
-		return *p.page.Title
+	if title := value(p.page.Title); title != "" {
+		return title
 	}
 	if p.route.Title != "" {
 		return p.route.Title
@@ -82,74 +88,100 @@ func (p *Page) Refresh(e *env.Env) {
 			return
 		}
 		p.page = page
+		p.refreshDerived()
 	})
-	if albumCanSave(p.route.ID) {
-		act.Call[[]model.BrowseItem](e, protocol.MethodGetLibraryAlbums, protocol.Null{}, func(items []model.BrowseItem, err error) {
-			if req != p.request || err != nil {
-				return
-			}
-			p.saved = false
-			for _, item := range items {
-				if item.ID == p.route.ID {
-					p.saved = true
-					break
-				}
-			}
-		})
+	if !albumCanSave(p.route.ID) {
+		return
 	}
+	act.Call[[]model.BrowseItem](e, protocol.MethodGetLibraryAlbums, protocol.Null{}, func(items []model.BrowseItem, err error) {
+		if req != p.request || err != nil {
+			return
+		}
+		p.saved = false
+		for _, item := range items {
+			if item.ID == p.route.ID {
+				p.saved = true
+				break
+			}
+		}
+	})
 }
 
-// Layout renders the album hero, filter, and numbered track list.
+// Layout renders one virtualised scroller containing the hero and table.
 func (p *Page) Layout(gtx layout.Context, e *env.Env) layout.Dimensions {
 	state := e.Store.Snapshot()
-	if !p.loaded || (p.libraryRev != state.LibraryRevision && !p.loading && !p.savePending) {
+	if !p.loaded || p.libraryRev != state.LibraryRevision && !p.loading && !p.savePending {
 		p.Refresh(e)
 	}
 	p.handleActions(gtx, e)
 	if p.loading && p.page.Title == nil {
-		return widgets.Loading(e)(gtx)
+		return widgets.Loading(e, widgets.LoadingHero)(gtx)
 	}
 	if p.errText != "" && p.page.Title == nil {
 		return widgets.Failed(e, p.errText, &p.retry)(gtx)
 	}
 
-	items, indices := p.filtered()
-	return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
-		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			return p.hero.Layout(gtx, e, widgets.HeroContent{
-				Art:    value(p.page.Thumbnail),
-				Kicker: albumKicker(p.page),
-				Name:   p.Title(),
-				Proof:  value(p.page.Subtitle),
-				Facts:  albumFacts(p.page),
-				Tone:   lithic.Idle,
-				Acts:   p.layoutActs(e),
-			})
-		}),
-		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			return layout.Inset{Left: 34, Right: 34, Top: 21, Bottom: 13}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-				return p.filter.Layout(gtx, e.Th, "Search this album", "/")
-			})
-		}),
-		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-			return layout.Inset{Left: 34, Right: 34, Bottom: 34}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-				if len(items) == 0 && strings.TrimSpace(p.filter.Text()) != "" {
-					return widgets.EmptyState(e, "search_off", "No tracks match “"+strings.TrimSpace(p.filter.Text())+"”.", "Clear the filter to see the whole album.")(gtx)
-				}
-				return p.list.Layout(gtx, e, items, widgets.TrackListOpts{
-					ShowArt:   false,
-					ShowAlbum: false,
-					Footer:    p.layoutFooter(e),
-					OnEnd:     func() { p.loadMore(e) },
-					OnPlay: func(i int) {
-						if i >= 0 && i < len(indices) {
-							act.PlayCollection(e, p.page.Items, indices[i], p.route.ID, p.Title(), false, p.page.Continuation)
-						}
-					},
-				})
-			})
-		}),
-	)
+	items := p.page.Items
+	if len(items) == 0 {
+		return p.scroll.Layout(gtx, e.Th, 2, func(gtx layout.Context, index int) layout.Dimensions {
+			if index == 0 {
+				return p.layoutHero(gtx, e)
+			}
+			return p.inset(e, 0, 34, widgets.EmptyState(e, look.Icon.Album, "No tracks on this album", "This album does not have any playable tracks."))(gtx)
+		})
+	}
+
+	opts := widgets.TrackTableOpts{
+		Columns:      widgets.ColArtist | widgets.ColPlays,
+		Context:      "album",
+		SourceID:     p.route.ID,
+		SourceName:   p.Title(),
+		SourceItems:  p.page.Items,
+		DisplayItems: items,
+		Continuation: p.page.Continuation,
+		Number:       true,
+	}
+	count := len(items) + 3
+	return p.scroll.Layout(gtx, e.Th, count, func(gtx layout.Context, index int) layout.Dimensions {
+		switch {
+		case index == 0:
+			return p.layoutHero(gtx, e)
+		case index == 1:
+			return p.inset(e, 0, 0, func(gtx layout.Context) layout.Dimensions {
+				return p.table.Header(gtx, e, opts)
+			})(gtx)
+		case index < len(items)+2:
+			row := index - 2
+			return p.inset(e, 0, 0, func(gtx layout.Context) layout.Dimensions {
+				return p.table.Row(gtx, e, items, row, opts)
+			})(gtx)
+		default:
+			return p.inset(e, 13, 34, p.layoutFooter(e))(gtx)
+		}
+	})
+}
+
+func (p *Page) inset(e *env.Env, top, bottom unit.Dp, body layout.Widget) layout.Widget {
+	return func(gtx layout.Context) layout.Dimensions {
+		inset := look.ContentInset(e.Th.Class)
+		return layout.Inset{Left: inset, Right: inset, Top: top, Bottom: bottom}.Layout(gtx, body)
+	}
+}
+
+func (p *Page) layoutHero(gtx layout.Context, e *env.Env) layout.Dimensions {
+	artistID, artistName := albumArtist(p.page)
+	var openArtist func()
+	if artistID != "" {
+		openArtist = func() { act.OpenArtist(e, artistID, artistName) }
+	}
+	return p.hero.Layout(gtx, e, widgets.HeroContent{
+		Art:        value(p.page.Thumbnail),
+		Kind:       albumKind(p.page),
+		Title:      p.Title(),
+		Meta:       p.meta,
+		MetaAction: openArtist,
+		Acts:       p.layoutActs(e),
+	})
 }
 
 func (p *Page) handleActions(gtx layout.Context, e *env.Env) {
@@ -159,16 +191,21 @@ func (p *Page) handleActions(gtx layout.Context, e *env.Env) {
 	if p.moreRetry.Clicked(gtx) {
 		p.loadMore(e)
 	}
-	if p.play.Main.Clicked(gtx) && len(p.page.Items) > 0 {
-		act.PlayCollection(e, p.page.Items, 0, p.route.ID, p.Title(), false, p.page.Continuation)
+	if p.play.Clicked(gtx) && len(p.page.Items) > 0 {
+		if p.collectionPlaying(e) {
+			act.Call[protocol.Null](e, protocol.MethodTogglePause, protocol.Null{}, func(_ protocol.Null, err error) {
+				if err != nil {
+					e.Toast(err.Error(), env.ToastError)
+				}
+			})
+		} else {
+			act.PlayCollection(e, p.page.Items, 0, p.route.ID, p.Title(), false, p.page.Continuation)
+		}
 	}
-	if p.play.More.Clicked(gtx) && len(p.page.Items) > 0 {
+	if p.shuffle.Clicked(gtx) && len(p.page.Items) > 0 {
 		act.PlayCollection(e, p.page.Items, 0, p.route.ID, p.Title(), true, p.page.Continuation)
 	}
-	if p.addQueue.Clicked(gtx) {
-		act.AddToQueue(e, p.page.Items, p.Title())
-	}
-	if p.download.Clicked(gtx) {
+	if p.download.Clicked(gtx) && model.ProviderOf(p.route.ID) != model.ProviderLocal {
 		p.confirmDownload(e)
 	}
 	if p.save.Clicked(gtx) && !p.savePending {
@@ -179,72 +216,91 @@ func (p *Page) handleActions(gtx layout.Context, e *env.Env) {
 		}
 	}
 	if p.more.Clicked(gtx) {
-		e.Menu(env.MenuTarget{Playlist: &p.page})
-	}
-	if p.artist.Clicked(gtx) {
-		if id, name := albumArtist(p.page); id != "" {
-			act.OpenArtist(e, id, name)
+		card := model.BrowseItem{Kind: "album", ID: p.route.ID, Title: p.Title(), Thumbnail: p.page.Thumbnail}
+		if _, artist := albumArtist(p.page); artist != "" {
+			card.Subtitle = &artist
+		}
+		if e.Overlays != nil {
+			p.menu.OpenAt(e, env.MenuTarget{Card: &card}, e.Overlays.Press())
 		}
 	}
 }
 
+func (p *Page) collectionPlaying(e *env.Env) bool {
+	state := e.Store.Snapshot()
+	return !state.Playback.Paused && state.Playback.Now != nil && state.Queue.SourceName != nil && *state.Queue.SourceName == p.Title()
+}
+
 func (p *Page) layoutActs(e *env.Env) layout.Widget {
 	return func(gtx layout.Context) layout.Dimensions {
-		provider := model.ProviderOf(p.route.ID)
-		artistID, artistName := albumArtist(p.page)
-		return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
-			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-				return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
-					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-						if len(p.page.Items) == 0 {
-							gtx = gtx.Disabled()
-						}
-						return p.play.Layout(gtx, e.Th, lithic.Gold, lithic.Icon("play_arrow"), "Play", false)
-					}),
-					layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
-					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-						return p.addQueue.Layout(gtx, e.Th, lithic.Line, lithic.Icon("queue_music"), "Add to queue")
-					}),
-					layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
-					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-						if provider == model.ProviderLocal {
-							return layout.Dimensions{}
-						}
-						return p.download.Layout(gtx, e.Th, lithic.Line, lithic.Icon("download"), "Download album")
-					}),
-				)
-			}),
-			layout.Rigid(layout.Spacer{Height: unit.Dp(8)}.Layout),
-			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-				return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
-					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-						if !albumCanSave(p.route.ID) {
-							return layout.Dimensions{}
-						}
-						if p.savePending {
-							gtx = gtx.Disabled()
-						}
-						label := "Save to library"
-						if p.saved {
-							label = "Remove from library"
-						}
-						return p.save.Layout(gtx, e.Th, lithic.Quiet, lithic.Icon("favorite"), label)
-					}),
-					layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
-					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-						if artistID == "" {
-							return layout.Dimensions{}
-						}
-						return p.artist.Layout(gtx, e.Th, lithic.Quiet, lithic.Icon("person"), artistName)
-					}),
-					layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
-					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-						return p.more.Layout(gtx, e.Th, lithic.Quiet, lithic.Icon("more_horiz"), "More")
-					}),
-				)
-			}),
-		)
+		playing := p.collectionPlaying(e)
+		p.play.Kind, p.play.Icon, p.play.Label = kit.PlaqueGold, look.Icon.Play, "Play"
+		if playing {
+			p.play.Icon, p.play.Label = look.Icon.Pause, "Pause"
+		}
+		p.shuffle.Kind, p.shuffle.Icon, p.shuffle.Description = kit.PlaqueQuiet, look.Icon.Shuffle, "Shuffle album"
+		p.save.Kind, p.save.Icon, p.save.Description = kit.PlaqueQuiet, look.Icon.HeartOutline, "Save album"
+		if p.saved {
+			p.save.Icon, p.save.Description = look.Icon.Heart, "Remove album from library"
+		}
+		p.download.Kind, p.download.Icon, p.download.Description = kit.PlaqueQuiet, look.Icon.Download, "Download album"
+		active, progress, current, complete := collectionDownload(e, p.Title(), p.trackIDs, len(p.page.Items))
+		if active {
+			p.download.Notch = e.Th.R.Lapis
+		} else {
+			p.download.Notch = color.NRGBA{}
+		}
+		if active {
+			p.download.Description = fmt.Sprintf("Downloading %d of %d", current, len(p.page.Items))
+		} else if complete {
+			p.download.Icon, p.download.Description = look.Icon.DownloadDone, "Saved"
+		}
+		p.more.Kind, p.more.Icon, p.more.Description = kit.PlaqueQuiet, look.Icon.More, "More album actions"
+		play := layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			if len(p.page.Items) == 0 {
+				gtx = gtx.Disabled()
+			}
+			return p.play.Layout(gtx, e.Th.Theme)
+		})
+		gap := layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout)
+		shuffle := layout.Rigid(func(gtx layout.Context) layout.Dimensions { return p.shuffle.Layout(gtx, e.Th.Theme) })
+		save := layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			if p.savePending {
+				gtx = gtx.Disabled()
+			}
+			return p.save.Layout(gtx, e.Th.Theme)
+		})
+		download := layout.Rigid(func(gtx layout.Context) layout.Dimensions { return p.layoutDownload(gtx, e, active, progress) })
+		more := layout.Rigid(func(gtx layout.Context) layout.Dimensions { return p.more.Layout(gtx, e.Th.Theme) })
+		canSave := albumCanSave(p.route.ID)
+		canDownload := model.ProviderOf(p.route.ID) != model.ProviderLocal
+		switch {
+		case canSave && canDownload:
+			return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx, play, gap, shuffle, gap, save, gap, download, gap, more)
+		case canSave:
+			return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx, play, gap, shuffle, gap, save, gap, more)
+		case canDownload:
+			return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx, play, gap, shuffle, gap, download, gap, more)
+		default:
+			return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx, play, gap, shuffle, gap, more)
+		}
 	}
+}
+
+func (p *Page) layoutDownload(gtx layout.Context, e *env.Env, active bool, progress int) layout.Dimensions {
+	dims := p.download.Layout(gtx, e.Th.Theme)
+	if !active {
+		return dims
+	}
+	height := max(1, gtx.Dp(2))
+	cut := gtx.Dp(e.Th.Cut.Small)
+	width := max(1, dims.Size.X-cut*2)
+	progressGTX := gtx
+	progressGTX.Constraints = layout.Exact(image.Pt(width, height))
+	offset := op.Offset(image.Pt(cut, dims.Size.Y-height)).Push(gtx.Ops)
+	kit.BladeProgress{Fraction: float64(progress) / 100}.Layout(progressGTX, e.Th.Theme)
+	offset.Pop()
+	return dims
 }
 
 func (p *Page) setSaved(e *env.Env, saved bool) {
@@ -285,62 +341,81 @@ func (p *Page) loadMore(e *env.Env) {
 		}
 		p.page.Items = append(p.page.Items, more.Items...)
 		p.page.Continuation = more.Continuation
+		p.refreshDerived()
 	})
 }
 
 func (p *Page) layoutFooter(e *env.Env) layout.Widget {
 	return func(gtx layout.Context) layout.Dimensions {
 		if p.loadingMore {
-			return layout.Inset{Top: 13, Bottom: 13}.Layout(gtx, lithic.Text(e.Th, e.Th.T.Body, e.Th.R.Fg2, "Loading more…"))
+			return kit.Text(e.Th.Theme, e.Th.T.Body, e.Th.R.Fg2, "Loading more…")(gtx)
 		}
 		if p.moreError != "" {
-			return layout.Inset{Top: 13, Bottom: 13}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-				return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
-					layout.Flexed(1, lithic.Text(e.Th, e.Th.T.Body, e.Th.R.Jasper, p.moreError)),
-					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-						return p.moreRetry.Layout(gtx, e.Th, lithic.Quiet, nil, "Try again")
-					}),
-				)
-			})
+			p.moreRetry.Kind, p.moreRetry.Label = kit.PlaqueQuiet, "Try again"
+			return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
+				layout.Flexed(1, kit.Text(e.Th.Theme, e.Th.T.Body, e.Th.R.Jasper, p.moreError)),
+				layout.Rigid(func(gtx layout.Context) layout.Dimensions { return p.moreRetry.Layout(gtx, e.Th.Theme) }),
+			)
+		}
+		if p.page.Continuation != nil && *p.page.Continuation != "" {
+			p.loadMore(e)
+			return kit.Text(e.Th.Theme, e.Th.T.Body, e.Th.R.Fg2, "Loading more…")(gtx)
 		}
 		return layout.Dimensions{}
 	}
 }
 
-func (p *Page) filtered() ([]model.Track, []int) {
-	query := strings.ToLower(strings.TrimSpace(p.filter.Text()))
-	if query == "" {
-		indices := make([]int, len(p.page.Items))
-		for i := range indices {
-			indices[i] = i
-		}
-		return p.page.Items, indices
+func (p *Page) refreshDerived() {
+	p.meta = albumMeta(p.page)
+	clear(p.trackIDs)
+	for _, track := range p.page.Items {
+		p.trackIDs[track.VideoID] = struct{}{}
 	}
-	items := make([]model.Track, 0, len(p.page.Items))
-	indices := make([]int, 0, len(p.page.Items))
-	for i, track := range p.page.Items {
-		album := value(track.Album)
-		if strings.Contains(strings.ToLower(track.Title), query) || strings.Contains(strings.ToLower(track.Artists), query) || strings.Contains(strings.ToLower(album), query) {
-			items = append(items, track)
-			indices = append(indices, i)
-		}
-	}
-	return items, indices
 }
 
-func albumFacts(page model.AlbumPage) []string {
-	facts := make([]string, 0, 3)
-	if year := findYear(value(page.Subtitle) + " " + value(page.Description)); year != "" {
-		facts = append(facts, year)
+func albumMeta(page model.AlbumPage) []kit.Span {
+	meta := make([]kit.Span, 0, 9)
+	_, artist := albumArtist(page)
+	appendMeta := func(text string, mono bool) {
+		if strings.TrimSpace(text) == "" {
+			return
+		}
+		if len(meta) > 0 {
+			meta = append(meta, kit.Span{Text: " · "})
+		}
+		meta = append(meta, kit.Span{Text: text, Mono: mono})
 	}
-	facts = append(facts, fmt.Sprintf("%d tracks", len(page.Items)))
-	if seconds := totalDuration(page.Items); seconds > 0 {
-		facts = append(facts, widgets.Duration(float64(seconds)))
-	}
-	return facts
+	appendMeta(artist, false)
+	appendMeta(findYear(value(page.Subtitle)+" "+value(page.Description)), true)
+	appendMeta(songCount(len(page.Items)), true)
+	appendMeta(collectionDuration(totalDuration(page.Items)), true)
+	return meta
 }
 
-func albumKicker(page model.AlbumPage) string {
+func songCount(n int) string {
+	if n == 1 {
+		return "1 song"
+	}
+	return fmt.Sprintf("%d songs", n)
+}
+
+func collectionDuration(seconds int) string {
+	if seconds <= 0 {
+		return ""
+	}
+	minutes := (seconds + 30) / 60
+	if minutes < 60 {
+		return fmt.Sprintf("%d min", minutes)
+	}
+	hours := minutes / 60
+	minutes %= 60
+	if minutes == 0 {
+		return fmt.Sprintf("%d hr", hours)
+	}
+	return fmt.Sprintf("%d hr %d min", hours, minutes)
+}
+
+func albumKind(page model.AlbumPage) string {
 	text := strings.ToLower(value(page.Subtitle) + " " + value(page.Description))
 	if strings.Contains(text, " ep") || strings.HasPrefix(text, "ep") {
 		return "EP"
@@ -362,12 +437,13 @@ func albumArtist(page model.AlbumPage) (string, string) {
 	return "", ""
 }
 
-func findYear(s string) string {
-	for _, field := range strings.FieldsFunc(s, func(r rune) bool { return r < '0' || r > '9' }) {
-		if len(field) == 4 {
-			if year, err := strconv.Atoi(field); err == nil && year >= 1900 && year <= 2200 {
-				return field
-			}
+func findYear(value string) string {
+	for _, field := range strings.FieldsFunc(value, func(r rune) bool { return r < '0' || r > '9' }) {
+		if len(field) != 4 {
+			continue
+		}
+		if year, err := strconv.Atoi(field); err == nil && year >= 1900 && year <= 2200 {
+			return field
 		}
 	}
 	return ""
@@ -379,10 +455,9 @@ func totalDuration(items []model.Track) int {
 		if item.Duration == nil {
 			continue
 		}
-		parts := strings.Split(*item.Duration, ":")
 		seconds := 0
 		valid := true
-		for _, part := range parts {
+		for _, part := range strings.Split(*item.Duration, ":") {
 			n, err := strconv.Atoi(strings.TrimSpace(part))
 			if err != nil {
 				valid = false
@@ -397,11 +472,45 @@ func totalDuration(items []model.Track) int {
 	return total
 }
 
+func collectionDownload(e *env.Env, title string, ids map[string]struct{}, itemCount int) (active bool, progress, current int, complete bool) {
+	matched, completed, totalProgress := 0, 0, 0
+	for _, job := range e.Store.Snapshot().Downloads.Jobs {
+		_, trackMatch := ids[job.VideoID]
+		collectionMatch := job.Collection != nil && *job.Collection == title
+		if !trackMatch && !collectionMatch {
+			continue
+		}
+		switch job.Status {
+		case model.DownloadStatusQueued:
+			active = true
+			matched++
+		case model.DownloadStatusDownloading:
+			active = true
+			matched++
+			current++
+			totalProgress += min(max(job.Progress, 0), 100)
+		case model.DownloadStatusCompleted:
+			matched++
+			completed++
+			current++
+			totalProgress += 100
+		}
+	}
+	if itemCount > 0 {
+		progress = totalProgress / itemCount
+		current = min(current, itemCount)
+	} else if matched > 0 {
+		progress = totalProgress / matched
+	}
+	complete = itemCount > 0 && completed >= itemCount
+	return active, progress, current, complete
+}
+
 func value(v *string) string {
 	if v == nil {
 		return ""
 	}
-	return *v
+	return strings.TrimSpace(*v)
 }
 
 func albumCanSave(id string) bool {

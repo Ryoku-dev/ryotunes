@@ -42,9 +42,10 @@ type App struct {
 	Store *store.Store
 	Bus   *bus.Fanout
 
-	Player    *player.Player
-	Queue     *queue.Queue
-	Providers *provider.Registry
+	Player        *player.Player
+	Queue         *queue.Queue
+	Providers     *provider.Registry
+	EngineVersion string
 
 	YouTube    *youtube.Client
 	Spotify    *spotify.Spotify

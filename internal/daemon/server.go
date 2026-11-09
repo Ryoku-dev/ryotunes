@@ -16,6 +16,7 @@ import (
 	"syscall"
 	"time"
 
+	clientstate "github.com/ryoku-dev/ryotunes/internal/client/state"
 	"github.com/ryoku-dev/ryotunes/internal/protocol"
 )
 
@@ -351,14 +352,20 @@ func (s *Server) Clients() int {
 	return s.clients
 }
 
-// Show raises subscribed clients or starts a detached Ryotunes client.
+// Show raises the lock-owning client or starts a detached one when none runs.
 func (s *Server) Show() error {
-	if s.Clients() > 0 {
+	lock, err := clientstate.AcquireClientLock()
+	if errors.Is(err, clientstate.ErrClientLockHeld) {
 		s.app.Bus.Emit(protocol.EventShow, nil)
-		if s.Clients() > 0 {
-			return nil
-		}
+		return nil
 	}
+	if err != nil {
+		return err
+	}
+	if err := lock.Close(); err != nil {
+		return fmt.Errorf("release client probe lock: %w", err)
+	}
+
 	devnull, err := os.OpenFile(os.DevNull, os.O_RDWR, 0)
 	if err != nil {
 		return err
