@@ -21,7 +21,7 @@ if [[ -z $release_version || $version != "$release_version" ]]; then
   exit 1
 fi
 
-if git grep -n $'\u2014' -- .; then
+if git grep -nF $'\xe2\x80\x94' -- .; then
   echo 'Tracked text must not contain an em dash.' >&2
   exit 1
 fi
