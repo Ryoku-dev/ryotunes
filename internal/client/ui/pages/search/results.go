@@ -8,6 +8,7 @@ import (
 	"gioui.org/unit"
 
 	"github.com/ryoku-dev/ryoku/docs/lithic/library/go/kit"
+	"github.com/ryoku-dev/ryotunes/internal/client/ui/act"
 	"github.com/ryoku-dev/ryotunes/internal/client/ui/env"
 	"github.com/ryoku-dev/ryotunes/internal/client/ui/look"
 	"github.com/ryoku-dev/ryotunes/internal/client/ui/widgets"
@@ -201,13 +202,7 @@ func mixedSongs(items []model.BrowseItem, limit int) []model.Track {
 		if item.IsVideo || strings.ToLower(item.Kind) != "song" {
 			continue
 		}
-		track := model.Track{
-			VideoID: item.ID, Title: item.Title, Thumbnail: item.Thumbnail, Duration: item.Duration,
-			ArtistRuns: item.ArtistRuns, IsUpload: item.IsUpload, Explicit: item.Explicit,
-		}
-		if item.Subtitle != nil {
-			track.Artists = strings.TrimSpace(*item.Subtitle)
-		}
+		track := act.TrackFromCard(item)
 		tracks = append(tracks, track)
 		if len(tracks) == limit {
 			break

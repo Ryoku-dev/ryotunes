@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"regexp"
 	"strings"
 	"sync"
 
@@ -149,11 +150,65 @@ func DownloadCollection(e *env.Env, title string, items []model.Track) {
 	})
 }
 
-func trackFromCard(c model.BrowseItem) model.Track {
+var (
+	cardDurationFact = regexp.MustCompile(`^\d{1,2}:\d{2}(:\d{2})?$`)
+	cardYearFact     = regexp.MustCompile(`^\d{4}$`)
+	cardCountFact    = regexp.MustCompile(`(?i)^\d+(\.\d+)?[kmb]?\s+(plays?|views?|songs?|tracks?|episodes?|subscribers?|monthly listeners?)$`)
+)
+
+func cardKindFact(value string) bool {
+	switch strings.ToLower(value) {
+	case "song", "video", "single", "ep", "album", "episode", "podcast", "playlist", "artist":
+		return true
+	default:
+		return false
+	}
+}
+
+func cardSubtitleFields(subtitle string) (artists, duration string) {
+	for _, raw := range strings.Split(subtitle, "•") {
+		fact := strings.TrimSpace(raw)
+		switch {
+		case fact == "", cardKindFact(fact), cardYearFact.MatchString(fact), cardCountFact.MatchString(fact):
+			continue
+		case cardDurationFact.MatchString(fact):
+			if duration == "" {
+				duration = fact
+			}
+		default:
+			if artists == "" {
+				artists = fact
+			} else {
+				artists += ", " + fact
+			}
+		}
+	}
+	return artists, duration
+}
+
+// TrackFromCard preserves track identity while removing presentation facts from card subtitles.
+func TrackFromCard(card model.BrowseItem) model.Track {
+	artists := make([]string, 0, len(card.ArtistRuns))
+	for _, artist := range card.ArtistRuns {
+		if name := strings.TrimSpace(artist.Text); name != "" {
+			artists = append(artists, name)
+		}
+	}
+	subtitleArtists, subtitleDuration := cardSubtitleFields(value(card.Subtitle))
+	artistText := strings.Join(artists, ", ")
+	if artistText == "" {
+		artistText = subtitleArtists
+	}
+	duration := card.Duration
+	if duration == nil || strings.TrimSpace(*duration) == "" {
+		if subtitleDuration != "" {
+			duration = &subtitleDuration
+		}
+	}
 	return model.Track{
-		VideoID: c.ID, Title: c.Title, Artists: value(c.Subtitle), ArtistRuns: c.ArtistRuns,
-		Duration: c.Duration, Thumbnail: c.Thumbnail, PlayCount: c.PlayCount,
-		IsVideo: c.IsVideo, IsUpload: c.IsUpload, Explicit: c.Explicit,
+		VideoID: card.ID, Title: card.Title, Artists: artistText, ArtistRuns: card.ArtistRuns,
+		Duration: duration, Thumbnail: card.Thumbnail, PlayCount: card.PlayCount,
+		IsVideo: card.IsVideo, IsUpload: card.IsUpload, Explicit: card.Explicit,
 	}
 }
 
@@ -171,7 +226,7 @@ func OpenCard(e *env.Env, c model.BrowseItem) {
 	}
 	switch strings.ToLower(c.Kind) {
 	case "song", "track", "video":
-		Play(e, trackFromCard(c))
+		Play(e, TrackFromCard(c))
 	case "artist", "channel", "user":
 		OpenArtist(e, c.ID, c.Title)
 	case "album", "single", "ep":

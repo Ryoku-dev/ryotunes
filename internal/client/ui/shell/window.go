@@ -120,7 +120,7 @@ func (runtime *clientRuntime) runWindows(options Options) error {
 	preferences := runtime.store.Snapshot().Client
 	initial := initialRoute(preferences.Route, options)
 	panel := env.PanelNone
-	if look.ClassFor(float32(options.Width)) != look.Compact && preferences.PanelOpen {
+	if look.ClassFor(effectiveInitialWidth(options.Width, preferences)) != look.Compact && preferences.PanelOpen {
 		panel = parsePanel(preferences.PanelTab)
 	}
 	if options.Panel != "" {
@@ -240,9 +240,9 @@ func (s *uiShell) runWindow(window *gioapp.Window, mini bool) error {
 
 func (s *uiShell) frameMain(frame gioapp.FrameEvent, operations *op.Ops) {
 	gtx := gioapp.NewContext(operations, frame)
-	windowWidthDP := float32(gtx.Metric.PxToDp(gtx.Constraints.Max.X))
 	preferences := s.runtime.store.Snapshot().Client
 	scaleMetric(&gtx, preferences)
+	windowWidthDP := float32(gtx.Metric.PxToDp(gtx.Constraints.Max.X))
 	theme := s.runtime.applyClientTheme(preferences)
 	e := s.environment(gtx.Now, theme)
 	act.PendingClipboard(gtx)
@@ -271,11 +271,20 @@ func (s *uiShell) frameMini(frame gioapp.FrameEvent, operations *op.Ops) {
 	s.layoutOverlays(gtx, e)
 }
 
-func scaleMetric(gtx *layout.Context, preferences state.ClientPreferences) {
+func clientScale(preferences state.ClientPreferences) float32 {
 	scale := float32(preferences.ZoomPercent) / 100
 	if scale <= 0 {
-		scale = 1
+		return 1
 	}
+	return scale
+}
+
+func effectiveInitialWidth(width int, preferences state.ClientPreferences) float32 {
+	return float32(width) / clientScale(preferences)
+}
+
+func scaleMetric(gtx *layout.Context, preferences state.ClientPreferences) {
+	scale := clientScale(preferences)
 	gtx.Metric.PxPerDp *= scale
 	gtx.Metric.PxPerSp *= scale
 }

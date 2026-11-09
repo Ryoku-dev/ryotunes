@@ -47,7 +47,7 @@ func (c *Card) openMenu(e *env.Env, item model.BrowseItem) {
 
 func playBrowseItem(e *env.Env, item model.BrowseItem) {
 	if browseIsTrack(item) {
-		act.Play(e, browseTrack(item))
+		act.Play(e, act.TrackFromCard(item))
 		return
 	}
 	withCollection(e, item, func(items []model.Track) {

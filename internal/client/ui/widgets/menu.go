@@ -312,21 +312,13 @@ func collectionEntries(e *env.Env, card model.BrowseItem) []menuEntry {
 	return entries
 }
 
-func browseTrack(card model.BrowseItem) model.Track {
-	return model.Track{
-		VideoID: card.ID, Title: card.Title, Artists: textValue(card.Subtitle), ArtistRuns: card.ArtistRuns,
-		Duration: card.Duration, Thumbnail: card.Thumbnail, PlayCount: card.PlayCount,
-		IsVideo: card.IsVideo, IsUpload: card.IsUpload, Explicit: card.Explicit,
-	}
-}
-
 func targetEntries(m *ItemMenu, e *env.Env, target env.MenuTarget) []menuEntry {
 	if target.Track != nil {
 		return trackEntries(m, e, target)
 	}
 	if target.Card != nil {
 		if browseIsTrack(*target.Card) {
-			track := browseTrack(*target.Card)
+			track := act.TrackFromCard(*target.Card)
 			target.Track = &track
 			return trackEntries(m, e, target)
 		}

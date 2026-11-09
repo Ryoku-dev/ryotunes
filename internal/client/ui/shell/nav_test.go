@@ -3,6 +3,7 @@ package shell
 import (
 	"testing"
 
+	"github.com/ryoku-dev/ryotunes/internal/client/state"
 	"github.com/ryoku-dev/ryotunes/internal/client/ui/env"
 	"github.com/ryoku-dev/ryotunes/internal/client/ui/look"
 )
@@ -50,16 +51,27 @@ func TestNavigatorBackClosesNowPlayingFirst(t *testing.T) {
 }
 
 func TestPanelDockingBoundary(t *testing.T) {
-	if panelDockEligible(995, look.Medium) {
-		t.Fatal("995 dp medium frame docked below the content minimum")
+	if panelDockEligible(955, look.Medium) {
+		t.Fatal("955 dp medium frame docked below the content minimum")
 	}
-	if !panelDockEligible(996, look.Medium) {
-		t.Fatal("996 dp medium frame did not dock at the exact content minimum")
+	if !panelDockEligible(956, look.Medium) {
+		t.Fatal("956 dp medium frame did not dock at the exact content minimum")
 	}
 	if panelDockEligible(1280, look.Compact) {
 		t.Fatal("compact frame allowed a docked panel")
 	}
 	if !panelDockEligible(1280, look.Expanded) {
 		t.Fatal("expanded default frame did not dock the panel")
+	}
+}
+
+func TestEffectiveWidthKeepsDefaultWindowExpandedAtSupportedZoom(t *testing.T) {
+	preferences := state.DefaultClientPreferences()
+	for _, zoom := range []int{100, 110} {
+		preferences.ZoomPercent = zoom
+		width := effectiveInitialWidth(1280, preferences)
+		if class := look.ClassFor(width); class != look.Expanded {
+			t.Fatalf("1280 dp at %d%% zoom has effective width %.2f and class %v, want expanded", zoom, width, class)
+		}
 	}
 }

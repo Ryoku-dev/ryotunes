@@ -20,7 +20,7 @@ The window is laid out like a music player, not like a list and detail tool:
    bottom bar on compact ones.
 3. The content pane with the current page.
 4. The side panel with Queue, Lyrics and Together. It docks while the content
-   keeps 560 dp and becomes a sheet when it would not.
+   keeps 520 dp and becomes a sheet when it would not.
 5. The player bar across the bottom: what plays on the left, transport over the
    progress in the centre, panels, volume and sound on the right.
 
@@ -28,9 +28,9 @@ The now playing view takes the space between the two bars with large artwork
 and lyrics. The mini player is a second window, "Ryotunes Mini", in the same
 process and the same state.
 
-Structure changes at the size-class boundaries (760 and 1280 dp) instead of
-squeezing the wide layout. Entering the compact class closes a docked panel so
-it never covers the page.
+Structure changes at the size-class boundaries (760 and 1100 dp, measured
+after the app's zoom) instead of squeezing the wide layout. Entering the
+compact class closes a docked panel so it never covers the page.
 
 ## Selection, action and source
 

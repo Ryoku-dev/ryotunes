@@ -4,6 +4,8 @@ import (
 	"image"
 	"image/color"
 	"math"
+	"strconv"
+	"strings"
 	"time"
 
 	"gioui.org/f32"
@@ -67,6 +69,83 @@ type PlayerBar struct {
 	compact compactPlayer
 }
 
+type playerBarFitMetrics struct {
+	Plaque       int
+	SmallGap     int
+	MajorGap     int
+	CompactGap   int
+	MaxScrubber  int
+	MinScrubber  int
+	TransportMin int
+}
+
+type playerBarFit struct {
+	Side       int
+	Centre     int
+	Scrubber   int
+	Gap        int
+	ShowNow    bool
+	TotalWidth int
+}
+
+func fitPlayerBar(side, centre int, metrics playerBarFitMetrics) playerBarFit {
+	fit := playerBarFit{
+		Side: side, Centre: centre, Scrubber: metrics.MaxScrubber,
+		Gap: metrics.MajorGap, ShowNow: true,
+	}
+	fit.TotalWidth = playerBarTrailingWidth(fit, metrics)
+	if fit.TotalWidth > fit.Side {
+		fit.Scrubber = metrics.MinScrubber
+		fit.TotalWidth = playerBarTrailingWidth(fit, metrics)
+	}
+	if fit.TotalWidth > fit.Side {
+		fit.ShowNow = false
+		fit.TotalWidth = playerBarTrailingWidth(fit, metrics)
+	}
+	if fit.TotalWidth > fit.Side {
+		fit.Gap = metrics.CompactGap
+		fit.TotalWidth = playerBarTrailingWidth(fit, metrics)
+	}
+	if fit.TotalWidth > fit.Side {
+		needed := fit.TotalWidth - fit.Side
+		available := max(0, (fit.Centre-metrics.TransportMin)/2)
+		grow := min(needed, available)
+		fit.Side += grow
+		fit.Centre -= grow * 2
+	}
+	return fit
+}
+
+func playerBarTrailingWidth(fit playerBarFit, metrics playerBarFitMetrics) int {
+	plaques, smallGaps := 6, 3
+	if !fit.ShowNow {
+		plaques, smallGaps = 5, 2
+	}
+	return plaques*metrics.Plaque + smallGaps*metrics.SmallGap + 3*fit.Gap + fit.Scrubber
+}
+
+func playbackDisplayDuration(reported float64, value *string) float64 {
+	if reported > 0 && !math.IsNaN(reported) && !math.IsInf(reported, 0) {
+		return reported
+	}
+	if value == nil {
+		return 0
+	}
+	parts := strings.Split(strings.TrimSpace(*value), ":")
+	if len(parts) < 2 || len(parts) > 3 {
+		return 0
+	}
+	seconds := 0
+	for index, part := range parts {
+		component, err := strconv.Atoi(strings.TrimSpace(part))
+		if err != nil || component < 0 || (index > 0 && component >= 60) {
+			return 0
+		}
+		seconds = seconds*60 + component
+	}
+	return float64(seconds)
+}
+
 // Layout renders the 88 dp three-zone player interior.
 func (bar *PlayerBar) Layout(gtx layout.Context, e *env.Env) layout.Dimensions {
 	snapshot := e.Store.Snapshot()
@@ -89,17 +168,26 @@ func (bar *PlayerBar) Layout(gtx layout.Context, e *env.Env) layout.Dimensions {
 	side = min(max(side, gtx.Dp(220)), gtx.Dp(360))
 	centre := min(gtx.Dp(560), barWidth-2*side-gtx.Dp(42))
 	centre = max(0, centre)
+	fit := fitPlayerBar(side, centre, playerBarFitMetrics{
+		Plaque:       gtx.Dp(32),
+		SmallGap:     gtx.Dp(4),
+		MajorGap:     gtx.Dp(13),
+		CompactGap:   gtx.Dp(8),
+		MaxScrubber:  gtx.Dp(120),
+		MinScrubber:  gtx.Dp(72),
+		TransportMin: gtx.Dp(220),
+	})
 
 	dimensions := layout.Inset{Left: 21, Right: 21}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 		return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
-			layout.Rigid(fixedPlayerWidth(side, func(gtx layout.Context) layout.Dimensions {
+			layout.Rigid(fixedPlayerWidth(fit.Side, func(gtx layout.Context) layout.Dimensions {
 				return bar.layoutTrack(gtx, e, snapshot, track, provider)
 			})),
-			layout.Rigid(fixedPlayerWidth(centre, func(gtx layout.Context) layout.Dimensions {
-				return bar.layoutCentre(gtx, e, snapshot)
+			layout.Rigid(fixedPlayerWidth(fit.Centre, func(gtx layout.Context) layout.Dimensions {
+				return bar.layoutCentre(gtx, e, snapshot, track, provider)
 			})),
-			layout.Rigid(fixedPlayerWidth(side, func(gtx layout.Context) layout.Dimensions {
-				return bar.layoutTrailing(gtx, e, snapshot, provider, side)
+			layout.Rigid(fixedPlayerWidth(fit.Side, func(gtx layout.Context) layout.Dimensions {
+				return bar.layoutTrailing(gtx, e, provider, fit)
 			})),
 		)
 	})
@@ -263,23 +351,34 @@ func (bar *PlayerBar) layoutDownload(gtx layout.Context, e *env.Env, job *model.
 	})
 }
 
-func (bar *PlayerBar) layoutCentre(gtx layout.Context, e *env.Env, snapshot state.State) layout.Dimensions {
+func (bar *PlayerBar) layoutCentre(gtx layout.Context, e *env.Env, snapshot state.State, track model.Track, provider model.Provider) layout.Dimensions {
 	return layout.Center.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 		return layout.Flex{Axis: layout.Vertical, Alignment: layout.Middle}.Layout(gtx,
 			layout.Rigid(func(gtx layout.Context) layout.Dimensions { return bar.transport.Layout(gtx, e, snapshot) }),
 			layout.Rigid(layout.Spacer{Height: 6}.Layout),
-			layout.Rigid(func(gtx layout.Context) layout.Dimensions { return bar.layoutSeek(gtx, e, snapshot) }),
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				return bar.layoutSeek(gtx, e, snapshot, track, provider)
+			}),
 		)
 	})
 }
 
-func (bar *PlayerBar) layoutSeek(gtx layout.Context, e *env.Env, snapshot state.State) layout.Dimensions {
-	duration := max(0, snapshot.Playback.Duration)
-	if duration == 0 {
+func (bar *PlayerBar) layoutSeek(gtx layout.Context, e *env.Env, snapshot state.State, track model.Track, provider model.Provider) layout.Dimensions {
+	if provider == model.ProviderRadio {
 		return layout.Center.Layout(gtx, kit.Claim(e.Th.Theme, palette.Alive, "Live"))
 	}
-	position := e.Store.PositionAt(gtx.Now)
-	value := float32(min(max(position/duration, 0), 1))
+	duration := playbackDisplayDuration(snapshot.Playback.Duration, track.Duration)
+	knownDuration := duration > 0
+	position := 0.0
+	end := "--:--"
+	if knownDuration {
+		position = e.Store.PositionAt(gtx.Now)
+		end = widgets.Duration(duration)
+	}
+	value := float32(0)
+	if knownDuration {
+		value = float32(min(max(position/duration, 0), 1))
+	}
 	return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
 		layout.Rigid(playerTimeBox(e, widgets.Duration(position), text.End)),
 		layout.Rigid(layout.Spacer{Width: 8}.Layout),
@@ -288,13 +387,27 @@ func (bar *PlayerBar) layoutSeek(gtx layout.Context, e *env.Env, snapshot state.
 			if !snapshot.Playback.Paused {
 				fill = e.Th.Src.Ink
 			}
-			dimensions := bar.seek.Layout(gtx, e.Th, value, look.ScrubberStyle{
+			scrubGTX := gtx
+			if !knownDuration {
+				scrubGTX = gtx.Disabled()
+			}
+			dimensions := bar.seek.Layout(scrubGTX, e.Th, value, look.ScrubberStyle{
 				Fill: fill,
 				Bubble: func(fraction float32) string {
+					if !knownDuration {
+						return "--:--"
+					}
 					return widgets.Duration(float64(fraction) * duration)
 				},
-				WheelStep: float32(min(1, 5/duration)),
+				WheelStep: float32(min(1, 5/max(1, duration))),
 			})
+			if !knownDuration {
+				if bar.seekDragging {
+					e.Store.SetSeekDrag(nil)
+				}
+				bar.seekDragging = false
+				return dimensions
+			}
 			fraction, dragging := bar.seek.Dragging()
 			if dragging {
 				preview := float64(fraction) * duration
@@ -302,7 +415,7 @@ func (bar *PlayerBar) layoutSeek(gtx layout.Context, e *env.Env, snapshot state.
 			}
 			committedFraction, committed := bar.seek.Committed()
 			if committed {
-				bar.commitSeek(gtx, e, snapshot, float64(committedFraction)*duration)
+				bar.commitSeek(gtx, e, snapshot, float64(committedFraction)*duration, duration)
 			} else if bar.seekDragging && !dragging {
 				e.Store.SetSeekDrag(nil)
 			}
@@ -311,13 +424,12 @@ func (bar *PlayerBar) layoutSeek(gtx layout.Context, e *env.Env, snapshot state.
 			return dimensions
 		}),
 		layout.Rigid(layout.Spacer{Width: 8}.Layout),
-		layout.Rigid(playerTimeBox(e, widgets.Duration(duration), text.Start)),
+		layout.Rigid(playerTimeBox(e, end, text.Start)),
 	)
 }
 
-func (bar *PlayerBar) layoutTrailing(gtx layout.Context, e *env.Env, snapshot state.State, provider model.Provider, width int) layout.Dimensions {
+func (bar *PlayerBar) layoutTrailing(gtx layout.Context, e *env.Env, provider model.Provider, fit playerBarFit) layout.Dimensions {
 	panel := e.Nav.Panel()
-	showAll := width >= gtx.Dp(330)
 	bar.lyrics.Small, bar.lyrics.Icon, bar.lyrics.Description = true, look.Icon.Lyrics, "Lyrics"
 	bar.lyrics.Kind = kit.PlaqueQuiet
 	if panel == env.PanelLyrics {
@@ -336,13 +448,7 @@ func (bar *PlayerBar) layoutTrailing(gtx layout.Context, e *env.Env, snapshot st
 	bar.mini.Small, bar.mini.Icon, bar.mini.Description, bar.mini.Kind = true, look.Icon.Mini, "Mini player", kit.PlaqueQuiet
 	bar.sound.Small, bar.sound.Icon, bar.sound.Description, bar.sound.Kind = true, look.Icon.Tune, "Sound", kit.PlaqueQuiet
 
-	volumeWidth := gtx.Dp(88)
-	if e.Th.Class == look.Expanded {
-		volumeWidth = gtx.Dp(120)
-	}
-	if showAll {
-		volumeWidth = min(volumeWidth, max(gtx.Dp(88), width-gtx.Dp(243)))
-	}
+	volumeWidth := fit.Scrubber
 
 	children := []layout.FlexChild{
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
@@ -360,7 +466,7 @@ func (bar *PlayerBar) layoutTrailing(gtx layout.Context, e *env.Env, snapshot st
 			})
 		}),
 	}
-	if showAll {
+	if fit.ShowNow {
 		children = append(children,
 			layout.Rigid(layout.Spacer{Width: 4}.Layout),
 			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
@@ -368,19 +474,21 @@ func (bar *PlayerBar) layoutTrailing(gtx layout.Context, e *env.Env, snapshot st
 					return bar.now.Layout(gtx, e.Th.Theme)
 				})
 			}),
-			layout.Rigid(layout.Spacer{Width: 13}.Layout),
-			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-				return bar.miniTip.Layout(gtx, e.Th, e.Overlays, "Mini player", func(gtx layout.Context) layout.Dimensions {
-					return bar.mini.Layout(gtx, e.Th.Theme)
-				})
-			}),
 		)
 	}
+	children = append(children,
+		layout.Rigid(fixedPlayerWidth(fit.Gap, layout.Spacer{}.Layout)),
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			return bar.miniTip.Layout(gtx, e.Th, e.Overlays, "Mini player", func(gtx layout.Context) layout.Dimensions {
+				return bar.mini.Layout(gtx, e.Th.Theme)
+			})
+		}),
+	)
 	var soundSize image.Point
 	children = append(children,
-		layout.Rigid(layout.Spacer{Width: 13}.Layout),
+		layout.Rigid(fixedPlayerWidth(fit.Gap, layout.Spacer{}.Layout)),
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions { return bar.volume.Layout(gtx, e, volumeWidth) }),
-		layout.Rigid(layout.Spacer{Width: 13}.Layout),
+		layout.Rigid(fixedPlayerWidth(fit.Gap, layout.Spacer{}.Layout)),
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			dimensions := bar.soundTip.Layout(gtx, e.Th, e.Overlays, "Sound", func(gtx layout.Context) layout.Dimensions {
 				return bar.sound.Layout(gtx, e.Th.Theme)
@@ -397,10 +505,10 @@ func (bar *PlayerBar) layoutTrailing(gtx layout.Context, e *env.Env, snapshot st
 	if bar.queue.Clicked(gtx) {
 		e.Nav.TogglePanel(env.PanelQueue)
 	}
-	if showAll && bar.now.Clicked(gtx) {
+	if fit.ShowNow && bar.now.Clicked(gtx) {
 		e.Nav.ToggleNowPlaying()
 	}
-	if showAll && bar.mini.Clicked(gtx) {
+	if bar.mini.Clicked(gtx) {
 		e.Nav.ToggleMini()
 	}
 	if bar.sound.Clicked(gtx) && e.Overlays != nil {
@@ -409,8 +517,8 @@ func (bar *PlayerBar) layoutTrailing(gtx layout.Context, e *env.Env, snapshot st
 	return dimensions
 }
 
-func (bar *PlayerBar) commitSeek(gtx layout.Context, e *env.Env, snapshot state.State, target float64) {
-	target = min(max(target, 0), snapshot.Playback.Duration)
+func (bar *PlayerBar) commitSeek(gtx layout.Context, e *env.Env, snapshot state.State, target, duration float64) {
+	target = min(max(target, 0), duration)
 	bar.seekPending = true
 	bar.seekTarget = target
 	bar.seekOrigin = snapshot.Playback.Position

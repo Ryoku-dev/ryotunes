@@ -164,7 +164,7 @@ func (mini *Mini) layoutDetails(gtx layout.Context, e *env.Env, snapshot state.S
 		})),
 		layout.Rigid(layout.Spacer{Height: 13}.Layout),
 		layout.Rigid(miniFixedHeight(gtx.Dp(18), func(gtx layout.Context) layout.Dimensions {
-			return mini.layoutSeek(gtx, e, snapshot)
+			return mini.layoutSeek(gtx, e, snapshot, track, provider)
 		})),
 		layout.Rigid(layout.Spacer{Height: 13}.Layout),
 		layout.Rigid(miniFixedHeight(gtx.Dp(40), func(gtx layout.Context) layout.Dimensions {
@@ -177,13 +177,22 @@ func (mini *Mini) layoutDetails(gtx layout.Context, e *env.Env, snapshot state.S
 	)
 }
 
-func (mini *Mini) layoutSeek(gtx layout.Context, e *env.Env, snapshot state.State) layout.Dimensions {
-	duration := snapshot.Playback.Duration
-	if duration <= 0 {
+func (mini *Mini) layoutSeek(gtx layout.Context, e *env.Env, snapshot state.State, track model.Track, provider model.Provider) layout.Dimensions {
+	if provider == model.ProviderRadio {
 		return layout.Center.Layout(gtx, kit.Claim(e.Th.Theme, palette.Alive, "Live"))
 	}
-	position := e.Store.PositionAt(gtx.Now)
-	value := float32(min(max(position/duration, 0), 1))
+	duration := playbackDisplayDuration(snapshot.Playback.Duration, track.Duration)
+	knownDuration := duration > 0
+	position := 0.0
+	end := "--:--"
+	if knownDuration {
+		position = e.Store.PositionAt(gtx.Now)
+		end = widgets.Duration(duration)
+	}
+	value := float32(0)
+	if knownDuration {
+		value = float32(min(max(position/duration, 0), 1))
+	}
 	return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
 		layout.Rigid(playerTimeBox(e, widgets.Duration(position), text.End)),
 		layout.Rigid(layout.Spacer{Width: 8}.Layout),
@@ -192,11 +201,27 @@ func (mini *Mini) layoutSeek(gtx layout.Context, e *env.Env, snapshot state.Stat
 			if !snapshot.Playback.Paused {
 				fill = e.Th.Src.Ink
 			}
-			dimensions := mini.seek.Layout(gtx, e.Th, value, look.ScrubberStyle{
-				Fill:      fill,
-				Bubble:    func(fraction float32) string { return widgets.Duration(float64(fraction) * duration) },
-				WheelStep: float32(min(1, 5/duration)),
+			scrubGTX := gtx
+			if !knownDuration {
+				scrubGTX = gtx.Disabled()
+			}
+			dimensions := mini.seek.Layout(scrubGTX, e.Th, value, look.ScrubberStyle{
+				Fill: fill,
+				Bubble: func(fraction float32) string {
+					if !knownDuration {
+						return "--:--"
+					}
+					return widgets.Duration(float64(fraction) * duration)
+				},
+				WheelStep: float32(min(1, 5/max(1, duration))),
 			})
+			if !knownDuration {
+				if mini.seekDragging {
+					e.Store.SetSeekDrag(nil)
+				}
+				mini.seekDragging = false
+				return dimensions
+			}
 			fraction, dragging := mini.seek.Dragging()
 			if dragging {
 				preview := float64(fraction) * duration
@@ -219,7 +244,7 @@ func (mini *Mini) layoutSeek(gtx layout.Context, e *env.Env, snapshot state.Stat
 			return dimensions
 		}),
 		layout.Rigid(layout.Spacer{Width: 8}.Layout),
-		layout.Rigid(playerTimeBox(e, widgets.Duration(duration), text.Start)),
+		layout.Rigid(playerTimeBox(e, end, text.Start)),
 	)
 }
 
@@ -229,6 +254,10 @@ func (mini *Mini) layoutBottom(gtx layout.Context, e *env.Env, snapshot state.St
 	if mini.showLyrics {
 		mini.lyricsAct.Kind = kit.PlaqueOn
 	}
+	scrubberWidth := fitMiniScrubber(
+		gtx.Constraints.Max.X, gtx.Dp(32), gtx.Dp(4),
+		gtx.Dp(100), gtx.Dp(72), canRate,
+	)
 	dimensions := layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			if !canRate {
@@ -257,7 +286,7 @@ func (mini *Mini) layoutBottom(gtx layout.Context, e *env.Env, snapshot state.St
 			})
 		}),
 		layout.Flexed(1, layout.Spacer{}.Layout),
-		layout.Rigid(func(gtx layout.Context) layout.Dimensions { return mini.volume.Layout(gtx, e, gtx.Dp(100)) }),
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions { return mini.volume.Layout(gtx, e, scrubberWidth) }),
 	)
 	if canRate && mini.like.Clicked(gtx) {
 		rating := model.RatingLike
@@ -277,6 +306,18 @@ func miniFixedHeight(height int, content layout.Widget) layout.Widget {
 		gtx.Constraints.Min.Y, gtx.Constraints.Max.Y = height, height
 		return layout.Center.Layout(gtx, content)
 	}
+}
+
+func fitMiniScrubber(available, plaque, gap, preferred, minimum int, showLike bool) int {
+	fixed := 2*plaque + gap
+	if showLike {
+		fixed += plaque + gap
+	}
+	remaining := available - fixed
+	if remaining >= preferred {
+		return preferred
+	}
+	return max(minimum, remaining)
 }
 
 func (mini *Mini) reconcileSeek(gtx layout.Context, e *env.Env, position float64, trackID string) {

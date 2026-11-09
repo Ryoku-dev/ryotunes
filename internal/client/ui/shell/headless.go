@@ -30,7 +30,7 @@ func (r *clientRuntime) renderPNG(options Options) error {
 	preferences := r.store.Snapshot().Client
 	initial := initialRoute(preferences.Route, options)
 	panel := env.PanelNone
-	if look.ClassFor(float32(options.Width)) != look.Compact && preferences.PanelOpen {
+	if look.ClassFor(effectiveInitialWidth(options.Width, preferences)) != look.Compact && preferences.PanelOpen {
 		panel = parsePanel(preferences.PanelTab)
 	}
 	if options.Panel != "" {
@@ -49,7 +49,6 @@ func (r *clientRuntime) renderPNG(options Options) error {
 	defer unsubscribe()
 
 	metric := unit.Metric{PxPerDp: 1, PxPerSp: 1}
-	windowWidthDP := float32(metric.PxToDp(options.Width))
 	var operations op.Ops
 	var router input.Router
 	started := time.Now()
@@ -91,6 +90,7 @@ func (r *clientRuntime) renderPNG(options Options) error {
 			shell.mini.Layout(gtx, e)
 			shell.layoutOverlays(gtx, e)
 		} else {
+			windowWidthDP := float32(gtx.Metric.PxToDp(options.Width))
 			shell.layout(gtx, e, windowWidthDP)
 			shell.layoutOverlays(gtx, e)
 		}

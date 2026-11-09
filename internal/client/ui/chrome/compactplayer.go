@@ -45,7 +45,7 @@ func (bar *PlayerBar) LayoutCompact(gtx layout.Context, e *env.Env) layout.Dimen
 		return layout.Dimensions{}
 	}
 	gtx.Constraints = layout.Exact(image.Pt(width, height))
-	bar.layoutCompactProgress(gtx, e, snapshot.Playback.Duration, snapshot.Playback.Paused)
+	bar.layoutCompactProgress(gtx, e, playbackDisplayDuration(snapshot.Playback.Duration, track.Duration), snapshot.Playback.Paused)
 
 	canRate := provider != model.ProviderLocal && provider != model.ProviderRadio
 	key := track.VideoID

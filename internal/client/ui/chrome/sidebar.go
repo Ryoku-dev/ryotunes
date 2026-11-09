@@ -458,23 +458,71 @@ func sidebarPlaying(snapshot state.State, item sidebarCollection) bool {
 	return snapshot.Queue.SourceName != nil && strings.EqualFold(strings.TrimSpace(*snapshot.Queue.SourceName), strings.TrimSpace(item.card.Title))
 }
 
+func sidebarCardCount(item model.BrowseItem) (int, bool) {
+	if count, ok := sidebarCollectionCount(item.Subtitle); ok {
+		return count, true
+	}
+	return sidebarCollectionCount(item.PlayCount)
+}
+
+func sidebarAlbumArtist(item model.BrowseItem) string {
+	for _, artist := range item.ArtistRuns {
+		name := strings.TrimSpace(artist.Text)
+		if name != "" && !strings.EqualFold(name, strings.TrimSpace(item.Title)) {
+			return name
+		}
+	}
+	if item.Subtitle == nil {
+		return ""
+	}
+	name := strings.TrimSpace(*item.Subtitle)
+	if name == "" || strings.EqualFold(name, strings.TrimSpace(item.Title)) || strings.EqualFold(name, "Album") {
+		return ""
+	}
+	return name
+}
+
+func sidebarSongsSuffix(count int) string {
+	if count == 1 {
+		return " song"
+	}
+	return " songs"
+}
+
 func sidebarCaption(e *env.Env, item sidebarCollection, likedCount int, selected bool) layout.Widget {
 	ink := e.Th.R.Fg3
 	if selected {
 		ink = e.Th.R.OnSel2
 	}
 	if item.liked {
+		if likedCount == 0 {
+			return kit.Text(e.Th.Theme, e.Th.T.Caption, ink, "No songs yet")
+		}
 		return func(gtx layout.Context) layout.Dimensions {
 			return kit.Sentence(gtx, e.Th.Theme, e.Th.T.Caption, ink, []kit.Span{
-				{Text: "Liked songs · "}, {Text: widgets.Count(likedCount), Mono: true},
+				{Text: widgets.Count(likedCount), Mono: true},
+				{Text: sidebarSongsSuffix(likedCount)},
 			})
 		}
 	}
-	caption := sidebarCollectionKind(item.card)
-	if item.card.Subtitle != nil && strings.TrimSpace(*item.card.Subtitle) != "" {
-		caption = strings.TrimSpace(*item.card.Subtitle)
+	kind := sidebarCollectionKind(item.card)
+	switch kind {
+	case "Playlist":
+		if count, ok := sidebarCardCount(item.card); ok {
+			return func(gtx layout.Context) layout.Dimensions {
+				return kit.Sentence(gtx, e.Th.Theme, e.Th.T.Caption, ink, []kit.Span{
+					{Text: "Playlist · "},
+					{Text: widgets.Count(count), Mono: true},
+					{Text: sidebarSongsSuffix(count)},
+				})
+			}
+		}
+	case "Album":
+		if artist := sidebarAlbumArtist(item.card); artist != "" {
+			return kit.Text(e.Th.Theme, e.Th.T.Caption, ink, "Album · "+artist)
+		}
 	}
-	return kit.Text(e.Th.Theme, e.Th.T.Caption, ink, caption)
+	return kit.Text(e.Th.Theme, e.Th.T.Caption, ink, kind)
 }
 
 func (sidebar *Sidebar) layoutCollectionArt(gtx layout.Context, e *env.Env, row *sidebarCollectionRow, item sidebarCollection, size int) layout.Dimensions {

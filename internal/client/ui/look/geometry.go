@@ -1,10 +1,6 @@
 package look
 
-import (
-	"gioui.org/unit"
-
-	"github.com/ryoku-dev/ryoku/docs/lithic/library/go/tokens"
-)
+import "gioui.org/unit"
 
 // Class is the responsive frame structure selected from the window width.
 type Class uint8
@@ -13,6 +9,12 @@ const (
 	Compact Class = iota
 	Medium
 	Expanded
+)
+
+// Player breakpoints keep the sidebar with playlist names visible in a 1280 px window at 110% zoom.
+const (
+	playerBreakpointMedium   float32 = 760
+	playerBreakpointExpanded float32 = 1100
 )
 
 // Frame dimensions in dp.
@@ -25,15 +27,15 @@ const (
 	PlayerBar           unit.Dp = 88
 	PlayerCompact       unit.Dp = 64
 	BottomNav           unit.Dp = 56
-	ContentMinWithPanel unit.Dp = 560
+	ContentMinWithPanel unit.Dp = 520
 )
 
 // ClassFor resolves the frame structure for a width in dp.
 func ClassFor(widthDp float32) Class {
 	switch {
-	case widthDp >= tokens.BreakpointExpanded:
+	case widthDp >= playerBreakpointExpanded:
 		return Expanded
-	case widthDp >= tokens.BreakpointMedium:
+	case widthDp >= playerBreakpointMedium:
 		return Medium
 	default:
 		return Compact

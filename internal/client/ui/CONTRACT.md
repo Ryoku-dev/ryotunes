@@ -127,8 +127,10 @@ provider the source colour is `R.Lapis` (fill) and its re-toned ink.
 
 ## Frame geometry (dp)
 
-`W`, `H` are the window size. Classes come from `tokens.Breakpoint*`:
-compact `W < 760`, medium `760 <= W < 1280`, expanded `W >= 1280`. Structure
+`W`, `H` are the window size in effective dp: window pixels divided by the
+screen scale times the app's zoom. The player window has its own classes:
+compact `W < 760`, medium `760 <= W < 1100`, expanded `W >= 1100`, so the
+sidebar with playlist names survives a 1280 window at 110 % zoom. Structure
 changes at a boundary; a wide layout is never squeezed.
 
 ```
@@ -159,7 +161,7 @@ compact
 | sidebar | x 8, width 240, labels + playlists | x 8, width 72, icons + playlist covers | none: bottom nav 56 |
 | content side inset | 34 | 21 | 13 |
 | content top inset (pages without a hero) | 21 | 21 | 13 |
-| right panel | docked 340 when `W - sidebar - 340 - 24 >= 560`, else an overlay sheet 340 wide (max `W - 72`) over the content's right edge | same rule | full sheet over the content, opened only by an explicit action |
+| right panel | docked 340 when `W - sidebar - 340 - 24 >= 520`, else an overlay sheet 340 wide (max `W - 72`) over the content's right edge | same rule | full sheet over the content, opened only by an explicit action |
 | player bar | 88, three zones | 88, three zones, narrower | compact player 64 above the bottom nav |
 
 Crossing into compact closes a docked panel (it would otherwise cover the
@@ -550,7 +552,7 @@ var Icon struct{ Play, Pause, Next, Previous, Shuffle, Repeat, RepeatOne,
 // Frame geometry, in dp.
 const (TopBar = 56; Gap = 8; SidebarExpanded = 240; SidebarMedium = 72
     Panel = 340; PlayerBar = 88; PlayerCompact = 64; BottomNav = 56
-    ContentMinWithPanel = 560)
+    ContentMinWithPanel = 520)
 func ContentInset(c Class) unit.Dp // 34, 21, 13
 
 // Scrolling (app-owned: see Library limits). Every delta applies at once,
