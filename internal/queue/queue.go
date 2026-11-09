@@ -138,6 +138,9 @@ func (q *Queue) Playback() model.PlaybackSnapshot {
 
 // Play replaces the context with one seed while retaining upcoming manual rows.
 func (q *Queue) Play(ctx context.Context, item model.Track) error {
+	if item.VideoID == "" {
+		return errNothingToPlay
+	}
 	q.mu.Lock()
 	manual := upcomingManual(q.state.items, q.state.current)
 	forceHydrate := len(manual) > 1
@@ -167,7 +170,10 @@ func (q *Queue) PlayPlaylist(ctx context.Context, items []model.Track, start *in
 	if index < 0 || index >= len(items) {
 		return errors.New("queue index out of range")
 	}
-	items = cloneTracks(items)
+	items, index, _ = dropUnplayable(cloneTracks(items), index, index)
+	if index < 0 {
+		return errNothingToPlay
+	}
 	for i := range items {
 		items[i] = cleanQueueFlags(items[i])
 	}

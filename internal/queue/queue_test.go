@@ -2,6 +2,8 @@ package queue
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"math/rand/v2"
 	"reflect"
 	"testing"
@@ -254,5 +256,58 @@ func TestCloseCancelsAndJoinsBackgroundWork(t *testing.T) {
 	case <-done:
 	case <-time.After(time.Second):
 		t.Fatal("Close did not join cancelled autoplay")
+	}
+}
+
+type mapPersist map[string]string
+
+func (m mapPersist) Get(key string) (string, bool) { value, ok := m[key]; return value, ok }
+func (m mapPersist) Set(key, value string) error   { m[key] = value; return nil }
+
+func TestPlayWithoutAnIDKeepsTheQueue(t *testing.T) {
+	q, _ := testQueue(t, &fakeProvider{}, &fakeHooks{})
+	q.state.items = tracks("a", "b")
+	q.state.current = 1
+	if err := q.Play(context.Background(), model.Track{}); !errors.Is(err, errNothingToPlay) {
+		t.Fatalf("Play(empty) error = %v, want %v", err, errNothingToPlay)
+	}
+	start := 1
+	if err := q.PlayPlaylist(context.Background(), []model.Track{{VideoID: "x"}, {}}, &start, nil, nil, false, nil); !errors.Is(err, errNothingToPlay) {
+		t.Fatalf("PlayPlaylist(start on empty) error = %v, want %v", err, errNothingToPlay)
+	}
+	if got := ids(q.state.items); !reflect.DeepEqual(got, []string{"a", "b"}) || q.state.current != 1 {
+		t.Fatalf("queue = %v at %d, want [a b] at 1 untouched", got, q.state.current)
+	}
+}
+
+func TestRestoreDropsTracksWithoutAnID(t *testing.T) {
+	tests := []struct {
+		name         string
+		items        []model.Track
+		current      int
+		wantIDs      []string
+		wantCurrent  int
+		wantSeekFrom string
+	}{
+		{name: "only an empty track", items: []model.Track{{}}, wantIDs: []string{}},
+		{name: "current kept and moved", items: []model.Track{{}, {VideoID: "a"}, {VideoID: "b"}}, current: 2, wantIDs: []string{"a", "b"}, wantCurrent: 1, wantSeekFrom: "b"},
+		{name: "current dropped", items: []model.Track{{VideoID: "a"}, {}, {VideoID: "b"}}, current: 1, wantIDs: []string{"a", "b"}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			raw, err := json.Marshal(savedQueue{Items: test.items, Current: test.current, PlayedFrom: test.current, Repeat: model.RepeatOff})
+			if err != nil {
+				t.Fatal(err)
+			}
+			q, _ := testQueue(t, &fakeProvider{}, &fakeHooks{})
+			q.persist = mapPersist{queueJSONKey: string(raw), queuePositionKey: "42"}
+			q.restore()
+			if got := ids(q.state.items); !reflect.DeepEqual(got, test.wantIDs) || q.state.current != test.wantCurrent {
+				t.Fatalf("restored %v at %d, want %v at %d", got, q.state.current, test.wantIDs, test.wantCurrent)
+			}
+			if q.pendingSeekID != test.wantSeekFrom {
+				t.Fatalf("pending seek on %q, want %q", q.pendingSeekID, test.wantSeekFrom)
+			}
+		})
 	}
 }

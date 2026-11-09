@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"strconv"
 	"time"
 
@@ -49,6 +50,16 @@ func (q *Queue) restore() {
 			}
 		}
 	}
+	items, current, playedFrom := dropUnplayable(q.state.items, q.state.current, q.state.playedFrom)
+	if len(items) == 0 {
+		q.state = state{repeat: q.state.repeat}
+		return
+	}
+	if current < 0 {
+		q.state.items, q.state.current, q.state.playedFrom = items, 0, 0
+		return
+	}
+	q.state.items, q.state.current, q.state.playedFrom = items, current, playedFrom
 	if rawPosition, ok := q.persist.Get(queuePositionKey); ok {
 		if position, err := strconv.ParseFloat(rawPosition, 64); err == nil && position > 0 {
 			q.pendingSeek = position
@@ -56,6 +67,29 @@ func (q *Queue) restore() {
 			q.position = position
 		}
 	}
+}
+
+var errNothingToPlay = errors.New("nothing to play")
+
+// dropUnplayable removes tracks without an id, which can never play, in place,
+// and moves current and playedFrom with the tracks they pointed at; current is
+// -1 when its own track was dropped.
+func dropUnplayable(items []model.Track, current, playedFrom int) ([]model.Track, int, int) {
+	kept := items[:0]
+	mappedCurrent, mappedFrom := -1, 0
+	for i, item := range items {
+		if item.VideoID == "" {
+			continue
+		}
+		if i == current {
+			mappedCurrent = len(kept)
+		}
+		if i <= playedFrom {
+			mappedFrom = len(kept)
+		}
+		kept = append(kept, item)
+	}
+	return kept, mappedCurrent, mappedFrom
 }
 
 func clampIndex(value, length int) int {

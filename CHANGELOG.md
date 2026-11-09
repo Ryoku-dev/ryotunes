@@ -22,6 +22,7 @@
 - Ryotunes shows up as Ryotunes instead of mpv in your volume mixer.
 - Fixed trackpad scrolling trailing behind your fingers, the sound popover getting cut off at the bottom of the window, the volume being hard to drag, a narrow window hiding the page behind the queue, and Ryotunes not opening again while something else was listening to its events.
 - Fixed remote playback stalling or skipping during back-to-back loads, restored live playback events, made daemon shutdown deterministic, and applied proxy changes across every network-backed source and download.
+- Fixed an empty "Untitled track" that could replace your queue and come back after every restart. Local music covers show up again too.
 
 ## v2.0.0 - 2026-11-08
 
