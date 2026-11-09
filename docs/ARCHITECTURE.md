@@ -166,8 +166,8 @@ publishes events; it never calls back into `App` under a lock.
 
 ### Errors and logging
 
-`log/slog`, JSON to `$XDG_STATE_HOME/ryotunes/ryotunesd.log` with size
-rotation, level from `RYOTUNES_LOG` (default `warn`). Every repairable
+`log/slog`, JSON to `$XDG_DATA_HOME/dev.ryoku.ryotunes/logs/ryotunesd.log` with
+size rotation, level from `RYOTUNES_LOG` (default `warn`). Every repairable
 playback wedge logs one `info` line that names the repair. User-visible
 errors are plain sentences in `internal/daemon/copy.go`; packages return
 typed errors and the handler picks the sentence.

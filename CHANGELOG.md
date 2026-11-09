@@ -7,11 +7,11 @@
 - Search is one field in the top bar, with recent searches and suggestions while you type.
 - Play, likes, track changes, seeking, panels and provider switches have small animations, and nothing moves while you are not doing anything.
 - The Discord toggle is back in the top bar, artists can be subscribed to again, and Settings has its missing rows back: sound, watched folders, playlist import and export, diagnostics and the engine version.
-- The seek bar is a sharp zigzag wave that moves while music plays and lies flat when you pause, like Android's wavy progress but cut in Lithic.
+- The seek bar is a slim, sharp zigzag that moves while music plays and lies flat when you pause, like Android's wavy progress but cut in Lithic.
 - Page headers and the now playing view have a visualizer of Lithic blades that move with the music at 60 frames a second. It uses cava and can be turned off in Settings, Appearance.
 - Home's mood chips now replace the page with that mood's music, and All brings the usual Home back.
-- Sign in opens your browser for YouTube Music, Spotify, SoundCloud and TIDAL, with Open again and Copy link while it waits, and the Home Sign in starts it right there.
-- Fixed lyrics in now playing falling behind the song, the mini player getting cut off at 110% zoom, and the Settings section list trailing behind your scroll.
+- Sign in opens your browser for YouTube Music, Spotify, SoundCloud and TIDAL, with Open again and Copy link while it waits, and the Home Sign in starts it right there. YouTube Music first tries the session from one browser profile at a time and opens the browser instead of showing an error when that session can't be used.
+- Fixed lyrics in now playing falling behind the song, the mini player getting cut off at 110% zoom, the time over the seek bar being cut in half, and the Settings section list trailing behind your scroll. The mini player's window buttons are smaller and sit clear of the corner.
 - Ryotunes shows up as Ryotunes instead of mpv in your volume mixer.
 - Fixed trackpad scrolling trailing behind your fingers, the sound popover getting cut off at the bottom of the window, the volume being hard to drag, a narrow window hiding the page behind the queue, and Ryotunes not opening again while something else was listening to its events.
 - Fixed remote playback stalling or skipping during back-to-back loads, restored live playback events, made daemon shutdown deterministic, and applied proxy changes across every network-backed source and download.

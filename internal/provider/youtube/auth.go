@@ -60,16 +60,17 @@ func (c *Client) SignIn(ctx context.Context) (SignInFlow, error) {
 	c.signInMu.Unlock()
 
 	stores := c.cookies.Discover()
-	if header := harvestYouTubeCookies(c.cookies, stores); sapisidCookie(header) != "" {
-		err := c.applyCookie(ctx, header)
+	signedIn, failures := c.tryCookieCandidates(ctx, buildYouTubeCookieCandidates(c.cookies, stores, time.Now()))
+	if signedIn {
 		c.signInMu.Lock()
 		c.signingIn = false
 		c.signInMu.Unlock()
-		return SignInFlow{}, err
+		return SignInFlow{}, nil
 	}
+	c.warnCookieCandidateFailures(failures, nil)
 
 	done := make(chan error, 1)
-	flowCtx, cancel := context.WithTimeout(c.ctx, 5*time.Minute)
+	flowCtx, cancel := context.WithCancel(c.ctx)
 	c.wg.Add(1)
 	go func() {
 		defer c.wg.Done()
@@ -84,15 +85,56 @@ func (c *Client) SignIn(ctx context.Context) (SignInFlow, error) {
 	return SignInFlow{URL: youtubeSignInURL, Done: done}, nil
 }
 
+type cookieCandidateFailure struct {
+	candidate cookieCandidate
+	err       error
+}
+
+func (c *Client) tryCookieCandidates(ctx context.Context, candidates []cookieCandidate) (bool, []cookieCandidateFailure) {
+	attemptCtx, cancel := context.WithTimeout(ctx, 8*time.Second)
+	defer cancel()
+	failures := make([]cookieCandidateFailure, 0, len(candidates))
+	for _, candidate := range candidates {
+		err := c.applyCookie(attemptCtx, candidate.header)
+		if err == nil {
+			return true, failures
+		}
+		failures = append(failures, cookieCandidateFailure{candidate: candidate, err: err})
+		if attemptCtx.Err() != nil {
+			break
+		}
+	}
+	return false, failures
+}
+
+func (c *Client) warnCookieCandidateFailures(failures []cookieCandidateFailure, seenReasons map[string]struct{}) {
+	for _, failure := range failures {
+		reason := failure.err.Error()
+		if seenReasons != nil {
+			if _, seen := seenReasons[reason]; seen {
+				continue
+			}
+			seenReasons[reason] = struct{}{}
+		}
+		c.log.Warn(
+			"YouTube browser cookie import failed",
+			"store", failure.candidate.store.Path,
+			"container", failure.candidate.container,
+			"error", failure.err,
+		)
+	}
+}
+
 func (c *Client) watchSignIn(ctx context.Context, stores []browsercookies.Store) error {
 	deadline := time.NewTimer(5 * time.Minute)
 	defer deadline.Stop()
 	ticker := time.NewTicker(2 * time.Second)
 	defer ticker.Stop()
-	seen := make(map[string]time.Time)
+	seenModifications := make(map[string]time.Time)
 	for _, store := range stores {
-		seen[store.Path] = cookieStoreModTime(store)
+		seenModifications[store.Path] = cookieStoreModTime(store)
 	}
+	loggedReasons := make(map[string]struct{})
 	for {
 		select {
 		case <-ctx.Done():
@@ -103,15 +145,21 @@ func (c *Client) watchSignIn(ctx context.Context, stores []browsercookies.Store)
 			stores = c.cookies.Discover()
 			changed := false
 			for _, store := range stores {
-				if c.cookies.ChangedSince(store, seen[store.Path]) {
+				if c.cookies.ChangedSince(store, seenModifications[store.Path]) {
 					changed = true
-					seen[store.Path] = cookieStoreModTime(store)
+					seenModifications[store.Path] = cookieStoreModTime(store)
 				}
 			}
-			if changed {
-				if header := harvestYouTubeCookies(c.cookies, stores); sapisidCookie(header) != "" {
-					return c.applyCookie(ctx, header)
-				}
+			if !changed {
+				continue
+			}
+			signedIn, failures := c.tryCookieCandidates(ctx, buildYouTubeCookieCandidates(c.cookies, stores, time.Now()))
+			if signedIn {
+				return nil
+			}
+			c.warnCookieCandidateFailures(failures, loggedReasons)
+			if err := ctx.Err(); err != nil {
+				return err
 			}
 		}
 	}
@@ -125,39 +173,6 @@ func cookieStoreModTime(store browsercookies.Store) time.Time {
 		}
 	}
 	return latest
-}
-
-func harvestYouTubeCookies(source CookieSource, stores []browsercookies.Store) string {
-	type value struct {
-		cookie      browsercookies.Cookie
-		specificity int
-	}
-	selected := make(map[string]value)
-	for _, store := range stores {
-		cookies, err := source.Read(store, "youtube.com")
-		if err != nil {
-			continue
-		}
-		for _, cookie := range cookies {
-			if cookie.Name == "" {
-				continue
-			}
-			specificity := len(strings.TrimPrefix(strings.ToLower(cookie.Host), "."))
-			if old, ok := selected[cookie.Name]; !ok || specificity > old.specificity {
-				selected[cookie.Name] = value{cookie: cookie, specificity: specificity}
-			}
-		}
-	}
-	names := make([]string, 0, len(selected))
-	for name := range selected {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-	parts := make([]string, 0, len(names))
-	for _, name := range names {
-		parts = append(parts, name+"="+selected[name].cookie.Value)
-	}
-	return strings.Join(parts, "; ")
 }
 
 // ImportCookiesFile imports a Netscape cookies.txt session and validates it.

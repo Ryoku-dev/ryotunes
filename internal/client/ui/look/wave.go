@@ -41,7 +41,7 @@ func (state *WaveState) reset() {
 
 func waveDefaults(thickness, amplitude, wavelength unit.Dp) (unit.Dp, unit.Dp, unit.Dp) {
 	if thickness <= 0 {
-		thickness = 4
+		thickness = 2
 	}
 	if amplitude <= 0 {
 		amplitude = 3
@@ -151,8 +151,9 @@ func DrawWave(gtx layout.Context, th *Theme, state *WaveState, rect image.Rectan
 		target = amplitudePx
 	}
 	if !state.ready {
+		// a wave that appears while music plays is already moving, only play and pause ease
 		state.amplitude = anim.Spring{Omega: omega, Rest: .02}
-		state.amplitude.Snap(0)
+		state.amplitude.Snap(target)
 		state.ready = true
 	}
 	state.amplitude.Omega = omega
@@ -190,8 +191,8 @@ func DrawWave(gtx layout.Context, th *Theme, state *WaveState, rect image.Rectan
 	played := start + fraction*(end-start)
 	centre := float32(rect.Min.Y+rect.Max.Y) / 2
 	gap := float32(0)
-	if currentAmplitude > float32(gtx.Dp(unit.Dp(.5))) {
-		gap = float32(gtx.Dp(4))
+	if currentAmplitude > 0 {
+		gap = float32(gtx.Dp(3))
 	}
 	trackStart := min(played+gap, end)
 	if trackStart < end && track.A > 0 {

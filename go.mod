@@ -17,6 +17,7 @@ require (
 	github.com/ryoku-dev/ryoku/docs/lithic/library/go v0.0.0-20261109022738-f273fa939a18
 	golang.org/x/exp/shiny v0.0.0-20261106192419-47ce03d25ef0
 	golang.org/x/image v0.47.0
+	golang.org/x/net v0.48.0
 	golang.org/x/oauth2 v0.37.0
 	golang.org/x/text v0.43.0
 	google.golang.org/protobuf v1.36.11
@@ -46,7 +47,6 @@ require (
 	go.yaml.in/yaml/v3 v3.0.5 // indirect
 	golang.org/x/crypto v0.46.0 // indirect
 	golang.org/x/exp v0.0.0-20251209150349-8475f28825e9 // indirect
-	golang.org/x/net v0.48.0 // indirect
 	golang.org/x/sys v0.49.0 // indirect
 	modernc.org/libc v1.80.1 // indirect
 	modernc.org/mathutil v1.7.1 // indirect

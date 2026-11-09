@@ -253,9 +253,11 @@ func (s *Scrubber) Layout(gtx layout.Context, th *Theme, value float32, style Sc
 	hover := s.hoverValue(gtx, th)
 	thickness := style.Thickness
 	if thickness <= 0 {
-		thickness = 4
+		thickness = 2
 	}
-	thickness += unit.Dp(2 * hover)
+	if style.AlwaysHandle {
+		thickness += unit.Dp(hover)
+	}
 	trackHeight := max(1, gtx.Dp(thickness))
 	trackY := (size.Y - trackHeight) / 2
 	trackInk := scrubberTrackInk(th.R)
@@ -281,9 +283,9 @@ func (s *Scrubber) Layout(gtx layout.Context, th *Theme, value float32, style Sc
 	if style.AlwaysHandle {
 		handleAlpha = 1
 	}
-	handleWidth, handleHeight, handleCut := max(1, gtx.Dp(4)), max(1, gtx.Dp(18)), 0
+	handleWidth, handleHeight, handleCut := max(1, gtx.Dp(3)), max(1, gtx.Dp(14)), 0
 	if style.AlwaysHandle {
-		handleWidth, handleHeight, handleCut = max(1, gtx.Dp(12)), max(1, gtx.Dp(12)), gtx.Dp(3)
+		handleWidth, handleHeight, handleCut = max(1, gtx.Dp(10)), max(1, gtx.Dp(10)), gtx.Dp(3)
 	}
 	handleX := int(math.Round(float64(display*float32(width)))) - handleWidth/2
 	if handleAlpha > 0 {

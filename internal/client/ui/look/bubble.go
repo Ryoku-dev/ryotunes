@@ -19,7 +19,7 @@ func Bubble(gtx layout.Context, th *Theme, at image.Point, value string, alpha f
 	}
 	measure := gtx
 	measure.Constraints.Min = image.Point{}
-	measure.Constraints.Max.X = max(0, gtx.Constraints.Max.X)
+	measure.Constraints.Max = image.Pt(max(0, gtx.Constraints.Max.X), 1<<20)
 	record := op.Record(gtx.Ops)
 	dimensions := layout.Inset{Top: 4, Bottom: 4, Left: 8, Right: 8}.Layout(measure, func(gtx layout.Context) layout.Dimensions {
 		return kit.Label{Style: th.T.Mono, Color: th.R.Fg, MaxLines: 1, Align: text.Middle}.Layout(gtx, th.Theme, value)

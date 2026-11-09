@@ -99,7 +99,12 @@ func (a *App) Dispatch(ctx context.Context, method string, params json.RawMessag
 	}
 	result, err := h(ctx, a, params)
 	if err != nil {
-		return nil, asProtocolError(err)
+		rpcError := asProtocolError(err)
+		_, generic := userMessageMapping(err)
+		if rpcError.Code == protocol.ErrorFailed && generic && a.Log != nil {
+			a.Log.Warn("daemon request failed", "method", method, "error", err)
+		}
+		return nil, rpcError
 	}
 	return result, nil
 }

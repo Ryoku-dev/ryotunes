@@ -281,13 +281,15 @@ stone1, 88 high, x 8 to W-8, top corners cut 16, side insets 21. Three zones:
   the previous level or 70.
 
 Scrubbers (look.Scrubber): 24 high hit area across the full length. Every end
-and corner is square or cut, never rounded. The handle is a vertical blade
-(4 × 18, square ends, `fg`) for seek and a 12 square cut 3 for volume; the seek
-handle fades in on hover or drag, the volume handle is always shown. Press
-anywhere jumps there and grabs the pointer
-(`pointer.GrabCmd`) so the drag continues outside the 24 band until release. A
-bubble (stone4, cut 4, `T.Mono`) floats 8 above the pointer while hovering or
-dragging: the time under the pointer for seek, the percentage for volume. Seek
+and corner is square or cut, never rounded. Seek uses a 2 thick track and a
+3 × 14 vertical blade handle (square ends, `fg`) that fades in on hover or
+drag without changing the track thickness. Volume uses a 2 thick track at
+rest, 3 on hover, and an always-visible 10 square handle cut 3. Press anywhere
+jumps there and grabs the pointer (`pointer.GrabCmd`) so the drag continues
+outside the 24 band until release. A bubble (stone4, cut 4, `T.Mono`) floats 8
+above the pointer while hovering or dragging, measured at its full label
+height and clamped horizontally inside the scrubber: the time under the
+pointer for seek, the percentage for volume. Seek
 previews while dragging and commits on release; the position then holds at the
 committed value until the daemon reports past it (no jump back). Volume sends
 `set_volume` at most every 50 ms while dragging and persists on release. Wheel
@@ -298,21 +300,21 @@ step; over seek: ±5 s per notch. Keyboard when focused: Left/Right step.
 compact player). Android's wavy progress, chiselled: the played part is a
 zigzag, a triangle wave with sharp vertices, never a sine.
 
-- Played part: a zigzag 4 thick (perpendicular), amplitude 3, wavelength 20,
+- Played part: a zigzag 2 thick (perpendicular), amplitude 3, wavelength 20,
   in the fill colour. Build it as one filled polygon: the zigzag's points
   shifted up and down by `thickness / 2 × √(1 + slope²)`, which keeps parallel
   edges and sharp mitred vertices. Clip it at the track start and at the
   played position with a vertical cut.
-- Unplayed part: a flat track 4 thick in the track ink (at least 1.5:1 against
-  the bar plane in both modes), starting 4 after the played end while the wave
+- Unplayed part: a flat track 2 thick in the track ink (at least 1.5:1 against
+  the bar plane in both modes), starting 3 after the played end while the wave
   has amplitude, square at both ends.
 - While playing, the wave travels toward the played end at one wavelength per
   1200 ms. Pausing, buffering, a drag or reduced motion flattens it: amplitude
-  eases to 0 over `Motion.Field`, then the phase stops and the bar is a flat 4
+  eases to 0 over `Motion.Field`, then the phase stops and the bar is a flat 2
   stroke that asks for no frames. Resuming eases the amplitude back.
-- Hover keeps the wave and shows the blade handle; dragging flattens it so the
-  position is exact.
-- The compact player's top edge uses the same wave at 2 thick, amplitude 1.5,
+- Hover keeps the wave at 2 thick and shows the 3 × 14 blade handle; dragging
+  flattens it so the position is exact.
+- The compact player's top edge uses the same wave at 1.5 thick, amplitude 1.5,
   wavelength 12.
 
 **Sound popover** (chrome/sound.go): a `look.Overlays` entry anchored to the
@@ -325,7 +327,7 @@ changes debounce 80 ms into `set_audio_fx`; a quiet "Reset" plaque at the end.
 
 **Compact player** (64, stone1, cut 16 top corners, above the bottom nav): art 44
 │ 13 │ title and artist (flexed) │ 8 │ like │ 8 │ play/pause (gold 40) │ 4 │
-next. A wave progress (2 thick) across the bar's top edge shows progress in
+next. A wave progress (1.5 thick) across the bar's top edge shows progress in
 `Src.Ink`. Tapping the art or text opens the now playing view.
 
 Progress drawing: while the wave travels it asks for its next frame 1/30 s ahead
@@ -399,8 +401,11 @@ player bar stay. Escape, Back or the plaque closes it. It enters over
 ### Mini window (chrome/mini.go)
 
 Title "Ryotunes Mini", its own window, asked for at 360 × 420 dp times the
-zoom; the niri rule opens it at 360 × 420. 32 strip on top (drag; "expand" and
-close small quiet plaques at the right), then title `T.Row` and artists
+zoom; the niri rule opens it at 360 × 420. A 48 strip on top keeps 24 square
+expand and close controls 12 from the top and right edges, 6 apart. Their icons
+are 16, their cut is 4, their resting plane is clear, hover steps to stone3,
+press follows the plaque recipe, and keyboard focus draws the shared ring.
+Only the strip's blank part drags the window. Then title `T.Row` and artists
 `T.Caption` centred, the seek row, the transport row (13 apart) and a 48
 bottom row (like, lyrics toggle; volume icon and scrubber at the right), 13
 apart with 13 side and bottom insets. The art (cut 7) takes what is left:
@@ -758,7 +763,7 @@ instant.
 | like | `look.Fill`: the heart fills from its centre in `Src.Ink`; unliking empties it | notch 200 |
 | track changes | player-bar art crossfades; title and artists rise 8 and fade in | navigate 200 |
 | track changes in the now playing view | art crossfades | field 320 |
-| hover a scrubber | blade handle and bubble fade in; a flat track thickens 4 → 6 | hover in / out |
+| hover a scrubber | blade handle and bubble fade in; only the volume track thickens 2 → 3 | hover in / out |
 | drag a scrubber | handle follows the pointer exactly; the wave flattens; seek holds the committed value | field 320 |
 | playback starts / pauses | the wave's amplitude eases in and travels / eases out and stops | field 320 |
 | music plays | visualizer blades rise fast and fall slowly with the bands | springs, every frame |
@@ -819,11 +824,13 @@ The client opens every sign-in page; the daemon never launches a browser. The
 client runs inside the graphical session that started it, so its opener has
 the session's display and browser, and it can see when opening fails.
 
-- YouTube Music and SoundCloud: `sign_in` and `soundcloud_sign_in` return the
-  page to open (`{"url": ...}`) and keep watching the browser's cookie stores
-  as now. Spotify: the existing `spotify-auth` `url` event. TIDAL: the
-  `tidal-auth` `waiting` event carries `url` (the complete verification link)
-  and `code`.
+YouTube Music imports one eligible browser session at a time, in discovered
+store order with the default container first. If every session fails it returns
+the sign-in page without an RPC error and keeps watching all stores until one
+succeeds or five minutes pass. SoundCloud keeps its existing cookie-store
+watch; Spotify uses the `spotify-auth` `url` event, and TIDAL's `tidal-auth`
+`waiting` event carries the complete verification `url` and `code`.
+
 - `act.OpenURL(e, url)` starts `xdg-open url` detached (its own session, no
   inherited descriptors) and waits for it off the frame goroutine. Each flow's
   URL opens once. A missing opener or a non-zero exit shows a placard "Could

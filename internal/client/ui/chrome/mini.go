@@ -25,9 +25,9 @@ import (
 
 // Mini owns the complete Ryotunes Mini window content.
 type Mini struct {
-	expand    kit.IconPlaque
+	expand    look.WindowControl
 	expandTip look.Tip
-	close     kit.IconPlaque
+	close     look.WindowControl
 	closeTip  look.Tip
 
 	artClick   kit.Click
@@ -74,7 +74,7 @@ func (mini *Mini) Layout(gtx layout.Context, e *env.Env) layout.Dimensions {
 	}
 
 	const detailsHeight = 40 + 13 + 18 + 13 + 40 + 5 + 48
-	fixed := gtx.Dp(32 + 13 + detailsHeight + 13)
+	fixed := gtx.Dp(48 + 13 + detailsHeight + 13)
 	stageSide, showStage := fitMiniStage(size.Y-fixed, size.X-2*gtx.Dp(13), gtx.Dp(96), gtx.Dp(200))
 	if !showStage {
 		mini.showLyrics = false
@@ -109,10 +109,10 @@ func (mini *Mini) WindowAction() (system.Action, bool) {
 }
 
 func (mini *Mini) layoutStrip(gtx layout.Context, e *env.Env) layout.Dimensions {
-	gtx.Constraints.Min.Y, gtx.Constraints.Max.Y = gtx.Dp(32), gtx.Dp(32)
-	mini.expand.Small, mini.expand.Kind, mini.expand.Icon, mini.expand.Description = true, kit.PlaqueQuiet, look.Icon.Expand, "Expand"
-	mini.close.Small, mini.close.Kind, mini.close.Icon, mini.close.Description = true, kit.PlaqueQuiet, look.Icon.Close, "Close"
-	dimensions := layout.Inset{Left: 8, Right: 8}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+	gtx.Constraints.Min.Y, gtx.Constraints.Max.Y = gtx.Dp(48), gtx.Dp(48)
+	mini.expand.Icon, mini.expand.Description = look.Icon.Expand, "Expand"
+	mini.close.Icon, mini.close.Description = look.Icon.Close, "Close"
+	dimensions := layout.Inset{Left: 12, Right: 12}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 		return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
 			layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
 				size := gtx.Constraints.Max
@@ -123,13 +123,13 @@ func (mini *Mini) layoutStrip(gtx layout.Context, e *env.Env) layout.Dimensions 
 			}),
 			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 				return mini.expandTip.Layout(gtx, e.Th, e.Overlays, "Expand", func(gtx layout.Context) layout.Dimensions {
-					return mini.expand.Layout(gtx, e.Th.Theme)
+					return mini.expand.Layout(gtx, e.Th)
 				})
 			}),
-			layout.Rigid(layout.Spacer{Width: 4}.Layout),
+			layout.Rigid(layout.Spacer{Width: 6}.Layout),
 			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 				return mini.closeTip.Layout(gtx, e.Th, e.Overlays, "Close", func(gtx layout.Context) layout.Dimensions {
-					return mini.close.Layout(gtx, e.Th.Theme)
+					return mini.close.Layout(gtx, e.Th)
 				})
 			}),
 		)

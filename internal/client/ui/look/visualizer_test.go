@@ -110,16 +110,20 @@ func TestPlaybackMotionCadence(t *testing.T) {
 			})
 		})
 	})
-	t.Run("wave", func(t *testing.T) {
+	t.Run("wave appearing while playing", func(t *testing.T) {
 		var wave WaveState
-		wave.ready = true
-		wave.amplitude.Snap(3)
 		assertNextFrame(t, 32*time.Millisecond, 35*time.Millisecond, func(gtx layout.Context) {
 			DrawWave(gtx, theme, &wave, image.Rect(0, 0, 180, 24), .5, roles.Fg, roles.Fg3, 4, 3, 20, true)
 		})
 	})
 	t.Run("wave amplitude", func(t *testing.T) {
 		var wave WaveState
+		var paused op.Ops
+		DrawWave(layout.Context{
+			Ops: &paused, Now: now.Add(-time.Second),
+			Metric:      unit.Metric{PxPerDp: 1, PxPerSp: 1},
+			Constraints: layout.Exact(image.Pt(180, 40)),
+		}, theme, &wave, image.Rect(0, 0, 180, 24), .5, roles.Fg, roles.Fg3, 4, 3, 20, false)
 		assertNextFrame(t, 16*time.Millisecond, 18*time.Millisecond, func(gtx layout.Context) {
 			DrawWave(gtx, theme, &wave, image.Rect(0, 0, 180, 24), .5, roles.Fg, roles.Fg3, 4, 3, 20, true)
 		})

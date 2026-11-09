@@ -41,9 +41,13 @@ type Store struct {
 
 // Cookie is the portable subset of a browser cookie.
 type Cookie struct {
-	Name  string
-	Value string
-	Host  string
+	Name        string
+	Value       string
+	Host        string
+	Path        string
+	Expires     time.Time
+	Container   string
+	Partitioned bool
 }
 
 // Discover returns eligible cookie stores in default-browser-first path order.
@@ -204,7 +208,7 @@ func copyFile(src, dst string) error {
 }
 
 func readGecko(db *sql.DB, suffixes []string) ([]Cookie, error) {
-	rows, err := db.Query(`SELECT name, value, host FROM moz_cookies`)
+	rows, err := db.Query(`SELECT name, value, host, path, expiry, originAttributes FROM moz_cookies`)
 	if err != nil {
 		return nil, err
 	}
@@ -212,9 +216,21 @@ func readGecko(db *sql.DB, suffixes []string) ([]Cookie, error) {
 	var result []Cookie
 	for rows.Next() {
 		var cookie Cookie
-		if err := rows.Scan(&cookie.Name, &cookie.Value, &cookie.Host); err != nil {
+		var expiry int64
+		var originAttributes string
+		if err := rows.Scan(
+			&cookie.Name,
+			&cookie.Value,
+			&cookie.Host,
+			&cookie.Path,
+			&expiry,
+			&originAttributes,
+		); err != nil {
 			return nil, err
 		}
+		cookie.Expires = geckoExpiry(expiry)
+		cookie.Container = geckoContainer(originAttributes)
+		cookie.Partitioned = strings.Contains(originAttributes, "partitionKey=")
 		if hostMatches(cookie.Host, suffixes) {
 			result = append(result, cookie)
 		}
@@ -222,8 +238,36 @@ func readGecko(db *sql.DB, suffixes []string) ([]Cookie, error) {
 	return result, rows.Err()
 }
 
+func geckoExpiry(value int64) time.Time {
+	if value <= 0 {
+		return time.Time{}
+	}
+	if value > 1e12 {
+		return time.UnixMilli(value)
+	}
+	return time.Unix(value, 0)
+}
+
+func geckoContainer(originAttributes string) string {
+	for attribute := range strings.SplitSeq(strings.TrimPrefix(originAttributes, "^"), "&") {
+		name, value, ok := strings.Cut(attribute, "=")
+		if ok && name == "userContextId" {
+			return value
+		}
+	}
+	return ""
+}
+
 func readChromium(db *sql.DB, st Store, suffixes []string) ([]Cookie, error) {
-	rows, err := db.Query(`SELECT name, value, host_key, encrypted_value FROM cookies`)
+	hasPartitionKey, err := tableHasColumn(db, "cookies", "top_frame_site_key")
+	if err != nil {
+		return nil, err
+	}
+	query := `SELECT name, value, host_key, path, expires_utc, encrypted_value, '' FROM cookies`
+	if hasPartitionKey {
+		query = `SELECT name, value, host_key, path, expires_utc, encrypted_value, top_frame_site_key FROM cookies`
+	}
+	rows, err := db.Query(query)
 	if err != nil {
 		return nil, err
 	}
@@ -233,15 +277,25 @@ func readChromium(db *sql.DB, st Store, suffixes []string) ([]Cookie, error) {
 	v11Tried := false
 	var result []Cookie
 	for rows.Next() {
-		var name, value, host string
+		var cookie Cookie
+		var expiry int64
 		var encrypted []byte
-		if err := rows.Scan(&name, &value, &host, &encrypted); err != nil {
+		var topFrameSiteKey sql.NullString
+		if err := rows.Scan(
+			&cookie.Name,
+			&cookie.Value,
+			&cookie.Host,
+			&cookie.Path,
+			&expiry,
+			&encrypted,
+			&topFrameSiteKey,
+		); err != nil {
 			return nil, err
 		}
-		if !hostMatches(host, suffixes) {
+		if !hostMatches(cookie.Host, suffixes) {
 			continue
 		}
-		if value == "" && len(encrypted) >= 3 {
+		if cookie.Value == "" && len(encrypted) >= 3 {
 			var key []byte
 			switch string(encrypted[:3]) {
 			case "v10":
@@ -254,14 +308,45 @@ func readChromium(db *sql.DB, st Store, suffixes []string) ([]Cookie, error) {
 				key = v11
 			}
 			if len(key) != 0 {
-				value, _ = decryptChromium(encrypted[3:], key, host)
+				cookie.Value, _ = decryptChromium(encrypted[3:], key, cookie.Host)
 			}
 		}
-		if value != "" {
-			result = append(result, Cookie{Name: name, Value: value, Host: host})
+		if cookie.Value != "" {
+			cookie.Expires = chromiumExpiry(expiry)
+			cookie.Partitioned = topFrameSiteKey.Valid && topFrameSiteKey.String != ""
+			result = append(result, cookie)
 		}
 	}
 	return result, rows.Err()
+}
+
+func tableHasColumn(db *sql.DB, table, column string) (bool, error) {
+	rows, err := db.Query(`PRAGMA table_info(` + table + `)`)
+	if err != nil {
+		return false, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id, notNull, primaryKey int
+		var name, columnType string
+		var defaultValue any
+		if err := rows.Scan(&id, &name, &columnType, &notNull, &defaultValue, &primaryKey); err != nil {
+			return false, err
+		}
+		if name == column {
+			return true, nil
+		}
+	}
+	return false, rows.Err()
+}
+
+func chromiumExpiry(value int64) time.Time {
+	if value == 0 {
+		return time.Time{}
+	}
+	const unixEpochInChromiumMicroseconds = int64(11_644_473_600_000_000)
+	unixMicroseconds := value - unixEpochInChromiumMicroseconds
+	return time.Unix(unixMicroseconds/1_000_000, unixMicroseconds%1_000_000*1_000)
 }
 
 func chromiumKey(passphrase string) []byte {

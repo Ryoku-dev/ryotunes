@@ -140,7 +140,7 @@ func (bar *PlayerBar) layoutCompactProgress(gtx layout.Context, e *env.Env, dura
 	live := e.Fx.Wave && !paused
 	look.DrawWave(
 		gtx, e.Th, &bar.compact.wave, image.Rect(0, 0, width, max(1, gtx.Dp(8))),
-		fraction, e.Th.Src.Ink, e.Th.R.Fg3, 2, 1.5, 12, live,
+		fraction, e.Th.Src.Ink, e.Th.R.Fg3, 1.5, 1.5, 12, live,
 	)
 	if !live {
 		bar.requestProgressFrame(gtx, e, duration, max(1, width), paused)

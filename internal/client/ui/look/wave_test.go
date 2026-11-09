@@ -6,7 +6,7 @@ import (
 )
 
 func TestWavePolygonKeepsPerpendicularThickness(t *testing.T) {
-	const thickness = float32(4)
+	const thickness = float32(2)
 	points := wavePolygon(nil, 0, 45, 20, 3, 20, 0, thickness)
 	upper := len(points) / 2
 	if upper < 4 || len(points)%2 != 0 {
@@ -23,6 +23,13 @@ func TestWavePolygonKeepsPerpendicularThickness(t *testing.T) {
 		if math.Abs(float64(perpendicular-thickness)) > .001 {
 			t.Fatalf("edge pair %d thickness = %v, want %v", index, perpendicular, thickness)
 		}
+	}
+}
+
+func TestWaveDefaultsUseSlimSeekGeometry(t *testing.T) {
+	thickness, amplitude, wavelength := waveDefaults(0, 0, 0)
+	if thickness != 2 || amplitude != 3 || wavelength != 20 {
+		t.Fatalf("waveDefaults(0, 0, 0) = (%v, %v, %v), want (2, 3, 20)", thickness, amplitude, wavelength)
 	}
 }
 
