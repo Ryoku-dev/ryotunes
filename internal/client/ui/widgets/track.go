@@ -70,14 +70,19 @@ type TrackTable struct {
 }
 
 type trackRow struct {
-	click      kit.Click
-	play       kit.Click
-	like       kit.Click
-	more       kit.IconPlaque
-	fill       look.Fill
-	hover      look.Hover
-	contextTag int
-	menu       ItemMenu
+	click             kit.Click
+	play              kit.Click
+	like              kit.Click
+	more              kit.IconPlaque
+	fill              look.Fill
+	hover             look.Hover
+	contextTag        int
+	menu              ItemMenu
+	titleChildren     [3]layout.FlexChild
+	titleLineChildren [3]layout.FlexChild
+	inlineChildren    [5]layout.FlexChild
+	titleCopyChildren [2]layout.FlexChild
+	rowChildren       [8]layout.FlexChild
 }
 
 type trackSpec struct {
@@ -199,8 +204,9 @@ func (t *TrackTable) listHasMixedProviders(items []model.Track) bool {
 
 func tableSpec(gtx layout.Context, e *env.Env, opts TrackTableOpts) trackSpec {
 	width := gtx.Constraints.Max.X
+	contentWidth := gtx.Metric.PxToDp(width)
 	spec := trackSpec{width: width, index: gtx.Dp(48)}
-	spec.compact = e.Th.Class == look.Compact
+	spec.compact = contentWidth < 560
 	spec.art = opts.Columns&ColArt != 0
 	values := opts.DisplayItems
 	hasValues := len(values) > 0
@@ -211,11 +217,11 @@ func tableSpec(gtx layout.Context, e *env.Env, opts TrackTableOpts) trackSpec {
 	if opts.Context == "album" && sameArtist(opts.SourceItems) {
 		spec.showArtist = false
 	}
-	spec.showAlbum = opts.Columns&ColAlbum != 0 && !spec.compact && gtx.Metric.PxToDp(width) >= 900
+	spec.showAlbum = opts.Columns&ColAlbum != 0 && !spec.compact && contentWidth >= 900
 	if hasValues && !anyTrackValue(values, func(track model.Track) string { return textValue(track.Album) }) {
 		spec.showAlbum = false
 	}
-	spec.showPlays = opts.Columns&ColPlays != 0 && !spec.compact
+	spec.showPlays = opts.Columns&ColPlays != 0 && !spec.compact && contentWidth >= 720
 	if hasValues && !anyPlayCount(values) {
 		spec.showPlays = false
 	}
@@ -483,7 +489,7 @@ func (t *TrackTable) titleCell(gtx layout.Context, e *env.Env, row *trackRow, tr
 	if row.like.Hovered() {
 		likeAlpha = 1
 	}
-	children := make([]layout.FlexChild, 0, 8)
+	children := row.titleChildren[:0]
 	if art {
 		children = append(children,
 			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
@@ -493,7 +499,7 @@ func (t *TrackTable) titleCell(gtx layout.Context, e *env.Env, row *trackRow, tr
 		)
 	}
 	children = append(children, layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-		title := make([]layout.FlexChild, 0, 3)
+		title := row.titleLineChildren[:0]
 		if mixed {
 			provider := model.ProviderOf(track.VideoID)
 			if provider != "" {
@@ -520,7 +526,7 @@ func (t *TrackTable) titleCell(gtx layout.Context, e *env.Env, row *trackRow, tr
 			}
 		}
 		title = append(title, layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-			inline := make([]layout.FlexChild, 0, 5)
+			inline := row.inlineChildren[:0]
 			inline = append(inline, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 				gtx.Constraints.Min.X = 0
 				gtx.Constraints.Max.X = max(0, gtx.Constraints.Max.X-extraWidth)
@@ -558,9 +564,10 @@ func (t *TrackTable) titleCell(gtx layout.Context, e *env.Env, row *trackRow, tr
 			}
 			return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx, inline...)
 		}))
-		copy := []layout.FlexChild{layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+		copy := row.titleCopyChildren[:1]
+		copy[0] = layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx, title...)
-		})}
+		})
 		if compact && strings.TrimSpace(track.Artists) != "" {
 			copy = append(copy, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 				return kit.Label{Style: e.Th.T.Caption, Color: quiet, MaxLines: 1}.Layout(gtx, e.Th.Theme, track.Artists)
@@ -589,14 +596,13 @@ func (t *TrackTable) rowContent(gtx layout.Context, e *env.Env, row *trackRow, i
 	if selected {
 		quiet = e.Th.R.OnSel2
 	}
-	children := []layout.FlexChild{
-		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			return t.indexCell(gtx, e, row, index, selected, playing, hot)
-		}),
-		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-			return t.titleCell(gtx, e, row, track, selected, playing, hot, mixed, spec.compact, spec.art)
-		}),
-	}
+	children := row.rowChildren[:2]
+	children[0] = layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+		return t.indexCell(gtx, e, row, index, selected, playing, hot)
+	})
+	children[1] = layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+		return t.titleCell(gtx, e, row, track, selected, playing, hot, mixed, spec.compact, spec.art)
+	})
 	if spec.showArtist {
 		children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			return fixedText(gtx, e, spec.artist, e.Th.T.Caption, quiet, track.Artists, text.Start)

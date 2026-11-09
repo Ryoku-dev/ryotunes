@@ -280,10 +280,11 @@ stone1, 88 high, x 8 to W-8, top corners cut 16, side insets 21. Three zones:
   1/3, `volume_down` under 2/3, `volume_up` above) and toggles mute, restoring
   the previous level or 70.
 
-Scrubbers (look.Scrubber): 24 high hit area across the full length, 4 dp track
-(stone3) that thickens to 6 on hover, fill from the left, a 12 square handle
-(cut 3, `fg`). The seek handle fades in on hover or drag; the volume handle is
-always shown. Press anywhere jumps there and grabs the pointer
+Scrubbers (look.Scrubber): 24 high hit area across the full length. Every end
+and corner is square or cut, never rounded. The handle is a vertical blade
+(4 × 18, square ends, `fg`) for seek and a 12 square cut 3 for volume; the seek
+handle fades in on hover or drag, the volume handle is always shown. Press
+anywhere jumps there and grabs the pointer
 (`pointer.GrabCmd`) so the drag continues outside the 24 band until release. A
 bubble (stone4, cut 4, `T.Mono`) floats 8 above the pointer while hovering or
 dragging: the time under the pointer for seek, the percentage for volume. Seek
@@ -292,6 +293,27 @@ committed value until the daemon reports past it (no jump back). Volume sends
 `set_volume` at most every 50 ms while dragging and persists on release. Wheel
 or trackpad over volume: ±5 per notch, trackpad deltas accumulate to the same
 step; over seek: ±5 s per notch. Keyboard when focused: Left/Right step.
+
+**Wave progress** (`ScrubberStyle.Wave`, every seek bar: player bar, mini,
+compact player). Android's wavy progress, chiselled: the played part is a
+zigzag, a triangle wave with sharp vertices, never a sine.
+
+- Played part: a zigzag 4 thick (perpendicular), amplitude 3, wavelength 20,
+  in the fill colour. Build it as one filled polygon: the zigzag's points
+  shifted up and down by `thickness / 2 × √(1 + slope²)`, which keeps parallel
+  edges and sharp mitred vertices. Clip it at the track start and at the
+  played position with a vertical cut.
+- Unplayed part: a flat track 4 thick in the track ink (at least 1.5:1 against
+  the bar plane in both modes), starting 4 after the played end while the wave
+  has amplitude, square at both ends.
+- While playing, the wave travels toward the played end at one wavelength per
+  1200 ms. Pausing, buffering, a drag or reduced motion flattens it: amplitude
+  eases to 0 over `Motion.Field`, then the phase stops and the bar is a flat 4
+  stroke that asks for no frames. Resuming eases the amplitude back.
+- Hover keeps the wave and shows the blade handle; dragging flattens it so the
+  position is exact.
+- The compact player's top edge uses the same wave at 2 thick, amplitude 1.5,
+  wavelength 12.
 
 **Sound popover** (chrome/sound.go): a `look.Overlays` entry anchored to the
 sound plaque's window rectangle, placed above the bar, right edges aligned and
@@ -303,12 +325,14 @@ changes debounce 80 ms into `set_audio_fx`; a quiet "Reset" plaque at the end.
 
 **Compact player** (64, stone1, cut 16 top corners, above the bottom nav): art 44
 │ 13 │ title and artist (flexed) │ 8 │ like │ 8 │ play/pause (gold 40) │ 4 │
-next. A 2 dp blade across the bar's top edge shows progress in `Src.Ink`.
-Tapping the art or text opens the now playing view.
+next. A wave progress (2 thick) across the bar's top edge shows progress in
+`Src.Ink`. Tapping the art or text opens the now playing view.
 
-Progress drawing: while playing, the bar asks for its next frame only when the
-fill would move by one pixel (`duration / trackPx`, at least 250 ms) and when
-the elapsed second changes. Paused or hidden, it asks for none.
+Progress drawing: while the wave moves, the bar asks for its next frame 1/60 s
+ahead. When the wave is flat (paused, reduced motion, wave turned off) it asks
+for its next frame only when the fill would move by one pixel
+(`duration / trackPx`, at least 250 ms) and when the elapsed second changes.
+Paused or hidden, it asks for none.
 
 ### Right panel (chrome/rightpanel.go, queue.go, lyrics.go, together.go)
 
@@ -331,10 +355,17 @@ on Escape or an outside press, which it swallows.
   the next tracks show here."
 - **Lyrics:** synced lines, the active one `T.Section` `fg` with sung words in
   `Src.Ink`, others `T.Proof` `fg3`, romanized line under each in
-  `T.Caption`. The active line glides to one third from the top with the
-  library spring; a manual scroll pauses following for 5 s and shows a quiet
-  "Follow" plaque. Clicking a line seeks to it. Caption proof: where the lyrics
-  came from. No lyrics: `kit.Empty` "No lyrics for this track".
+  `T.Caption`. The active line sits one third from the top. Following moves
+  the list's anchor (`layout.Position.First`) next to the active line at once,
+  so the line is laid out on the first frame, and springs only the remaining
+  distance (at most one viewport). Only real wheel, trackpad or drag input on
+  the lyrics pauses following, for 5 s, and shows a quiet "Follow" plaque; the
+  follow motion itself never counts as a manual scroll. A seek, a track change,
+  a speed change or the surface becoming visible anchors at once. The clock is
+  the playback position projected with the playback speed, the same clock
+  that schedules the next line and word boundary. Clicking a line seeks to it.
+  Caption proof: where the lyrics came from. No lyrics: `kit.Empty` "No lyrics
+  for this track".
 - **Together:** the Listen Together session (existing behaviour, rebuilt on
   kit components).
 
@@ -353,20 +384,66 @@ player bar stay. Escape, Back or the plaque closes it. It enters over
   add to playlist, download, start radio, more. Nothing in this row is gold.
   Right column: `kit.Tabs` Lyrics, Queue, then the content; lyrics here use
   `T.Sentence` for the active line and `T.Section` `fg3` for the others.
-- Narrower: one scrolling column: art `min(paneW - 42, 360)`, title, act row,
-  then the lyrics.
+- Narrower: a pane shorter than 720 puts art 120 (cut 7) beside the title,
+  artists and act row; a taller pane stacks art `min(paneW - 42, 280,
+  paneH - 440)` over them. The Lyrics and Queue tabs and their scroller fill
+  the rest.
+- The visualizer band runs along the pane's bottom edge (see Visualizer): 88
+  high at ≥ 900, 56 narrower, inset 34 (21 narrower) at the sides and 13 from
+  the bottom. The columns end 21 above it, so lyrics never run over bars.
 - Facts appear only when they exist. Never print "Plays -", "Unknown", an
   empty album or a lone provider word.
 - The art crossfades over `Motion.Field` when the track changes.
 
 ### Mini window (chrome/mini.go)
 
-Title "Ryotunes Mini", 360 × 420, its own window. 32 strip on top (drag;
-"expand" and close small quiet plaques at the right). Art 200 centred (cut 7);
-21; title `T.Row` and artists `T.Caption` centred; 13; seek row; 13; transport
-row (as the player bar, 13 apart); 13; bottom row: like, lyrics toggle (swaps
-the art for compact lyrics), volume icon and a 100 scrubber. Expand returns to
-the main window (re-creating it if it was closed) and closes the mini.
+Title "Ryotunes Mini", its own window, asked for at 360 × 420 dp times the
+zoom; the niri rule opens it at 360 × 420. 32 strip on top (drag; "expand" and
+close small quiet plaques at the right), then title `T.Row` and artists
+`T.Caption` centred, the seek row, the transport row (13 apart) and a 48
+bottom row (like, lyrics toggle; volume icon and scrubber at the right), 13
+apart with 13 side and bottom insets. The art (cut 7) takes what is left:
+`clamp(availableH - fixedRows, 96, 200)` square, centred. Below 96 the art
+goes and the lyrics toggle with it. The window's content always fits at any
+size the compositor gives and any zoom; nothing is ever cut at an edge.
+Expand returns to the main window (re-creating it if it was closed) and
+closes the mini.
+
+### Visualizer (look/visualizer.go, internal/client/spectrum)
+
+Bars that move with the music, carved from the source field. They show only
+while something plays, the visualizer setting is on and motion is not
+reduced or in low resource mode.
+
+- **Feed.** `internal/client/spectrum` runs `cava` (the same analyser the
+  Ryoku shell and Ryotunes 1.x use) while a visible visualizer wants it and
+  playback is playing: 64 bands at 60 frames a second, mono, raw ASCII on
+  stdout, `method = pipewire`. Its `source` is the sink the daemon's playback
+  stream links into, found with `pw-dump` (the Stream/Output/Audio node whose
+  `application.process.binary` is `ryotunesd`, then its link's input node),
+  so filter sinks such as Easy Effects still feed it; `auto` when that cannot
+  be found. The process stops within a second of the last visualizer leaving
+  the screen or playback pausing, restarts after 1.2 s if it dies, and gives
+  up until the next play after three failures in 30 s. Without `cava` the
+  bars never show and Settings says why. A frame older than 250 ms counts as
+  silence.
+- **Bars** (`look.Visualizer`). Vertical blades rising from the bottom of
+  their lane: square at the bottom, the top-right corner cut at 45° by
+  `min(barWidth, height)`. Pitch 12 (bar 9, gap 3) in the now playing band, 9
+  (bar 6, gap 3) in headers. The 64 bands are resampled to the bar count.
+  Each bar follows its band with a spring that rises fast (ω = 4 / 70 ms) and
+  falls slowly (ω = 4 / 220 ms). While playing a bar is at least 2 high, so
+  the lane reads as a floor in a quiet passage. One path, one paint. Ink:
+  `Src.Ink` at alpha .55 in dark mode and .45 in light.
+- **Frames.** While any bar moves the visualizer asks for its next frame 1/60
+  s ahead (60 a second even on faster screens; the feed only wakes a resting
+  visualizer). Paused, the bars fall to nothing and then ask for none; nothing
+  is drawn at rest.
+- **Where.** Page headers (`widgets.Header`, `widgets.Hero`, the Home
+  greeting): a lane along the field's bottom edge, the field's full width,
+  inside the bottom padding (header bottom padding 40, lane 32; compact 24 and
+  18), drawn after the field and before the text, so text never sits on bars.
+  The now playing band as above.
 
 ## Pages
 
@@ -377,11 +454,19 @@ archetype). The header field (`Src.Field`) sits behind the title or hero and
 scrolls with the page.
 
 - **Home:** greeting `T.Sentence` by time of day ("Good evening") and one proof
-  line `T.Proof` `fg2` ("Picked from YouTube Music for you", or a sign-in
-  line with a line plaque "Sign in" when signed out). Then the quick grid: up to
-  8 quick tiles (recent and pinned collections), 4 columns at content width
-  ≥ 1100, 3 at ≥ 820, else 2, 8 apart. Then shelves: Jump back in (recent),
-  Picked for you, then the provider feed's shelves in order.
+  line `T.Proof` `fg2` ("Picked from YouTube Music for you", or, signed out, "Sign
+  in to shape your YouTube Music home" with a line plaque "Sign in" that starts
+  the active provider's sign-in right there). Then the chips row:
+  `kit.Filters` with "All" first and the provider's chips after it (no
+  Podcasts, spec 09). All shows the quick grid: up to 8 quick tiles (recent and
+  pinned collections), 4 columns at content width ≥ 1100, 3 at ≥ 820, else 2, 8
+  apart, then shelves: Jump back in (recent), Picked for you, then the provider
+  feed's shelves in order. Any other chip replaces everything under the row
+  with that chip's shelves (`get_home` with the chip's params): a shelf skeleton
+  while it loads, the shelves when they arrive, `widgets.EmptyState` "Nothing
+  here yet" for an empty answer, and on failure a placard "Could not load
+  <chip>" with the selection back on the previous chip. The page consumes the
+  filter's change right after laying it out, in the same frame.
 - **Search results** (`RouteSearch`): "Results for “q”" `T.Section`, 13,
   `kit.Filters` All, Songs, Albums, Artists, Playlists with counts. All: at
   content width ≥ 1000 the top result tile (art 120, name `T.Section`, kind
@@ -394,14 +479,18 @@ scrolls with the page.
   playlist" plaque on Playlists. Playlists: grid with Liked songs first. Songs:
   track table. Albums and Artists: grids. Local: folder slab rows (path, count,
   Remove) with "Add folder", then the local track table.
-- **Album / playlist:** hero in the field: art 200 (160 medium, 120 compact),
-  cut 7; 21; a bottom-aligned column: kind `T.Group` `fg2`, title `T.Name`
-  (falls to `T.Sentence` under 640 content width or past two lines), meta
-  `T.Proof` `fg2` with the artist as a link and counts and durations in mono
-  ("Spiritbox · 2021 · 12 songs · 43 min"), then 13 and the act row 8 apart:
-  Play (gold `Plaque` with the play icon, "Pause" while this collection
-  plays), Shuffle, Save/like, Download (icon plaques, quiet) and More. Then the
-  track table.
+- **Album / playlist:** hero in the field: art 200 when the hero is at least
+  760 wide, 160 at 560–759, otherwise 120; cut 7; 21; a bottom-aligned
+  column whose natural height may make the hero taller than the art: kind
+  `T.Group` `fg2`, title `T.Name` (falls to `T.Sentence` under 640 content
+  width or past two lines), then meta `T.Proof` `fg2`. Meta wraps only between
+  whole facts, uses at most two lines and drops trailing facts that do not fit;
+  the artist is a link and counts and durations are mono ("Spiritbox · 2021 ·
+  12 songs · 43 min"). Then 13 and the full-size act row 8 apart: Play (gold
+  `Plaque` with the play icon, "Pause" while this collection plays), Shuffle,
+  Save/like, Download (icon plaques, quiet) and More. When space runs out,
+  fold Download, Save/like and Shuffle, in that order, into More; Play and More
+  always remain. Then the track table.
 - **Artist:** the same hero with the portrait octagon-cut and the act row
   Play (gold), Shuffle, Subscribe (line plaque "Subscribe"/"Subscribed", YouTube
   artists only, through `set_artist_subscribed`), Radio, More (Share).
@@ -454,10 +543,10 @@ playing, pause icon when hovering the playing row) │ Title flexed (art 40 when
 inline after the title: shown when liked or hovered) │ Artist 21 % │ Album
 27 % │ Plays 108 `T.Mono` (only when some row has plays) │ Length 72 `T.Mono`
 right aligned │ 40 more plaque (hover). Album pages use Title 66.5 % and
-Artist 33.5 % and drop Artist when every row matches the album artist. Under 900
-content width the Album column goes; in compact, Title carries the artists
-under it and only Length remains. Header row 32, `T.Group` `fg3`, 1 dp vein
-under it. Hover: plane step and the index/trailing reveals (hover in/out).
+Artist 33.5 % and drop Artist when every row matches the album artist. Under
+900 content width the Album column goes; under 720 Plays goes; under 560,
+Title carries the artists under it and only Length remains on the right.
+Header row 32, `T.Group` `fg3`, 1 dp vein under it. Hover: plane step and the index/trailing reveals (hover in/out).
 Single click selects (sel slab, glides); double click or Enter plays from that
 row; clicking the index play icon plays; right click opens the item menu.
 
@@ -479,7 +568,8 @@ type HeroContent struct {
     Acts layout.Widget     // the act row, built by the page
 }
 func (h *Hero) Layout(gtx layout.Context, e *env.Env, c HeroContent) layout.Dimensions
-func PageHeader(e *env.Env, title, sentence string, trailing layout.Widget) layout.Widget
+type Header struct{ ... } // retained per page: it owns the header's visualizer
+func (h *Header) Layout(gtx layout.Context, e *env.Env, title, sentence string, trailing layout.Widget) layout.Dimensions
 func Loading(e *env.Env, shape LoadingShape) layout.Widget
 func Failed(e *env.Env, message string, retry *kit.Plaque) layout.Widget
 func EmptyState(e *env.Env, icon *widget.Icon, title, body string, actions ...*kit.Plaque) layout.Widget
@@ -667,8 +757,10 @@ instant.
 | like | `look.Fill`: the heart fills from its centre in `Src.Ink`; unliking empties it | notch 200 |
 | track changes | player-bar art crossfades; title and artists rise 8 and fade in | navigate 200 |
 | track changes in the now playing view | art crossfades | field 320 |
-| hover a scrubber | track 4 → 6, handle and bubble fade in | hover in / out |
-| drag a scrubber | handle follows the pointer exactly; seek holds the committed value | none |
+| hover a scrubber | blade handle and bubble fade in; a flat track thickens 4 → 6 | hover in / out |
+| drag a scrubber | handle follows the pointer exactly; the wave flattens; seek holds the committed value | field 320 |
+| playback starts / pauses | the wave's amplitude eases in and travels / eases out and stops | field 320 |
+| music plays | visualizer blades rise fast and fall slowly with the bands | springs, every frame |
 | provider switch | active plate glides; source colours retint; content re-enters | select 240, field 320, navigate 200 |
 | current destination or selection changes | sel slab glides (sidebar, bottom nav, tables, tabs blade) | select 240 |
 | page navigation | new content fades in rising 8 | navigate 200 |
@@ -677,15 +769,18 @@ instant.
 | card hover | plate fades in; play plate rises 4 and fades in | hover in 160 |
 | row hover | index number crossfades to the play icon; like and more fade in | hover in / out |
 | queue row removed / added | collapses / notch cut | unfold 200 / notch 200 |
-| lyric line becomes active | glides to one third with the spring; ink fg3 → fg | spring, hover in |
+| lyric line becomes active | the list anchors next to it and springs the rest to one third; ink fg3 → fg | spring, hover in |
 | download completes | ring fills to full, icon morphs to `download_done` | spring, notch 200 |
 | shelf arrows | glide one page | wheel 140 |
 | placard | rises 8, blade drains (library) | placard in 300 / life 5000 |
 | now playing view opens / closes | fade with an 8 rise / fade | navigate 200 / hover out 100 |
 
-Nothing moves at rest: no pulsing, no looping equalizers, no idle frames. A
-paused, idle window draws zero frames; while playing, only the progress and
-the elapsed time ask for frames, at the cadence above.
+Nothing moves at rest: no pulsing, no idle frames. A paused, idle window draws
+zero frames. While music plays, the wave progress and the visible visualizers
+are the only things that move without being touched; they ask for frames at up
+to 60 a second and stop as soon as playback pauses, the window hides them, or
+motion is reduced. Position samples that only confirm the client's own clock
+do not redraw.
 
 ## Settings
 
@@ -710,8 +805,32 @@ storage, Diagnostics, About. Rows that were missing in 2.0.0 and come back:
 
 Skins and decor are not restored: colour comes from the Ryoku palette. The
 Appearance section offers Colours (Follow Ryoku, Dark, Light), Palette file
-(choose a palette JSON, or none), Density, Motion, UI scale and Low resource
-mode.
+(choose a palette JSON, or none), Density, Motion, UI scale, Low resource
+mode, **Visualizer** (on by default; its detail says "Bars that move with the
+music in page headers and the now playing view" or, without cava, "Install
+cava to see the visualizer" with the toggle disabled) and **Wave progress**
+(on by default). Reduced motion and low resource mode turn both off without
+changing the stored settings.
+
+## Sign in
+
+The client opens every sign-in page; the daemon never launches a browser. The
+client runs inside the graphical session that started it, so its opener has
+the session's display and browser, and it can see when opening fails.
+
+- YouTube Music and SoundCloud: `sign_in` and `soundcloud_sign_in` return the
+  page to open (`{"url": ...}`) and keep watching the browser's cookie stores
+  as now. Spotify: the existing `spotify-auth` `url` event. TIDAL: the
+  `tidal-auth` `waiting` event carries `url` (the complete verification link)
+  and `code`.
+- `act.OpenURL(e, url)` starts `xdg-open url` detached (its own session, no
+  inherited descriptors) and waits for it off the frame goroutine. Each flow's
+  URL opens once. A missing opener or a non-zero exit shows a placard "Could
+  not open your browser" and leaves the link on the account row.
+- While a flow waits, its account row says "Waiting for your browser" and
+  offers "Open again" and "Copy link" (quiet plaques) and Cancel; TIDAL also
+  shows its code in mono. The Home header's Sign in starts the active
+  provider's flow directly.
 
 ## Input
 

@@ -3,7 +3,6 @@ package chrome
 import (
 	"image"
 	"math"
-	"strconv"
 	"strings"
 	"time"
 
@@ -33,12 +32,17 @@ const (
 	queueTrack
 )
 
+type queueEntryKey struct {
+	videoID    string
+	occurrence int
+}
+
 type queueEntry struct {
 	kind  queueEntryKind
 	title string
 	count int
 	row   state.QueueRow
-	key   string
+	key   queueEntryKey
 }
 
 type queueRowState struct {
@@ -54,6 +58,7 @@ type queueRowState struct {
 	removing   bool
 	removeSent bool
 	lastSeen   uint64
+	children   [5]layout.FlexChild
 }
 
 type queueDrag struct {
@@ -72,7 +77,7 @@ type Queue struct {
 	clear       kit.Plaque
 	more        kit.IconPlaque
 	menu        kit.Menu
-	items       map[string]*queueRowState
+	items       map[queueEntryKey]*queueRowState
 	seen        map[string]int
 	entries     []queueEntry
 	build       uint64
@@ -110,7 +115,7 @@ func (queue *Queue) layoutList(gtx layout.Context, e *env.Env) layout.Dimensions
 
 func (queue *Queue) buildEntries(gtx layout.Context, notch time.Duration, groups state.QueueGroups) {
 	if queue.items == nil {
-		queue.items = make(map[string]*queueRowState)
+		queue.items = make(map[queueEntryKey]*queueRowState)
 		queue.seen = make(map[string]int)
 	}
 	clear(queue.seen)
@@ -122,10 +127,10 @@ func (queue *Queue) buildEntries(gtx layout.Context, notch time.Duration, groups
 		}
 		queue.entries = append(queue.entries, queueEntry{kind: queueSection, title: title, count: len(rows)})
 		for _, row := range rows {
-			key := row.Item.VideoID
-			occurrence := queue.seen[key]
-			queue.seen[key] = occurrence + 1
-			key += "#" + strconv.Itoa(occurrence)
+			videoID := row.Item.VideoID
+			occurrence := queue.seen[videoID]
+			queue.seen[videoID] = occurrence + 1
+			key := queueEntryKey{videoID: videoID, occurrence: occurrence}
 			item := queue.items[key]
 			if item == nil {
 				item = new(queueRowState)
@@ -292,61 +297,58 @@ func (queue *Queue) layoutRow(gtx layout.Context, e *env.Env, entry queueEntry) 
 		}
 		return item.click.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 			return layout.Inset{Top: 8, Bottom: 8}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-				children := make([]layout.FlexChild, 0, 6)
-				children = append(children,
-					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-						size := image.Pt(gtx.Dp(40), gtx.Dp(40))
-						return look.Art(gtx, e.Th, e.Art, optionalString(row.Item.Thumbnail), size, look.Shape{Cut: 3})
-					}),
-					layout.Rigid(layout.Spacer{Width: 13}.Layout),
-					layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-						titleInk := e.Th.R.Fg
-						if playing {
-							titleInk = e.Th.Src.Ink
-						} else if row.Item.Autoplay {
-							titleInk = e.Th.R.Fg2
-						}
-						return layout.Flex{Axis: layout.Vertical, Alignment: layout.Start}.Layout(gtx,
-							layout.Rigid(kit.Text(e.Th.Theme, e.Th.T.Row, titleInk, queueTrackTitle(row.Item))),
-							layout.Rigid(kit.Text(e.Th.Theme, e.Th.T.Caption, e.Th.R.Fg2, strings.TrimSpace(row.Item.Artists))),
+				item.children[0] = layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+					size := image.Pt(gtx.Dp(40), gtx.Dp(40))
+					return look.Art(gtx, e.Th, e.Art, optionalString(row.Item.Thumbnail), size, look.Shape{Cut: 3})
+				})
+				item.children[1] = layout.Rigid(layout.Spacer{Width: 13}.Layout)
+				item.children[2] = layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+					titleInk := e.Th.R.Fg
+					if playing {
+						titleInk = e.Th.Src.Ink
+					} else if row.Item.Autoplay {
+						titleInk = e.Th.R.Fg2
+					}
+					return layout.Flex{Axis: layout.Vertical, Alignment: layout.Start}.Layout(gtx,
+						layout.Rigid(kit.Text(e.Th.Theme, e.Th.T.Row, titleInk, queueTrackTitle(row.Item))),
+						layout.Rigid(kit.Text(e.Th.Theme, e.Th.T.Caption, e.Th.R.Fg2, strings.TrimSpace(row.Item.Artists))),
+					)
+				})
+				item.children[3] = layout.Rigid(layout.Spacer{Width: 8}.Layout)
+				item.children[4] = layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+					if !playing && hoverValue > .05 {
+						item.remove.Kind = kit.PlaqueQuiet
+						item.remove.Icon = look.Icon.Remove
+						item.remove.Description = "Remove from queue"
+						item.remove.Small = true
+						return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
+							layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+								target, moved, dims := item.drag.Layout(gtx, e.Th, hoverValue, row.Index, queueSnapshot.CurrentIndex+1, len(queueSnapshot.Items)-1)
+								if moved && target != row.Index {
+									if target > row.Index {
+										target--
+									}
+									callVoid(e, protocol.MethodMoveInQueue, protocol.MoveInQueueParams{From: row.Index, To: target})
+								}
+								return dims
+							}),
+							layout.Rigid(layout.Spacer{Width: 4}.Layout),
+							layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+								dims := item.remove.Layout(gtx, e.Th.Theme)
+								if item.remove.Clicked(gtx) && !item.removing {
+									item.removing = true
+									item.removal.Duration = e.Th.Motion.Unfold
+									item.removal.Ease = anim.EaseChisel
+									item.removal.Set(gtx, 1)
+									item.removal.Set(gtx, 0)
+								}
+								return dims
+							}),
 						)
-					}),
-					layout.Rigid(layout.Spacer{Width: 8}.Layout),
-					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-						if !playing && hoverValue > .05 {
-							item.remove.Kind = kit.PlaqueQuiet
-							item.remove.Icon = look.Icon.Remove
-							item.remove.Description = "Remove from queue"
-							item.remove.Small = true
-							return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
-								layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-									target, moved, dims := item.drag.Layout(gtx, e.Th, hoverValue, row.Index, queueSnapshot.CurrentIndex+1, len(queueSnapshot.Items)-1)
-									if moved && target != row.Index {
-										if target > row.Index {
-											target--
-										}
-										callVoid(e, protocol.MethodMoveInQueue, protocol.MoveInQueueParams{From: row.Index, To: target})
-									}
-									return dims
-								}),
-								layout.Rigid(layout.Spacer{Width: 4}.Layout),
-								layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-									dims := item.remove.Layout(gtx, e.Th.Theme)
-									if item.remove.Clicked(gtx) && !item.removing {
-										item.removing = true
-										item.removal.Duration = e.Th.Motion.Unfold
-										item.removal.Ease = anim.EaseChisel
-										item.removal.Set(gtx, 1)
-										item.removal.Set(gtx, 0)
-									}
-									return dims
-								}),
-							)
-						}
-						return kit.Text(e.Th.Theme, e.Th.T.Mono, e.Th.R.Fg3, optionalString(row.Item.Duration))(gtx)
-					}),
-				)
-				return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx, children...)
+					}
+					return kit.Text(e.Th.Theme, e.Th.T.Mono, e.Th.R.Fg3, optionalString(row.Item.Duration))(gtx)
+				})
+				return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx, item.children[:]...)
 			})
 		})
 	})

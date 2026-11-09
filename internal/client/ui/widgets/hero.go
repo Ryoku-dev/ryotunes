@@ -3,9 +3,9 @@ package widgets
 import (
 	"image"
 	"strings"
-	"unicode"
 
 	"gioui.org/layout"
+	"gioui.org/op"
 	"gioui.org/unit"
 
 	"github.com/ryoku-dev/ryoku/docs/lithic/library/go/kit"
@@ -27,71 +27,142 @@ type HeroContent struct {
 
 // Hero is a retained source-tinted page header.
 type Hero struct {
-	art  look.ArtView
-	meta kit.Click
+	art        look.ArtView
+	meta       kit.Click
+	visualizer look.Visualizer
+	facts      []heroFact
+	factCalls  []op.CallOp
 }
 
-func heroArtSize(class look.Class) unit.Dp {
-	switch class {
-	case look.Compact:
-		return 120
-	case look.Medium:
+func heroArtSize(width unit.Dp) unit.Dp {
+	switch {
+	case width >= 760:
+		return 200
+	case width >= 560:
 		return 160
 	default:
-		return 200
+		return 120
 	}
 }
 
-type heroMetaRun struct {
-	span kit.Span
-	gap  bool
+type heroFact struct {
+	start, end int
+	width      int
+	height     int
+	row        int
+	x          int
+	separatorX int
 }
 
-func heroMeta(meta []kit.Span) []heroMetaRun {
-	out := make([]heroMetaRun, 0, len(meta))
-	for _, span := range meta {
-		text := span.Text
-		words := strings.Fields(text)
-		if len(words) == 0 {
-			continue
+func metaSeparator(span kit.Span) bool {
+	return strings.TrimSpace(span.Text) == "·"
+}
+
+func (h *Hero) prepareFacts(meta []kit.Span) []heroFact {
+	h.facts = h.facts[:0]
+	for index := 0; index < len(meta); {
+		for index < len(meta) && metaSeparator(meta[index]) {
+			index++
 		}
-		leading := unicode.IsSpace(rune(text[0]))
-		trailing := unicode.IsSpace(rune(text[len(text)-1]))
-		span.Text = strings.Join(words, " ")
-		if leading {
-			span.Text = " " + span.Text
+		start := index
+		for index < len(meta) && !metaSeparator(meta[index]) {
+			index++
 		}
-		if trailing {
-			span.Text += " "
+		if start < index {
+			h.facts = append(h.facts, heroFact{start: start, end: index})
 		}
-		run := heroMetaRun{span: span}
-		if len(out) > 0 {
-			previous := &out[len(out)-1]
-			if previous.span.Mono && !span.Mono && (strings.HasSuffix(previous.span.Text, " ") || leading) {
-				previous.span.Text = strings.TrimRightFunc(previous.span.Text, unicode.IsSpace)
-				run.span.Text = strings.TrimLeftFunc(run.span.Text, unicode.IsSpace)
-				run.gap = true
-			} else if strings.HasSuffix(previous.span.Text, " ") {
-				run.span.Text = strings.TrimLeftFunc(run.span.Text, unicode.IsSpace)
+	}
+	return h.facts
+}
+
+func heroFactLayout(gtx layout.Context, e *env.Env, meta []kit.Span, fact heroFact) layout.Dimensions {
+	return kit.Sentence(gtx, e.Th.Theme, e.Th.T.Proof, e.Th.R.Fg2, meta[fact.start:fact.end])
+}
+
+func (h *Hero) layoutMeta(gtx layout.Context, e *env.Env, content HeroContent) layout.Dimensions {
+	facts := h.prepareFacts(content.Meta)
+	if len(facts) == 0 || gtx.Constraints.Max.X <= 0 {
+		return layout.Dimensions{}
+	}
+	if cap(h.factCalls) < len(facts) {
+		h.factCalls = make([]op.CallOp, len(facts))
+	} else {
+		h.factCalls = h.factCalls[:len(facts)]
+	}
+	measure := gtx
+	measure.Constraints.Min = image.Point{}
+	measure.Constraints.Max.X = 1 << 20
+	for index := range facts {
+		record := op.Record(gtx.Ops)
+		fact := facts[index]
+		var dimensions layout.Dimensions
+		if index == 0 && content.MetaAction != nil {
+			dimensions = h.meta.Layout(measure, func(gtx layout.Context) layout.Dimensions {
+				return heroFactLayout(gtx, e, content.Meta, fact)
+			})
+		} else {
+			dimensions = heroFactLayout(measure, e, content.Meta, fact)
+		}
+		h.factCalls[index] = record.Stop()
+		facts[index].width, facts[index].height = dimensions.Size.X, dimensions.Size.Y
+	}
+	separatorRecord := op.Record(gtx.Ops)
+	separatorDimensions := kit.Label{Style: e.Th.T.Proof, Color: e.Th.R.Fg2, MaxLines: 1}.Layout(measure, e.Th.Theme, "·")
+	separator := separatorRecord.Stop()
+	gap := gtx.Dp(4)
+	maxWidth := gtx.Constraints.Max.X
+	rowWidths := [2]int{}
+	rowHeights := [2]int{}
+	row := 0
+	visible := 0
+	for index := range facts {
+		fact := &facts[index]
+		required := fact.width
+		if rowWidths[row] > 0 {
+			required += gap + separatorDimensions.Size.X + gap
+		}
+		if required > maxWidth-rowWidths[row] {
+			if row == 1 {
+				break
 			}
+			row = 1
+			required = fact.width
 		}
-		out = append(out, run)
-	}
-	return out
-}
-
-func heroSentence(gtx layout.Context, e *env.Env, runs []heroMetaRun) layout.Dimensions {
-	children := make([]layout.FlexChild, 0, len(runs)*2)
-	for _, run := range runs {
-		if run.gap {
-			children = append(children, layout.Rigid(layout.Spacer{Width: unit.Dp(4)}.Layout))
+		if fact.width > maxWidth {
+			break
 		}
-		span := run.span
-		children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			return kit.Sentence(gtx, e.Th.Theme, e.Th.T.Proof, e.Th.R.Fg2, []kit.Span{span})
-		}))
+		fact.row = row
+		fact.x = rowWidths[row]
+		fact.separatorX = -1
+		if rowWidths[row] > 0 {
+			fact.separatorX = rowWidths[row] + gap
+			fact.x += gap + separatorDimensions.Size.X + gap
+		}
+		rowWidths[row] = fact.x + fact.width
+		rowHeights[row] = max(rowHeights[row], fact.height)
+		visible++
 	}
-	return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Baseline}.Layout(gtx, children...)
+	lineGap := 0
+	if rowHeights[1] > 0 {
+		lineGap = gtx.Dp(4)
+	}
+	secondY := rowHeights[0] + lineGap
+	for index := range visible {
+		fact := facts[index]
+		y := 0
+		if fact.row == 1 {
+			y = secondY
+		}
+		if fact.separatorX >= 0 {
+			offset := op.Offset(image.Pt(fact.separatorX, y+(rowHeights[fact.row]-separatorDimensions.Size.Y)/2)).Push(gtx.Ops)
+			separator.Add(gtx.Ops)
+			offset.Pop()
+		}
+		offset := op.Offset(image.Pt(fact.x, y+(rowHeights[fact.row]-fact.height)/2)).Push(gtx.Ops)
+		h.factCalls[index].Add(gtx.Ops)
+		offset.Pop()
+	}
+	return layout.Dimensions{Size: image.Pt(max(rowWidths[0], rowWidths[1]), secondY+rowHeights[1])}
 }
 
 func heroArtURL(content HeroContent) string {
@@ -109,13 +180,12 @@ func heroNameStyle(width unit.Dp, th *look.Theme) theme.TextStyle {
 	return th.T.Name
 }
 
-func (h *Hero) copy(gtx layout.Context, e *env.Env, content HeroContent, height int) layout.Dimensions {
+func (h *Hero) copy(gtx layout.Context, e *env.Env, content HeroContent) layout.Dimensions {
 	for h.meta.Clicked(gtx) {
 		if content.MetaAction != nil {
 			content.MetaAction()
 		}
 	}
-	meta := heroMeta(content.Meta)
 	children := make([]layout.FlexChild, 0, 8)
 	if strings.TrimSpace(content.Kind) != "" {
 		children = append(children,
@@ -129,23 +199,11 @@ func (h *Hero) copy(gtx layout.Context, e *env.Env, content HeroContent, height 
 		style := heroNameStyle(gtx.Metric.PxToDp(gtx.Constraints.Max.X), e.Th)
 		return kit.Label{Style: style, Color: e.Th.R.Fg, MaxLines: 2}.Layout(gtx, e.Th.Theme, content.Title)
 	}))
-	if len(meta) > 0 {
+	if len(content.Meta) > 0 {
 		children = append(children,
 			layout.Rigid(layout.Spacer{Height: unit.Dp(8)}.Layout),
 			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-				if content.MetaAction == nil {
-					return heroSentence(gtx, e, meta)
-				}
-				return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Baseline}.Layout(gtx,
-					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-						return h.meta.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-							return heroSentence(gtx, e, meta[:1])
-						})
-					}),
-					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-						return heroSentence(gtx, e, meta[1:])
-					}),
-				)
+				return h.layoutMeta(gtx, e, content)
 			}),
 		)
 	}
@@ -155,11 +213,7 @@ func (h *Hero) copy(gtx layout.Context, e *env.Env, content HeroContent, height 
 			layout.Rigid(content.Acts),
 		)
 	}
-	gtx.Constraints.Min.Y = height
-	gtx.Constraints.Max.Y = height
-	return layout.S.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-		return layout.Flex{Axis: layout.Vertical, Alignment: layout.Start}.Layout(gtx, children...)
-	})
+	return layout.Flex{Axis: layout.Vertical, Alignment: layout.Start}.Layout(gtx, children...)
 }
 
 // Layout draws a responsive bottom-aligned hero over the provider field.
@@ -167,12 +221,13 @@ func (h *Hero) Layout(gtx layout.Context, e *env.Env, content HeroContent) layou
 	if e == nil || e.Th == nil {
 		return layout.Dimensions{}
 	}
-	artDp := heroArtSize(e.Th.Class)
+	artDp := heroArtSize(gtx.Metric.PxToDp(gtx.Constraints.Max.X))
 	artPixels := gtx.Dp(artDp)
 	inset := look.ContentInset(e.Th.Class)
+	bottom, _ := headerLaneMetrics(e.Th.Class)
 	cut := gtx.Dp(e.Th.Cut.Large)
-	return look.Field(gtx, e.Th, [4]int{cut, cut, 0, 0}, func(gtx layout.Context) layout.Dimensions {
-		return layout.Inset{Top: inset, Right: inset, Bottom: inset, Left: inset}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+	return headerField(gtx, e, &h.visualizer, [4]int{cut, cut, 0, 0}, func(gtx layout.Context) layout.Dimensions {
+		return layout.Inset{Top: inset, Right: inset, Bottom: bottom, Left: inset}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 			shape := look.Shape{Cut: 7, Octagon: content.Octagon}
 			return layout.Flex{Axis: layout.Horizontal, Alignment: layout.End}.Layout(gtx,
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
@@ -180,45 +235,139 @@ func (h *Hero) Layout(gtx layout.Context, e *env.Env, content HeroContent) layou
 				}),
 				layout.Rigid(layout.Spacer{Width: unit.Dp(21)}.Layout),
 				layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-					return h.copy(gtx, e, content, artPixels)
+					return h.copy(gtx, e, content)
 				}),
 			)
 		})
 	})
 }
 
-// PageHeader returns a source-field page title with optional proof and actions.
-func PageHeader(e *env.Env, title, sentence string, trailing layout.Widget) layout.Widget {
-	return func(gtx layout.Context) layout.Dimensions {
-		if e == nil || e.Th == nil {
-			return layout.Dimensions{}
-		}
-		cut := gtx.Dp(e.Th.Cut.Large)
-		inset := look.ContentInset(e.Th.Class)
-		return look.Field(gtx, e.Th, [4]int{cut, cut, 0, 0}, func(gtx layout.Context) layout.Dimensions {
-			return layout.Inset{Top: inset, Right: inset, Bottom: inset, Left: inset}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-				copy := []layout.FlexChild{layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					return kit.Label{Style: e.Th.T.Section, Color: e.Th.R.Fg, MaxLines: 2}.Layout(gtx, e.Th.Theme, title)
-				})}
-				if strings.TrimSpace(sentence) != "" {
-					copy = append(copy,
-						layout.Rigid(layout.Spacer{Height: unit.Dp(4)}.Layout),
-						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-							return kit.Label{Style: e.Th.T.Proof, Color: e.Th.R.Fg2, MaxLines: 2}.Layout(gtx, e.Th.Theme, sentence)
-						}),
-					)
-				}
-				children := []layout.FlexChild{layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-					return layout.Flex{Axis: layout.Vertical, Alignment: layout.Start}.Layout(gtx, copy...)
-				})}
-				if trailing != nil {
-					children = append(children,
-						layout.Rigid(layout.Spacer{Width: unit.Dp(21)}.Layout),
-						layout.Rigid(trailing),
-					)
-				}
-				return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx, children...)
-			})
-		})
+// HeroActions lays out Play and More at full size and folds trailing optional actions first.
+type HeroActions struct {
+	calls   []op.CallOp
+	sizes   []image.Point
+	visible []bool
+}
+
+// Hidden reports whether the latest layout folded an action into More.
+func (actions *HeroActions) Hidden(index int) bool {
+	return index >= 0 && index < len(actions.visible) && !actions.visible[index]
+}
+
+func (actions *HeroActions) Layout(gtx layout.Context, widgets []layout.Widget) layout.Dimensions {
+	count := len(widgets)
+	if count == 0 {
+		return layout.Dimensions{}
 	}
+	if cap(actions.calls) < count {
+		actions.calls = make([]op.CallOp, count)
+		actions.sizes = make([]image.Point, count)
+		actions.visible = make([]bool, count)
+	} else {
+		actions.calls = actions.calls[:count]
+		actions.sizes = actions.sizes[:count]
+		actions.visible = actions.visible[:count]
+	}
+	measure := gtx
+	measure.Constraints.Min = image.Point{}
+	measure.Constraints.Max.X = 1 << 20
+	maxHeight := 0
+	for index, widget := range widgets {
+		actions.visible[index] = widget != nil
+		if widget == nil {
+			actions.calls[index] = op.CallOp{}
+			actions.sizes[index] = image.Point{}
+			continue
+		}
+		record := op.Record(gtx.Ops)
+		dimensions := widget(measure)
+		actions.calls[index] = record.Stop()
+		actions.sizes[index] = dimensions.Size
+		maxHeight = max(maxHeight, dimensions.Size.Y)
+	}
+	gap := gtx.Dp(8)
+	totalWidth := func() int {
+		width := 0
+		seen := false
+		for index := range widgets {
+			if !actions.visible[index] {
+				continue
+			}
+			if seen {
+				width += gap
+			}
+			width += actions.sizes[index].X
+			seen = true
+		}
+		return width
+	}
+	width := totalWidth()
+	for index := count - 2; index >= 1 && width > gtx.Constraints.Max.X; index-- {
+		actions.visible[index] = false
+		width = totalWidth()
+	}
+	x := 0
+	seen := false
+	for index := range widgets {
+		if !actions.visible[index] {
+			continue
+		}
+		if seen {
+			x += gap
+		}
+		offset := op.Offset(image.Pt(x, (maxHeight-actions.sizes[index].Y)/2)).Push(gtx.Ops)
+		actions.calls[index].Add(gtx.Ops)
+		offset.Pop()
+		x += actions.sizes[index].X
+		seen = true
+	}
+	return layout.Dimensions{Size: gtx.Constraints.Constrain(image.Pt(width, maxHeight))}
+}
+
+// Header is a retained source-field page title with optional proof and actions.
+type Header struct {
+	Sentence   bool
+	visualizer look.Visualizer
+	copy       [3]layout.FlexChild
+	children   [3]layout.FlexChild
+}
+
+func (h *Header) Layout(gtx layout.Context, e *env.Env, title, sentence string, trailing layout.Widget) layout.Dimensions {
+	if e == nil || e.Th == nil {
+		return layout.Dimensions{}
+	}
+	cut := gtx.Dp(e.Th.Cut.Large)
+	inset := look.ContentInset(e.Th.Class)
+	bottom, _ := headerLaneMetrics(e.Th.Class)
+	return headerField(gtx, e, &h.visualizer, [4]int{cut, cut, 0, 0}, func(gtx layout.Context) layout.Dimensions {
+		return layout.Inset{Top: inset, Right: inset, Bottom: bottom, Left: inset}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+			style := e.Th.T.Section
+			if h.Sentence {
+				style = e.Th.T.Sentence
+			}
+			copy := h.copy[:1]
+			copy[0] = layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				return kit.Label{Style: style, Color: e.Th.R.Fg, MaxLines: 2}.Layout(gtx, e.Th.Theme, title)
+			})
+			if strings.TrimSpace(sentence) != "" {
+				copy = append(copy,
+					layout.Rigid(layout.Spacer{Height: unit.Dp(4)}.Layout),
+					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+						return kit.Label{Style: e.Th.T.Proof, Color: e.Th.R.Fg2, MaxLines: 2}.Layout(gtx, e.Th.Theme, sentence)
+					}),
+				)
+			}
+			children := h.children[:1]
+			children[0] = layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+				return layout.Flex{Axis: layout.Vertical, Alignment: layout.Start}.Layout(gtx, copy...)
+			})
+			if trailing != nil {
+				children = append(children,
+					layout.Rigid(layout.Spacer{Width: unit.Dp(21)}.Layout),
+					layout.Rigid(trailing),
+				)
+			}
+			return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx, children...)
+		})
+	})
 }

@@ -25,6 +25,7 @@ depends=(
   'vulkan-icd-loader'
   'mesa'
 )
+optdepends=('cava: playback visualizer')
 provides=("ryotunes=$pkgver")
 conflicts=('ryotunes')
 install=ryotunes-bin.install

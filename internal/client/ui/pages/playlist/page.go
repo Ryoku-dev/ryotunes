@@ -37,19 +37,19 @@ var sortValues = []model.PlaylistSort{model.PlaylistSortDefault, model.PlaylistS
 
 // Page is a retained playlist detail surface.
 type Page struct {
-	route      env.Route
-	hero       widgets.Hero
-	scroll     look.Scroller
-	table      widgets.TrackTable
-	sortChoice look.Choice
-
-	play      kit.Plaque
-	shuffle   kit.IconPlaque
-	save      kit.IconPlaque
-	download  kit.IconPlaque
-	more      kit.IconPlaque
-	retry     kit.Plaque
-	moreRetry kit.Plaque
+	route       env.Route
+	hero        widgets.Hero
+	heroActions widgets.HeroActions
+	scroll      look.Scroller
+	table       widgets.TrackTable
+	sortChoice  look.Choice
+	play        kit.Plaque
+	shuffle     kit.IconPlaque
+	save        kit.IconPlaque
+	download    kit.IconPlaque
+	more        kit.IconPlaque
+	retry       kit.Plaque
+	moreRetry   kit.Plaque
 
 	moreMenu     kit.Menu
 	moreTag      int
@@ -327,32 +327,28 @@ func (p *Page) layoutActs(e *env.Env, sortInHero bool) layout.Widget {
 			p.download.Icon, p.download.Description = look.Icon.DownloadDone, "Saved"
 		}
 		p.more.Kind, p.more.Icon, p.more.Description = kit.PlaqueQuiet, look.Icon.More, "More playlist actions"
-		play := layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+		play := func(gtx layout.Context) layout.Dimensions {
 			if len(p.page.Items) == 0 {
 				gtx = gtx.Disabled()
 			}
 			return p.play.Layout(gtx, e.Th.Theme)
-		})
-		gap := layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout)
-		shuffle := layout.Rigid(func(gtx layout.Context) layout.Dimensions { return p.shuffle.Layout(gtx, e.Th.Theme) })
-		save := layout.Rigid(func(gtx layout.Context) layout.Dimensions { return p.save.Layout(gtx, e.Th.Theme) })
-		download := layout.Rigid(func(gtx layout.Context) layout.Dimensions { return p.layoutDownload(gtx, e, active, progress) })
-		more := layout.Rigid(func(gtx layout.Context) layout.Dimensions { return p.more.Layout(gtx, e.Th.Theme) })
+		}
+		shuffle := func(gtx layout.Context) layout.Dimensions { return p.shuffle.Layout(gtx, e.Th.Theme) }
+		save := func(gtx layout.Context) layout.Dimensions { return p.save.Layout(gtx, e.Th.Theme) }
+		download := func(gtx layout.Context) layout.Dimensions { return p.layoutDownload(gtx, e, active, progress) }
+		more := func(gtx layout.Context) layout.Dimensions { return p.more.Layout(gtx, e.Th.Theme) }
+		var actions [6]layout.Widget
+		actions[0], actions[2], actions[3], actions[4], actions[5] = play, shuffle, save, download, more
 		if p.sortAvailable() && sortInHero {
-			choice := layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			actions[1] = func(gtx layout.Context) layout.Dimensions {
 				if p.sortPending {
 					gtx = gtx.Disabled()
 				}
 				gtx.Constraints.Max.X = min(gtx.Constraints.Max.X, gtx.Dp(128))
 				return p.sortChoice.Layout(gtx, e.Th, e.Overlays, sortLabels, sortIndex(p.selectedSort()))
-			})
-			return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
-				play, gap, shuffle, gap, save, gap, download, gap, more, gap, choice,
-			)
+			}
 		}
-		return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
-			play, gap, shuffle, gap, save, gap, download, gap, more,
-		)
+		return p.heroActions.Layout(gtx, actions[:])
 	}
 }
 

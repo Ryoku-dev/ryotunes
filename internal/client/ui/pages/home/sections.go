@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"gioui.org/layout"
+	"gioui.org/op"
 	"gioui.org/unit"
 
 	"github.com/ryoku-dev/ryotunes/internal/client/state"
@@ -14,70 +15,187 @@ import (
 	"github.com/ryoku-dev/ryotunes/internal/model"
 )
 
+type homeContentKey struct {
+	contentRevision  uint64
+	personalRevision uint64
+	insightsRevision uint64
+	session          homeSessionKey
+	account          string
+	hour             int
+}
+
+type homeProjectionKey struct {
+	feedRevision     uint64
+	personalRevision uint64
+}
+
 func (p *page) content(e *env.Env, snapshot state.State) []layout.Widget {
-	children := []layout.Widget{p.header(e, snapshot)}
+	key := homeContentKey{
+		contentRevision:  p.contentRevision,
+		personalRevision: snapshot.PersonalRevision,
+		insightsRevision: p.insights.revision,
+		session:          homeSession(snapshot),
+		account:          stringValue(accountName(snapshot)),
+		hour:             e.Now.Hour(),
+	}
+	if key == p.contentKey && p.children != nil {
+		return p.children
+	}
+	p.contentKey = key
+
+	children := make([]layout.Widget, 0, len(p.feed.Sections)+6)
+	children = append(children, p.headerLayout(e, snapshot))
 	if p.loading && !p.loaded {
-		return append(children, widgets.Loading(e, widgets.LoadingGrid))
+		p.children = append(children, widgets.Loading(e, widgets.LoadingGrid))
+		return p.children
 	}
 	if p.errorText != "" && !p.loaded {
-		return append(children, widgets.Failed(e, p.errorText, &p.retry))
+		children = append(children, func(gtx layout.Context) layout.Dimensions {
+			dimensions := widgets.Failed(e, p.errorText, &p.retry)(gtx)
+			if p.retry.Clicked(gtx) {
+				p.fetchAll(e)
+				gtx.Execute(op.InvalidateCmd{})
+			}
+			return dimensions
+		})
+		p.children = children
+		return p.children
 	}
 
-	if len(p.feed.Chips) > 1 {
+	if len(p.chips) != 0 {
 		children = append(children, p.feedFiltersLayout(e))
 	}
-	if quick := p.quickItems(snapshot.Personal); len(quick) != 0 {
-		children = append(children, p.quickGrid(e, quick))
+	if p.loading && p.pendingChip > 0 {
+		p.children = append(children, widgets.Loading(e, widgets.LoadingShelf))
+		return p.children
 	}
-
-	recent := recentItems(snapshot.Personal)
-	if len(recent) != 0 {
-		children = append(children, func(gtx layout.Context) layout.Dimensions {
-			return p.recent.Layout(gtx, e, "Jump back in", recent, nil)
-		})
-	}
-	picked := state.PickedForYou(p.feed, snapshot.Personal)
-	if len(picked) != 0 {
-		children = append(children, func(gtx layout.Context) layout.Dimensions {
-			return p.picked.Layout(gtx, e, "Picked for you", picked, nil)
-		})
-	}
-
-	if snapshot.Provider == model.ProviderTidal && !snapshot.Tidal.SignedIn {
-		children = append(children, widgets.EmptyState(e, look.Icon.Person, "Sign in to TIDAL", "Sign in from Settings to see your TIDAL home feed."))
-	} else {
-		for index := range p.feed.Sections {
-			shelf := p.feed.Sections[index]
-			if len(shelf.Items) == 0 {
-				continue
-			}
-			key := fmt.Sprintf("%d:%s", index, shelf.Title)
-			view := p.shelves[key]
-			if view == nil {
-				view = new(widgets.Shelf)
-				p.shelves[key] = view
-			}
-			var more *env.Route
-			if shelf.MoreBrowseID != nil && strings.TrimSpace(*shelf.MoreBrowseID) != "" {
-				route := env.Route{Kind: env.RouteList, ID: *shelf.MoreBrowseID, Title: shelf.Title}
-				if shelf.MoreParams != nil {
-					route.Params = *shelf.MoreParams
-				}
-				more = &route
-			}
-			title, items, route := shelf.Title, shelf.Items, more
-			children = append(children, func(gtx layout.Context) layout.Dimensions {
-				return view.Layout(gtx, e, title, items, route)
-			})
+	if p.activeChip > 0 {
+		children = append(children, p.feedShelves(e)...)
+		if len(children) == 2 {
+			children = append(children, widgets.EmptyState(e, look.Icon.Sparkle, "Nothing here yet", ""))
 		}
+		p.children = children
+		return p.children
 	}
+
+	p.prepareProjections(e, snapshot)
+	if p.quickWidget != nil {
+		children = append(children, p.quickWidget)
+	}
+	if p.recentWidget != nil {
+		children = append(children, p.recentWidget)
+	}
+	if p.pickedWidget != nil {
+		children = append(children, p.pickedWidget)
+	}
+	children = append(children, p.feedShelves(e)...)
 	if facts := p.insights.layout(e); facts != nil {
 		children = append(children, facts)
 	}
-	return children
+	p.children = children
+	return p.children
+}
+
+func (p *page) feedShelves(e *env.Env) []layout.Widget {
+	if p.shelfRevision == p.feedRevision && p.shelfChildren != nil {
+		return p.shelfChildren
+	}
+	children := make([]layout.Widget, 0, len(p.feed.Sections))
+	for index := range p.feed.Sections {
+		shelf := p.feed.Sections[index]
+		if len(shelf.Items) == 0 {
+			continue
+		}
+		key := fmt.Sprintf("%d:%s", index, shelf.Title)
+		view := p.shelves[key]
+		if view == nil {
+			view = new(widgets.Shelf)
+			p.shelves[key] = view
+		}
+		var more *env.Route
+		if shelf.MoreBrowseID != nil && strings.TrimSpace(*shelf.MoreBrowseID) != "" {
+			route := env.Route{Kind: env.RouteList, ID: *shelf.MoreBrowseID, Title: shelf.Title}
+			if shelf.MoreParams != nil {
+				route.Params = *shelf.MoreParams
+			}
+			more = &route
+		}
+		title, items, route := shelf.Title, shelf.Items, more
+		children = append(children, func(gtx layout.Context) layout.Dimensions {
+			return view.Layout(gtx, e, title, items, route)
+		})
+	}
+	p.shelfRevision = p.feedRevision
+	p.shelfChildren = children
+	return p.shelfChildren
+}
+
+func (p *page) prepareProjections(e *env.Env, snapshot state.State) {
+	key := homeProjectionKey{feedRevision: p.feedRevision, personalRevision: snapshot.PersonalRevision}
+	if key == p.projectionKey && p.projectionReady {
+		return
+	}
+	p.projectionKey = key
+	p.projectionReady = true
+	p.quickWidget = nil
+	p.recentWidget = nil
+	p.pickedWidget = nil
+	if quick := p.quickItems(snapshot.Personal); len(quick) != 0 {
+		p.quickWidget = p.quickGrid(e, quick)
+	}
+	if recent := recentItems(snapshot.Personal); len(recent) != 0 {
+		p.recentWidget = func(gtx layout.Context) layout.Dimensions {
+			return p.recent.Layout(gtx, e, "Jump back in", recent, nil)
+		}
+	}
+	if picked := state.PickedForYou(p.feed, snapshot.Personal); len(picked) != 0 {
+		p.pickedWidget = func(gtx layout.Context) layout.Dimensions {
+			return p.picked.Layout(gtx, e, "Picked for you", picked, nil)
+		}
+	}
+}
+
+func stringValue(value *string) string {
+	if value == nil {
+		return ""
+	}
+	return *value
 }
 
 func (p *page) quickGrid(e *env.Env, items []model.BrowseItem) layout.Widget {
+	layouts := make(map[int][]layout.FlexChild, 3)
+	for _, columns := range []int{2, 3, 4} {
+		rows := (len(items) + columns - 1) / columns
+		rowWidgets := make([]layout.FlexChild, 0, rows*2)
+		for row := range rows {
+			start := row * columns
+			end := min(len(items), start+columns)
+			children := make([]layout.FlexChild, 0, columns*2-1)
+			for column := range columns {
+				if column > 0 {
+					children = append(children, layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout))
+				}
+				index := start + column
+				if index >= end {
+					children = append(children, layout.Flexed(1, func(layout.Context) layout.Dimensions { return layout.Dimensions{} }))
+					continue
+				}
+				item := items[index]
+				tile := p.tile(item)
+				children = append(children, layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+					return tile.Layout(gtx, e, item)
+				}))
+			}
+			rowChildren := children
+			rowWidgets = append(rowWidgets, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				return layout.Flex{Axis: layout.Horizontal}.Layout(gtx, rowChildren...)
+			}))
+			if row+1 < rows {
+				rowWidgets = append(rowWidgets, layout.Rigid(layout.Spacer{Height: unit.Dp(8)}.Layout))
+			}
+		}
+		layouts[columns] = rowWidgets
+	}
 	return func(gtx layout.Context) layout.Dimensions {
 		width := int(gtx.Metric.PxToDp(gtx.Constraints.Max.X))
 		columns := 2
@@ -86,35 +204,7 @@ func (p *page) quickGrid(e *env.Env, items []model.BrowseItem) layout.Widget {
 		} else if width >= 820 {
 			columns = 3
 		}
-		rows := (len(items) + columns - 1) / columns
-		rowWidgets := make([]layout.FlexChild, 0, rows*2)
-		for row := range rows {
-			start := row * columns
-			end := min(len(items), start+columns)
-			rowWidgets = append(rowWidgets, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-				children := make([]layout.FlexChild, 0, columns*2-1)
-				for column := range columns {
-					if column > 0 {
-						children = append(children, layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout))
-					}
-					index := start + column
-					if index >= end {
-						children = append(children, layout.Flexed(1, func(layout.Context) layout.Dimensions { return layout.Dimensions{} }))
-						continue
-					}
-					item := items[index]
-					tile := p.tile(item)
-					children = append(children, layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-						return tile.Layout(gtx, e, item)
-					}))
-				}
-				return layout.Flex{Axis: layout.Horizontal}.Layout(gtx, children...)
-			}))
-			if row+1 < rows {
-				rowWidgets = append(rowWidgets, layout.Rigid(layout.Spacer{Height: unit.Dp(8)}.Layout))
-			}
-		}
-		return layout.Flex{Axis: layout.Vertical}.Layout(gtx, rowWidgets...)
+		return layout.Flex{Axis: layout.Vertical}.Layout(gtx, layouts[columns]...)
 	}
 }
 

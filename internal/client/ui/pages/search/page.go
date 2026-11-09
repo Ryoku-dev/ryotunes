@@ -58,6 +58,7 @@ type cardState struct {
 type page struct {
 	query          string
 	scroll         look.Scroller
+	header         widgets.Header
 	provider       model.Provider
 	spotifyBlocked bool
 	selected       int
@@ -68,10 +69,9 @@ type page struct {
 	topTable       widgets.TrackTable
 	tracksTable    widgets.TrackTable
 	shelves        map[string]*widgets.Shelf
-
-	mixed  mixedState
-	tracks trackState
-	cards  [3]cardState
+	mixed          mixedState
+	tracks         trackState
+	cards          [3]cardState
 }
 
 // New returns a retained Search page for the route query.
@@ -122,7 +122,9 @@ func (p *page) Layout(gtx layout.Context, e *env.Env) layout.Dimensions {
 	inset := look.ContentInset(e.Th.Class)
 	width := int(gtx.Metric.PxToDp(gtx.Constraints.Max.X - 2*gtx.Dp(inset)))
 	children := []layout.Widget{
-		widgets.PageHeader(e, searchTitle(p.query), "", nil),
+		func(gtx layout.Context) layout.Dimensions {
+			return p.header.Layout(gtx, e, searchTitle(p.query), "", nil)
+		},
 		p.filtersLayout(e),
 	}
 	if blocked {

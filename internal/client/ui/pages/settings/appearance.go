@@ -36,8 +36,24 @@ func (p *page) layoutAppearance(gtx layout.Context, e *env.Env, snapshot state.S
 	}
 	density := indexOf(densityValues, preferences.Density, 0)
 	scale := settingInt(snapshot.Settings, model.SettingUIScale, 100)
-	return settingRows(gtx,
-		settingRow(e.Th, "Colours", "Follow Ryoku, or pin dark or light stones while keeping the live palette accents.", func(gtx layout.Context) layout.Dimensions {
+	lowResource := settingBool(snapshot.Settings, model.SettingLowResourceMode, false)
+	visualizerAvailable := e.Spectrum != nil && e.Spectrum.Available()
+	visualizerDetail := "Bars that move with the music in page headers and the now playing view."
+	if !visualizerAvailable {
+		visualizerDetail = "Install cava to see the visualizer"
+	} else if preferences.ReduceMotion {
+		visualizerDetail += " Reduced motion pauses it without changing this setting."
+	} else if lowResource {
+		visualizerDetail += " Low resource mode pauses it without changing this setting."
+	}
+	waveDetail := "A sharp travelling wave marks the played part of every seek bar."
+	if preferences.ReduceMotion {
+		waveDetail += " Reduced motion pauses it without changing this setting."
+	} else if lowResource {
+		waveDetail += " Low resource mode pauses it without changing this setting."
+	}
+	return p.settingRows(gtx,
+		p.settingRow(e.Th, "Colours", "Follow Ryoku, or pin dark or light stones while keeping the live palette accents.", func(gtx layout.Context) layout.Dimensions {
 			dims := p.appearance.colours.Layout(gtx, e.Th, e.Overlays, appearanceLabels, mode)
 			if selected, ok := p.appearance.colours.Changed(); ok {
 				preferences.Appearance = appearanceValues[selected]
@@ -46,7 +62,7 @@ func (p *page) layoutAppearance(gtx layout.Context, e *env.Env, snapshot state.S
 			}
 			return dims
 		}),
-		settingRow(e.Th, "Palette file", "Choose a Ryoku palette JSON, or clear it to use the live desktop palette.", func(gtx layout.Context) layout.Dimensions {
+		p.settingRow(e.Th, "Palette file", "Choose a Ryoku palette JSON, or clear it to use the live desktop palette.", func(gtx layout.Context) layout.Dimensions {
 			p.appearance.palette.field.Mono = true
 			p.appearance.palette.field.Placeholder = "/path/to/colors.json"
 			p.appearance.usePalette.Kind, p.appearance.usePalette.Label = kit.PlaqueLine, "Use palette"
@@ -79,7 +95,7 @@ func (p *page) layoutAppearance(gtx layout.Context, e *env.Env, snapshot state.S
 				}),
 			)
 		}),
-		settingRow(e.Th, "Density", "Compact changes resource rows from 56 dp to 48 dp.", func(gtx layout.Context) layout.Dimensions {
+		p.settingRow(e.Th, "Density", "Compact changes resource rows from 56 dp to 48 dp.", func(gtx layout.Context) layout.Dimensions {
 			dims := p.appearance.density.Layout(gtx, e.Th, e.Overlays, densityLabels, density)
 			if selected, ok := p.appearance.density.Changed(); ok {
 				preferences.Density = densityValues[selected]
@@ -92,7 +108,7 @@ func (p *page) layoutAppearance(gtx layout.Context, e *env.Env, snapshot state.S
 			}
 			return dims
 		}),
-		settingRow(e.Th, "Motion", "Reduced motion makes state and selection changes immediate.", func(gtx layout.Context) layout.Dimensions {
+		p.settingRow(e.Th, "Motion", "Reduced motion makes state and selection changes immediate and pauses visualizers and wave progress without changing their settings.", func(gtx layout.Context) layout.Dimensions {
 			selected := 0
 			if preferences.ReduceMotion {
 				selected = 1
@@ -105,7 +121,7 @@ func (p *page) layoutAppearance(gtx layout.Context, e *env.Env, snapshot state.S
 			}
 			return dims
 		}),
-		settingRow(e.Th, "UI scale", "Preferred renderer scale, persisted for every Ryotunes client on this account.", func(gtx layout.Context) layout.Dimensions {
+		p.settingRow(e.Th, "UI scale", "Preferred renderer scale, persisted for every Ryotunes client on this account.", func(gtx layout.Context) layout.Dimensions {
 			p.appearance.scale.Value, p.appearance.scale.Min, p.appearance.scale.Max = scale, 80, 140
 			p.appearance.scale.Step, p.appearance.scale.Unit = 10, "%"
 			dims := p.appearance.scale.Layout(gtx, e.Th.Theme)
@@ -114,9 +130,32 @@ func (p *page) layoutAppearance(gtx layout.Context, e *env.Env, snapshot state.S
 			}
 			return dims
 		}),
-		toggleSettingRow(e, &p.appearance.lowResource, snapshot.Settings, model.SettingLowResourceMode, false,
-			"Low resource mode", "Disable speculative stream warming and reduce automatic Home and network work."),
-	)
+		p.toggleSettingRow(e, &p.appearance.lowResource, snapshot.Settings, model.SettingLowResourceMode, false,
+			"Low resource mode", "Reduce automatic Home and network work, and pause visualizers and wave progress without changing their settings."),
+		p.settingRow(e.Th, "Visualizer", visualizerDetail, func(gtx layout.Context) layout.Dimensions {
+			p.appearance.visualizer.Value = preferences.VisualizerOn()
+			toggleGTX := gtx
+			if !visualizerAvailable {
+				toggleGTX = toggleGTX.Disabled()
+			}
+			dims := p.appearance.visualizer.Layout(toggleGTX, e.Th.Theme)
+			if visualizerAvailable && p.appearance.visualizer.Changed() {
+				value := p.appearance.visualizer.Value
+				preferences.Visualizer = &value
+				saveClientPreferences(e, preferences)
+			}
+			return dims
+		}),
+		p.settingRow(e.Th, "Wave progress", waveDetail, func(gtx layout.Context) layout.Dimensions {
+			p.appearance.waveProgress.Value = preferences.WaveOn()
+			dims := p.appearance.waveProgress.Layout(gtx, e.Th.Theme)
+			if p.appearance.waveProgress.Changed() {
+				value := p.appearance.waveProgress.Value
+				preferences.WaveProgress = &value
+				saveClientPreferences(e, preferences)
+			}
+			return dims
+		}))
 }
 
 func applyAppearance(e *env.Env, appearance, paletteFile string) {

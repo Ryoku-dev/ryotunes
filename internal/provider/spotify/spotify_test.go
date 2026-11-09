@@ -2,6 +2,7 @@ package spotify
 
 import (
 	"bytes"
+	"context"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -9,7 +10,9 @@ import (
 
 	audiofilespb "github.com/devgianlu/go-librespot/proto/spotify/extendedmetadata/audiofiles"
 	metadatapb "github.com/devgianlu/go-librespot/proto/spotify/metadata"
+	"github.com/ryoku-dev/ryotunes/internal/bus"
 	"github.com/ryoku-dev/ryotunes/internal/model"
+	"github.com/ryoku-dev/ryotunes/internal/protocol"
 )
 
 func TestTrackIDConversions(t *testing.T) {
@@ -72,5 +75,34 @@ func TestServeSeekableRange(t *testing.T) {
 	}
 	if got := response.Header().Get("Content-Range"); got != "bytes 3-6/10" {
 		t.Fatalf("Content-Range = %q", got)
+	}
+}
+
+func TestRepeatedSignInReemitsPendingURL(t *testing.T) {
+	const authURL = "https://accounts.spotify.com/authorize?state=stable"
+	events := make(chan model.SpotifyAuthEvent, 2)
+	client := &Spotify{
+		events: bus.SinkFunc(func(event string, data any) {
+			if event == protocol.EventSpotifyAuth {
+				events <- data.(model.SpotifyAuthEvent)
+			}
+		}),
+		signing: true,
+		authURL: authURL,
+	}
+	for range 2 {
+		started, err := client.SignIn(context.Background())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !started {
+			t.Fatal("pending flow was not reported as started")
+		}
+	}
+	for range 2 {
+		event := <-events
+		if event.State != "url" || event.URL == nil || *event.URL != authURL {
+			t.Fatalf("event = %#v", event)
+		}
 	}
 }

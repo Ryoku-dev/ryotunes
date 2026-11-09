@@ -45,6 +45,7 @@ type Options struct {
 	DataDir               string
 	Proxy                 string
 	DisabledStreamClients string
+	Cookies               CookieSource
 }
 
 // Client is a YouTube Music provider and account surface.
@@ -53,6 +54,7 @@ type Client struct {
 	http    *http.Client
 	log     *slog.Logger
 	dataDir string
+	cookies CookieSource
 
 	mu             sync.RWMutex
 	cookie         string
@@ -63,6 +65,9 @@ type Client struct {
 	disabled       map[string]bool
 	lastVisitorTry time.Time
 	cipher         cipherState
+
+	signInMu  sync.Mutex
+	signingIn bool
 
 	ctx       context.Context
 	cancel    context.CancelFunc
@@ -99,8 +104,11 @@ func New(o Options) (*Client, error) {
 		hc = netx.Client(60 * time.Second)
 	}
 	clientCtx, cancel := context.WithCancel(context.Background())
+	if o.Cookies == nil {
+		o.Cookies = systemCookies{}
+	}
 	c := &Client{
-		kv: o.KV, http: hc, log: o.Log, dataDir: o.DataDir, proxy: o.Proxy,
+		kv: o.KV, http: hc, log: o.Log, dataDir: o.DataDir, cookies: o.Cookies, proxy: o.Proxy,
 		disabled: parseDisabled(o.DisabledStreamClients), ctx: clientCtx, cancel: cancel,
 	}
 	c.cookie, _ = o.KV.Get(cookieKey)

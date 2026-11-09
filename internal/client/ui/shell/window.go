@@ -3,6 +3,7 @@ package shell
 import (
 	"context"
 	"image"
+	"strings"
 	"sync"
 	"time"
 
@@ -21,6 +22,7 @@ import (
 	"github.com/ryoku-dev/ryotunes/internal/client/ui/env"
 	"github.com/ryoku-dev/ryotunes/internal/client/ui/look"
 	"github.com/ryoku-dev/ryotunes/internal/client/ui/widgets"
+	"github.com/ryoku-dev/ryotunes/internal/model"
 )
 
 type postQueue struct {
@@ -172,10 +174,12 @@ func (runtime *clientRuntime) runWindows(options Options) error {
 func (s *uiShell) newWindow(mini bool) *gioapp.Window {
 	window := new(gioapp.Window)
 	if mini {
+		preferences := s.runtime.store.Snapshot().Client
+		scale := clientScale(preferences)
 		window.Option(
 			gioapp.Title("Ryotunes Mini"),
-			gioapp.Size(unit.Dp(360), unit.Dp(420)),
-			gioapp.MinSize(unit.Dp(300), unit.Dp(320)),
+			gioapp.Size(unit.Dp(360*scale), unit.Dp(420*scale)),
+			gioapp.MinSize(unit.Dp(300*scale), unit.Dp(320*scale)),
 			gioapp.Decorated(false),
 		)
 		return window
@@ -290,9 +294,21 @@ func scaleMetric(gtx *layout.Context, preferences state.ClientPreferences) {
 }
 
 func (s *uiShell) environment(now time.Time, theme *look.Theme) *env.Env {
+	snapshot := s.runtime.store.Snapshot()
+	lowResource := strings.EqualFold(strings.TrimSpace(snapshot.Settings[string(model.SettingLowResourceMode)]), "true")
+	motion := !snapshot.Client.ReduceMotion && !lowResource
+	available := s.runtime.spectrum != nil && s.runtime.spectrum.Available()
+	fx := env.Fx{
+		Visualizer: snapshot.Client.VisualizerOn() && motion && available,
+		Wave:       snapshot.Client.WaveOn() && motion,
+	}
+	playing := snapshot.Playback.Now != nil && !snapshot.Playback.Paused
+	if s.runtime.spectrum != nil {
+		s.runtime.spectrum.SetActive(playing && fx.Visualizer)
+	}
 	e := &env.Env{
 		Th: theme, Overlays: &s.overlays, Store: s.runtime.store, Conn: s.runtime.client,
-		Nav: s.nav, Art: s.runtime.art, Now: now,
+		Nav: s.nav, Art: s.runtime.art, Spectrum: s.runtime.spectrum, Fx: fx, Now: now,
 	}
 	e.Toast = func(message string, _ env.ToastKind) {
 		s.posts.Post(func() { s.placards.Push(time.Now(), message, "") })
@@ -328,6 +344,7 @@ func (s *uiShell) environment(now time.Time, theme *look.Theme) *env.Env {
 			return s.sound.Layout(gtx, e)
 		})
 	}
+	act.OpenAuthURLs(e)
 	return e
 }
 

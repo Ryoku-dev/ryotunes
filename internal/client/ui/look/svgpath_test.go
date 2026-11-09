@@ -65,3 +65,20 @@ func TestSVGNumberAndImplicitSyntax(t *testing.T) {
 		t.Fatalf("operations = %d", len(geometry.operations))
 	}
 }
+
+func TestSVGPathCacheReusesParsedGeometry(t *testing.T) {
+	first, err := cachedSVGPath(spotifyGlyphPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := cachedSVGPath(spotifyGlyphPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(first.operations) == 0 || len(second.operations) == 0 {
+		t.Fatal("cached geometry is empty")
+	}
+	if &first.operations[0] != &second.operations[0] {
+		t.Fatal("cached path was parsed more than once")
+	}
+}

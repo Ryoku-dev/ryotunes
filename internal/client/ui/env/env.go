@@ -13,6 +13,7 @@ import (
 
 	"github.com/ryoku-dev/ryotunes/internal/client/art"
 	"github.com/ryoku-dev/ryotunes/internal/client/conn"
+	"github.com/ryoku-dev/ryotunes/internal/client/spectrum"
 	"github.com/ryoku-dev/ryotunes/internal/client/state"
 	"github.com/ryoku-dev/ryotunes/internal/client/ui/look"
 	"github.com/ryoku-dev/ryotunes/internal/model"
@@ -86,6 +87,12 @@ type Nav interface {
 	OpenSound(anchor image.Rectangle)
 }
 
+// Fx are the motion-sensitive playback effects enabled for this frame.
+type Fx struct {
+	Visualizer bool
+	Wave       bool
+}
+
 // Env is passed to every Layout call. Pages keep their own widget state
 // and read everything else from here.
 type Env struct {
@@ -95,6 +102,8 @@ type Env struct {
 	Conn     *conn.Client
 	Nav      Nav
 	Art      *art.Cache
+	Spectrum *spectrum.Feed
+	Fx       Fx
 	Now      time.Time
 	// Toast shows a placard; the shell owns the stack.
 	Toast func(message string, kind ToastKind)

@@ -31,6 +31,7 @@ func execute() (int, error) {
 	pngPath := flag.String("png", "", "render one frame to a PNG and exit")
 	size := flag.String("size", "", "window or PNG size as WIDTHxHEIGHT (default 1280x800)")
 	demoMode := flag.Bool("demo", false, "use the in-process demo daemon")
+	demoPlaying := flag.Bool("demo-playing", false, "play the demo fixture for live visual effects")
 	route := flag.String("route", "", "initial route (default home)")
 	query := flag.String("query", "", "initial search query")
 	panel := flag.String("panel", "", "initial panel: queue, lyrics, now-playing, listen-together, or empty")
@@ -63,7 +64,7 @@ func execute() (int, error) {
 	}
 
 	options := shell.Options{
-		Demo: *demoMode, PNG: *pngPath, Width: width, Height: height,
+		Demo: *demoMode, DemoPlaying: *demoPlaying, PNG: *pngPath, Width: width, Height: height,
 		Route: *route, Query: *query, Panel: *panel, Mode: *mode, Mini: *mini,
 	}
 	if *pngPath != "" {

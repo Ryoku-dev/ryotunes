@@ -16,6 +16,7 @@ import (
 	libtheme "github.com/ryoku-dev/ryoku/docs/lithic/library/go/theme"
 	"github.com/ryoku-dev/ryotunes/internal/client/art"
 	"github.com/ryoku-dev/ryotunes/internal/client/conn"
+	"github.com/ryoku-dev/ryotunes/internal/client/spectrum"
 	"github.com/ryoku-dev/ryotunes/internal/client/state"
 	"github.com/ryoku-dev/ryotunes/internal/client/ui/demo"
 	"github.com/ryoku-dev/ryotunes/internal/client/ui/look"
@@ -31,6 +32,7 @@ func init() {
 // Options configures the initial windows, route, palette mode, demo daemon, and PNG capture.
 type Options struct {
 	Demo          bool
+	DemoPlaying   bool
 	PNG           string
 	Width, Height int
 	Route         string
@@ -122,6 +124,7 @@ type clientRuntime struct {
 	client   *conn.Client
 	store    *state.Store
 	art      *art.Cache
+	spectrum *spectrum.Feed
 	hub      invalidationHub
 	themeMu  sync.Mutex
 	theme    *look.Theme
@@ -152,7 +155,7 @@ func startRuntime(options Options) (*clientRuntime, error) {
 		}
 		runtime.tempDir = tempDir
 		socketPath = filepath.Join(tempDir, "ryotunesd.sock")
-		go func() { runtime.serveErr <- demo.Serve(ctx, socketPath) }()
+		go func() { runtime.serveErr <- demo.Serve(ctx, socketPath, options.DemoPlaying) }()
 		deadline := time.Now().Add(time.Second)
 		for {
 			if _, err := os.Stat(socketPath); err == nil {
@@ -183,10 +186,16 @@ func startRuntime(options Options) (*clientRuntime, error) {
 	runtime.store = state.NewEmpty()
 	_ = runtime.store.LoadClientPreferences()
 	runtime.art = art.New(art.Options{Invalidate: runtime.hub.Invalidate})
-	preferences := runtime.store.Snapshot().Client
+	if options.Demo {
+		runtime.spectrum = spectrum.NewStatic(demo.SpectrumLevels())
+	} else {
+		runtime.spectrum = spectrum.New(runtime.hub.Invalidate)
+	}
+	snapshot := runtime.store.Snapshot()
+	preferences := snapshot.Client
 	appearance := runtime.modeValue(preferences)
 	density := clientDensity(preferences)
-	runtime.theme = look.NewTheme(look.Roles(appearance, preferences.PaletteFile), density)
+	runtime.theme = look.NewTheme(look.Roles(appearance, preferences.PaletteFile), density, snapshot.Provider)
 	runtime.paletteAppearance, runtime.paletteFile = appearance, preferences.PaletteFile
 
 	go look.Watch(runtime.ctx, func() (string, string) {
@@ -207,6 +216,9 @@ func (r *clientRuntime) Close() {
 	r.cancel()
 	if r.client != nil {
 		r.client.Close()
+	}
+	if r.spectrum != nil {
+		r.spectrum.Close()
 	}
 	if r.art != nil {
 		r.art.Close()

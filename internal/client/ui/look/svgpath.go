@@ -6,6 +6,7 @@ import (
 	"math"
 	"strconv"
 	"strings"
+	"sync"
 	"unicode"
 
 	"gioui.org/f32"
@@ -29,6 +30,25 @@ type svgGeometry struct {
 type svgScanner struct {
 	data  string
 	index int
+}
+
+type svgCacheEntry struct {
+	geometry svgGeometry
+	err      error
+}
+
+var svgGeometryCache sync.Map
+
+func cachedSVGPath(data string) (svgGeometry, error) {
+	if cached, ok := svgGeometryCache.Load(data); ok {
+		entry := cached.(svgCacheEntry)
+		return entry.geometry, entry.err
+	}
+	geometry, err := parseSVGPath(data)
+	entry := svgCacheEntry{geometry: geometry, err: err}
+	actual, _ := svgGeometryCache.LoadOrStore(data, entry)
+	stored := actual.(svgCacheEntry)
+	return stored.geometry, stored.err
 }
 
 func parseSVGPath(data string) (svgGeometry, error) {
@@ -207,7 +227,7 @@ func (geometry *svgGeometry) add(operation svgOperation) {
 }
 
 func buildSVGPath(ops *op.Ops, data string, source f32.Point, size image.Point) (clip.PathSpec, svgGeometry, error) {
-	geometry, err := parseSVGPath(data)
+	geometry, err := cachedSVGPath(data)
 	if err != nil {
 		return clip.PathSpec{}, geometry, err
 	}

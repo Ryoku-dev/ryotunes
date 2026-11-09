@@ -19,13 +19,13 @@ var (
 
 func (p *page) layoutDownloads(gtx layout.Context, e *env.Env) layout.Dimensions {
 	p.download.path.sync(p.downloads.Path)
-	return settingRows(gtx,
-		settingRow(e.Th, "Destination", "An absolute path, or ~/ for your home folder. Missing folders are created when needed.", func(gtx layout.Context) layout.Dimensions {
+	return p.settingRows(gtx,
+		p.settingRow(e.Th, "Destination", "An absolute path, or ~/ for your home folder. Missing folders are created when needed.", func(gtx layout.Context) layout.Dimensions {
 			p.download.path.field.Mono = true
 			p.download.path.field.Placeholder = "/home/you/Music"
 			return p.download.path.field.Layout(gtx, e.Th.Theme)
 		}),
-		settingRow(e.Th, "Format", "Keep the original stream, or transcode it to MP3, Opus or FLAC.", func(gtx layout.Context) layout.Dimensions {
+		p.settingRow(e.Th, "Format", "Keep the original stream, or transcode it to MP3, Opus or FLAC.", func(gtx layout.Context) layout.Dimensions {
 			selected := 0
 			for i, format := range downloadFormatValues {
 				if p.downloads.Format == format {
@@ -39,7 +39,7 @@ func (p *page) layoutDownloads(gtx layout.Context, e *env.Env) layout.Dimensions
 			}
 			return dims
 		}),
-		settingRow(e.Th, "Artist subfolders", "Put each artist's downloads in a separate folder.", func(gtx layout.Context) layout.Dimensions {
+		p.settingRow(e.Th, "Artist subfolders", "Put each artist's downloads in a separate folder.", func(gtx layout.Context) layout.Dimensions {
 			p.download.artistFolders.Value = p.downloads.OrganizeByArtist
 			dims := p.download.artistFolders.Layout(gtx, e.Th.Theme)
 			if p.download.artistFolders.Changed() {
@@ -47,7 +47,7 @@ func (p *page) layoutDownloads(gtx layout.Context, e *env.Env) layout.Dimensions
 			}
 			return dims
 		}),
-		settingRow(e.Th, "Embed metadata", "Write track metadata, cover art and lyrics into the completed download.", func(gtx layout.Context) layout.Dimensions {
+		p.settingRow(e.Th, "Embed metadata", "Write track metadata, cover art and lyrics into the completed download.", func(gtx layout.Context) layout.Dimensions {
 			p.download.embedMetadata.Value = p.downloads.EmbedMetadata
 			dims := p.download.embedMetadata.Layout(gtx, e.Th.Theme)
 			if p.download.embedMetadata.Changed() {
@@ -55,7 +55,7 @@ func (p *page) layoutDownloads(gtx layout.Context, e *env.Env) layout.Dimensions
 			}
 			return dims
 		}),
-		settingRow(e.Th, "Simultaneous downloads", "Run one to four downloads at the same time.", func(gtx layout.Context) layout.Dimensions {
+		p.settingRow(e.Th, "Simultaneous downloads", "Run one to four downloads at the same time.", func(gtx layout.Context) layout.Dimensions {
 			p.download.workers.Value = max(1, p.downloads.Workers)
 			p.download.workers.Min, p.download.workers.Max, p.download.workers.Step = 1, 4, 1
 			dims := p.download.workers.Layout(gtx, e.Th.Theme)
@@ -64,7 +64,7 @@ func (p *page) layoutDownloads(gtx layout.Context, e *env.Env) layout.Dimensions
 			}
 			return dims
 		}),
-		settingRow(e.Th, "Download settings", "Changes apply to downloads queued after they are saved.", func(gtx layout.Context) layout.Dimensions {
+		p.settingRow(e.Th, "Download settings", "Changes apply to downloads queued after they are saved.", func(gtx layout.Context) layout.Dimensions {
 			p.download.save.Kind, p.download.save.Label = kit.PlaqueLine, "Save"
 			if p.download.save.Clicked(gtx) {
 				settings := p.downloads
@@ -80,6 +80,5 @@ func (p *page) layoutDownloads(gtx layout.Context, e *env.Env) layout.Dimensions
 				})
 			}
 			return p.download.save.Layout(gtx, e.Th.Theme)
-		}),
-	)
+		}))
 }

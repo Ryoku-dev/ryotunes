@@ -16,11 +16,11 @@ import (
 )
 
 type page struct {
-	route  env.Route
-	scroll look.Scroller
-	grid   widgets.Grid
-	retry  kit.Plaque
-
+	route   env.Route
+	scroll  look.Scroller
+	header  widgets.Header
+	grid    widgets.Grid
+	retry   kit.Plaque
 	items   []model.BrowseItem
 	started bool
 	loading bool
@@ -50,7 +50,9 @@ func (p *page) Layout(gtx layout.Context, e *env.Env) layout.Dimensions {
 	}
 	inset := look.ContentInset(e.Th.Class)
 	width := int(gtx.Metric.PxToDp(gtx.Constraints.Max.X - 2*gtx.Dp(inset)))
-	children := []layout.Widget{widgets.PageHeader(e, p.Title(), "", nil)}
+	children := []layout.Widget{func(gtx layout.Context) layout.Dimensions {
+		return p.header.Layout(gtx, e, p.Title(), "", nil)
+	}}
 	switch {
 	case p.loading && !p.loaded:
 		children = append(children, widgets.Loading(e, widgets.LoadingGrid))

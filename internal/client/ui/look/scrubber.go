@@ -13,6 +13,7 @@ import (
 	"gioui.org/layout"
 	"gioui.org/op"
 	"gioui.org/op/clip"
+	"gioui.org/op/paint"
 	"gioui.org/unit"
 
 	"github.com/ryoku-dev/ryoku/docs/lithic/library/go/anim"
@@ -29,6 +30,11 @@ type ScrubberStyle struct {
 	Bubble       func(f float32) string
 	WheelStep    float32
 	Disabled     bool
+	Wave         bool
+	Live         bool
+	Thickness    unit.Dp
+	Amplitude    unit.Dp
+	Wavelength   unit.Dp
 }
 
 // Scrubber is a normalized pointer-grabbing seek or volume control.
@@ -38,6 +44,7 @@ type Scrubber struct {
 	hovered bool
 	pointer image.Point
 	hover   anim.Tween
+	wave    WaveState
 	hoverOn bool
 	ready   bool
 
@@ -244,10 +251,13 @@ func (s *Scrubber) Layout(gtx layout.Context, th *Theme, value float32, style Sc
 		display = s.preview
 	}
 	hover := s.hoverValue(gtx, th)
-	trackHeight := gtx.Dp(unit.Dp(4) + unit.Dp(2)*unit.Dp(hover))
-	trackHeight = max(1, trackHeight)
+	thickness := style.Thickness
+	if thickness <= 0 {
+		thickness = 4
+	}
+	thickness += unit.Dp(2 * hover)
+	trackHeight := max(1, gtx.Dp(thickness))
 	trackY := (size.Y - trackHeight) / 2
-	track := image.Rect(0, trackY, width, trackY+trackHeight)
 	trackInk := scrubberTrackInk(th.R)
 	fillInk := style.Fill
 	handleInk := th.R.Fg
@@ -256,20 +266,33 @@ func (s *Scrubber) Layout(gtx layout.Context, th *Theme, value float32, style Sc
 	}
 
 	area := clip.Rect(image.Rectangle{Max: size}).Push(gtx.Ops)
-	kit.FillCut(gtx.Ops, track, trackHeight/2, trackInk)
-	filled := int(math.Round(float64(display * float32(width))))
-	if filled > 0 {
-		kit.FillCut(gtx.Ops, image.Rect(0, trackY, min(filled, width), trackY+trackHeight), trackHeight/2, fillInk)
+	if style.Wave {
+		DrawWave(gtx, th, &s.wave, image.Rectangle{Max: size}, display, fillInk, trackInk, thickness, style.Amplitude, style.Wavelength, style.Live && !s.active && !style.Disabled)
+	} else {
+		s.wave.reset()
+		track := image.Rect(0, trackY, width, trackY+trackHeight)
+		paint.FillShape(gtx.Ops, trackInk, clip.Rect(track).Op())
+		filled := int(math.Round(float64(display * float32(width))))
+		if filled > 0 {
+			paint.FillShape(gtx.Ops, fillInk, clip.Rect(image.Rect(0, trackY, min(filled, width), trackY+trackHeight)).Op())
+		}
 	}
 	handleAlpha := hover
 	if style.AlwaysHandle {
 		handleAlpha = 1
 	}
-	handleSize := max(1, gtx.Dp(12))
-	handleX := int(math.Round(float64(display*float32(width)))) - handleSize/2
+	handleWidth, handleHeight, handleCut := max(1, gtx.Dp(4)), max(1, gtx.Dp(18)), 0
+	if style.AlwaysHandle {
+		handleWidth, handleHeight, handleCut = max(1, gtx.Dp(12)), max(1, gtx.Dp(12)), gtx.Dp(3)
+	}
+	handleX := int(math.Round(float64(display*float32(width)))) - handleWidth/2
 	if handleAlpha > 0 {
-		handle := image.Rect(handleX, (size.Y-handleSize)/2, handleX+handleSize, (size.Y+handleSize)/2)
-		kit.FillCut(gtx.Ops, handle, gtx.Dp(3), palette.WithAlpha(handleInk, handleAlpha))
+		handle := image.Rect(handleX, (size.Y-handleHeight)/2, handleX+handleWidth, (size.Y+handleHeight)/2)
+		if handleCut > 0 {
+			kit.FillCut(gtx.Ops, handle, handleCut, palette.WithAlpha(handleInk, handleAlpha))
+		} else {
+			paint.FillShape(gtx.Ops, palette.WithAlpha(handleInk, handleAlpha), clip.Rect(handle).Op())
+		}
 	}
 	semantic.Editor.Add(gtx.Ops)
 	semantic.EnabledOp(!style.Disabled).Add(gtx.Ops)
@@ -280,7 +303,7 @@ func (s *Scrubber) Layout(gtx layout.Context, th *Theme, value float32, style Sc
 		at := s.pointer
 		bubbleValue := scrubberFraction(float32(at.X), width)
 		if s.active {
-			at = image.Pt(handleX+handleSize/2, size.Y/2)
+			at = image.Pt(handleX+handleWidth/2, size.Y/2)
 			bubbleValue = s.preview
 		}
 		Bubble(gtx, th, at, style.Bubble(bubbleValue), handleAlpha)

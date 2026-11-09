@@ -26,7 +26,7 @@ func (p *page) layoutPlayback(gtx layout.Context, e *env.Env, snapshot state.Sta
 	}
 	quality := settingString(snapshot.Settings, model.SettingQuality, string(model.QualityHigh))
 	rows := []layout.Widget{
-		settingRow(e.Th, "Audio quality", "Preferred stream quality. Changing it clears cached stream URLs.", func(gtx layout.Context) layout.Dimensions {
+		p.settingRow(e.Th, "Audio quality", "Preferred stream quality. Changing it clears cached stream URLs.", func(gtx layout.Context) layout.Dimensions {
 			selected := indexOf(qualityValues, quality, 2)
 			dims := p.playback.quality.Layout(gtx, e.Th, e.Overlays, qualityLabels, selected)
 			if changed, ok := p.playback.quality.Changed(); ok {
@@ -43,11 +43,11 @@ func (p *page) layoutPlayback(gtx layout.Context, e *env.Env, snapshot state.Sta
 			}
 			return dims
 		}),
-		toggleSettingRow(e, &p.playback.autoplay, snapshot.Settings, model.SettingAutoplay, true,
+		p.toggleSettingRow(e, &p.playback.autoplay, snapshot.Settings, model.SettingAutoplay, true,
 			"Autoplay", "Continue with related music when the queue reaches its end."),
-		toggleSettingRow(e, &p.playback.duplicates, snapshot.Settings, model.SettingPreventDuplicates, false,
+		p.toggleSettingRow(e, &p.playback.duplicates, snapshot.Settings, model.SettingPreventDuplicates, false,
 			"Prevent duplicate tracks in queue", "Keep the same track from being added to the queue more than once."),
-		settingRow(e.Th, "Stop after current", "Stop when the current track finishes. This is a one-shot playback choice.", func(gtx layout.Context) layout.Dimensions {
+		p.settingRow(e.Th, "Stop after current", "Stop when the current track finishes. This is a one-shot playback choice.", func(gtx layout.Context) layout.Dimensions {
 			p.playback.stopAfter.Value = snapshot.Playback.StopAfterCurrent
 			dims := p.playback.stopAfter.Layout(gtx, e.Th.Theme)
 			if p.playback.stopAfter.Changed() {
@@ -55,17 +55,17 @@ func (p *page) layoutPlayback(gtx layout.Context, e *env.Env, snapshot state.Sta
 			}
 			return dims
 		}),
-		toggleSettingRow(e, &p.playback.history, snapshot.Settings, model.SettingEnableHistory, true,
+		p.toggleSettingRow(e, &p.playback.history, snapshot.Settings, model.SettingEnableHistory, true,
 			"Watch history", historyDetail),
-		toggleSettingRow(e, &p.appearance.tray, snapshot.Settings, model.SettingCloseToTray, true,
+		p.toggleSettingRow(e, &p.appearance.tray, snapshot.Settings, model.SettingCloseToTray, true,
 			"Close to tray", "Closing the window keeps music playing in the background."),
-		toggleSettingRow(e, &p.appearance.autostart, snapshot.Settings, model.SettingAutostart, false,
+		p.toggleSettingRow(e, &p.appearance.autostart, snapshot.Settings, model.SettingAutostart, false,
 			"Start on login", "Launch Ryotunes automatically when you log in."),
 	}
 
 	disabled := settingSet(snapshot.Settings, model.SettingDisabledStreamClients)
 	if len(p.streamClients) > 0 {
-		rows = append(rows, settingRow(e.Th, "Stream clients", "Choose which YouTube playback clients may resolve streams. At least one should remain enabled.", nil))
+		rows = append(rows, p.settingRow(e.Th, "Stream clients", "Choose which YouTube playback clients may resolve streams. At least one should remain enabled.", nil))
 	}
 	for _, client := range p.streamClients {
 		client := client
@@ -74,7 +74,7 @@ func (p *page) layoutPlayback(gtx layout.Context, e *env.Env, snapshot state.Sta
 			toggle = new(kit.Toggle)
 			p.playback.clients[client] = toggle
 		}
-		rows = append(rows, settingRow(e.Th, streamClientLabel(client), "YouTube stream resolver client.", func(gtx layout.Context) layout.Dimensions {
+		rows = append(rows, p.settingRow(e.Th, streamClientLabel(client), "YouTube stream resolver client.", func(gtx layout.Context) layout.Dimensions {
 			toggle.Value = !disabled[string(client)]
 			dims := toggle.Layout(gtx, e.Th.Theme)
 			if toggle.Changed() {
@@ -93,11 +93,11 @@ func (p *page) layoutPlayback(gtx layout.Context, e *env.Env, snapshot state.Sta
 			return dims
 		}))
 	}
-	return settingRows(gtx, rows...)
+	return p.settingRows(gtx, rows...)
 }
 
 func (p *page) layoutSound(gtx layout.Context, e *env.Env, snapshot state.State) layout.Dimensions {
-	return settingRows(gtx, settingRow(e.Th, "Playback sound", "Shape tempo, pitch, reverb, bass and stereo width. Current preset: "+snapshot.AudioFx.PresetName()+".", func(gtx layout.Context) layout.Dimensions {
+	return p.settingRows(gtx, p.settingRow(e.Th, "Playback sound", "Shape tempo, pitch, reverb, bass and stereo width. Current preset: "+snapshot.AudioFx.PresetName()+".", func(gtx layout.Context) layout.Dimensions {
 		p.sound.Kind, p.sound.Icon, p.sound.Label = kit.PlaqueLine, look.Icon.Tune, "Open sound"
 		dims := p.sound.Layout(gtx, e.Th.Theme)
 		if p.sound.Clicked(gtx) {
@@ -108,16 +108,15 @@ func (p *page) layoutSound(gtx layout.Context, e *env.Env, snapshot state.State)
 }
 
 func (p *page) layoutLyrics(gtx layout.Context, e *env.Env, snapshot state.State) layout.Dimensions {
-	return settingRows(gtx,
-		toggleSettingRow(e, &p.lyrics.wordByWord, snapshot.Settings, model.SettingLyricsBoidu, false,
+	return p.settingRows(gtx,
+		p.toggleSettingRow(e, &p.lyrics.wordByWord, snapshot.Settings, model.SettingLyricsBoidu, false,
 			"Word-by-word lyrics", "Use word timing when the lyrics service provides it."),
-		toggleSettingRow(e, &p.lyrics.romanize, snapshot.Settings, model.SettingLyricsRomanize, false,
-			"Romanized lyrics", "Show romanized readings when the lyrics service provides them."),
-	)
+		p.toggleSettingRow(e, &p.lyrics.romanize, snapshot.Settings, model.SettingLyricsRomanize, false,
+			"Romanized lyrics", "Show romanized readings when the lyrics service provides them."))
 }
 
-func toggleSettingRow(e *env.Env, toggle *kit.Toggle, settings model.SettingsSnapshot, key model.SettingKey, fallback bool, title, detail string) layout.Widget {
-	return settingRow(e.Th, title, detail, func(gtx layout.Context) layout.Dimensions {
+func (p *page) toggleSettingRow(e *env.Env, toggle *kit.Toggle, settings model.SettingsSnapshot, key model.SettingKey, fallback bool, title, detail string) layout.Widget {
+	return p.settingRow(e.Th, title, detail, func(gtx layout.Context) layout.Dimensions {
 		toggle.Value = settingBool(settings, key, fallback)
 		dims := toggle.Layout(gtx, e.Th.Theme)
 		if toggle.Changed() {

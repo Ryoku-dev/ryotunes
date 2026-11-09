@@ -38,14 +38,20 @@
 
 - `get_settings`, `set_setting`, `get_stream_clients`, `clear_caches`: string settings and playback caches.
 - `get_personal`, `set_personal`: opaque renderer-owned personalization.
-- `get_account`, `get_account_identities`, `switch_account`, `sign_in`, `sign_out`: YouTube account lifecycle.
+- `get_account`, `get_account_identities`, `switch_account`, `sign_out`: YouTube account lifecycle.
 - `get_provider`, `set_provider`: active catalogue selection.
 
 ## Provider authentication
 
-- `spotify_status`, `spotify_sign_in`, `spotify_sign_out`: Spotify account lifecycle.
-- `soundcloud_status`, `soundcloud_sign_in`, `soundcloud_sign_out`: SoundCloud account lifecycle.
-- `tidal_status`, `tidal_set_credentials`, `tidal_sign_in`, `tidal_sign_out`: TIDAL credentials and account lifecycle.
+The client owns every browser handoff; the daemon never launches a browser.
+`sign_in` and `soundcloud_sign_in` return `{"url": string}`. The URL is the
+provider sign-in page, or empty when stored cookies already completed sign-in.
+The cookie import continues watching after a non-empty URL is returned.
+
+- `sign_in`: YouTube authorization; returns `https://music.youtube.com` when browser input is needed.
+- `spotify_status`, `spotify_sign_in`, `spotify_sign_out`: Spotify account lifecycle. `spotify-auth` with `state: "url"` carries the PKCE URL; another sign-in request while pending re-emits the same event.
+- `soundcloud_status`, `soundcloud_sign_in`, `soundcloud_sign_out`: SoundCloud account lifecycle. Browser input uses `https://soundcloud.com/signin`.
+- `tidal_status`, `tidal_set_credentials`, `tidal_sign_in`, `tidal_sign_out`: TIDAL credentials and account lifecycle. A `tidal-auth` waiting event carries `{"state":"waiting","url":string,"code":string}`; `url` is the complete verification URI when TIDAL supplies it, otherwise the verification URI.
 
 ## Lyrics and integrations
 

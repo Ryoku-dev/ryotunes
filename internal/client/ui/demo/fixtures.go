@@ -21,22 +21,34 @@ const (
 	PlaylistID = "PL_KiteNightSignals"
 )
 
-type fixtures struct {
-	snapshot protocol.Snapshot
-	tracks   []model.Track
-	cards    []model.BrowseItem
-	library  []model.BrowseItem
-	feed     model.Feed
-	playlist model.PlaylistPage
-	album    model.AlbumPage
-	artist   model.ArtistPage
-	lyrics   model.Lyrics
-	radio    []model.RadioStation
-	logs     model.LogsResult
-	stats    model.ListeningStats
+// SpectrumLevels returns the fixed 64-band demo analyser frame.
+func SpectrumLevels() []float32 {
+	shape := [...]float32{.18, .24, .33, .46, .61, .76, .9, .72, .55, .41, .3, .22, .28, .39, .58, .8}
+	levels := make([]float32, 64)
+	for index := range levels {
+		level := shape[index%len(shape)] - float32(index/16)*.035
+		levels[index] = max(.08, level)
+	}
+	return levels
 }
 
-func makeFixtures(directory string) (fixtures, error) {
+type fixtures struct {
+	snapshot  protocol.Snapshot
+	tracks    []model.Track
+	cards     []model.BrowseItem
+	library   []model.BrowseItem
+	feed      model.Feed
+	focusFeed model.Feed
+	playlist  model.PlaylistPage
+	album     model.AlbumPage
+	artist    model.ArtistPage
+	lyrics    model.Lyrics
+	radio     []model.RadioStation
+	logs      model.LogsResult
+	stats     model.ListeningStats
+}
+
+func makeFixtures(directory string, playing bool) (fixtures, error) {
 	artwork, err := writeArtwork(directory)
 	if err != nil {
 		return fixtures{}, err
@@ -87,6 +99,13 @@ func makeFixtures(directory string) (fixtures, error) {
 	feed := model.Feed{
 		Chips:    []model.FeedChip{{Title: "Energise", Params: "energy"}, {Title: "Focus", Params: "focus"}, {Title: "Unwind", Params: "unwind"}},
 		Sections: shelves,
+	}
+	focusFeed := model.Feed{
+		Chips: feed.Chips,
+		Sections: []model.Shelf{
+			{Title: "Focus rotation", Items: append([]model.BrowseItem(nil), cards[16:24]...)},
+			{Title: "Quiet signals", Items: append([]model.BrowseItem(nil), cards[24:32]...)},
+		},
 	}
 
 	likedSubtitle := "128 songs"
@@ -260,7 +279,7 @@ func makeFixtures(directory string) (fixtures, error) {
 	premium := true
 	spotifyName, soundcloudName, tidalName, tidalQuality := "Nero on Spotify", "nero", "Nero", "LOSSLESS"
 	snapshot := protocol.Snapshot{
-		Playback: model.PlaybackSnapshot{Now: &now, Paused: true, Position: 105, Duration: 198, Volume: 68},
+		Playback: model.PlaybackSnapshot{Now: &now, Paused: !playing, Position: 105, Duration: 198, Volume: 68},
 		Queue:    queue, Settings: settings, Auth: account, AudioFx: model.DefaultAudioFx(),
 		Provider: model.ProviderYouTube, Downloads: downloads, Personal: personal,
 		Spotify:    model.SpotifyStatus{SignedIn: true, Stored: true, Name: &spotifyName, Premium: &premium},
@@ -269,7 +288,7 @@ func makeFixtures(directory string) (fixtures, error) {
 		LT:         model.LTState{Status: "idle", ServerURL: "wss://sync.ryotunes.invalid", Users: []model.LTUser{}, Queue: []model.LTTrack{}},
 	}
 	return fixtures{
-		snapshot: snapshot, tracks: tracks, cards: cards, library: library, feed: feed,
+		snapshot: snapshot, tracks: tracks, cards: cards, library: library, feed: feed, focusFeed: focusFeed,
 		playlist: playlist, album: album, artist: artist, lyrics: lyrics, radio: radio, logs: logs, stats: stats,
 	}, nil
 }

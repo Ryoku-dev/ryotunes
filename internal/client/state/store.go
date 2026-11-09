@@ -55,6 +55,14 @@ type TidalState struct {
 	Error string
 }
 
+// AuthFlow is one provider's browser handoff state.
+type AuthFlow struct {
+	Waiting bool
+	URL     string
+	Code    string
+	Error   string
+}
+
 // State is the complete daemon mirror and client-only UI state.
 type State struct {
 	Playback   model.PlaybackSnapshot
@@ -66,6 +74,7 @@ type State struct {
 	Spotify    SpotifyState
 	SoundCloud SoundCloudState
 	Tidal      TidalState
+	AuthFlows  map[model.Provider]AuthFlow
 	Downloads  model.DownloadSnapshot
 	Personal   Personal
 	LT         model.LTState
@@ -105,45 +114,55 @@ type QueueGroups struct {
 
 // Store holds one synchronized client state and invalidation subscriptions.
 type Store struct {
-	mu    sync.RWMutex
-	state State
+	mu       sync.RWMutex
+	state    State
+	snapshot State
 
-	subscribers         map[uint64]func()
-	nextSubscriber      uint64
-	toastSerial         uint64
-	positionSampledAt   time.Time
-	realNowPlaying      bool
-	authEventSeen       bool
-	spotifyEventSeen    bool
-	soundCloudEventSeen bool
-	tidalEventSeen      bool
-	lastNowID           string
-	pendingPersonal     []json.RawMessage
+	subscribers          map[uint64]func()
+	nextSubscriber       uint64
+	toastSerial          uint64
+	positionSampledAt    time.Time
+	positionSamplePaused bool
+	positionSampleSpeed  float64
+	realNowPlaying       bool
+	authEventSeen        bool
+	spotifyEventSeen     bool
+	soundCloudEventSeen  bool
+	tidalEventSeen       bool
+	lastNowID            string
+	pendingPersonal      []json.RawMessage
+	lastOpenedAuthURL    map[model.Provider]string
 }
 
 // New returns a store seeded from a daemon subscription snapshot.
 func New(snapshot protocol.Snapshot) *Store {
-	store := &Store{subscribers: make(map[uint64]func())}
+	store := &Store{
+		subscribers:       make(map[uint64]func()),
+		lastOpenedAuthURL: make(map[model.Provider]string),
+	}
 	store.state.Personal = EmptyPersonal()
 	store.state.Client = DefaultClientPreferences()
+	store.state.AuthFlows = make(map[model.Provider]AuthFlow)
 	store.applySnapshotLocked(snapshot, time.Now())
+	store.publishLocked()
 	return store
 }
 
 // NewEmpty returns a store with canonical empty client state.
 func NewEmpty() *Store { return New(protocol.Snapshot{}) }
 
-// Snapshot returns a detached copy of the current top-level state.
+// Snapshot returns the immutable state published by the latest reducer revision.
 func (s *Store) Snapshot() State {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return cloneState(s.state)
+	return s.snapshot
 }
 
 // ApplySnapshot replaces daemon-owned state while preserving newer event updates.
 func (s *Store) ApplySnapshot(snapshot protocol.Snapshot) {
 	s.mu.Lock()
 	s.applySnapshotLocked(snapshot, time.Now())
+	s.publishLocked()
 	callbacks := s.callbacksLocked()
 	s.mu.Unlock()
 	notify(callbacks)
@@ -152,10 +171,10 @@ func (s *Store) ApplySnapshot(snapshot protocol.Snapshot) {
 // SetSetting updates one renderer-visible setting after a successful daemon write.
 func (s *Store) SetSetting(key, value string) {
 	s.mu.Lock()
-	if s.state.Settings == nil {
-		s.state.Settings = make(model.SettingsSnapshot)
-	}
-	s.state.Settings[key] = value
+	settings := cloneSettings(s.state.Settings)
+	settings[key] = value
+	s.state.Settings = settings
+	s.publishLocked()
 	callbacks := s.callbacksLocked()
 	s.mu.Unlock()
 	notify(callbacks)
@@ -165,6 +184,7 @@ func (s *Store) SetSetting(key, value string) {
 func (s *Store) ReplaceSettings(settings model.SettingsSnapshot) {
 	s.mu.Lock()
 	s.state.Settings = cloneSettings(settings)
+	s.publishLocked()
 	callbacks := s.callbacksLocked()
 	s.mu.Unlock()
 	notify(callbacks)
@@ -178,11 +198,23 @@ func (s *Store) Apply(name string, data json.RawMessage) error {
 // ApplyAt is the clock-injected deterministic form of Apply.
 func (s *Store) ApplyAt(name string, data json.RawMessage, now time.Time) error {
 	s.mu.Lock()
+	if name == protocol.EventPosition {
+		invalidate := s.applyPositionLocked(data, now)
+		s.snapshot.Playback.Position = s.state.Playback.Position
+		var callbacks []func()
+		if invalidate {
+			callbacks = s.callbacksLocked()
+		}
+		s.mu.Unlock()
+		notify(callbacks)
+		return nil
+	}
 	err := s.applyLocked(name, data, now)
 	if err != nil {
 		s.mu.Unlock()
 		return err
 	}
+	s.publishLocked()
 	callbacks := s.callbacksLocked()
 	s.mu.Unlock()
 	notify(callbacks)
@@ -210,11 +242,11 @@ func (s *Store) Subscribe(invalidate func()) func() {
 func (s *Store) CurrentTrack() *model.Track {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	index := s.state.Queue.CurrentIndex
-	if index < 0 || index >= len(s.state.Queue.Items) {
+	index := s.snapshot.Queue.CurrentIndex
+	if index < 0 || index >= len(s.snapshot.Queue.Items) {
 		return nil
 	}
-	track := s.state.Queue.Items[index]
+	track := s.snapshot.Queue.Items[index]
 	return &track
 }
 
@@ -222,7 +254,7 @@ func (s *Store) CurrentTrack() *model.Track {
 func (s *Store) QueueGroups() QueueGroups {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	queue := s.state.Queue
+	queue := s.snapshot.Queue
 	groups := QueueGroups{UpNextManual: []QueueRow{}, Continuation: []QueueRow{}}
 	if queue.CurrentIndex >= 0 && queue.CurrentIndex < len(queue.Items) {
 		groups.NowPlaying = &QueueRow{Index: queue.CurrentIndex, Item: queue.Items[queue.CurrentIndex]}
@@ -243,14 +275,7 @@ func (s *Store) QueueGroups() QueueGroups {
 func (s *Store) PositionAt(now time.Time) float64 {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	if s.state.SeekDrag != nil {
-		return clampPosition(s.state.Playback.Duration, *s.state.SeekDrag)
-	}
-	position := s.state.Playback.Position
-	if !s.state.Playback.Paused && !s.positionSampledAt.IsZero() {
-		position += max(0, now.Sub(s.positionSampledAt).Seconds())
-	}
-	return clampPosition(s.state.Playback.Duration, position)
+	return s.positionAtLocked(now)
 }
 
 // SetSeekDrag holds or releases the client seek thumb.
@@ -261,6 +286,7 @@ func (s *Store) SetSeekDrag(position *float64) {
 	} else {
 		s.state.SeekDrag = new(*position)
 	}
+	s.publishLocked()
 	callbacks := s.callbacksLocked()
 	s.mu.Unlock()
 	notify(callbacks)
@@ -270,6 +296,7 @@ func (s *Store) SetSeekDrag(position *float64) {
 func (s *Store) SetVolumeDragging(dragging bool) {
 	s.mu.Lock()
 	s.state.VolumeDragging = dragging
+	s.publishLocked()
 	s.mu.Unlock()
 }
 
@@ -278,6 +305,7 @@ func (s *Store) ConsumeShow() bool {
 	s.mu.Lock()
 	requested := s.state.ShowRequested
 	s.state.ShowRequested = false
+	s.publishLocked()
 	s.mu.Unlock()
 	return requested
 }
@@ -295,6 +323,7 @@ func (s *Store) UpdatePersonal(update func(*Personal) bool) bool {
 	}
 	s.state.Personal = personal
 	s.markPersonalDirtyLocked()
+	s.publishLocked()
 	callbacks := s.callbacksLocked()
 	s.mu.Unlock()
 	notify(callbacks)
@@ -307,7 +336,76 @@ func (s *Store) MarkPersonalSave(raw json.RawMessage) {
 	s.mu.Lock()
 	s.pendingPersonal = append(s.pendingPersonal, copy)
 	s.state.PersonalDirty = false
+	s.publishLocked()
 	s.mu.Unlock()
+}
+
+// BeginAuthFlow marks a provider flow as waiting for its URL event.
+func (s *Store) BeginAuthFlow(provider model.Provider) {
+	s.mu.Lock()
+	flows := cloneAuthFlows(s.state.AuthFlows)
+	flow := flows[provider]
+	flow.Waiting, flow.Error = true, ""
+	flows[provider] = flow
+	s.state.AuthFlows = flows
+	s.publishLocked()
+	callbacks := s.callbacksLocked()
+	s.mu.Unlock()
+	notify(callbacks)
+}
+
+// SetAuthFlow publishes a provider browser handoff returned by a daemon call.
+func (s *Store) SetAuthFlow(provider model.Provider, url, code string) {
+	s.mu.Lock()
+	flows := cloneAuthFlows(s.state.AuthFlows)
+	flow := flows[provider]
+	flow.Waiting, flow.URL, flow.Code, flow.Error = url != "", url, code, ""
+	flows[provider] = flow
+	s.state.AuthFlows = flows
+	s.publishLocked()
+	callbacks := s.callbacksLocked()
+	s.mu.Unlock()
+	notify(callbacks)
+}
+
+// SetAuthFlowError records a failed provider authorization start.
+func (s *Store) SetAuthFlowError(provider model.Provider, message string) {
+	s.mu.Lock()
+	flows := cloneAuthFlows(s.state.AuthFlows)
+	flow := flows[provider]
+	flow.Waiting, flow.Error = false, message
+	flows[provider] = flow
+	s.state.AuthFlows = flows
+	s.publishLocked()
+	callbacks := s.callbacksLocked()
+	s.mu.Unlock()
+	notify(callbacks)
+}
+
+// CancelAuthFlow dismisses one client-side browser handoff.
+func (s *Store) CancelAuthFlow(provider model.Provider) {
+	s.mu.Lock()
+	flows := cloneAuthFlows(s.state.AuthFlows)
+	delete(flows, provider)
+	s.state.AuthFlows = flows
+	s.publishLocked()
+	callbacks := s.callbacksLocked()
+	s.mu.Unlock()
+	notify(callbacks)
+}
+
+// ClaimAuthURL returns true once for each provider URL.
+func (s *Store) ClaimAuthURL(provider model.Provider, url string) bool {
+	if url == "" {
+		return false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.lastOpenedAuthURL[provider] == url {
+		return false
+	}
+	s.lastOpenedAuthURL[provider] = url
+	return true
 }
 
 func (s *Store) applySnapshotLocked(snapshot protocol.Snapshot, now time.Time) {
@@ -347,7 +445,10 @@ func (s *Store) applySnapshotLocked(snapshot protocol.Snapshot, now time.Time) {
 	} else {
 		s.state.Rating = model.RatingIndifferent
 	}
+	s.state = cloneState(s.state)
 	s.positionSampledAt = now
+	s.positionSamplePaused = s.state.Playback.Paused
+	s.positionSampleSpeed = effectivePlaybackSpeed(s.state.AudioFx.Speed)
 	s.realNowPlaying = false
 	s.authEventSeen = false
 	s.spotifyEventSeen = false
@@ -357,13 +458,6 @@ func (s *Store) applySnapshotLocked(snapshot protocol.Snapshot, now time.Time) {
 
 func (s *Store) applyLocked(name string, data json.RawMessage, now time.Time) error {
 	switch name {
-	case protocol.EventPosition:
-		var event protocol.PositionEvent
-		if decode(data, &event) != nil {
-			event.Position = 0
-		}
-		s.state.Playback.Position = clampPosition(s.state.Playback.Duration, event.Position)
-		s.positionSampledAt = now
 	case protocol.EventDuration:
 		var event protocol.DurationEvent
 		if err := decode(data, &event); err != nil {
@@ -404,7 +498,7 @@ func (s *Store) applyLocked(name string, data json.RawMessage, now time.Time) er
 			return err
 		}
 		changed := event == nil || s.state.Playback.Now == nil || event.VideoID != s.state.Playback.Now.VideoID
-		s.state.Playback.Now = event
+		s.state.Playback.Now = clonePlaybackTrack(event)
 		if changed {
 			s.state.Playback.Position = 0
 			s.state.Playback.Duration = playbackTrackDuration(event)
@@ -417,6 +511,7 @@ func (s *Store) applyLocked(name string, data json.RawMessage, now time.Time) er
 			s.state.Rating = *event.Rating
 		}
 		s.realNowPlaying = true
+		s.state.Personal = clonePersonal(s.state.Personal)
 		if RecordNowPlaying(&s.state.Personal, event, &s.lastNowID, now.UnixMilli()) {
 			s.markPersonalDirtyLocked()
 		}
@@ -430,7 +525,9 @@ func (s *Store) applyLocked(name string, data json.RawMessage, now time.Time) er
 			return err
 		}
 		if event.Current != nil && event.CurrentIndex >= 0 && event.CurrentIndex < len(s.state.Queue.Items) {
-			s.state.Queue.Items[event.CurrentIndex] = *event.Current
+			items := cloneTracks(s.state.Queue.Items)
+			items[event.CurrentIndex] = cloneTrack(*event.Current)
+			s.state.Queue.Items = items
 		}
 		s.state.Queue.CurrentIndex = event.CurrentIndex
 		s.state.Queue.PlayedFrom = event.PlayedFrom
@@ -467,6 +564,7 @@ func (s *Store) applyLocked(name string, data json.RawMessage, now time.Time) er
 		if err := decode(data, &s.state.Auth); err != nil {
 			return err
 		}
+		s.state.Personal = clonePersonal(s.state.Personal)
 		if oldSignedIn && !s.state.Auth.SignedIn && ForgetYouTubeRecents(&s.state.Personal) > 0 {
 			s.markPersonalDirtyLocked()
 		}
@@ -555,14 +653,17 @@ func (s *Store) applyLocked(name string, data json.RawMessage, now time.Time) er
 }
 
 func (s *Store) reduceSpotifyLocked(event model.SpotifyAuthEvent) {
+	s.state.Personal = clonePersonal(s.state.Personal)
 	state := &s.state.Spotify
 	switch event.State {
 	case "url":
 		state.Flow, state.URL, state.Error = "browser", stringValue(event.URL), ""
+		s.setAuthFlowLocked(model.ProviderSpotify, AuthFlow{Waiting: true, URL: state.URL})
 		s.setToastLocked("Opening Spotify sign-in in your browser", ToastInfo)
 	case "signed_in":
 		wasSignedIn := state.SignedIn
 		state.SignedIn, state.Stored, state.Name, state.Flow, state.URL, state.Error = true, true, event.Name, "", "", ""
+		s.setAuthFlowLocked(model.ProviderSpotify, AuthFlow{})
 		if !wasSignedIn {
 			message := "Signed in to Spotify"
 			if event.Name != nil {
@@ -572,22 +673,26 @@ func (s *Store) reduceSpotifyLocked(event model.SpotifyAuthEvent) {
 		}
 	case "restored":
 		state.SignedIn, state.Stored, state.Premium, state.Flow, state.URL, state.Error = true, true, new(true), "", "", ""
+		s.setAuthFlowLocked(model.ProviderSpotify, AuthFlow{})
 	case "restore_failed":
 		wasSignedIn := state.SignedIn
 		state.SignedIn, state.Stored, state.Flow, state.URL = false, true, "", ""
 		state.Error = eventMessage(event.Message, "Spotify sign-in no longer works")
+		s.setAuthFlowLocked(model.ProviderSpotify, AuthFlow{Error: state.Error})
 		if wasSignedIn && ForgetSpotifyRecents(&s.state.Personal) > 0 {
 			s.markPersonalDirtyLocked()
 		}
 	case "signed_out":
 		wasSignedIn := state.SignedIn
 		*state = SpotifyState{}
+		s.setAuthFlowLocked(model.ProviderSpotify, AuthFlow{})
 		if wasSignedIn && ForgetSpotifyRecents(&s.state.Personal) > 0 {
 			s.markPersonalDirtyLocked()
 		}
 	case "error":
 		state.Flow, state.URL = "", ""
 		state.Error = eventMessage(event.Message, "Spotify sign-in failed")
+		s.setAuthFlowLocked(model.ProviderSpotify, AuthFlow{Error: state.Error})
 		s.setToastLocked(state.Error, ToastError)
 	}
 }
@@ -597,6 +702,7 @@ func (s *Store) reduceSoundCloudLocked(event model.SoundCloudAuthEvent) {
 	switch event.State {
 	case "signed_in":
 		state.SignedIn, state.Name, state.Flow, state.Error = true, event.Name, "", ""
+		s.setAuthFlowLocked(model.ProviderSoundCloud, AuthFlow{})
 		message := "Signed in to SoundCloud"
 		if event.Name != nil {
 			message += " as " + *event.Name
@@ -604,15 +710,21 @@ func (s *Store) reduceSoundCloudLocked(event model.SoundCloudAuthEvent) {
 		s.setToastLocked(message, ToastSuccess)
 	case "signed_out":
 		*state = SoundCloudState{}
+		s.setAuthFlowLocked(model.ProviderSoundCloud, AuthFlow{})
 	case "waiting":
 		state.SignedIn, state.Name, state.Flow, state.Error = false, nil, "waiting", ""
+		flow := s.state.AuthFlows[model.ProviderSoundCloud]
+		flow.Waiting, flow.Error = true, ""
+		s.setAuthFlowLocked(model.ProviderSoundCloud, flow)
 		s.setToastLocked("Opened soundcloud.com in your browser, sign in there and Ryotunes will connect", ToastInfo)
 	case "expired":
 		state.SignedIn, state.Name, state.Flow, state.Error = false, nil, "expired", ""
+		s.setAuthFlowLocked(model.ProviderSoundCloud, AuthFlow{})
 		s.setToastLocked("No SoundCloud sign-in was completed in the browser", ToastInfo)
 	case "restore_failed", "error":
 		state.SignedIn, state.Name, state.Flow = false, nil, ""
 		state.Error = eventMessage(event.Message, "SoundCloud sign-in failed")
+		s.setAuthFlowLocked(model.ProviderSoundCloud, AuthFlow{Error: state.Error})
 		s.setToastLocked(state.Error, ToastError)
 	}
 }
@@ -626,6 +738,7 @@ func (s *Store) reduceTidalLocked(event model.TidalAuthEvent) {
 			state.Quality = event.Quality
 		}
 		state.Code, state.URL, state.Error = "", "", ""
+		s.setAuthFlowLocked(model.ProviderTidal, AuthFlow{})
 		message := "Signed in to TIDAL"
 		if event.Name != nil {
 			message += " as " + *event.Name
@@ -634,9 +747,11 @@ func (s *Store) reduceTidalLocked(event model.TidalAuthEvent) {
 	case "signed_out":
 		hasCredentials := state.HasCredentials
 		*state = TidalState{TidalStatus: model.TidalStatus{HasCredentials: hasCredentials}}
+		s.setAuthFlowLocked(model.ProviderTidal, AuthFlow{})
 	case "waiting":
 		state.SignedIn, state.Name, state.Quality, state.HasCredentials = false, nil, nil, true
 		state.Code, state.URL, state.Error = stringValue(event.Code), stringValue(event.URL), ""
+		s.setAuthFlowLocked(model.ProviderTidal, AuthFlow{Waiting: true, URL: state.URL, Code: state.Code})
 		code, target := state.Code, state.URL
 		if code == "" {
 			code = "the code"
@@ -647,23 +762,57 @@ func (s *Store) reduceTidalLocked(event model.TidalAuthEvent) {
 		s.setToastLocked("Enter "+code+" at "+target+" to finish signing in", ToastInfo)
 	case "expired":
 		state.SignedIn, state.Name, state.Quality, state.Code, state.URL, state.Error = false, nil, nil, "", "", ""
+		s.setAuthFlowLocked(model.ProviderTidal, AuthFlow{})
 		state.HasCredentials = true
 		s.setToastLocked("The TIDAL code expired before it was approved", ToastInfo)
 	default:
 		state.SignedIn, state.Name, state.Quality, state.Code, state.URL = false, nil, nil, "", ""
 		state.Error = stringValue(event.Message)
+		s.setAuthFlowLocked(model.ProviderTidal, AuthFlow{Error: state.Error})
 		if state.Error != "" {
 			s.setToastLocked(state.Error, ToastError)
 		}
 	}
 }
 
+func (s *Store) applyPositionLocked(data json.RawMessage, now time.Time) bool {
+	var event protocol.PositionEvent
+	if decode(data, &event) != nil {
+		event.Position = 0
+	}
+	position := clampPosition(s.state.Playback.Duration, event.Position)
+	speed := effectivePlaybackSpeed(s.state.AudioFx.Speed)
+	confirming := !s.positionSampledAt.IsZero() &&
+		s.state.Playback.Paused == s.positionSamplePaused &&
+		speed == s.positionSampleSpeed &&
+		math.Abs(position-s.positionAtLocked(now)) < .15
+	s.state.Playback.Position = position
+	s.positionSampledAt = now
+	s.positionSamplePaused = s.state.Playback.Paused
+	s.positionSampleSpeed = speed
+	return !confirming
+}
+
+func (s *Store) positionAtLocked(now time.Time) float64 {
+	if s.state.SeekDrag != nil {
+		return clampPosition(s.state.Playback.Duration, *s.state.SeekDrag)
+	}
+	return s.projectedPositionLocked(now)
+}
+
 func (s *Store) projectedPositionLocked(now time.Time) float64 {
 	position := s.state.Playback.Position
 	if !s.state.Playback.Paused && !s.positionSampledAt.IsZero() {
-		position += max(0, now.Sub(s.positionSampledAt).Seconds())
+		position += max(0, now.Sub(s.positionSampledAt).Seconds()) * effectivePlaybackSpeed(s.state.AudioFx.Speed)
 	}
 	return clampPosition(s.state.Playback.Duration, position)
+}
+
+func effectivePlaybackSpeed(speed float64) float64 {
+	if speed <= 0 || math.IsNaN(speed) || math.IsInf(speed, 0) {
+		return 1
+	}
+	return speed
 }
 
 func (s *Store) setToastLocked(message string, kind ToastKind) {
@@ -707,12 +856,38 @@ func decode(raw json.RawMessage, target any) error {
 	return json.Unmarshal(raw, target)
 }
 
+func (s *Store) publishLocked() {
+	s.snapshot = cloneState(s.state)
+}
+
+func (s *Store) setAuthFlowLocked(provider model.Provider, flow AuthFlow) {
+	flows := cloneAuthFlows(s.state.AuthFlows)
+	if flow == (AuthFlow{}) {
+		delete(flows, provider)
+	} else {
+		flows[provider] = flow
+	}
+	s.state.AuthFlows = flows
+}
+
 func cloneState(state State) State {
+	state.Playback.Now = clonePlaybackTrack(state.Playback.Now)
+	state.Queue.Items = cloneTracks(state.Queue.Items)
+	state.Queue.SourceName = clonePtr(state.Queue.SourceName)
 	state.Settings = cloneSettings(state.Settings)
-	state.Queue.Items = append([]model.QueueItem(nil), state.Queue.Items...)
-	state.Downloads.Jobs = append([]model.DownloadEntry(nil), state.Downloads.Jobs...)
-	state.LocalRemoved = append([]string(nil), state.LocalRemoved...)
+	state.Auth = cloneAccount(state.Auth)
+	state.Spotify = cloneSpotifyState(state.Spotify)
+	state.SoundCloud = cloneSoundCloudState(state.SoundCloud)
+	state.Tidal = cloneTidalState(state.Tidal)
+	state.AuthFlows = cloneAuthFlows(state.AuthFlows)
+	state.Downloads = cloneDownloads(state.Downloads)
 	state.Personal = clonePersonal(state.Personal)
+	state.LT = cloneLTState(state.LT)
+	state.Lastfm.Username = clonePtr(state.Lastfm.Username)
+	state.Lastfm.Error = clonePtr(state.Lastfm.Error)
+	state.SeekDrag = clonePtr(state.SeekDrag)
+	state.Toast = clonePtr(state.Toast)
+	state.LocalRemoved = append([]string(nil), state.LocalRemoved...)
 	return state
 }
 
@@ -724,10 +899,27 @@ func cloneSettings(settings model.SettingsSnapshot) model.SettingsSnapshot {
 	return clone
 }
 
+func cloneAuthFlows(flows map[model.Provider]AuthFlow) map[model.Provider]AuthFlow {
+	clone := make(map[model.Provider]AuthFlow, len(flows))
+	for provider, flow := range flows {
+		clone[provider] = flow
+	}
+	return clone
+}
+
 func clonePersonal(personal Personal) Personal {
 	clone := personal
-	clone.Picks = append([]Pick(nil), personal.Picks...)
-	clone.Saved = append([]model.BrowseItem(nil), personal.Saved...)
+	clone.Picks = make([]Pick, len(personal.Picks))
+	for i, pick := range personal.Picks {
+		pick.BrowseItem = cloneBrowseItem(pick.BrowseItem)
+		pick.ArtistID = clonePtr(pick.ArtistID)
+		pick.Manual = clonePtr(pick.Manual)
+		clone.Picks[i] = pick
+	}
+	clone.Saved = make([]model.BrowseItem, len(personal.Saved))
+	for i, item := range personal.Saved {
+		clone.Saved[i] = cloneBrowseItem(item)
+	}
 	clone.Pins = append([]string(nil), personal.Pins...)
 	clone.DismissedSeeds = append([]string(nil), personal.DismissedSeeds...)
 	clone.Home.Order = append([]string(nil), personal.Home.Order...)
@@ -735,6 +927,8 @@ func clonePersonal(personal Personal) Personal {
 	clone.Home.Seen = append([]string(nil), personal.Home.Seen...)
 	clone.Recent = make(map[string]RecentItem, len(personal.Recent))
 	for id, item := range personal.Recent {
+		item.BrowseItem = cloneBrowseItem(item.BrowseItem)
+		item.ArtistID = clonePtr(item.ArtistID)
 		clone.Recent[id] = item
 	}
 	clone.Artists = make(map[string]ArtistStat, len(personal.Artists))
@@ -742,6 +936,152 @@ func clonePersonal(personal Personal) Personal {
 		clone.Artists[id] = artist
 	}
 	return clone
+}
+
+func cloneAccount(account model.Account) model.Account {
+	account.Name = clonePtr(account.Name)
+	account.Handle = clonePtr(account.Handle)
+	account.Email = clonePtr(account.Email)
+	account.Thumbnail = clonePtr(account.Thumbnail)
+	account.ChannelID = clonePtr(account.ChannelID)
+	return account
+}
+
+func cloneSpotifyState(state SpotifyState) SpotifyState {
+	state.Name = clonePtr(state.Name)
+	state.Premium = clonePtr(state.Premium)
+	return state
+}
+
+func cloneSoundCloudState(state SoundCloudState) SoundCloudState {
+	state.Name = clonePtr(state.Name)
+	return state
+}
+
+func cloneTidalState(state TidalState) TidalState {
+	state.Name = clonePtr(state.Name)
+	state.Quality = clonePtr(state.Quality)
+	return state
+}
+
+func clonePlaybackTrack(track *model.PlaybackTrack) *model.PlaybackTrack {
+	if track == nil {
+		return nil
+	}
+	clone := *track
+	clone.ArtistID = clonePtr(track.ArtistID)
+	clone.ArtistRuns = cloneArtists(track.ArtistRuns)
+	clone.Thumbnail = clonePtr(track.Thumbnail)
+	clone.Duration = clonePtr(track.Duration)
+	clone.Rating = clonePtr(track.Rating)
+	clone.Plays = clonePtr(track.Plays)
+	clone.Likes = clonePtr(track.Likes)
+	clone.Genre = clonePtr(track.Genre)
+	return &clone
+}
+
+func cloneTracks(tracks []model.Track) []model.Track {
+	clone := make([]model.Track, len(tracks))
+	for i, track := range tracks {
+		clone[i] = cloneTrack(track)
+	}
+	return clone
+}
+
+func cloneTrack(track model.Track) model.Track {
+	track.ArtistID = clonePtr(track.ArtistID)
+	track.ArtistRuns = cloneArtists(track.ArtistRuns)
+	track.Album = clonePtr(track.Album)
+	track.AlbumID = clonePtr(track.AlbumID)
+	track.Duration = clonePtr(track.Duration)
+	track.PlayCount = clonePtr(track.PlayCount)
+	track.Thumbnail = clonePtr(track.Thumbnail)
+	track.SetVideoID = clonePtr(track.SetVideoID)
+	track.AddedBy = clonePtr(track.AddedBy)
+	track.AddedByAvatar = clonePtr(track.AddedByAvatar)
+	track.Rating = clonePtr(track.Rating)
+	track.QueuedBy = clonePtr(track.QueuedBy)
+	track.QueuedFrom = clonePtr(track.QueuedFrom)
+	track.Plays = clonePtr(track.Plays)
+	track.Likes = clonePtr(track.Likes)
+	track.Genre = clonePtr(track.Genre)
+	return track
+}
+
+func cloneBrowseItem(item model.BrowseItem) model.BrowseItem {
+	item.Subtitle = clonePtr(item.Subtitle)
+	item.Thumbnail = clonePtr(item.Thumbnail)
+	item.Duration = clonePtr(item.Duration)
+	item.ArtistRuns = cloneArtists(item.ArtistRuns)
+	item.PlayCount = clonePtr(item.PlayCount)
+	return item
+}
+
+func cloneArtists(artists []model.Artist) []model.Artist {
+	clone := make([]model.Artist, len(artists))
+	for i, artist := range artists {
+		artist.ID = clonePtr(artist.ID)
+		clone[i] = artist
+	}
+	return clone
+}
+
+func cloneDownloads(downloads model.DownloadSnapshot) model.DownloadSnapshot {
+	downloads.Jobs = append([]model.DownloadEntry(nil), downloads.Jobs...)
+	for i := range downloads.Jobs {
+		job := &downloads.Jobs[i]
+		job.FilePath = clonePtr(job.FilePath)
+		job.Error = clonePtr(job.Error)
+		job.Collection = clonePtr(job.Collection)
+		job.CollectionKind = clonePtr(job.CollectionKind)
+		job.FinishedAt = clonePtr(job.FinishedAt)
+		job.Warnings = append([]string(nil), job.Warnings...)
+	}
+	return downloads
+}
+
+func cloneLTState(state model.LTState) model.LTState {
+	state.RoomCode = clonePtr(state.RoomCode)
+	state.MyID = clonePtr(state.MyID)
+	state.Users = append([]model.LTUser(nil), state.Users...)
+	state.CurrentTrack = cloneLTTrack(state.CurrentTrack)
+	state.Queue = cloneLTTracks(state.Queue)
+	state.PendingJoins = append([]model.LTPendingJoin(nil), state.PendingJoins...)
+	state.Suggestions = append([]model.LTSuggestion(nil), state.Suggestions...)
+	for i := range state.Suggestions {
+		state.Suggestions[i].Track = cloneLTTrackValue(state.Suggestions[i].Track)
+	}
+	return state
+}
+
+func cloneLTTracks(tracks []model.LTTrack) []model.LTTrack {
+	clone := make([]model.LTTrack, len(tracks))
+	for i, track := range tracks {
+		clone[i] = cloneLTTrackValue(track)
+	}
+	return clone
+}
+
+func cloneLTTrack(track *model.LTTrack) *model.LTTrack {
+	if track == nil {
+		return nil
+	}
+	clone := cloneLTTrackValue(*track)
+	return &clone
+}
+
+func cloneLTTrackValue(track model.LTTrack) model.LTTrack {
+	track.Thumbnail = clonePtr(track.Thumbnail)
+	track.QueuedBy = clonePtr(track.QueuedBy)
+	return track
+}
+
+func clonePtr[T any](value *T) *T {
+	if value == nil {
+		return nil
+	}
+	clone := *value
+	return &clone
 }
 
 func playbackTrackDuration(track *model.PlaybackTrack) float64 {

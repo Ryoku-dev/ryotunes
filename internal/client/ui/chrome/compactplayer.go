@@ -2,10 +2,8 @@ package chrome
 
 import (
 	"image"
-	"math"
 
 	"gioui.org/layout"
-	"gioui.org/op/clip"
 
 	"github.com/ryoku-dev/ryoku/docs/lithic/library/go/kit"
 	"github.com/ryoku-dev/ryotunes/internal/client/ui/act"
@@ -26,6 +24,7 @@ type compactPlayer struct {
 	playTip    look.Tip
 	next       kit.IconPlaque
 	nextTip    look.Tip
+	wave       look.WaveState
 }
 
 // LayoutCompact renders the 64 dp player above compact bottom navigation.
@@ -137,12 +136,13 @@ func (bar *PlayerBar) layoutCompactProgress(gtx layout.Context, e *env.Env, dura
 		return
 	}
 	width := gtx.Constraints.Max.X
-	fraction := min(max(e.Store.PositionAt(gtx.Now)/duration, 0), 1)
-	filled := int(math.Round(float64(width) * fraction))
-	if filled > 0 {
-		area := clip.Rect(image.Rect(0, 0, filled, max(1, gtx.Dp(2)))).Push(gtx.Ops)
-		kit.Blade(gtx.Ops, image.Rect(0, 0, filled, max(1, gtx.Dp(2))), e.Th.Src.Ink)
-		area.Pop()
+	fraction := float32(min(max(e.Store.PositionAt(gtx.Now)/duration, 0), 1))
+	live := e.Fx.Wave && !paused
+	look.DrawWave(
+		gtx, e.Th, &bar.compact.wave, image.Rect(0, 0, width, max(1, gtx.Dp(8))),
+		fraction, e.Th.Src.Ink, e.Th.R.Fg3, 2, 1.5, 12, live,
+	)
+	if !live {
+		bar.requestProgressFrame(gtx, e, duration, max(1, width), paused)
 	}
-	bar.requestProgressFrame(gtx, e, duration, max(1, width), paused)
 }

@@ -75,9 +75,13 @@ the provider plate glides and the source colour retints, the side panel
 unfolds, the active lyric line glides into place. Each uses the library's
 chisel curve and duration tokens and is instant under reduced motion.
 
-Nothing moves at rest. While playing, only the progress and the elapsed time
-ask for frames, and only when the fill would move by a pixel or the second
-changes.
+Nothing moves at rest. While music plays, two things move on their own: the
+wave progress (the played part is a travelling zigzag with sharp vertices,
+flattening when you pause or drag) and the visualizer (Lithic blades in the
+bottom lane of page headers and along the bottom of the now playing view).
+They run at up to 60 frames a second only while playing and visible, and stop with
+reduced motion, low resource mode or their own settings. The bars come from
+`cava` on the sink Ryotunes plays into, the same analyser the Ryoku shell uses.
 
 Scrolling applies every delta at once. Gio cannot tell a wheel from a
 trackpad, so the client never guesses a wheel from the size of a delta.

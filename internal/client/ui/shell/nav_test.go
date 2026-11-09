@@ -39,6 +39,13 @@ func TestNavigatorBackForwardAndReplace(t *testing.T) {
 	}
 }
 
+func TestParseHomeRoutePreservesChipParams(t *testing.T) {
+	route := parseRoute("home:focus")
+	if route.Kind != env.RouteHome || route.Params != "focus" {
+		t.Fatalf("route = %#v, want Home focus", route)
+	}
+}
+
 func TestNavigatorBackClosesNowPlayingFirst(t *testing.T) {
 	nav := newNavigator(env.Route{Kind: env.RouteHome}, env.PanelNone, false, nil)
 	nav.ToggleNowPlaying()

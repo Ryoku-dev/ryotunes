@@ -16,8 +16,8 @@ import (
 
 func (p *page) layoutPlaylists(gtx layout.Context, e *env.Env, snapshot state.State) layout.Dimensions {
 	p.playlists.exportPath.sync("ryotunes-queue.json")
-	return settingRows(gtx,
-		settingRow(e.Th, "Import a playlist", "Choose a Ryotunes playlist file; its tracks land in a new library playlist. Sign in first.", func(gtx layout.Context) layout.Dimensions {
+	return p.settingRows(gtx,
+		p.settingRow(e.Th, "Import a playlist", "Choose a Ryotunes playlist file; its tracks land in a new library playlist. Sign in first.", func(gtx layout.Context) layout.Dimensions {
 			p.playlists.importPath.field.Mono = true
 			p.playlists.importPath.field.Placeholder = "/home/you/Music/playlist.json"
 			p.playlists.importButton.Kind, p.playlists.importButton.Label, p.playlists.importButton.Busy = kit.PlaqueLine, "Import", p.playlists.busy
@@ -31,7 +31,7 @@ func (p *page) layoutPlaylists(gtx layout.Context, e *env.Env, snapshot state.St
 			}
 			return transferControl(gtx, e, &p.playlists.importPath.field, &p.playlists.importButton)
 		}),
-		settingRow(e.Th, "Export the queue", "Write the tracks now in your queue to a portable JSON file.", func(gtx layout.Context) layout.Dimensions {
+		p.settingRow(e.Th, "Export the queue", "Write the tracks now in your queue to a portable JSON file.", func(gtx layout.Context) layout.Dimensions {
 			p.playlists.exportPath.field.Mono = true
 			p.playlists.exportPath.field.Placeholder = "ryotunes-queue.json"
 			p.playlists.exportButton.Kind, p.playlists.exportButton.Label, p.playlists.exportButton.Busy = kit.PlaqueLine, "Export", p.playlists.busy
@@ -54,8 +54,7 @@ func (p *page) layoutPlaylists(gtx layout.Context, e *env.Env, snapshot state.St
 				}
 			}
 			return transferControl(gtx, e, &p.playlists.exportPath.field, &p.playlists.exportButton)
-		}),
-	)
+		}))
 }
 
 func transferControl(gtx layout.Context, e *env.Env, field *kit.TextField, button *kit.Plaque) layout.Dimensions {

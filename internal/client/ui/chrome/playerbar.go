@@ -400,6 +400,8 @@ func (bar *PlayerBar) layoutSeek(gtx layout.Context, e *env.Env, snapshot state.
 					return widgets.Duration(float64(fraction) * duration)
 				},
 				WheelStep: float32(min(1, 5/max(1, duration))),
+				Wave:      e.Fx.Wave,
+				Live:      !snapshot.Playback.Paused,
 			})
 			if !knownDuration {
 				if bar.seekDragging {
@@ -420,7 +422,9 @@ func (bar *PlayerBar) layoutSeek(gtx layout.Context, e *env.Env, snapshot state.
 				e.Store.SetSeekDrag(nil)
 			}
 			bar.seekDragging = dragging
-			bar.requestProgressFrame(gtx, e, duration, max(1, dimensions.Size.X), snapshot.Playback.Paused)
+			if !e.Fx.Wave || dragging {
+				bar.requestProgressFrame(gtx, e, duration, max(1, dimensions.Size.X), snapshot.Playback.Paused)
+			}
 			return dimensions
 		}),
 		layout.Rigid(layout.Spacer{Width: 8}.Layout),

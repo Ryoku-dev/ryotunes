@@ -18,11 +18,11 @@ import (
 )
 
 // Serve runs an in-process fake daemon until ctx is cancelled.
-func Serve(ctx context.Context, socketPath string) error {
+func Serve(ctx context.Context, socketPath string, playing bool) error {
 	if err := os.MkdirAll(filepath.Dir(socketPath), 0o700); err != nil {
 		return err
 	}
-	data, err := makeFixtures(filepath.Dir(socketPath))
+	data, err := makeFixtures(filepath.Dir(socketPath), playing)
 	if err != nil {
 		return err
 	}
@@ -136,7 +136,13 @@ func (s *demoServer) result(method string, params json.RawMessage) any {
 		return s.data.snapshot.SoundCloud
 	case protocol.MethodTidalStatus:
 		return s.data.snapshot.Tidal
-	case protocol.MethodGetHome, protocol.MethodGetHomeMore:
+	case protocol.MethodGetHome:
+		var request protocol.HomeParams
+		if json.Unmarshal(params, &request) == nil && request.Params != nil && *request.Params == "focus" {
+			return s.data.focusFeed
+		}
+		return s.data.feed
+	case protocol.MethodGetHomeMore:
 		return s.data.feed
 	case protocol.MethodSearch:
 		return append([]model.Track(nil), s.data.tracks...)

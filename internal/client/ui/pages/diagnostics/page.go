@@ -11,6 +11,7 @@ import (
 	"github.com/ryoku-dev/ryotunes/internal/client/ui/act"
 	"github.com/ryoku-dev/ryotunes/internal/client/ui/env"
 	"github.com/ryoku-dev/ryotunes/internal/client/ui/look"
+	"github.com/ryoku-dev/ryotunes/internal/client/ui/widgets"
 	"github.com/ryoku-dev/ryotunes/internal/model"
 	"github.com/ryoku-dev/ryotunes/internal/protocol"
 )
@@ -25,15 +26,15 @@ type Page struct {
 	levelFilters  kit.Filters
 	sourceFilters kit.Filters
 	scroll        look.Scroller
+	header        widgets.Header
 	rows          map[string]*logRow
-
-	levelIndex  int
-	sourceIndex int
-	query       string
-	logs        model.LogsResult
-	hello       protocol.Hello
-	dataDir     string
-	renderer    string
+	levelIndex    int
+	sourceIndex   int
+	query         string
+	logs          model.LogsResult
+	hello         protocol.Hello
+	dataDir       string
+	renderer      string
 
 	loaded      bool
 	loading     bool

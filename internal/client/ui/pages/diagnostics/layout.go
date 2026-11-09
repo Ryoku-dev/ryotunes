@@ -71,7 +71,7 @@ func (p *Page) Layout(gtx layout.Context, e *env.Env) layout.Dimensions {
 		return p.scroll.Layout(gtx, e.Th, count, func(gtx layout.Context, index int) layout.Dimensions {
 			switch index {
 			case 0:
-				return widgets.PageHeader(e, "Diagnostics", "Recent daemon and client evidence.", p.headerActions(e))(gtx)
+				return p.header.Layout(gtx, e, "Diagnostics", "Recent daemon and client evidence.", p.headerActions(e))
 			case 1:
 				return layout.Inset{Top: unit.Dp(21)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 					return kit.Section(e.Th.Theme, "Runtime", func(gtx layout.Context) layout.Dimensions {

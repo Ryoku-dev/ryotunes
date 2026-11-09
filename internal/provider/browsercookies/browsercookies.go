@@ -11,7 +11,6 @@ import (
 	"crypto/sha256"
 	"database/sql"
 	"errors"
-	"fmt"
 	"hash"
 	"io"
 	"os"
@@ -368,12 +367,4 @@ func DefaultBrowser() string {
 		return ""
 	}
 	return strings.TrimSpace(string(out))
-}
-
-// OpenURL asks the desktop to open an HTTPS URL.
-func OpenURL(url string) error {
-	if !strings.HasPrefix(url, "https://") {
-		return fmt.Errorf("refusing non-HTTPS URL")
-	}
-	return exec.Command("xdg-open", url).Start()
 }

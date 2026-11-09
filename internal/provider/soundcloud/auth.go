@@ -17,7 +17,10 @@ import (
 	"github.com/ryoku-dev/ryotunes/internal/provider/browsercookies"
 )
 
-const refreshURL = "https://soundcloud.com/n/api/refresh-token"
+const (
+	refreshURL          = "https://soundcloud.com/n/api/refresh-token"
+	soundCloudSignInURL = "https://soundcloud.com/signin"
+)
 
 // Auth is the persisted SoundCloud browser authorization.
 type Auth struct {
@@ -30,12 +33,11 @@ type Auth struct {
 	UserID         uint64  `json:"-"`
 }
 
-// CookieSource supplies browser cookies and opens the system browser.
+// CookieSource supplies browser cookies without touching the live browser.
 type CookieSource interface {
 	Discover() []browsercookies.Store
 	Read(store browsercookies.Store, hostSuffixes ...string) ([]browsercookies.Cookie, error)
 	ChangedSince(store browsercookies.Store, since time.Time) bool
-	OpenURL(url string) error
 }
 
 type systemCookies struct{}
@@ -47,7 +49,6 @@ func (systemCookies) Read(store browsercookies.Store, suffixes ...string) ([]bro
 func (systemCookies) ChangedSince(store browsercookies.Store, since time.Time) bool {
 	return browsercookies.ChangedSince(store, since)
 }
-func (systemCookies) OpenURL(rawURL string) error { return browsercookies.OpenURL(rawURL) }
 
 // Status returns the current SoundCloud authorization snapshot.
 func (p *Provider) Status() model.SoundCloudStatus {
@@ -59,22 +60,50 @@ func (p *Provider) Status() model.SoundCloudStatus {
 	return model.SoundCloudStatus{SignedIn: true, Name: p.auth.Username}
 }
 
-// SignIn starts one browser-cookie import flow and reports whether it started.
-func (p *Provider) SignIn(ctx context.Context) bool {
+// SignIn starts one browser-cookie import flow and returns its browser handoff.
+func (p *Provider) SignIn(ctx context.Context) string {
 	p.mu.Lock()
-	if p.signingIn {
+	if p.auth != nil {
 		p.mu.Unlock()
-		return false
+		return ""
+	}
+	if p.signingIn {
+		url := p.signInURL
+		p.mu.Unlock()
+		return url
 	}
 	p.signingIn = true
 	epoch := p.epoch
 	p.mu.Unlock()
+
+	stores := p.cookies.Discover()
+	auth, found := p.importCookies(stores, nil)
+	url := ""
+	if !found {
+		url = soundCloudSignInURL
+	}
 	flowCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Minute)
+	p.mu.Lock()
+	if p.epoch != epoch {
+		p.mu.Unlock()
+		cancel()
+		return ""
+	}
+	p.signInURL = url
+	p.signInCancel = cancel
+	p.mu.Unlock()
 	go func() {
 		defer cancel()
-		defer func() { p.mu.Lock(); p.signingIn = false; p.mu.Unlock() }()
-		stores := p.cookies.Discover()
-		if auth, ok := p.importCookies(stores, nil); ok {
+		defer func() {
+			p.mu.Lock()
+			if p.epoch == epoch {
+				p.signingIn = false
+				p.signInURL = ""
+				p.signInCancel = nil
+			}
+			p.mu.Unlock()
+		}()
+		if found {
 			_ = p.installAndProve(flowCtx, auth, epoch)
 			return
 		}
@@ -82,11 +111,6 @@ func (p *Provider) SignIn(ctx context.Context) bool {
 			return
 		}
 		watchSince := time.Now()
-		if err := p.cookies.OpenURL("https://soundcloud.com/signin"); err != nil {
-			message := "Could not open your browser. Sign in at soundcloud.com, then press the button again."
-			p.bus.Emit(protocol.EventSoundCloudAuth, model.SoundCloudAuthEvent{State: "error", Message: &message})
-			return
-		}
 		p.bus.Emit(protocol.EventSoundCloudAuth, model.SoundCloudAuthEvent{State: "waiting"})
 		ticker := time.NewTicker(2 * time.Second)
 		defer ticker.Stop()
@@ -110,7 +134,7 @@ func (p *Provider) SignIn(ctx context.Context) bool {
 			}
 		}
 	}()
-	return true
+	return url
 }
 
 // SignOut clears SoundCloud authorization and emits signed_out.
@@ -118,7 +142,14 @@ func (p *Provider) SignOut() error {
 	p.mu.Lock()
 	p.auth = nil
 	p.epoch++
+	cancel := p.signInCancel
+	p.signInCancel = nil
+	p.signingIn = false
+	p.signInURL = ""
 	p.mu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
 	err := p.kv.Delete(soundCloudAuthKey)
 	p.bus.Emit(protocol.EventSoundCloudAuth, model.SoundCloudAuthEvent{State: "signed_out"})
 	return err

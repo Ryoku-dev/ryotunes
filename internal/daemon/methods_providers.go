@@ -53,18 +53,28 @@ func setProvider(_ context.Context, a *App, p protocol.ProviderParams) (protocol
 	a.Bus.Emit(protocol.EventProviderChanged, result)
 	return result, nil
 }
-func signIn(_ context.Context, a *App, _ protocol.Null) (protocol.Null, error) {
-	a.background.Add(1)
-	go func() {
+func signIn(ctx context.Context, a *App, _ protocol.Null) (protocol.AuthFlowResult, error) {
+	flow, err := a.YouTube.SignIn(ctx)
+	if err != nil {
+		return protocol.AuthFlowResult{}, err
+	}
+	finish := func(err error) {
 		defer a.background.Done()
-		if err := a.YouTube.SignIn(a.ctx); err != nil {
+		if err != nil {
 			a.Bus.Emit(protocol.EventAuthChanged, model.Account{})
 			return
 		}
 		account, _ := a.YouTube.Account(a.ctx)
 		a.Bus.Emit(protocol.EventAuthChanged, account)
-	}()
-	return protocol.Null{}, nil
+	}
+	if flow.Done != nil {
+		a.background.Add(1)
+		go func() { finish(<-flow.Done) }()
+	} else if flow.URL == "" {
+		a.background.Add(1)
+		go finish(nil)
+	}
+	return protocol.AuthFlowResult{URL: flow.URL}, nil
 }
 func signOut(_ context.Context, a *App, _ protocol.Null) (protocol.Null, error) {
 	if err := a.YouTube.SignOut(); err != nil {
@@ -102,8 +112,8 @@ func spotifySignOut(_ context.Context, a *App, _ protocol.Null) (protocol.Signed
 func soundCloudStatus(_ context.Context, a *App, _ protocol.Null) (model.SoundCloudStatus, error) {
 	return a.SoundCloud.Status(), nil
 }
-func soundCloudSignIn(ctx context.Context, a *App, _ protocol.Null) (protocol.StartedResult, error) {
-	return protocol.StartedResult{Started: a.SoundCloud.SignIn(ctx)}, nil
+func soundCloudSignIn(ctx context.Context, a *App, _ protocol.Null) (protocol.AuthFlowResult, error) {
+	return protocol.AuthFlowResult{URL: a.SoundCloud.SignIn(ctx)}, nil
 }
 func soundCloudSignOut(_ context.Context, a *App, _ protocol.Null) (protocol.SignedOutResult, error) {
 	return protocol.SignedOutResult{SignedIn: false}, providerError(model.ProviderSoundCloud, a.SoundCloud.SignOut())

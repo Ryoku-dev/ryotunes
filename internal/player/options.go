@@ -34,6 +34,7 @@ func playerOptions(cacheDir string, lowResource bool) []mpvOption {
 		{name: "video", value: "no"},
 		{name: "audio-display", value: "no"},
 		{name: "ao", value: "pipewire,pulse,alsa,null"},
+		{name: "audio-client-name", value: "Ryotunes"},
 		{name: "ytdl", value: "no"},
 		{name: "force-window", value: "no"},
 		{name: "gapless-audio", value: "yes"},

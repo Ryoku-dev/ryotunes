@@ -16,8 +16,8 @@ import (
 func (p *page) layoutData(gtx layout.Context, e *env.Env) layout.Dimensions {
 	snapshot := e.Store.Snapshot()
 	p.data.proxy.sync(settingString(snapshot.Settings, model.SettingProxy, ""))
-	return settingRows(gtx,
-		settingRow(e.Th, "Proxy", "Route HTTP and HTTPS YouTube traffic through this proxy. Restart Ryotunes after saving.", func(gtx layout.Context) layout.Dimensions {
+	return p.settingRows(gtx,
+		p.settingRow(e.Th, "Proxy", "Route HTTP and HTTPS YouTube traffic through this proxy. Restart Ryotunes after saving.", func(gtx layout.Context) layout.Dimensions {
 			p.data.proxy.field.Mono = true
 			p.data.proxy.field.Placeholder = "http://host:port (blank = none)"
 			p.data.saveProxy.Kind, p.data.saveProxy.Label = kit.PlaqueLine, "Save proxy"
@@ -30,11 +30,11 @@ func (p *page) layoutData(gtx layout.Context, e *env.Env) layout.Dimensions {
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions { return p.data.saveProxy.Layout(gtx, e.Th.Theme) }),
 			)
 		}),
-		settingRow(e.Th, "Rotate playback identity", "Ask the daemon to establish a fresh YouTube playback identity after clearing caches.", func(gtx layout.Context) layout.Dimensions {
+		p.settingRow(e.Th, "Rotate playback identity", "Ask the daemon to establish a fresh YouTube playback identity after clearing caches.", func(gtx layout.Context) layout.Dimensions {
 			p.data.rotate.Label = "Rotate playback identity"
 			return p.data.rotate.Layout(gtx, e.Th.Theme)
 		}),
-		settingRow(e.Th, "Playback caches", "Clear cached stream URLs and downloaded audio bytes, and reset the YouTube playback identity.", func(gtx layout.Context) layout.Dimensions {
+		p.settingRow(e.Th, "Playback caches", "Clear cached stream URLs and downloaded audio bytes, and reset the YouTube playback identity.", func(gtx layout.Context) layout.Dimensions {
 			p.data.clear.Kind, p.data.clear.Busy = kit.PlaqueDangerLine, p.clearing
 			p.data.clear.Label = "Force clear caches"
 			if p.clearing {
@@ -57,7 +57,7 @@ func (p *page) layoutData(gtx layout.Context, e *env.Env) layout.Dimensions {
 			}
 			return p.data.clear.Layout(gtx, e.Th.Theme)
 		}),
-		settingRow(e.Th, "Playlist index", "Refresh saved-state checks and the track-to-playlist index.", func(gtx layout.Context) layout.Dimensions {
+		p.settingRow(e.Th, "Playlist index", "Refresh saved-state checks and the track-to-playlist index.", func(gtx layout.Context) layout.Dimensions {
 			p.data.sync.Kind, p.data.sync.Busy, p.data.sync.Label = kit.PlaqueLine, p.syncing, "Sync now"
 			if p.syncing {
 				p.data.sync.Label = "Syncing…"
@@ -74,6 +74,5 @@ func (p *page) layoutData(gtx layout.Context, e *env.Env) layout.Dimensions {
 				})
 			}
 			return p.data.sync.Layout(gtx, e.Th.Theme)
-		}),
-	)
+		}))
 }

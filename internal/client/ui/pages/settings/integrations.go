@@ -19,19 +19,18 @@ func (p *page) layoutIntegrations(gtx layout.Context, e *env.Env, snapshot state
 	p.integrations.presence.sync(presence)
 	p.integrations.presence.field.MaxLen = 128
 	p.integrations.listenURL.sync(snapshot.LT.ServerURL)
-	return settingRows(gtx,
+	return p.settingRows(gtx,
 		p.discordRow(e, snapshot),
 		p.discordTitleRow(e),
 		p.lastfmRow(e, snapshot),
 		p.mprisRow(e),
-		p.listenTogetherRow(e),
-	)
+		p.listenTogetherRow(e))
 }
 
 func (p *page) discordRow(e *env.Env, snapshot state.State) layout.Widget {
 	enabled := settingBool(snapshot.Settings, model.SettingDiscordRPC, false)
 	tone, claim := discordClaim(p.discord, enabled)
-	return settingRow(e.Th, "Discord rich presence", discordDetail(p.discord, enabled), func(gtx layout.Context) layout.Dimensions {
+	return p.settingRow(e.Th, "Discord rich presence", discordDetail(p.discord, enabled), func(gtx layout.Context) layout.Dimensions {
 		p.integrations.discord.Value = enabled
 		return accountControl(gtx, e, tone, claim, func(gtx layout.Context) layout.Dimensions {
 			dims := p.integrations.discord.Layout(gtx, e.Th.Theme)
@@ -44,7 +43,7 @@ func (p *page) discordRow(e *env.Env, snapshot state.State) layout.Widget {
 }
 
 func (p *page) discordTitleRow(e *env.Env) layout.Widget {
-	return settingRow(e.Th, "Discord presence title", "The text Discord renders as “Listening to …”.", func(gtx layout.Context) layout.Dimensions {
+	return p.settingRow(e.Th, "Discord presence title", "The text Discord renders as “Listening to …”.", func(gtx layout.Context) layout.Dimensions {
 		p.integrations.presence.field.Placeholder = "Ryotunes"
 		p.integrations.presence.field.Help = "Listening to " + p.integrations.presence.field.Text()
 		p.integrations.savePresence.Kind, p.integrations.savePresence.Label = kit.PlaqueLine, "Save"
@@ -81,7 +80,7 @@ func (p *page) lastfmRow(e *env.Env, snapshot state.State) layout.Widget {
 	} else if snapshot.Lastfm.Error != nil && *snapshot.Lastfm.Error != "" {
 		tone, claim, detail = palette.Failed, "Failed", *snapshot.Lastfm.Error
 	}
-	return settingRow(e.Th, "Last.fm", detail, func(gtx layout.Context) layout.Dimensions {
+	return p.settingRow(e.Th, "Last.fm", detail, func(gtx layout.Context) layout.Dimensions {
 		return accountControl(gtx, e, tone, claim, func(gtx layout.Context) layout.Dimensions {
 			if connected {
 				return providerButton(gtx, e, &p.integrations.lastfmDisconnect, kit.PlaqueDangerLine, "Disconnect", func() {
@@ -106,13 +105,13 @@ func (p *page) mprisRow(e *env.Env) layout.Widget {
 	if p.diagnostics.MPRIS {
 		tone, claim, detail = palette.Alive, "Connected", "Desktop media keys and player controls can operate Ryotunes."
 	}
-	return settingRow(e.Th, "MPRIS", detail, func(gtx layout.Context) layout.Dimensions {
+	return p.settingRow(e.Th, "MPRIS", detail, func(gtx layout.Context) layout.Dimensions {
 		return kit.Claim(e.Th.Theme, tone, claim)(gtx)
 	})
 }
 
 func (p *page) listenTogetherRow(e *env.Env) layout.Widget {
-	return settingRow(e.Th, "Listen Together server", "The ws:// or wss:// relay used to host and join synchronized rooms.", func(gtx layout.Context) layout.Dimensions {
+	return p.settingRow(e.Th, "Listen Together server", "The ws:// or wss:// relay used to host and join synchronized rooms.", func(gtx layout.Context) layout.Dimensions {
 		p.integrations.listenURL.field.Mono = true
 		p.integrations.listenURL.field.Placeholder = "wss://sync.example"
 		p.integrations.saveListenURL.Kind, p.integrations.saveListenURL.Label = kit.PlaqueLine, "Save server"

@@ -27,13 +27,13 @@ type folderActions struct {
 
 // Page is the retained Library surface.
 type Page struct {
-	tabs       kit.Tabs
-	selected   int
-	scroll     look.Scroller
-	filter     kit.Search
-	filterOpen bool
-	focusNext  bool
-
+	tabs          kit.Tabs
+	selected      int
+	scroll        look.Scroller
+	header        widgets.Header
+	filter        kit.Search
+	filterOpen    bool
+	focusNext     bool
 	playlistsGrid widgets.Grid
 	albumsGrid    widgets.Grid
 	artistsGrid   widgets.Grid
@@ -342,7 +342,7 @@ func (p *Page) layoutPage(gtx layout.Context, e *env.Env) layout.Dimensions {
 	return p.scroll.Layout(gtx, e.Th, count, func(gtx layout.Context, index int) layout.Dimensions {
 		switch index {
 		case 0:
-			return widgets.PageHeader(e, "Library", "", nil)(gtx)
+			return p.header.Layout(gtx, e, "Library", "", nil)
 		case 1:
 			return p.layoutTabs(gtx, e)
 		default:

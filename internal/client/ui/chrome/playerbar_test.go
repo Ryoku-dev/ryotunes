@@ -1,6 +1,9 @@
 package chrome
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
 
 func TestFitPlayerBar(t *testing.T) {
 	metrics := playerBarFitMetrics{
@@ -76,14 +79,59 @@ func TestFitMiniScrubber(t *testing.T) {
 		want      int
 	}{
 		{name: "preferred fits", available: 334, want: 100},
-		{name: "use remaining width", available: 190, want: 86},
-		{name: "preserve minimum", available: 170, want: 72},
+		{name: "use remaining width", available: 190, want: 68},
+		{name: "fit available width", available: 170, want: 48},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			if got := fitMiniScrubber(test.available, 32, 4, 100, 72, true); got != test.want {
+			if got := fitMiniScrubber(test.available, 32, 13, 100, 72, true, true); got != test.want {
 				t.Fatalf("fitMiniScrubber(%d) = %d, want %d", test.available, got, test.want)
 			}
 		})
+	}
+}
+
+func TestFitMiniStageAcrossZoom(t *testing.T) {
+	tests := []struct {
+		name             string
+		remaining, width int
+		minimum, maximum int
+		wantSide         int
+		wantVisible      bool
+	}{
+		{name: "100 percent", remaining: 185, width: 334, minimum: 96, maximum: 200, wantSide: 185, wantVisible: true},
+		{name: "110 percent", remaining: 161, width: 331, minimum: 106, maximum: 220, wantSide: 161, wantVisible: true},
+		{name: "125 percent", remaining: 126, width: 328, minimum: 120, maximum: 250, wantSide: 126, wantVisible: true},
+		{name: "small window hides stage", remaining: 6, width: 248, minimum: 120, maximum: 250, wantSide: 0, wantVisible: false},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			side, visible := fitMiniStage(test.remaining, test.width, test.minimum, test.maximum)
+			if side != test.wantSide || visible != test.wantVisible {
+				t.Fatalf("fitMiniStage() = (%d, %t), want (%d, %t)", side, visible, test.wantSide, test.wantVisible)
+			}
+		})
+	}
+}
+
+func TestLyricsFollowPlanAndManualPause(t *testing.T) {
+	plan := planLyricsFollow(9, 0, 122, false, false)
+	if !plan.anchor || plan.anchorIndex != 10 || plan.anchorOffset != 122 || plan.springDelta != 0 {
+		t.Fatalf("distant jump plan = %+v", plan)
+	}
+	plan = planLyricsFollow(10, 244, 122, true, false)
+	if plan.anchor || plan.springDelta != 122 {
+		t.Fatalf("visible line plan = %+v", plan)
+	}
+
+	now := time.Unix(100, 0)
+	var deadline time.Time
+	deadline = lyricManualDeadline(now, deadline, false)
+	if !deadline.IsZero() {
+		t.Fatalf("programmatic follow started manual pause at %v", deadline)
+	}
+	deadline = lyricManualDeadline(now, deadline, true)
+	if want := now.Add(lyricsManualHold); !deadline.Equal(want) {
+		t.Fatalf("real input deadline = %v, want %v", deadline, want)
 	}
 }

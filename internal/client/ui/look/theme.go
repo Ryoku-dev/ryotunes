@@ -26,19 +26,25 @@ type Theme struct {
 
 	srcFrom, srcTo Source
 	srcTween       anim.Tween
+	providerSet    bool
 }
 
 // NewTheme constructs the official Lithic theme with Ryotunes fonts.
-func NewTheme(roles palette.Roles, density libtheme.Density) *Theme {
+func NewTheme(roles palette.Roles, density libtheme.Density, provider ...model.Provider) *Theme {
 	base := libtheme.New(roles, libtheme.WithFontCollection(Fonts()))
 	base.Density = density
-	source := sourceFor("", roles)
+	var initial model.Provider
+	if len(provider) > 0 {
+		initial = provider[0]
+	}
+	source := sourceFor(initial, roles)
 	return &Theme{
-		Theme:    base,
-		Src:      source,
-		srcFrom:  source,
-		srcTo:    source,
-		srcTween: anim.Tween{Duration: base.Motion.Field, Ease: anim.EaseChisel},
+		Theme:       base,
+		Src:         source,
+		srcFrom:     source,
+		srcTo:       source,
+		srcTween:    anim.Tween{Duration: base.Motion.Field, Ease: anim.EaseChisel},
+		providerSet: initial != "",
 	}
 }
 
@@ -50,10 +56,16 @@ func (theme *Theme) SetRoles(roles palette.Roles) {
 	theme.srcTween = anim.Tween{Duration: theme.Motion.Field, Ease: anim.EaseChisel}
 }
 
-// SetProvider starts a source-color transition from the colors visible now.
+// SetProvider snaps the first source assignment and transitions later switches.
 func (theme *Theme) SetProvider(gtx layout.Context, provider model.Provider) {
-	theme.Animate(gtx)
 	target := sourceFor(provider, theme.R)
+	if !theme.providerSet {
+		theme.providerSet = true
+		theme.Src, theme.srcFrom, theme.srcTo = target, target, target
+		theme.srcTween = anim.Tween{Duration: theme.Motion.Field, Ease: anim.EaseChisel}
+		return
+	}
+	theme.Animate(gtx)
 	if theme.Src.Provider == provider && theme.srcTo == target {
 		return
 	}

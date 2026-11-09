@@ -38,7 +38,9 @@ func (p *Page) Layout(gtx layout.Context, e *env.Env) layout.Dimensions {
 	inset := look.ContentInset(e.Th.Class)
 	width := int(gtx.Metric.PxToDp(gtx.Constraints.Max.X - 2*gtx.Dp(inset)))
 	children := []layout.Widget{
-		widgets.PageHeader(e, "Radio", "Live stations from around the world.", nil),
+		func(gtx layout.Context) layout.Dimensions {
+			return p.header.Layout(gtx, e, "Radio", "Live stations from around the world.", nil)
+		},
 		p.controls(e),
 	}
 	switch {

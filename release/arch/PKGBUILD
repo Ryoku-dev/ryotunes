@@ -26,6 +26,7 @@ depends=(
   'vulkan-icd-loader'
   'mesa'
 )
+optdepends=('cava: playback visualizer')
 makedepends=('go' 'vulkan-headers')
 install=ryotunes.install
 options=(!debug)

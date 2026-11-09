@@ -18,10 +18,10 @@ import (
 func (p *page) layoutLocal(gtx layout.Context, e *env.Env) layout.Dimensions {
 	rows := make([]layout.Widget, 0, len(p.local.library.Folders)+2)
 	if p.local.errorMessage != "" {
-		rows = append(rows, settingRow(e.Th, "Local music", p.local.errorMessage, nil))
+		rows = append(rows, p.settingRow(e.Th, "Local music", p.local.errorMessage, nil))
 	}
 	if p.local.loaded && len(p.local.library.Folders) == 0 {
-		rows = append(rows, settingRow(e.Th, "Watched folders", "No folders yet. Add the one your music sits in.", nil))
+		rows = append(rows, p.settingRow(e.Th, "Watched folders", "No folders yet. Add the one your music sits in.", nil))
 	}
 	for _, folder := range p.local.library.Folders {
 		folder := folder
@@ -30,7 +30,7 @@ func (p *page) layoutLocal(gtx layout.Context, e *env.Env) layout.Dimensions {
 			button = new(kit.Plaque)
 			p.local.remove[folder] = button
 		}
-		rows = append(rows, settingRow(e.Th, filepath.Base(folder), folder, func(gtx layout.Context) layout.Dimensions {
+		rows = append(rows, p.settingRow(e.Th, filepath.Base(folder), folder, func(gtx layout.Context) layout.Dimensions {
 			button.Kind, button.Label, button.Small = kit.PlaqueDangerLine, "Remove", true
 			if button.Clicked(gtx) {
 				p.local.busy = true
@@ -52,7 +52,7 @@ func (p *page) layoutLocal(gtx layout.Context, e *env.Env) layout.Dimensions {
 		}))
 	}
 	rows = append(rows,
-		settingRow(e.Th, "Rescan watched folders", "Refresh every watched folder and update the local library.", func(gtx layout.Context) layout.Dimensions {
+		p.settingRow(e.Th, "Rescan watched folders", "Refresh every watched folder and update the local library.", func(gtx layout.Context) layout.Dimensions {
 			p.local.rescan.Kind, p.local.rescan.Label, p.local.rescan.Busy = kit.PlaqueLine, "Rescan", p.local.busy
 			if p.local.rescan.Clicked(gtx) && !p.local.busy {
 				p.local.loaded = false
@@ -60,7 +60,7 @@ func (p *page) layoutLocal(gtx layout.Context, e *env.Env) layout.Dimensions {
 			}
 			return p.local.rescan.Layout(gtx, e.Th.Theme)
 		}),
-		settingRow(e.Th, "Add folder", "Folders Ryotunes watches for files on disk. The daemon rescans them on demand.", func(gtx layout.Context) layout.Dimensions {
+		p.settingRow(e.Th, "Add folder", "Folders Ryotunes watches for files on disk. The daemon rescans them on demand.", func(gtx layout.Context) layout.Dimensions {
 			p.local.path.field.Mono = true
 			p.local.path.field.Placeholder = "/home/you/Music"
 			p.local.add.Kind, p.local.add.Label, p.local.add.Busy = kit.PlaqueLine, "Add folder", p.local.busy
@@ -88,7 +88,7 @@ func (p *page) layoutLocal(gtx layout.Context, e *env.Env) layout.Dimensions {
 			)
 		}),
 	)
-	return settingRows(gtx, rows...)
+	return p.settingRows(gtx, rows...)
 }
 
 func localTrackCount(folder string, tracks []model.Track) int {

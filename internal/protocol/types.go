@@ -152,6 +152,11 @@ type StartedResult struct {
 	Started bool `json:"started"`
 }
 
+// AuthFlowResult carries a browser URL for a client-owned sign-in handoff.
+type AuthFlowResult struct {
+	URL string `json:"url"`
+}
+
 // SignedOutResult is the provider sign-out result.
 type SignedOutResult struct {
 	SignedIn bool `json:"signedIn"`

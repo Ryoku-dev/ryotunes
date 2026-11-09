@@ -16,6 +16,16 @@ import (
 
 // Layout draws the responsive Lithic settings archetype.
 func (p *page) Layout(gtx layout.Context, e *env.Env) layout.Dimensions {
+	p.scroll.UpdateInput(gtx)
+	userScrolled := p.scroll.UserScrolled()
+	if p.indexHold >= 0 && !userScrolled {
+		first, offset := p.scroll.Offset()
+		userScrolled = first != p.indexHold || offset != 0
+	}
+	if userScrolled {
+		p.indexHold = -1
+	}
+	p.updateCurrentSection()
 	if !p.refreshed {
 		p.Refresh(e)
 	}
@@ -31,23 +41,11 @@ func (p *page) Layout(gtx layout.Context, e *env.Env) layout.Dimensions {
 		return widgets.Failed(e, p.loadError, &p.retry)(gtx)
 	}
 	return layout.Inset{Top: unit.Dp(34), Right: unit.Dp(36), Bottom: unit.Dp(34), Left: unit.Dp(36)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-		switch e.Th.Class {
-		case look.Expanded:
+		if gtx.Constraints.Max.X >= gtx.Dp(900) {
 			return p.layoutExpanded(gtx, e, snapshot)
-		case look.Medium:
-			return p.layoutMedium(gtx, e, snapshot)
-		default:
-			return p.layoutCompact(gtx, e, snapshot)
 		}
+		return p.layoutMedium(gtx, e, snapshot)
 	})
-}
-
-func sectionLabels() []string {
-	labels := make([]string, len(settingsSections))
-	for i, section := range settingsSections {
-		labels[i] = section.title
-	}
-	return labels
 }
 
 func (p *page) layoutExpanded(gtx layout.Context, e *env.Env, snapshot state.State) layout.Dimensions {
@@ -56,7 +54,7 @@ func (p *page) layoutExpanded(gtx layout.Context, e *env.Env, snapshot state.Sta
 		gtx.Constraints.Min.X, gtx.Constraints.Max.X = width, width
 		return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Start}.Layout(gtx,
 			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-				dims := p.index.Layout(gtx, e.Th.Theme, sectionLabels(), p.currentSection, kit.FrameExpanded)
+				dims := p.index.Layout(gtx, e.Th.Theme, p.sectionLabels, p.currentSection, kit.FrameExpanded)
 				p.consumeIndexSelection()
 				return dims
 			}),
@@ -70,12 +68,12 @@ func (p *page) layoutExpanded(gtx layout.Context, e *env.Env, snapshot state.Sta
 }
 
 func (p *page) layoutMedium(gtx layout.Context, e *env.Env, snapshot state.State) layout.Dimensions {
-	width := min(gtx.Constraints.Max.X, gtx.Dp(760))
+	width := gtx.Constraints.Max.X
 	return layout.Center.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 		gtx.Constraints.Min.X, gtx.Constraints.Max.X = width, width
 		return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
 			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-				dims := p.index.Layout(gtx, e.Th.Theme, sectionLabels(), p.currentSection, kit.FrameMedium)
+				dims := p.index.Layout(gtx, e.Th.Theme, p.sectionLabels, p.currentSection, kit.FrameMedium)
 				p.consumeIndexSelection()
 				return dims
 			}),
@@ -83,14 +81,6 @@ func (p *page) layoutMedium(gtx layout.Context, e *env.Env, snapshot state.State
 			layout.Flexed(1, func(gtx layout.Context) layout.Dimensions { return p.layoutSections(gtx, e, snapshot) }),
 		)
 	})
-}
-
-func (p *page) layoutCompact(gtx layout.Context, e *env.Env, snapshot state.State) layout.Dimensions {
-	return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
-		layout.Rigid(kit.Text(e.Th.Theme, e.Th.T.Section, e.Th.R.Fg, "Settings")),
-		layout.Rigid(layout.Spacer{Height: unit.Dp(21)}.Layout),
-		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions { return p.layoutSections(gtx, e, snapshot) }),
-	)
 }
 
 func (p *page) consumeIndexSelection() {
@@ -102,32 +92,34 @@ func (p *page) consumeIndexSelection() {
 }
 
 func (p *page) layoutSections(gtx layout.Context, e *env.Env, snapshot state.State) layout.Dimensions {
+	p.viewportHeight = gtx.Constraints.Max.Y
 	if !p.initialScroll {
 		p.scroll.ScrollTo(p.initialSection)
 		p.currentSection = p.initialSection
 		p.indexHold = p.initialSection
 		p.initialScroll = true
 	}
-	dims := p.scroll.Layout(gtx, e.Th, len(settingsSections), func(gtx layout.Context, index int) layout.Dimensions {
+	return p.scroll.Layout(gtx, e.Th, len(settingsSections), func(gtx layout.Context, index int) layout.Dimensions {
 		section := settingsSections[index]
 		sectionWidget := func(gtx layout.Context) layout.Dimensions {
-			dims := kit.Section(e.Th.Theme, section.title, func(gtx layout.Context) layout.Dimensions {
+			return kit.Section(e.Th.Theme, section.title, func(gtx layout.Context) layout.Dimensions {
 				return kit.SlabContent(gtx, e.Th.Theme, p.sectionBody(index, e, snapshot))
 			})(gtx)
-			p.sectionHeights[index] = dims.Size.Y
-			return dims
 		}
+		var dims layout.Dimensions
 		if index+1 < len(settingsSections) {
-			return layout.Inset{Bottom: unit.Dp(34)}.Layout(gtx, sectionWidget)
+			dims = layout.Inset{Bottom: unit.Dp(34)}.Layout(gtx, sectionWidget)
+		} else {
+			dims = sectionWidget(gtx)
 		}
-		return sectionWidget(gtx)
+		p.sectionHeights[index] = dims.Size.Y
+		return dims
 	})
-	p.updateCurrentSection()
-	return dims
 }
 
 func (p *page) sectionBody(index int, e *env.Env, snapshot state.State) layout.Widget {
 	return func(gtx layout.Context) layout.Dimensions {
+		p.rowSection, p.rowCursor = index, 0
 		switch settingsSections[index].slug {
 		case "account":
 			return p.layoutAccount(gtx, e, snapshot)
@@ -158,72 +150,140 @@ func (p *page) sectionBody(index int, e *env.Env, snapshot state.State) layout.W
 }
 
 func (p *page) updateCurrentSection() {
+	if p.indexHold >= 0 || len(settingsSections) == 0 {
+		return
+	}
 	first, offset := p.scroll.Offset()
-	first = min(max(first, 0), len(settingsSections)-1)
-	if p.indexHold >= 0 {
-		if first == p.indexHold && offset == 0 {
-			p.currentSection = p.indexHold
-			return
-		}
-		p.indexHold = -1
-	}
-	current := first
-	height := p.sectionHeights[current]
-	if current+1 < len(settingsSections) && height > 0 && -offset > height*2/3 {
-		current++
-	}
-	if p.scroll.Position.First+p.scroll.Position.Count >= len(settingsSections) && p.scroll.Position.OffsetLast >= 0 {
-		current = len(settingsSections) - 1
-	}
-	p.currentSection = current
+	atEnd := p.scroll.Position.First+p.scroll.Position.Count >= len(settingsSections) && p.scroll.Position.OffsetLast >= 0
+	p.currentSection = scrollspySection(first, offset, p.viewportHeight, p.sectionHeights, atEnd)
 }
 
-func settingRows(gtx layout.Context, rows ...layout.Widget) layout.Dimensions {
-	children := make([]layout.FlexChild, 0, len(rows)*2)
+func scrollspySection(first, offset, viewportHeight int, sectionHeights []int, atEnd bool) int {
+	if len(sectionHeights) == 0 {
+		return 0
+	}
+	if atEnd {
+		return len(sectionHeights) - 1
+	}
+	first = min(max(first, 0), len(sectionHeights)-1)
+	current := first
+	threshold := viewportHeight / 3
+	top := -offset
+	for index := first + 1; index < len(sectionHeights); index++ {
+		height := sectionHeights[index-1]
+		if height <= 0 {
+			break
+		}
+		top += height
+		if top >= threshold {
+			break
+		}
+		current = index
+	}
+	return current
+}
+
+func (p *page) settingRows(gtx layout.Context, rows ...layout.Widget) layout.Dimensions {
+	children := p.rowChildren[p.rowSection][:0]
 	for i, row := range rows {
 		children = append(children, layout.Rigid(row))
 		if i+1 < len(rows) {
 			children = append(children, layout.Rigid(layout.Spacer{Height: unit.Dp(13)}.Layout))
 		}
 	}
+	p.rowChildren[p.rowSection] = children
 	return layout.Flex{Axis: layout.Vertical, Alignment: layout.Start}.Layout(gtx, children...)
 }
 
-func settingRow(th *look.Theme, title, detail string, control layout.Widget) layout.Widget {
-	return func(gtx layout.Context) layout.Dimensions {
-		copyBlock := func(gtx layout.Context) layout.Dimensions {
-			return layout.Flex{Axis: layout.Vertical, Alignment: layout.Start}.Layout(gtx,
-				layout.Rigid(kit.Text(th.Theme, th.T.Row, th.R.Fg, title)),
-				layout.Rigid(layout.Spacer{Height: unit.Dp(2)}.Layout),
-				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					return kit.Label{Style: th.T.Caption, Color: th.R.Fg2, MaxLines: 3}.Layout(gtx, th.Theme, detail)
-				}),
-			)
+type settingRowDescriptor struct {
+	th           *look.Theme
+	title        string
+	detail       string
+	description  string
+	control      layout.Widget
+	controlWidth int
+
+	widget         layout.Widget
+	copyBlock      layout.Widget
+	detailBlock    layout.Widget
+	controlBlock   layout.Widget
+	controlColumn  layout.Widget
+	alignedControl layout.Widget
+}
+
+func newSettingRowDescriptor() *settingRowDescriptor {
+	row := new(settingRowDescriptor)
+	row.widget = row.layout
+	row.copyBlock = row.layoutCopy
+	row.detailBlock = row.layoutDetail
+	row.controlBlock = row.layoutControl
+	row.controlColumn = row.layoutControlColumn
+	row.alignedControl = row.layoutAlignedControl
+	return row
+}
+
+func (p *page) settingRow(th *look.Theme, title, detail string, control layout.Widget) layout.Widget {
+	rows := p.rowDescriptors[p.rowSection]
+	if p.rowCursor == len(rows) {
+		rows = append(rows, newSettingRowDescriptor())
+		p.rowDescriptors[p.rowSection] = rows
+	}
+	row := rows[p.rowCursor]
+	p.rowCursor++
+	row.th, row.control = th, control
+	if row.title != title || row.detail != detail {
+		row.title, row.detail = title, detail
+		row.description = title
+		if detail != "" {
+			row.description += ". " + detail
 		}
-		if control == nil {
-			return copyBlock(gtx)
-		}
-		controlWithDescription := func(gtx layout.Context) layout.Dimensions {
-			description := title
-			if detail != "" {
-				description += ". " + detail
-			}
-			semantic.DescriptionOp(description).Add(gtx.Ops)
-			gtx.Constraints.Min = image.Point{}
-			gtx.Constraints.Max.X = min(gtx.Constraints.Max.X, gtx.Dp(320))
-			return control(gtx)
-		}
-		if gtx.Constraints.Max.X < gtx.Dp(560) {
-			return layout.Flex{Axis: layout.Vertical, Alignment: layout.Start}.Layout(gtx,
-				layout.Rigid(copyBlock),
-				layout.Rigid(layout.Spacer{Height: unit.Dp(8)}.Layout),
-				layout.Rigid(func(gtx layout.Context) layout.Dimensions { return layout.E.Layout(gtx, controlWithDescription) }),
-			)
-		}
-		return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Start}.Layout(gtx,
-			layout.Flexed(1, copyBlock),
-			layout.Rigid(layout.Spacer{Width: unit.Dp(21)}.Layout),
-			layout.Rigid(controlWithDescription),
+	}
+	return row.widget
+}
+
+func (row *settingRowDescriptor) layout(gtx layout.Context) layout.Dimensions {
+	if row.control == nil {
+		return row.copyBlock(gtx)
+	}
+	if gtx.Constraints.Max.X < gtx.Dp(440) {
+		return layout.Flex{Axis: layout.Vertical, Alignment: layout.Start}.Layout(gtx,
+			layout.Rigid(row.copyBlock),
+			layout.Rigid(layout.Spacer{Height: unit.Dp(8)}.Layout),
+			layout.Rigid(row.alignedControl),
 		)
 	}
+	row.controlWidth = min(gtx.Dp(320), gtx.Constraints.Max.X*45/100)
+	return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Start}.Layout(gtx,
+		layout.Flexed(1, row.copyBlock),
+		layout.Rigid(layout.Spacer{Width: unit.Dp(21)}.Layout),
+		layout.Rigid(row.controlColumn),
+	)
+}
+
+func (row *settingRowDescriptor) layoutCopy(gtx layout.Context) layout.Dimensions {
+	return layout.Flex{Axis: layout.Vertical, Alignment: layout.Start}.Layout(gtx,
+		layout.Rigid(kit.Text(row.th.Theme, row.th.T.Row, row.th.R.Fg, row.title)),
+		layout.Rigid(layout.Spacer{Height: unit.Dp(2)}.Layout),
+		layout.Rigid(row.detailBlock),
+	)
+}
+
+func (row *settingRowDescriptor) layoutDetail(gtx layout.Context) layout.Dimensions {
+	return kit.Label{Style: row.th.T.Caption, Color: row.th.R.Fg2, MaxLines: 3}.Layout(gtx, row.th.Theme, row.detail)
+}
+
+func (row *settingRowDescriptor) layoutControl(gtx layout.Context) layout.Dimensions {
+	semantic.DescriptionOp(row.description).Add(gtx.Ops)
+	gtx.Constraints.Min = image.Point{}
+	gtx.Constraints.Max.X = min(gtx.Constraints.Max.X, gtx.Dp(320))
+	return row.control(gtx)
+}
+
+func (row *settingRowDescriptor) layoutControlColumn(gtx layout.Context) layout.Dimensions {
+	gtx.Constraints.Min.X, gtx.Constraints.Max.X = row.controlWidth, row.controlWidth
+	return layout.NE.Layout(gtx, row.controlBlock)
+}
+
+func (row *settingRowDescriptor) layoutAlignedControl(gtx layout.Context) layout.Dimensions {
+	return layout.E.Layout(gtx, row.controlBlock)
 }

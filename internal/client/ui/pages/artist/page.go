@@ -20,26 +20,33 @@ import (
 	"github.com/ryoku-dev/ryotunes/internal/protocol"
 )
 
-var artistMoreItems = []kit.MenuItem{{Icon: look.Icon.Share, Label: "Copy artist link"}}
+const (
+	artistMoreShuffle = iota
+	artistMoreFollow
+	artistMoreRadio
+	artistMoreCopy
+)
 
 // Page is a retained artist detail surface.
 type Page struct {
-	route   env.Route
-	scroll  look.Scroller
-	hero    widgets.Hero
-	tracks  widgets.TrackTable
-	shelves map[string]*widgets.Shelf
+	route       env.Route
+	scroll      look.Scroller
+	hero        widgets.Hero
+	heroActions widgets.HeroActions
+	tracks      widgets.TrackTable
+	shelves     map[string]*widgets.Shelf
+	play        kit.Plaque
+	shuffle     kit.IconPlaque
+	follow      kit.Plaque
+	radio       kit.IconPlaque
+	more        kit.IconPlaque
+	showAll     kit.Plaque
+	retry       kit.Plaque
 
-	play    kit.Plaque
-	shuffle kit.IconPlaque
-	follow  kit.Plaque
-	radio   kit.IconPlaque
-	more    kit.IconPlaque
-	showAll kit.Plaque
-	retry   kit.Plaque
-
-	moreMenu kit.Menu
-	moreTag  int
+	moreMenu     kit.Menu
+	moreTag      int
+	moreItems    []kit.MenuItem
+	moreCommands []int
 
 	page          model.ArtistPage
 	sections      []model.ArtistSection
@@ -304,46 +311,63 @@ func (p *Page) layoutActs(e *env.Env) layout.Widget {
 		p.follow.Busy = p.followPending
 		p.radio.Kind, p.radio.Icon, p.radio.Description = kit.PlaqueQuiet, look.Icon.Radio, "Start artist radio"
 		p.more.Kind, p.more.Icon, p.more.Description = kit.PlaqueQuiet, look.Icon.More, "More artist actions"
-		play := layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+		play := func(gtx layout.Context) layout.Dimensions {
 			if len(p.page.TopSongs) == 0 {
 				gtx = gtx.Disabled()
 			}
 			return p.play.Layout(gtx, e.Th.Theme)
-		})
-		if model.ProviderOf(p.route.ID) == model.ProviderYouTube {
-			return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
-				play,
-				layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
-				layout.Rigid(func(gtx layout.Context) layout.Dimensions { return p.shuffle.Layout(gtx, e.Th.Theme) }),
-				layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
-				layout.Rigid(func(gtx layout.Context) layout.Dimensions { return p.follow.Layout(gtx, e.Th.Theme) }),
-				layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
-				layout.Rigid(func(gtx layout.Context) layout.Dimensions { return p.radio.Layout(gtx, e.Th.Theme) }),
-				layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
-				layout.Rigid(func(gtx layout.Context) layout.Dimensions { return p.more.Layout(gtx, e.Th.Theme) }),
-			)
 		}
-		return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
-			play,
-			layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
-			layout.Rigid(func(gtx layout.Context) layout.Dimensions { return p.shuffle.Layout(gtx, e.Th.Theme) }),
-			layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
-			layout.Rigid(func(gtx layout.Context) layout.Dimensions { return p.radio.Layout(gtx, e.Th.Theme) }),
-			layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
-			layout.Rigid(func(gtx layout.Context) layout.Dimensions { return p.more.Layout(gtx, e.Th.Theme) }),
-		)
+		shuffle := func(gtx layout.Context) layout.Dimensions { return p.shuffle.Layout(gtx, e.Th.Theme) }
+		follow := func(gtx layout.Context) layout.Dimensions { return p.follow.Layout(gtx, e.Th.Theme) }
+		radio := func(gtx layout.Context) layout.Dimensions { return p.radio.Layout(gtx, e.Th.Theme) }
+		more := func(gtx layout.Context) layout.Dimensions { return p.more.Layout(gtx, e.Th.Theme) }
+		var actions [5]layout.Widget
+		actions[0], actions[1], actions[3], actions[4] = play, shuffle, radio, more
+		if model.ProviderOf(p.route.ID) == model.ProviderYouTube {
+			actions[2] = follow
+		}
+		return p.heroActions.Layout(gtx, actions[:])
 	}
 }
 
 func (p *Page) layoutMore(e *env.Env) layout.Widget {
 	return func(gtx layout.Context) layout.Dimensions {
-		dims := p.moreMenu.Layout(gtx, e.Th.Theme, artistMoreItems)
-		if _, ok := p.moreMenu.Clicked(gtx); ok {
-			id := strings.TrimSpace(p.page.ChannelID)
-			if id == "" {
-				id = p.route.ID
+		p.moreItems = p.moreItems[:0]
+		p.moreCommands = p.moreCommands[:0]
+		add := func(hidden bool, command int, item kit.MenuItem) {
+			if hidden {
+				p.moreItems = append(p.moreItems, item)
+				p.moreCommands = append(p.moreCommands, command)
 			}
-			act.CopyText(e, "https://music.youtube.com/channel/"+url.PathEscape(id), "Link copied")
+		}
+		add(p.heroActions.Hidden(1), artistMoreShuffle, kit.MenuItem{Icon: look.Icon.Shuffle, Label: "Shuffle artist"})
+		followLabel := "Subscribe"
+		if p.following {
+			followLabel = "Unsubscribe"
+		}
+		add(p.heroActions.Hidden(2), artistMoreFollow, kit.MenuItem{Icon: look.Icon.HeartOutline, Label: followLabel})
+		add(p.heroActions.Hidden(3), artistMoreRadio, kit.MenuItem{Icon: look.Icon.Radio, Label: "Start artist radio"})
+		add(true, artistMoreCopy, kit.MenuItem{Icon: look.Icon.Share, Label: "Copy artist link"})
+		dims := p.moreMenu.Layout(gtx, e.Th.Theme, p.moreItems)
+		if index, ok := p.moreMenu.Clicked(gtx); ok && index < len(p.moreCommands) {
+			switch p.moreCommands[index] {
+			case artistMoreShuffle:
+				if len(p.page.TopSongs) > 0 {
+					act.PlayCollection(e, p.page.TopSongs, 0, value(p.page.TopSongsID), p.Title(), true, nil)
+				}
+			case artistMoreFollow:
+				if !p.followPending {
+					p.toggleFollow(e)
+				}
+			case artistMoreRadio:
+				act.StartRadio(e, "artist", p.route.ID, p.Title())
+			case artistMoreCopy:
+				id := strings.TrimSpace(p.page.ChannelID)
+				if id == "" {
+					id = p.route.ID
+				}
+				act.CopyText(e, "https://music.youtube.com/channel/"+url.PathEscape(id), "Link copied")
+			}
 			e.Overlays.Close(&p.moreTag)
 			gtx.Execute(op.InvalidateCmd{})
 		}

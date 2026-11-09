@@ -1,11 +1,18 @@
 package tidal
 
 import (
+	"context"
 	"encoding/base64"
 	"errors"
+	"io"
+	"net/http"
+	"strings"
 	"testing"
+	"time"
 
+	"github.com/ryoku-dev/ryotunes/internal/bus"
 	"github.com/ryoku-dev/ryotunes/internal/model"
+	"github.com/ryoku-dev/ryotunes/internal/protocol"
 	baseprovider "github.com/ryoku-dev/ryotunes/internal/provider"
 )
 
@@ -73,5 +80,72 @@ func TestTokenExpiryMargin(t *testing.T) {
 	}
 	if !tokenExpired(now+60, now) {
 		t.Fatal("token at margin is fresh")
+	}
+}
+
+type tidalAuthRoundTrip func(*http.Request) (*http.Response, error)
+
+func (f tidalAuthRoundTrip) RoundTrip(request *http.Request) (*http.Response, error) {
+	return f(request)
+}
+
+func TestDeviceFlowWaitingEventCarriesVerificationLink(t *testing.T) {
+	for _, test := range []struct {
+		name     string
+		response string
+		wantURL  string
+	}{
+		{
+			name:     "complete URI",
+			response: `{"deviceCode":"device","userCode":"RYO-KU","verificationUri":"link.tidal.com","verificationUriComplete":"https://link.tidal.com/RYO-KU","expiresIn":300,"interval":60}`,
+			wantURL:  "https://link.tidal.com/RYO-KU",
+		},
+		{
+			name:     "verification URI fallback",
+			response: `{"deviceCode":"device","userCode":"RYO-KU","verificationUri":"link.tidal.com","expiresIn":300,"interval":60}`,
+			wantURL:  "https://link.tidal.com",
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			events := make(chan model.TidalAuthEvent, 1)
+			sink := bus.SinkFunc(func(event string, data any) {
+				if event == protocol.EventTidalAuth {
+					events <- data.(model.TidalAuthEvent)
+				}
+			})
+			client, err := New(Options{
+				Bus: sink,
+				HTTPClient: &http.Client{Transport: tidalAuthRoundTrip(func(*http.Request) (*http.Response, error) {
+					return &http.Response{
+						StatusCode: http.StatusOK,
+						Header:     make(http.Header),
+						Body:       io.NopCloser(strings.NewReader(test.response)),
+					}, nil
+				})},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			client.credentials = Credentials{DeviceID: "device-client"}
+			ctx, cancel := context.WithCancel(context.Background())
+			done := make(chan error, 1)
+			go func() { done <- client.deviceFlow(ctx, client.epoch) }()
+			var event model.TidalAuthEvent
+			select {
+			case event = <-events:
+			case <-time.After(time.Second):
+				t.Fatal("waiting event was not emitted")
+			}
+			cancel()
+			if err := <-done; err != nil && !errors.Is(err, context.Canceled) {
+				t.Fatal(err)
+			}
+			if event.State != "waiting" || event.URL == nil || *event.URL != test.wantURL {
+				t.Fatalf("event = %#v, want waiting url %q", event, test.wantURL)
+			}
+			if event.Code == nil || *event.Code != "RYO-KU" {
+				t.Fatalf("code = %#v", event.Code)
+			}
+		})
 	}
 }

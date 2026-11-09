@@ -24,7 +24,7 @@ func (p *page) layoutDiagnostics(gtx layout.Context, e *env.Env) layout.Dimensio
 	if p.diagnostics.EngineVersion != "" {
 		detail += " · " + p.diagnostics.EngineVersion
 	}
-	return settingRows(gtx, settingRow(e.Th, "Daemon summary", detail, func(gtx layout.Context) layout.Dimensions {
+	return p.settingRows(gtx, p.settingRow(e.Th, "Daemon summary", detail, func(gtx layout.Context) layout.Dimensions {
 		p.diagnosticsUI.open.Kind, p.diagnosticsUI.open.Label = kit.PlaqueLine, "Open diagnostics"
 		if p.diagnosticsUI.open.Clicked(gtx) {
 			e.Nav.Push(env.Route{Kind: env.RouteDiagnostics})

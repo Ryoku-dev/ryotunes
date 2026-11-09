@@ -64,12 +64,14 @@ type Provider struct {
 	apiBase string
 	homeURL string
 
-	mu          sync.RWMutex
-	clientID    string
-	auth        *Auth
-	signingIn   bool
-	epoch       uint64
-	refreshLock sync.Mutex
+	mu           sync.RWMutex
+	clientID     string
+	auth         *Auth
+	signingIn    bool
+	signInURL    string
+	signInCancel context.CancelFunc
+	epoch        uint64
+	refreshLock  sync.Mutex
 }
 
 // New creates a SoundCloud provider and restores persisted authorization.

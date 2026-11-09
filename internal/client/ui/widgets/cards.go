@@ -194,11 +194,13 @@ func (c *Card) Layout(gtx layout.Context, e *env.Env, item model.BrowseItem, wid
 
 // Shelf is a titled horizontal strip of retained cards.
 type Shelf struct {
-	scroll look.HScroller
-	cards  map[string]*Card
-	more   kit.Plaque
-	prev   kit.IconPlaque
-	next   kit.IconPlaque
+	scroll         look.HScroller
+	cards          map[string]*Card
+	more           kit.Plaque
+	prev           kit.IconPlaque
+	next           kit.IconPlaque
+	headerChildren [7]layout.FlexChild
+	itemChildren   [2]layout.FlexChild
 }
 
 func (s *Shelf) card(item model.BrowseItem) *Card {
@@ -224,9 +226,8 @@ func (s *Shelf) header(gtx layout.Context, e *env.Env, title string, more *env.R
 	if s.next.Clicked(gtx) {
 		s.scroll.Page(gtx, 1)
 	}
-	children := []layout.FlexChild{
-		layout.Flexed(1, kit.Text(e.Th.Theme, e.Th.T.Section, e.Th.R.Fg, title)),
-	}
+	children := s.headerChildren[:1]
+	children[0] = layout.Flexed(1, kit.Text(e.Th.Theme, e.Th.T.Section, e.Th.R.Fg, title))
 	if more != nil {
 		s.more.Kind = kit.PlaqueQuiet
 		s.more.Small = true
@@ -260,9 +261,10 @@ func (s *Shelf) Layout(gtx layout.Context, e *env.Env, title string, items []mod
 		layout.Rigid(layout.Spacer{Height: unit.Dp(13)}.Layout),
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			return s.scroll.Layout(gtx, e.Th, len(items), func(gtx layout.Context, index int) layout.Dimensions {
-				children := []layout.FlexChild{layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				children := s.itemChildren[:1]
+				children[0] = layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 					return s.card(items[index]).Layout(gtx, e, items[index], width)
-				})}
+				})
 				if index+1 < len(items) {
 					children = append(children, layout.Rigid(layout.Spacer{Width: unit.Dp(21)}.Layout))
 				}
@@ -340,6 +342,7 @@ type QuickTile struct {
 	hover      anim.Tween
 	contextTag int
 	menu       ItemMenu
+	children   [7]layout.FlexChild
 }
 
 func (q *QuickTile) process(gtx layout.Context, e *env.Env, item model.BrowseItem) {
@@ -381,18 +384,17 @@ func (q *QuickTile) Layout(gtx layout.Context, e *env.Env, item model.BrowseItem
 		plane := palette.Mix(e.Th.R.Stone1, e.Th.R.Stone3, hover)
 		kit.FillCutCorners(gtx.Ops, image.Rectangle{Max: size}, gtx.Dp(e.Th.Cut.Small), 0, 0, 0, plane)
 		artSize := min(size.Y, size.X)
-		children := []layout.FlexChild{
-			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-				return q.art.Layout(gtx, e.Th, e.Art, textValue(item.Thumbnail), image.Pt(artSize, artSize), look.Shape{Cut: e.Th.Cut.Small, Corners: [4]bool{true, false, false, false}}, e.Th.Motion.Navigate)
-			}),
-			layout.Rigid(layout.Spacer{Width: unit.Dp(13)}.Layout),
-			layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-				return layout.Center.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-					gtx.Constraints.Min.X = gtx.Constraints.Max.X
-					return kit.Label{Style: e.Th.T.Label, Color: e.Th.R.Fg, MaxLines: 2}.Layout(gtx, e.Th.Theme, item.Title)
-				})
-			}),
-		}
+		children := q.children[:3]
+		children[0] = layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			return q.art.Layout(gtx, e.Th, e.Art, textValue(item.Thumbnail), image.Pt(artSize, artSize), look.Shape{Cut: e.Th.Cut.Small, Corners: [4]bool{true, false, false, false}}, e.Th.Motion.Navigate)
+		})
+		children[1] = layout.Rigid(layout.Spacer{Width: unit.Dp(13)}.Layout)
+		children[2] = layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+			return layout.Center.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+				gtx.Constraints.Min.X = gtx.Constraints.Max.X
+				return kit.Label{Style: e.Th.T.Label, Color: e.Th.R.Fg, MaxLines: 2}.Layout(gtx, e.Th.Theme, item.Title)
+			})
+		})
 		if hover > 0 {
 			children = append(children,
 				layout.Rigid(layout.Spacer{Width: unit.Dp(12)}.Layout),

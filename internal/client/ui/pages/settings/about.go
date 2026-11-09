@@ -35,18 +35,18 @@ func (p *page) layoutAbout(gtx layout.Context, e *env.Env) layout.Dimensions {
 		engine = "Unavailable"
 	}
 	rows := []layout.Widget{
-		settingRow(e.Th, "Ryotunes", "A focused Ryoku desktop music instrument: your library, local media, queue, lyrics and playback engine in one Lithic surface.", func(gtx layout.Context) layout.Dimensions {
+		p.settingRow(e.Th, "Ryotunes", "A focused Ryoku desktop music instrument: your library, local media, queue, lyrics and playback engine in one Lithic surface.", func(gtx layout.Context) layout.Dimensions {
 			return look.RyokuMark(unit.Dp(40))(gtx)
 		}),
-		versionRow(e, "App", version.Version),
-		versionRow(e, "Daemon", daemon),
-		versionRow(e, "Client", clientVersion()),
-		versionRow(e, "Engine", engine),
+		p.versionRow(e, "App", version.Version),
+		p.versionRow(e, "Daemon", daemon),
+		p.versionRow(e, "Client", clientVersion()),
+		p.versionRow(e, "Engine", engine),
 		p.updateRow(e),
 	}
 	for i, link := range aboutLinks {
 		i, link := i, link
-		rows = append(rows, settingRow(e.Th, link.label, link.url, func(gtx layout.Context) layout.Dimensions {
+		rows = append(rows, p.settingRow(e.Th, link.label, link.url, func(gtx layout.Context) layout.Dimensions {
 			p.about.links[i].Kind, p.about.links[i].Label = kit.PlaqueLine, "Open"
 			if p.about.links[i].Clicked(gtx) {
 				openExternal(e, link.url)
@@ -54,11 +54,11 @@ func (p *page) layoutAbout(gtx layout.Context, e *env.Env) layout.Dimensions {
 			return p.about.links[i].Layout(gtx, e.Th.Theme)
 		}))
 	}
-	return settingRows(gtx, rows...)
+	return p.settingRows(gtx, rows...)
 }
 
-func versionRow(e *env.Env, label, value string) layout.Widget {
-	return settingRow(e.Th, label, "Version", func(gtx layout.Context) layout.Dimensions {
+func (p *page) versionRow(e *env.Env, label, value string) layout.Widget {
+	return p.settingRow(e.Th, label, "Version", func(gtx layout.Context) layout.Dimensions {
 		return kit.Text(e.Th.Theme, e.Th.T.Mono, e.Th.R.Fg, value)(gtx)
 	})
 }
@@ -91,7 +91,7 @@ func (p *page) updateRow(e *env.Env) layout.Widget {
 	if p.installing {
 		detail = "Downloading and verifying the update, then asking for administrator approval. Keep Ryotunes open until it finishes."
 	}
-	return settingRow(e.Th, "Updates", detail, func(gtx layout.Context) layout.Dimensions {
+	return p.settingRow(e.Th, "Updates", detail, func(gtx layout.Context) layout.Dimensions {
 		p.about.check.Kind, p.about.check.Busy, p.about.check.Label = kit.PlaqueLine, p.checking, "Check"
 		if p.checking {
 			p.about.check.Label = "Checking…"

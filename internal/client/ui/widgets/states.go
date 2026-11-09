@@ -20,6 +20,7 @@ const (
 	LoadingTable LoadingShape = iota
 	LoadingGrid
 	LoadingHero
+	LoadingShelf
 )
 
 func loadingTable(gtx layout.Context, e *env.Env) layout.Dimensions {
@@ -51,8 +52,21 @@ func loadingGrid(gtx layout.Context, e *env.Env) layout.Dimensions {
 	return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Start}.Layout(gtx, children...)
 }
 
+func loadingShelf(gtx layout.Context, e *env.Env) layout.Dimensions {
+	return layout.Flex{Axis: layout.Vertical, Alignment: layout.Start}.Layout(gtx,
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			gtx.Constraints.Max.X = min(gtx.Constraints.Max.X, gtx.Dp(220))
+			return kit.Skeleton{Active: true, Rows: 1}.Layout(gtx, e.Th.Theme)
+		}),
+		layout.Rigid(layout.Spacer{Height: unit.Dp(13)}.Layout),
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			return loadingGrid(gtx, e)
+		}),
+	)
+}
+
 func loadingHero(gtx layout.Context, e *env.Env) layout.Dimensions {
-	art := heroArtSize(e.Th.Class)
+	art := heroArtSize(gtx.Metric.PxToDp(gtx.Constraints.Max.X))
 	pixels := gtx.Dp(art)
 	cut := gtx.Dp(e.Th.Cut.Large)
 	return look.Field(gtx, e.Th, [4]int{cut, cut, 0, 0}, func(gtx layout.Context) layout.Dimensions {
@@ -85,6 +99,8 @@ func Loading(e *env.Env, shape LoadingShape) layout.Widget {
 			return loadingGrid(gtx, e)
 		case LoadingHero:
 			return loadingHero(gtx, e)
+		case LoadingShelf:
+			return loadingShelf(gtx, e)
 		default:
 			return loadingTable(gtx, e)
 		}

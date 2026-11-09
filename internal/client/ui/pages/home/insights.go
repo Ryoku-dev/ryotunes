@@ -16,21 +16,24 @@ import (
 )
 
 type insightsView struct {
-	stats   model.ListeningStats
-	loaded  bool
-	loading bool
-	request uint64
+	stats    model.ListeningStats
+	loaded   bool
+	loading  bool
+	request  uint64
+	revision uint64
 }
 
 func (v *insightsView) refresh(e *env.Env) {
 	v.request++
 	request := v.request
 	v.loading = true
+	v.revision++
 	act.Call[model.ListeningStats](e, protocol.MethodListeningStats, protocol.ListeningStatsParams{Period: model.ListeningWeek}, func(stats model.ListeningStats, err error) {
 		if request != v.request {
 			return
 		}
 		v.loading = false
+		v.revision++
 		if err != nil {
 			return
 		}

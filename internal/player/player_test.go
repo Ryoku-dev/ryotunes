@@ -18,6 +18,7 @@ func TestPlayerOptions(t *testing.T) {
 		"vid": "no", "video": "no", "ytdl": "no", "gapless-audio": "yes",
 		"cache": "yes", "cache-on-disk": "yes", "demuxer-cache-dir": "/tmp/audio",
 		"replaygain": "no", "audio-pitch-correction": "yes", "prefetch-playlist": "yes",
+		"audio-client-name": "Ryotunes",
 	} {
 		if got := normal[name]; got != want {
 			t.Errorf("normal option %s = %q, want %q", name, got, want)

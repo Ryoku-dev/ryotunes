@@ -18,15 +18,73 @@ import (
 	"github.com/ryoku-dev/ryotunes/internal/provider/browsercookies"
 )
 
-// SignIn imports a YouTube browser session, opening Music and polling when no session exists yet.
-func (c *Client) SignIn(ctx context.Context) error {
-	stores := browsercookies.Discover()
-	if header := harvestYouTubeCookies(stores); sapisidCookie(header) != "" {
-		return c.applyCookie(ctx, header)
+const youtubeSignInURL = "https://music.youtube.com"
+
+// CookieSource supplies browser cookie stores without touching the live browser.
+type CookieSource interface {
+	Discover() []browsercookies.Store
+	Read(store browsercookies.Store, hostSuffixes ...string) ([]browsercookies.Cookie, error)
+	ChangedSince(store browsercookies.Store, since time.Time) bool
+}
+
+type systemCookies struct{}
+
+func (systemCookies) Discover() []browsercookies.Store { return browsercookies.Discover() }
+func (systemCookies) Read(store browsercookies.Store, suffixes ...string) ([]browsercookies.Cookie, error) {
+	return browsercookies.Read(store, suffixes...)
+}
+func (systemCookies) ChangedSince(store browsercookies.Store, since time.Time) bool {
+	return browsercookies.ChangedSince(store, since)
+}
+
+// SignInFlow reports the client-owned browser handoff and asynchronous completion.
+type SignInFlow struct {
+	URL  string
+	Done <-chan error
+}
+
+// SignIn imports a YouTube browser session or starts watching for one.
+func (c *Client) SignIn(ctx context.Context) (SignInFlow, error) {
+	c.mu.RLock()
+	signedIn := c.cookie != ""
+	c.mu.RUnlock()
+	if signedIn {
+		return SignInFlow{}, nil
 	}
-	if err := browsercookies.OpenURL("https://music.youtube.com"); err != nil {
-		return err
+	c.signInMu.Lock()
+	if c.signingIn {
+		c.signInMu.Unlock()
+		return SignInFlow{URL: youtubeSignInURL}, nil
 	}
+	c.signingIn = true
+	c.signInMu.Unlock()
+
+	stores := c.cookies.Discover()
+	if header := harvestYouTubeCookies(c.cookies, stores); sapisidCookie(header) != "" {
+		err := c.applyCookie(ctx, header)
+		c.signInMu.Lock()
+		c.signingIn = false
+		c.signInMu.Unlock()
+		return SignInFlow{}, err
+	}
+
+	done := make(chan error, 1)
+	flowCtx, cancel := context.WithTimeout(c.ctx, 5*time.Minute)
+	c.wg.Add(1)
+	go func() {
+		defer c.wg.Done()
+		defer cancel()
+		err := c.watchSignIn(flowCtx, stores)
+		c.signInMu.Lock()
+		c.signingIn = false
+		c.signInMu.Unlock()
+		done <- err
+		close(done)
+	}()
+	return SignInFlow{URL: youtubeSignInURL, Done: done}, nil
+}
+
+func (c *Client) watchSignIn(ctx context.Context, stores []browsercookies.Store) error {
 	deadline := time.NewTimer(5 * time.Minute)
 	defer deadline.Stop()
 	ticker := time.NewTicker(2 * time.Second)
@@ -42,22 +100,23 @@ func (c *Client) SignIn(ctx context.Context) error {
 		case <-deadline.C:
 			return errors.New("Sign-in didn't complete, try signing in again.")
 		case <-ticker.C:
-			stores = browsercookies.Discover()
+			stores = c.cookies.Discover()
 			changed := false
 			for _, store := range stores {
-				if browsercookies.ChangedSince(store, seen[store.Path]) {
+				if c.cookies.ChangedSince(store, seen[store.Path]) {
 					changed = true
 					seen[store.Path] = cookieStoreModTime(store)
 				}
 			}
 			if changed {
-				if header := harvestYouTubeCookies(stores); sapisidCookie(header) != "" {
+				if header := harvestYouTubeCookies(c.cookies, stores); sapisidCookie(header) != "" {
 					return c.applyCookie(ctx, header)
 				}
 			}
 		}
 	}
 }
+
 func cookieStoreModTime(store browsercookies.Store) time.Time {
 	var latest time.Time
 	for _, path := range []string{store.Path, store.Path + "-wal"} {
@@ -68,14 +127,14 @@ func cookieStoreModTime(store browsercookies.Store) time.Time {
 	return latest
 }
 
-func harvestYouTubeCookies(stores []browsercookies.Store) string {
+func harvestYouTubeCookies(source CookieSource, stores []browsercookies.Store) string {
 	type value struct {
 		cookie      browsercookies.Cookie
 		specificity int
 	}
 	selected := make(map[string]value)
 	for _, store := range stores {
-		cookies, err := browsercookies.Read(store, "youtube.com")
+		cookies, err := source.Read(store, "youtube.com")
 		if err != nil {
 			continue
 		}

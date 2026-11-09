@@ -5,14 +5,15 @@ import (
 	"github.com/ryoku-dev/ryoku/docs/lithic/library/go/kit"
 	"github.com/ryoku-dev/ryotunes/internal/client/ui/env"
 	"github.com/ryoku-dev/ryotunes/internal/client/ui/look"
+	"github.com/ryoku-dev/ryotunes/internal/client/ui/widgets"
 )
 
 // Page is the retained downloads queue and history surface.
 type Page struct {
-	route  env.Route
-	scroll look.Scroller
-	filter kit.Filters
-
+	route       env.Route
+	scroll      look.Scroller
+	header      widgets.Header
+	filter      kit.Filters
 	filterIndex int
 	rows        map[string]*downloadRow
 	collections map[string]*collectionCard

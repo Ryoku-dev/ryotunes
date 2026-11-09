@@ -69,7 +69,9 @@ func (r *clientRuntime) renderPNG(options Options) error {
 		quietSince = time.Time{}
 		operations.Reset()
 		preferences = r.store.Snapshot().Client
-		preferences.ReduceMotion = true
+		if !options.DemoPlaying {
+			preferences.ReduceMotion = true
+		}
 		scale := float32(preferences.ZoomPercent) / 100
 		if scale <= 0 {
 			scale = 1

@@ -5,9 +5,11 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os/exec"
 	"regexp"
 	"strings"
 	"sync"
+	"syscall"
 
 	"gioui.org/io/clipboard"
 	"gioui.org/layout"
@@ -65,6 +67,94 @@ func Call[R any](e *env.Env, method string, params any, done func(R, error)) {
 			dispatch(func() { done(result, err) })
 		}
 	})
+}
+
+// OpenURL dispatches a browser handoff outside the frame goroutine.
+func OpenURL(e *env.Env, rawURL string) {
+	rawURL = strings.TrimSpace(rawURL)
+	if rawURL == "" {
+		return
+	}
+	if e == nil || e.Go == nil {
+		toast(e, "Could not open your browser", env.ToastError)
+		return
+	}
+	e.Go(func(ctx context.Context) {
+		command := exec.CommandContext(ctx, "xdg-open", rawURL)
+		command.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+		if err := command.Run(); err != nil {
+			toast(e, "Could not open your browser", env.ToastError)
+		}
+	})
+}
+
+// OpenAuthURLs opens newly published event URLs exactly once per provider.
+func OpenAuthURLs(e *env.Env) {
+	if e == nil || e.Store == nil {
+		return
+	}
+	snapshot := e.Store.Snapshot()
+	for _, provider := range [...]model.Provider{
+		model.ProviderYouTube,
+		model.ProviderSpotify,
+		model.ProviderSoundCloud,
+		model.ProviderTidal,
+	} {
+		url := snapshot.AuthFlows[provider].URL
+		if e.Store.ClaimAuthURL(provider, url) {
+			OpenURL(e, url)
+		}
+	}
+}
+
+// SignIn starts one provider's authorization flow and opens its browser URL.
+func SignIn(e *env.Env, provider model.Provider) {
+	if e == nil || e.Store == nil {
+		toast(e, "Daemon connection is not available", env.ToastError)
+		return
+	}
+	switch provider {
+	case model.ProviderYouTube:
+		Call[protocol.AuthFlowResult](e, protocol.MethodSignIn, protocol.Null{}, func(result protocol.AuthFlowResult, err error) {
+			finishAuthStart(e, provider, result.URL, err)
+		})
+	case model.ProviderSoundCloud:
+		Call[protocol.AuthFlowResult](e, protocol.MethodSoundCloudSignIn, protocol.Null{}, func(result protocol.AuthFlowResult, err error) {
+			finishAuthStart(e, provider, result.URL, err)
+		})
+	case model.ProviderSpotify:
+		e.Store.BeginAuthFlow(provider)
+		Call[protocol.StartedResult](e, protocol.MethodSpotifySignIn, protocol.Null{}, func(_ protocol.StartedResult, err error) {
+			finishStartedAuth(e, provider, err)
+		})
+	case model.ProviderTidal:
+		e.Store.BeginAuthFlow(provider)
+		Call[protocol.StartedResult](e, protocol.MethodTidalSignIn, protocol.Null{}, func(_ protocol.StartedResult, err error) {
+			finishStartedAuth(e, provider, err)
+		})
+	default:
+		toast(e, "This provider does not require sign in", env.ToastInfo)
+	}
+}
+
+func finishAuthStart(e *env.Env, provider model.Provider, url string, err error) {
+	if err != nil {
+		e.Store.SetAuthFlowError(provider, err.Error())
+		toast(e, err.Error(), env.ToastError)
+		return
+	}
+	e.Store.SetAuthFlow(provider, url, "")
+	if e.Store.ClaimAuthURL(provider, url) {
+		OpenURL(e, url)
+	}
+}
+
+func finishStartedAuth(e *env.Env, provider model.Provider, err error) {
+	if err == nil {
+		return
+	}
+	e.Store.SetAuthFlowError(provider, err.Error())
+	toast(e, err.Error(), env.ToastError)
 }
 
 // Play starts one track.

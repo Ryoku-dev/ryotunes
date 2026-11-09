@@ -10,27 +10,30 @@ import (
 	"gioui.org/unit"
 
 	"github.com/ryoku-dev/ryoku/docs/lithic/library/go/kit"
+	"github.com/ryoku-dev/ryoku/docs/lithic/library/go/palette"
 	"github.com/ryoku-dev/ryotunes/internal/client/ui/act"
 	"github.com/ryoku-dev/ryotunes/internal/client/ui/env"
 	"github.com/ryoku-dev/ryotunes/internal/client/ui/look"
+	"github.com/ryoku-dev/ryotunes/internal/client/ui/widgets"
 	"github.com/ryoku-dev/ryotunes/internal/model"
 )
 
 // NowPlaying renders the artwork-first playback view and its lyrics or queue.
 type NowPlaying struct {
-	art      look.ArtView
-	tabs     kit.Tabs
-	lyrics   Lyrics
-	queue    Queue
-	like     kit.IconPlaque
-	likeFill look.Fill
-	playlist kit.IconPlaque
-	download kit.IconPlaque
-	radio    kit.IconPlaque
-	more     kit.IconPlaque
-	artist   kit.Click
-	album    kit.Click
-	stageTab int
+	art        look.ArtView
+	visualizer look.Visualizer
+	tabs       kit.Tabs
+	lyrics     Lyrics
+	queue      Queue
+	like       kit.IconPlaque
+	likeFill   look.Fill
+	playlist   kit.IconPlaque
+	download   kit.IconPlaque
+	radio      kit.IconPlaque
+	more       kit.IconPlaque
+	artist     kit.Click
+	album      kit.Click
+	stageTab   int
 }
 
 // Layout draws the complete source-field pane.
@@ -43,27 +46,55 @@ func (playing *NowPlaying) Layout(gtx layout.Context, e *env.Env) layout.Dimensi
 			return empty.Layout(gtx, e.Th.Theme)
 		}
 		track := trackFromPlayback(snapshot.Playback.Now, e.Store.CurrentTrack())
-		if gtx.Constraints.Max.X >= gtx.Dp(900) {
-			return playing.layoutWide(gtx, e, track, snapshot.Rating)
+		wide := gtx.Constraints.Max.X >= gtx.Dp(900)
+		band, inset := gtx.Dp(56), unit.Dp(21)
+		if wide {
+			band, inset = gtx.Dp(88), 34
 		}
-		return playing.layoutNarrow(gtx, e, track, snapshot.Rating)
+		alpha := float32(.45)
+		if e.Th.R.Dark {
+			alpha = .55
+		}
+		return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+			layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+				if wide {
+					return playing.layoutWide(gtx, e, track, snapshot.Rating)
+				}
+				return playing.layoutNarrow(gtx, e, track, snapshot.Rating)
+			}),
+			layout.Rigid(layout.Spacer{Height: 21}.Layout),
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				gtx.Constraints.Min.Y, gtx.Constraints.Max.Y = band, band
+				return layout.Inset{Left: inset, Right: inset}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+					return widgets.Visualizer(gtx, e, &playing.visualizer, look.VisualizerStyle{
+						Ink: palette.WithAlpha(e.Th.Src.Ink, alpha),
+						Bar: 9, Gap: 3, Floor: 2,
+					})
+				})
+			}),
+			layout.Rigid(layout.Spacer{Height: 13}.Layout),
+		)
 	})
 }
 
 func (playing *NowPlaying) layoutWide(gtx layout.Context, e *env.Env, track model.Track, rating model.Rating) layout.Dimensions {
 	width, height := gtx.Constraints.Max.X, gtx.Constraints.Max.Y
 	leftWidth := int(float32(width) * .42)
+	artSide := nowPlayingWideArtSide(gtx, e, track, leftWidth, height)
+	if artSide < gtx.Dp(120) {
+		return playing.layoutNarrow(gtx, e, track, rating)
+	}
 	rightWidth := max(0, width-leftWidth)
 	return layout.Flex{Axis: layout.Horizontal}.Layout(gtx,
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			gtx.Constraints.Min.X = leftWidth
 			gtx.Constraints.Max.X = leftWidth
-			return playing.layoutDetails(gtx, e, track, rating, leftWidth, height, true)
+			return playing.layoutDetails(gtx, e, track, rating, leftWidth, height, true, artSide)
 		}),
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			gtx.Constraints.Min.X = rightWidth
 			gtx.Constraints.Max.X = rightWidth
-			return layout.Inset{Top: 21, Right: 21, Bottom: 21, Left: 13}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+			return layout.Inset{Top: 21, Right: 21, Left: 13}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 				return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
 					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 						playing.tabs.Labels = []string{"Lyrics", "Queue"}
@@ -93,7 +124,7 @@ func (playing *NowPlaying) layoutNarrow(gtx layout.Context, e *env.Env, track mo
 		if height < gtx.Dp(720) {
 			return playing.layoutNarrowHeader(gtx, e, track, rating)
 		}
-		return playing.layoutDetails(gtx, e, track, rating, width, height, false)
+		return playing.layoutDetails(gtx, e, track, rating, width, height, false, 0)
 	}
 	return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
 		layout.Rigid(header),
@@ -110,7 +141,7 @@ func (playing *NowPlaying) layoutNarrow(gtx layout.Context, e *env.Env, track mo
 		}),
 		layout.Rigid(layout.Spacer{Height: 8}.Layout),
 		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-			return layout.Inset{Right: 13, Bottom: 13, Left: 13}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+			return layout.Inset{Right: 13, Left: 13}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 				if playing.stageTab == 1 {
 					return playing.queue.LayoutList(gtx, e)
 				}
@@ -164,7 +195,10 @@ func (playing *NowPlaying) layoutNarrowHeader(gtx layout.Context, e *env.Env, tr
 					}),
 					layout.Rigid(layout.Spacer{Height: 8}.Layout),
 					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-						return playing.layoutActs(gtx, e, track, rating)
+						gtx.Constraints.Min.Y, gtx.Constraints.Max.Y = gtx.Dp(40), gtx.Dp(40)
+						return layout.Center.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+							return playing.layoutActs(gtx, e, track, rating)
+						})
 					}),
 				)
 			}),
@@ -172,17 +206,16 @@ func (playing *NowPlaying) layoutNarrowHeader(gtx layout.Context, e *env.Env, tr
 	})
 }
 
-func (playing *NowPlaying) layoutDetails(gtx layout.Context, e *env.Env, track model.Track, rating model.Rating, columnWidth, paneHeight int, wide bool) layout.Dimensions {
-	artSide := min(columnWidth-gtx.Dp(110), paneHeight-gtx.Dp(208), gtx.Dp(520))
+func (playing *NowPlaying) layoutDetails(gtx layout.Context, e *env.Env, track model.Track, rating model.Rating, columnWidth, paneHeight int, wide bool, artSide int) layout.Dimensions {
 	if !wide {
 		artSide = min(columnWidth-gtx.Dp(42), gtx.Dp(280), paneHeight-gtx.Dp(440))
+		artSide = max(gtx.Dp(120), artSide)
 	}
-	artSide = max(gtx.Dp(120), artSide)
 	edge, detailGap := unit.Dp(21), unit.Dp(21)
 	if !wide {
 		edge, detailGap = 13, 13
 	}
-	return layout.Inset{Top: edge, Right: edge, Bottom: edge, Left: edge}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+	return layout.Inset{Top: edge, Right: edge, Left: edge}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 		return layout.Flex{Axis: layout.Vertical, Alignment: layout.Middle}.Layout(gtx,
 			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 				size := image.Pt(artSide, artSide)
@@ -227,10 +260,58 @@ func (playing *NowPlaying) layoutDetails(gtx layout.Context, e *env.Env, track m
 			}),
 			layout.Rigid(layout.Spacer{Height: detailGap}.Layout),
 			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-				return playing.layoutActs(gtx, e, track, rating)
+				gtx.Constraints.Min.Y, gtx.Constraints.Max.Y = gtx.Dp(40), gtx.Dp(40)
+				return layout.Center.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+					return playing.layoutActs(gtx, e, track, rating)
+				})
 			}),
 		)
 	})
+}
+
+func nowPlayingWideArtSide(gtx layout.Context, e *env.Env, track model.Track, columnWidth, paneHeight int) int {
+	maxSide := min(columnWidth-gtx.Dp(110), gtx.Dp(520))
+	if maxSide <= 0 {
+		return maxSide
+	}
+	textHeight := nowPlayingTextHeight(gtx, e, track, maxSide)
+	side := min(maxSide, paneHeight-gtx.Dp(21+21+21+40)-textHeight)
+	if side < gtx.Dp(120) {
+		return side
+	}
+	textHeight = nowPlayingTextHeight(gtx, e, track, side)
+	return min(maxSide, paneHeight-gtx.Dp(21+21+21+40)-textHeight)
+}
+
+func nowPlayingTextHeight(gtx layout.Context, e *env.Env, track model.Track, width int) int {
+	measure := gtx
+	measure.Constraints.Min = image.Point{}
+	measure.Constraints.Max = image.Pt(max(0, width), 1<<20)
+	record := op.Record(gtx.Ops)
+	dims := layout.Flex{Axis: layout.Vertical, Alignment: layout.Middle}.Layout(measure,
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			gtx.Constraints.Min.X = min(gtx.Constraints.Max.X, width)
+			gtx.Constraints.Max.X = gtx.Constraints.Min.X
+			return (kit.Label{Style: e.Th.T.Sentence, Color: e.Th.R.Fg, MaxLines: 2, Align: text.Middle}).Layout(gtx, e.Th.Theme, nowPlayingTitle(track))
+		}),
+		layout.Rigid(layout.Spacer{Height: 4}.Layout),
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			artists := strings.TrimSpace(track.Artists)
+			if artists == "" {
+				return layout.Dimensions{}
+			}
+			return (kit.Label{Style: e.Th.T.Proof, Color: e.Th.R.Fg2, MaxLines: 2, Align: text.Middle}).Layout(gtx, e.Th.Theme, artists)
+		}),
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			album := strings.TrimSpace(optionalString(track.Album))
+			if album == "" {
+				return layout.Dimensions{}
+			}
+			return layout.Inset{Top: 4}.Layout(gtx, kit.Text(e.Th.Theme, e.Th.T.Caption, e.Th.R.Fg3, album))
+		}),
+	)
+	record.Stop()
+	return dims.Size.Y
 }
 
 func (playing *NowPlaying) layoutActs(gtx layout.Context, e *env.Env, track model.Track, rating model.Rating) layout.Dimensions {

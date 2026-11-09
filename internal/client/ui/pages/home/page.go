@@ -4,10 +4,12 @@ import (
 	"strings"
 
 	"gioui.org/layout"
+	"gioui.org/op"
 	"gioui.org/unit"
 
 	"github.com/ryoku-dev/ryoku/docs/lithic/library/go/kit"
 	"github.com/ryoku-dev/ryotunes/internal/client/state"
+	"github.com/ryoku-dev/ryotunes/internal/client/ui/act"
 	"github.com/ryoku-dev/ryotunes/internal/client/ui/env"
 	"github.com/ryoku-dev/ryotunes/internal/client/ui/look"
 	"github.com/ryoku-dev/ryotunes/internal/client/ui/widgets"
@@ -17,21 +19,40 @@ import (
 type page struct {
 	scroll look.Scroller
 
-	started     bool
-	loading     bool
-	loaded      bool
-	errorText   string
-	request     uint64
-	sessionKey  string
-	feed        model.Feed
-	feedParams  string
-	loadingMore bool
-	moreRequest uint64
-	moreFailed  string
+	started       bool
+	loading       bool
+	loaded        bool
+	errorText     string
+	request       uint64
+	sessionKey    homeSessionKey
+	feed          model.Feed
+	allFeed       model.Feed
+	allLoaded     bool
+	initialParams string
+	activeChip    int
+	pendingChip   int
+	chips         []model.FeedChip
+	chipLabels    []string
+	loadingMore   bool
+	moreRequest   uint64
+	moreFailed    string
+
+	contentRevision uint64
+	contentKey      homeContentKey
+	children        []layout.Widget
+	feedRevision    uint64
+	shelfRevision   uint64
+	shelfChildren   []layout.Widget
+	projectionKey   homeProjectionKey
+	quickWidget     layout.Widget
+	recentWidget    layout.Widget
+	pickedWidget    layout.Widget
+	projectionReady bool
 
 	feedFilters kit.Filters
 	retry       kit.Plaque
 	signIn      kit.Plaque
+	header      widgets.Header
 	tiles       map[string]*widgets.QuickTile
 	recent      widgets.Shelf
 	picked      widgets.Shelf
@@ -42,9 +63,11 @@ type page struct {
 // New returns a retained Home page for the route.
 func New(r env.Route) env.Page {
 	return &page{
-		feedParams: strings.TrimSpace(r.Params),
-		tiles:      make(map[string]*widgets.QuickTile),
-		shelves:    make(map[string]*widgets.Shelf),
+		initialParams: strings.TrimSpace(r.Params),
+		pendingChip:   -1,
+		header:        widgets.Header{Sentence: true},
+		tiles:         make(map[string]*widgets.QuickTile),
+		shelves:       make(map[string]*widgets.Shelf),
 	}
 }
 
@@ -52,22 +75,24 @@ func (p *page) Title() string { return "Home" }
 
 func (p *page) Refresh(e *env.Env) {
 	p.sessionKey = homeSession(e.Store.Snapshot())
-	p.fetchHome(e)
+	if p.activeChip > 0 {
+		p.fetchChip(e, p.activeChip)
+	} else {
+		p.fetchAll(e)
+	}
 	p.insights.refresh(e)
 }
 
 func (p *page) Layout(gtx layout.Context, e *env.Env) layout.Dimensions {
 	snapshot := e.Store.Snapshot()
-	p.handleControls(gtx, e)
 	session := homeSession(snapshot)
 	if !p.started {
 		p.sessionKey = session
-		p.fetchHome(e)
+		p.fetchAll(e)
 		p.insights.refresh(e)
 	} else if p.sessionKey != session && !p.loading {
-		p.sessionKey = session
-		p.feedParams = ""
-		p.fetchHome(e)
+		p.reset(session)
+		p.fetchAll(e)
 	}
 
 	children := p.content(e, snapshot)
@@ -89,56 +114,52 @@ func (p *page) Layout(gtx layout.Context, e *env.Env) layout.Dimensions {
 	})
 }
 
-func (p *page) handleControls(gtx layout.Context, e *env.Env) {
-	if p.retry.Clicked(gtx) {
-		p.Refresh(e)
-	}
-	if p.signIn.Clicked(gtx) && e.Nav != nil {
-		e.Nav.Push(env.Route{Kind: env.RouteSettings, Title: "Settings"})
-	}
-	if selected, changed := p.feedFilters.Changed(); changed && selected >= 0 && selected < len(p.feed.Chips) {
-		p.feedParams = p.feed.Chips[selected].Params
-		p.fetchHome(e)
-	}
+func (p *page) reset(session homeSessionKey) {
+	p.request++
+	p.moreRequest++
+	p.sessionKey = session
+	p.started = false
+	p.loading = false
+	p.loaded = false
+	p.errorText = ""
+	p.feed = model.Feed{}
+	p.allFeed = model.Feed{}
+	p.allLoaded = false
+	p.activeChip = 0
+	p.pendingChip = -1
+	p.chips = nil
+	p.chipLabels = nil
+	p.feedFilters.Labels = nil
+	p.feedFilters.Selected = 0
+	p.loadingMore = false
+	p.moreFailed = ""
+	p.markFeedChanged()
 }
 
-func (p *page) header(e *env.Env, snapshot state.State) layout.Widget {
+func (p *page) headerLayout(e *env.Env, snapshot state.State) layout.Widget {
 	provider := look.ProviderName(snapshot.Provider)
 	signedIn := providerSignedIn(snapshot)
 	proof := "Picked from " + provider + " for you"
 	if !signedIn {
 		proof = "Sign in to shape your " + provider + " home"
 	}
+	var trailing layout.Widget
+	if !signedIn {
+		trailing = func(gtx layout.Context) layout.Dimensions {
+			p.signIn.Kind = kit.PlaqueLine
+			p.signIn.Label = "Sign in"
+			p.signIn.Small = true
+			dimensions := p.signIn.Layout(gtx, e.Th.Theme)
+			if p.signIn.Clicked(gtx) {
+				act.SignIn(e, snapshot.Provider)
+				gtx.Execute(op.InvalidateCmd{})
+			}
+			return dimensions
+		}
+	}
+	title := greeting(e.Now.Hour(), accountName(snapshot))
 	return func(gtx layout.Context) layout.Dimensions {
-		cut := gtx.Dp(e.Th.Cut.Large)
-		inset := look.ContentInset(e.Th.Class)
-		return look.Field(gtx, e.Th, [4]int{cut, cut, 0, 0}, func(gtx layout.Context) layout.Dimensions {
-			return layout.Inset{Top: inset, Right: inset, Bottom: inset, Left: inset}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-				name := accountName(snapshot)
-				copy := layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-					return layout.Flex{Axis: layout.Vertical, Alignment: layout.Start}.Layout(gtx,
-						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-							return kit.Label{Style: e.Th.T.Sentence, Color: e.Th.R.Fg, MaxLines: 2}.Layout(gtx, e.Th.Theme, greeting(e.Now.Hour(), name))
-						}),
-						layout.Rigid(layout.Spacer{Height: unit.Dp(4)}.Layout),
-						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-							return kit.Label{Style: e.Th.T.Proof, Color: e.Th.R.Fg2, MaxLines: 2}.Layout(gtx, e.Th.Theme, proof)
-						}),
-					)
-				})
-				children := []layout.FlexChild{copy}
-				if !signedIn {
-					p.signIn.Kind = kit.PlaqueLine
-					p.signIn.Label = "Sign in"
-					p.signIn.Small = true
-					children = append(children,
-						layout.Rigid(layout.Spacer{Width: unit.Dp(21)}.Layout),
-						layout.Rigid(func(gtx layout.Context) layout.Dimensions { return p.signIn.Layout(gtx, e.Th.Theme) }),
-					)
-				}
-				return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx, children...)
-			})
-		})
+		return p.header.Layout(gtx, e, title, proof, trailing)
 	}
 }
 
@@ -190,26 +211,22 @@ func providerSignedIn(snapshot state.State) bool {
 	}
 }
 
-func homeSession(snapshot state.State) string {
-	state := ":signed-out"
-	if providerSignedIn(snapshot) {
-		state = ":signed-in"
-	}
-	return string(snapshot.Provider) + state
+type homeSessionKey struct {
+	provider model.Provider
+	signedIn bool
+}
+
+func homeSession(snapshot state.State) homeSessionKey {
+	return homeSessionKey{provider: snapshot.Provider, signedIn: providerSignedIn(snapshot)}
 }
 
 func (p *page) feedFiltersLayout(e *env.Env) layout.Widget {
 	return func(gtx layout.Context) layout.Dimensions {
-		labels := make([]string, len(p.feed.Chips))
-		selected := 0
-		for i, chip := range p.feed.Chips {
-			labels[i] = chip.Title
-			if chip.Params == p.feedParams {
-				selected = i
-			}
+		dimensions := p.feedFilters.Layout(gtx, e.Th.Theme)
+		if selected, changed := p.feedFilters.Changed(); changed {
+			p.selectChip(e, selected)
+			gtx.Execute(op.InvalidateCmd{})
 		}
-		p.feedFilters.Labels = labels
-		p.feedFilters.Selected = selected
-		return p.feedFilters.Layout(gtx, e.Th.Theme)
+		return dimensions
 	}
 }

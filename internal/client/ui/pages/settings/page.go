@@ -1,6 +1,7 @@
 package settings
 
 import (
+	"gioui.org/layout"
 	"github.com/ryoku-dev/ryoku/docs/lithic/library/go/kit"
 	"github.com/ryoku-dev/ryotunes/internal/client/ui/env"
 	"github.com/ryoku-dev/ryotunes/internal/client/ui/look"
@@ -54,6 +55,8 @@ type appearanceControls struct {
 	colours, density, motion look.Choice
 	scale                    kit.Stepper
 	lowResource              kit.Toggle
+	visualizer               kit.Toggle
+	waveProgress             kit.Toggle
 	palette                  fieldValue
 	usePalette, clearPalette kit.Plaque
 	tray, autostart          kit.Toggle
@@ -69,17 +72,25 @@ type lyricsControls struct {
 	wordByWord, romanize kit.Toggle
 }
 
+type authFlowControls struct {
+	open, copy, cancel kit.Plaque
+}
+
 type accountControls struct {
 	youtubeSignIn, youtubeSignOut kit.Plaque
+	youtubeFlow                   authFlowControls
 	identity                      look.Choice
 	spotifySignIn, spotifySignOut kit.Plaque
+	spotifyFlow                   authFlowControls
 	soundCloudSignIn              kit.Plaque
 	soundCloudSignOut             kit.Plaque
+	soundCloudFlow                authFlowControls
 	tidalDeviceID                 fieldValue
 	tidalDeviceSecret             fieldValue
 	tidalPKCEID                   fieldValue
 	tidalSave, tidalSignIn        kit.Plaque
 	tidalSignOut                  kit.Plaque
+	tidalFlow                     authFlowControls
 }
 
 type downloadControls struct {
@@ -138,16 +149,22 @@ type page struct {
 	scroll look.Scroller
 	index  kit.SectionIndex
 
+	sectionLabels  []string
 	sectionHeights []int
 	currentSection int
 	initialSection int
 	initialScroll  bool
 	indexHold      int
+	viewportHeight int
 
-	refreshed  bool
-	generation uint64
-	loading    bool
-	loadError  string
+	rowDescriptors [][]*settingRowDescriptor
+	rowChildren    [][]layout.FlexChild
+	rowSection     int
+	rowCursor      int
+	refreshed      bool
+	generation     uint64
+	loading        bool
+	loadError      string
 
 	streamClients []model.StreamClient
 	identities    model.AccountIdentities
@@ -180,10 +197,18 @@ type page struct {
 
 // New creates a retained Settings page for the requested route.
 func New(r env.Route) env.Page {
+	initialSection := sectionIndex(r.Params)
 	p := &page{
+		sectionLabels:  make([]string, len(settingsSections)),
 		sectionHeights: make([]int, len(settingsSections)),
-		initialSection: sectionIndex(r.Params),
-		indexHold:      -1,
+		initialSection: initialSection,
+		currentSection: initialSection,
+		indexHold:      initialSection,
+		rowDescriptors: make([][]*settingRowDescriptor, len(settingsSections)),
+		rowChildren:    make([][]layout.FlexChild, len(settingsSections)),
+	}
+	for i, section := range settingsSections {
+		p.sectionLabels[i] = section.title
 	}
 	p.playback.clients = make(map[model.StreamClient]*kit.Toggle)
 	p.local.remove = make(map[string]*kit.Plaque)

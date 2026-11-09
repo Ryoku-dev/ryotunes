@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 
 	"gioui.org/layout"
@@ -73,24 +72,8 @@ func (p *Page) handleActions(gtx layout.Context, e *env.Env, jobs []model.Downlo
 }
 
 func (p *Page) layoutHeader(gtx layout.Context, e *env.Env, active, saved int) layout.Dimensions {
-	cut := gtx.Dp(e.Th.Cut.Large)
-	inset := look.ContentInset(e.Th.Class)
-	return look.Field(gtx, e.Th, [4]int{cut, cut, 0, 0}, func(gtx layout.Context) layout.Dimensions {
-		return layout.Inset{Top: inset, Right: inset, Bottom: inset, Left: inset}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-			return layout.Flex{Axis: layout.Vertical, Alignment: layout.Start}.Layout(gtx,
-				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					return kit.Label{Style: e.Th.T.Section, Color: e.Th.R.Fg, MaxLines: 1}.Layout(gtx, e.Th.Theme, "Downloads")
-				}),
-				layout.Rigid(layout.Spacer{Height: unit.Dp(4)}.Layout),
-				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					return kit.Sentence(gtx, e.Th.Theme, e.Th.T.Proof, e.Th.R.Fg2, []kit.Span{
-						{Text: strconv.Itoa(active), Mono: true}, {Text: " downloading, "},
-						{Text: strconv.Itoa(saved), Mono: true}, {Text: " saved"},
-					})
-				}),
-			)
-		})
-	})
+	sentence := fmt.Sprintf("%d downloading, %d saved", active, saved)
+	return p.header.Layout(gtx, e, "Downloads", sentence, nil)
 }
 
 func (p *Page) layoutControls(gtx layout.Context, e *env.Env) layout.Dimensions {

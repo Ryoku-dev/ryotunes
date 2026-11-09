@@ -21,6 +21,18 @@ type ClientPreferences struct {
 	Decorations  bool   `json:"decorations"`
 	Route        string `json:"route,omitempty"`
 	MiniOpen     bool   `json:"miniOpen"`
+	Visualizer   *bool  `json:"visualizer,omitempty"`
+	WaveProgress *bool  `json:"waveProgress,omitempty"`
+}
+
+// VisualizerOn reports the stored visualizer preference; missing means on.
+func (p ClientPreferences) VisualizerOn() bool {
+	return p.Visualizer == nil || *p.Visualizer
+}
+
+// WaveOn reports the stored wave-progress preference; missing means on.
+func (p ClientPreferences) WaveOn() bool {
+	return p.WaveProgress == nil || *p.WaveProgress
 }
 
 // DefaultClientPreferences returns safe defaults for malformed or absent state.
@@ -128,6 +140,7 @@ func SaveClientPreferences(preferences ClientPreferences) error {
 func (s *Store) SetClientPreferences(preferences ClientPreferences) {
 	s.mu.Lock()
 	s.state.Client = preferences
+	s.publishLocked()
 	callbacks := s.callbacksLocked()
 	s.mu.Unlock()
 	notify(callbacks)

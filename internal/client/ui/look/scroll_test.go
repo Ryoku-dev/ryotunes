@@ -1,10 +1,20 @@
 package look
 
 import (
+	"image"
 	"math"
 	"testing"
+	"time"
 
+	"gioui.org/f32"
+	"gioui.org/io/input"
+	"gioui.org/io/pointer"
 	"gioui.org/layout"
+	"gioui.org/op"
+	"gioui.org/unit"
+
+	"github.com/ryoku-dev/ryoku/docs/lithic/library/go/palette"
+	libtheme "github.com/ryoku-dev/ryoku/docs/lithic/library/go/theme"
 )
 
 func closeEnough(first, second float32) bool {
@@ -66,5 +76,91 @@ func TestScrollFractionalAccumulation(t *testing.T) {
 	}
 	if position.Offset != 1 || !closeEnough(fraction, .2) {
 		t.Fatalf("position = %d, fraction = %v, want 1 and .2", position.Offset, fraction)
+	}
+}
+
+func TestScrollerUserScrolledOnlyForRealInput(t *testing.T) {
+	theme := NewTheme(palette.Signature(true), libtheme.Comfortable)
+	var scroller Scroller
+	var operations op.Ops
+	var router input.Router
+	now := time.Unix(200, 0)
+	element := func(gtx layout.Context, _ int) layout.Dimensions {
+		return layout.Dimensions{Size: gtx.Constraints.Constrain(image.Pt(120, 24))}
+	}
+	context := func() layout.Context {
+		return layout.Context{
+			Ops: &operations, Source: router.Source(), Now: now,
+			Metric:      unit.Metric{PxPerDp: 1, PxPerSp: 1},
+			Constraints: layout.Exact(image.Pt(120, 96)),
+		}
+	}
+	frame := func() {
+		operations.Reset()
+		scroller.Layout(context(), theme, 20, element)
+		router.Frame(&operations)
+		now = now.Add(time.Millisecond)
+	}
+
+	frame()
+	if !scroller.Position.BeforeEnd {
+		t.Fatalf("initial list position is not scrollable: %+v", scroller.Position)
+	}
+	router.Queue(
+		pointer.Event{Kind: pointer.Move, Source: pointer.Mouse, PointerID: 1, Position: f32.Pt(20, 20)},
+		pointer.Event{
+			Kind: pointer.Scroll, Source: pointer.Mouse, PointerID: 1,
+			Position: f32.Pt(20, 20), Scroll: f32.Pt(0, 10),
+		},
+	)
+	operations.Reset()
+	outerGTX := context()
+	outerGTX.Constraints = layout.Exact(image.Pt(120, 500))
+	scroller.UpdateInput(outerGTX)
+	offsetAfterInput := scroller.Position.Offset
+	if !scroller.UserScrolled() {
+		t.Fatal("real pointer scroll did not set UserScrolled")
+	}
+	if scroller.UserScrolled() {
+		t.Fatal("UserScrolled did not clear on read")
+	}
+	scroller.Layout(context(), theme, 20, element)
+	if scroller.Position.Offset != offsetAfterInput {
+		t.Fatalf("Layout consumed input twice: offset %d became %d", offsetAfterInput, scroller.Position.Offset)
+	}
+	router.Frame(&operations)
+
+	scroller.AnchorTo(3, -15)
+	if scroller.UserScrolled() {
+		t.Fatal("AnchorTo counted as real input")
+	}
+	operations.Reset()
+	now = now.Add(time.Millisecond)
+	scroller.Layout(context(), theme, 20, element)
+	router.Frame(&operations)
+	scroller.SpringBy(20)
+	operations.Reset()
+	now = now.Add(time.Second / 60)
+	scroller.UpdateInput(context())
+	if scroller.UserScrolled() {
+		t.Fatal("SpringBy counted as real input")
+	}
+}
+
+func TestScrollerAnchorToNegativeOffset(t *testing.T) {
+	theme := NewTheme(palette.Signature(true), libtheme.Comfortable)
+	var scroller Scroller
+	var operations op.Ops
+	gtx := layout.Context{
+		Ops: &operations, Now: time.Unix(300, 0),
+		Metric:      unit.Metric{PxPerDp: 1, PxPerSp: 1},
+		Constraints: layout.Exact(image.Pt(120, 100)),
+	}
+	scroller.AnchorTo(3, -15)
+	scroller.Layout(gtx, theme, 10, func(gtx layout.Context, _ int) layout.Dimensions {
+		return layout.Dimensions{Size: gtx.Constraints.Constrain(image.Pt(120, 30))}
+	})
+	if scroller.Position.First != 3 || scroller.Position.Offset != 15 {
+		t.Fatalf("position = first %d offset %d, want element 3 at y -15", scroller.Position.First, scroller.Position.Offset)
 	}
 }

@@ -23,19 +23,19 @@ import (
 
 // Page is a retained album detail surface.
 type Page struct {
-	route  env.Route
-	hero   widgets.Hero
-	scroll look.Scroller
-	table  widgets.TrackTable
-
-	play      kit.Plaque
-	shuffle   kit.IconPlaque
-	save      kit.IconPlaque
-	download  kit.IconPlaque
-	more      kit.IconPlaque
-	retry     kit.Plaque
-	moreRetry kit.Plaque
-	menu      widgets.ItemMenu
+	route       env.Route
+	hero        widgets.Hero
+	heroActions widgets.HeroActions
+	scroll      look.Scroller
+	table       widgets.TrackTable
+	play        kit.Plaque
+	shuffle     kit.IconPlaque
+	save        kit.IconPlaque
+	download    kit.IconPlaque
+	more        kit.IconPlaque
+	retry       kit.Plaque
+	moreRetry   kit.Plaque
+	menu        widgets.ItemMenu
 
 	page        model.AlbumPage
 	loaded      bool
@@ -256,34 +256,32 @@ func (p *Page) layoutActs(e *env.Env) layout.Widget {
 			p.download.Icon, p.download.Description = look.Icon.DownloadDone, "Saved"
 		}
 		p.more.Kind, p.more.Icon, p.more.Description = kit.PlaqueQuiet, look.Icon.More, "More album actions"
-		play := layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+		play := func(gtx layout.Context) layout.Dimensions {
 			if len(p.page.Items) == 0 {
 				gtx = gtx.Disabled()
 			}
 			return p.play.Layout(gtx, e.Th.Theme)
-		})
-		gap := layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout)
-		shuffle := layout.Rigid(func(gtx layout.Context) layout.Dimensions { return p.shuffle.Layout(gtx, e.Th.Theme) })
-		save := layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+		}
+		shuffle := func(gtx layout.Context) layout.Dimensions { return p.shuffle.Layout(gtx, e.Th.Theme) }
+		save := func(gtx layout.Context) layout.Dimensions {
 			if p.savePending {
 				gtx = gtx.Disabled()
 			}
 			return p.save.Layout(gtx, e.Th.Theme)
-		})
-		download := layout.Rigid(func(gtx layout.Context) layout.Dimensions { return p.layoutDownload(gtx, e, active, progress) })
-		more := layout.Rigid(func(gtx layout.Context) layout.Dimensions { return p.more.Layout(gtx, e.Th.Theme) })
+		}
+		download := func(gtx layout.Context) layout.Dimensions { return p.layoutDownload(gtx, e, active, progress) }
+		more := func(gtx layout.Context) layout.Dimensions { return p.more.Layout(gtx, e.Th.Theme) }
 		canSave := albumCanSave(p.route.ID)
 		canDownload := model.ProviderOf(p.route.ID) != model.ProviderLocal
-		switch {
-		case canSave && canDownload:
-			return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx, play, gap, shuffle, gap, save, gap, download, gap, more)
-		case canSave:
-			return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx, play, gap, shuffle, gap, save, gap, more)
-		case canDownload:
-			return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx, play, gap, shuffle, gap, download, gap, more)
-		default:
-			return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx, play, gap, shuffle, gap, more)
+		var actions [5]layout.Widget
+		actions[0], actions[1], actions[4] = play, shuffle, more
+		if canSave {
+			actions[2] = save
 		}
+		if canDownload {
+			actions[3] = download
+		}
+		return p.heroActions.Layout(gtx, actions[:])
 	}
 }
 

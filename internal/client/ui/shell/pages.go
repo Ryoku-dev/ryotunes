@@ -22,6 +22,8 @@ func (s *uiShell) page(route env.Route) env.Page {
 	}
 	var page env.Page
 	switch route.Kind {
+	case env.RouteHome:
+		page = home.New(route)
 	case env.RouteSearch:
 		page = search.New(route)
 	case env.RouteLibrary:

@@ -8,6 +8,7 @@ import (
 	"github.com/ryoku-dev/ryotunes/internal/client/ui/act"
 	"github.com/ryoku-dev/ryotunes/internal/client/ui/env"
 	"github.com/ryoku-dev/ryotunes/internal/client/ui/look"
+	"github.com/ryoku-dev/ryotunes/internal/client/ui/widgets"
 	"github.com/ryoku-dev/ryotunes/internal/model"
 	"github.com/ryoku-dev/ryotunes/internal/protocol"
 	"strings"
@@ -20,14 +21,14 @@ var radioFilters = []string{"Popular", "Favourites", "Recent", "By country", "By
 
 // Page is the retained internet-radio directory surface.
 type Page struct {
-	scroll  look.Scroller
-	filter  kit.TextField
-	filters kit.Filters
-	tiles   map[string]*stationTile
-	retry   kit.Plaque
-	moreTry kit.Plaque
-	saver   radioSaver
-
+	scroll   look.Scroller
+	header   widgets.Header
+	filter   kit.TextField
+	filters  kit.Filters
+	tiles    map[string]*stationTile
+	retry    kit.Plaque
+	moreTry  kit.Plaque
+	saver    radioSaver
 	selected int
 	stations []model.RadioStation
 	error    string

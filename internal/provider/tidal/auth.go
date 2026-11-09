@@ -199,7 +199,7 @@ func (p *Provider) deviceFlow(ctx context.Context, epoch uint64) error {
 		complete = *login.VerificationURIComplete
 	}
 	if complete == "" {
-		complete = login.VerificationURI + "?userCode=" + url.QueryEscape(login.UserCode)
+		complete = login.VerificationURI
 	}
 	if !strings.HasPrefix(complete, "http") {
 		complete = "https://" + complete

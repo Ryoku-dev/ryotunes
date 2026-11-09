@@ -2,7 +2,6 @@
 package chrome
 
 import (
-	"fmt"
 	"image"
 	"image/color"
 	"math"
@@ -33,14 +32,30 @@ const (
 	LyricsCompact
 )
 
+type lyricLineKey struct {
+	size   LyricsSize
+	timeMS uint64
+	index  int
+}
+
+type lyricFollowPlan struct {
+	anchor       bool
+	anchorIndex  int
+	anchorOffset int
+	springDelta  int
+}
+
 // Lyrics resolves, caches, and follows the current track's lyric document.
 type Lyrics struct {
 	scroll      look.Scroller
-	lineClicks  map[string]*kit.Click
+	lineClicks  map[lyricLineKey]*kit.Click
 	follow      kit.Plaque
 	retry       kit.Plaque
 	lyrics      *model.Lyrics
 	timed       []int
+	rowTops     []int
+	rowSeen     []uint64
+	laidRows    []int
 	trackID     string
 	requestedID uint64
 	revision    uint64
@@ -51,9 +66,14 @@ type Lyrics struct {
 	active      int
 	lastActive  int
 	manualUntil time.Time
-	followAt    time.Time
 	lastTarget  int
 	romanized   bool
+	forceAnchor bool
+	generation  uint64
+	clockAt     time.Time
+	clockMS     int64
+	clockSpeed  float64
+	clockReady  bool
 }
 
 // Refresh reloads the current document and rejects stale replies.
@@ -101,12 +121,16 @@ func (lyrics *Lyrics) ensure(gtx layout.Context, e *env.Env) {
 		lyrics.lyrics = nil
 		lyrics.timed = lyrics.timed[:0]
 		lyrics.lineClicks = nil
+		lyrics.rowTops = lyrics.rowTops[:0]
+		lyrics.rowSeen = lyrics.rowSeen[:0]
+		lyrics.laidRows = lyrics.laidRows[:0]
 		lyrics.offsetMS = 0
 		lyrics.active = -1
 		lyrics.lastActive = -2
 		lyrics.manualUntil = time.Time{}
-		lyrics.followAt = time.Time{}
 		lyrics.lastTarget = 0
+		lyrics.forceAnchor = true
+		lyrics.clockReady = false
 		lyrics.scroll.ScrollTo(0)
 		lyrics.revision = snapshot.LyricsRevision
 		if trackID != "" {
@@ -118,7 +142,15 @@ func (lyrics *Lyrics) ensure(gtx layout.Context, e *env.Env) {
 		lyrics.Refresh(e)
 	}
 	if lyrics.lyrics != nil && lyrics.lyrics.Synced {
-		lyrics.active = activeLyricLine(lyrics.lyrics.Lines, lyrics.timed, lyrics.positionMS(gtx, e))
+		positionMS := lyrics.positionMS(gtx, e)
+		speed := snapshot.AudioFx.Speed
+		if speed <= 0 {
+			speed = 1
+		}
+		if lyrics.clockDiscontinuity(gtx.Now, positionMS, speed, snapshot.Playback.Paused) {
+			lyrics.forceAnchor = true
+		}
+		lyrics.active = activeLyricLine(lyrics.lyrics.Lines, lyrics.timed, positionMS)
 		lyrics.scheduleBoundary(gtx, e)
 	} else {
 		lyrics.active = -1
@@ -154,13 +186,20 @@ func (lyrics *Lyrics) fetch(e *env.Env, trackID string, requestID uint64) {
 			lyrics.err = ""
 			lyrics.lyrics = document
 			lyrics.timed = lyrics.timed[:0]
+			lineCount := 0
 			if document != nil {
+				lineCount = len(document.Lines)
 				for index := range document.Lines {
 					if document.Lines[index].TimeMS != nil {
 						lyrics.timed = append(lyrics.timed, index)
 					}
 				}
 			}
+			lyrics.rowTops = make([]int, lineCount)
+			lyrics.rowSeen = make([]uint64, lineCount)
+			lyrics.laidRows = make([]int, 0, min(lineCount, 16))
+			lyrics.generation = 0
+			lyrics.forceAnchor = true
 		}
 		if lyrics.stale {
 			lyrics.stale = false
@@ -171,6 +210,26 @@ func (lyrics *Lyrics) fetch(e *env.Env, trackID string, requestID uint64) {
 
 func (lyrics *Lyrics) positionMS(gtx layout.Context, e *env.Env) int64 {
 	return int64(math.Round(e.Store.PositionAt(gtx.Now)*1000)) - lyrics.offsetMS
+}
+
+func (lyrics *Lyrics) clockDiscontinuity(now time.Time, positionMS int64, speed float64, paused bool) bool {
+	if !lyrics.clockReady {
+		lyrics.clockAt = now
+		lyrics.clockMS = positionMS
+		lyrics.clockSpeed = speed
+		lyrics.clockReady = true
+		return true
+	}
+	expected := lyrics.clockMS
+	if !paused && now.After(lyrics.clockAt) {
+		expected += int64(float64(now.Sub(lyrics.clockAt).Milliseconds()) * lyrics.clockSpeed)
+	}
+	speedChanged := math.Abs(speed-lyrics.clockSpeed) > .001
+	jumped := math.Abs(float64(positionMS-expected)) > 500
+	lyrics.clockAt = now
+	lyrics.clockMS = positionMS
+	lyrics.clockSpeed = speed
+	return speedChanged || jumped
 }
 
 func activeLyricLine(lines []model.LyricsLine, timed []int, positionMS int64) int {
@@ -278,20 +337,28 @@ func (lyrics *Lyrics) layoutDocument(gtx layout.Context, e *env.Env, size Lyrics
 		empty := kit.Empty{Icon: look.Icon.Lyrics, Title: "No lyrics for this track"}
 		return empty.Layout(gtx, e.Th.Theme)
 	}
+	source := strings.TrimSpace(lyrics.lyrics.Source)
+	if source == "" {
+		return lyrics.layoutLines(gtx, e, size)
+	}
 	return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
 		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-			if lyrics.lyrics.Synced {
-				return lyrics.layoutSynced(gtx, e, size)
-			}
-			return lyrics.layoutPlain(gtx, e, size)
+			return lyrics.layoutLines(gtx, e, size)
 		}),
+		layout.Rigid(layout.Spacer{Height: 13}.Layout),
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			if strings.TrimSpace(lyrics.lyrics.Source) == "" {
-				return layout.Dimensions{}
-			}
-			return layout.Inset{Top: 8}.Layout(gtx, kit.Text(e.Th.Theme, e.Th.T.Caption, e.Th.R.Fg3, "Lyrics from "+strings.TrimSpace(lyrics.lyrics.Source)))
+			height := gtx.Dp(18)
+			gtx.Constraints.Min.Y, gtx.Constraints.Max.Y = height, height
+			return layout.Center.Layout(gtx, kit.Text(e.Th.Theme, e.Th.T.Caption, e.Th.R.Fg3, "Lyrics from "+source))
 		}),
 	)
+}
+
+func (lyrics *Lyrics) layoutLines(gtx layout.Context, e *env.Env, size LyricsSize) layout.Dimensions {
+	if lyrics.lyrics.Synced {
+		return lyrics.layoutSynced(gtx, e, size)
+	}
+	return lyrics.layoutPlain(gtx, e, size)
 }
 
 func (lyrics *Lyrics) layoutPlain(gtx layout.Context, e *env.Env, size LyricsSize) layout.Dimensions {
@@ -311,17 +378,38 @@ func (lyrics *Lyrics) layoutSynced(gtx layout.Context, e *env.Env, size LyricsSi
 	}
 	topPad := max(gtx.Dp(13), viewport/3-rowHeight/2)
 	bottomPad := max(gtx.Dp(13), viewport-topPad-rowHeight)
-	beforeFirst, beforeOffset := lyrics.scroll.Offset()
-	beforeAbsolute := lyricsAbsolute(beforeFirst, beforeOffset, topPad, rowHeight)
+	lyrics.scroll.UpdateInput(gtx)
+	if lyrics.scroll.UserScrolled() {
+		lyrics.manualUntil = lyricManualDeadline(gtx.Now, lyrics.manualUntil, true)
+		lyrics.lastActive = -2
+		lyrics.forceAnchor = true
+		gtx.Execute(op.InvalidateCmd{At: lyrics.manualUntil})
+	}
 	manual := gtx.Now.Before(lyrics.manualUntil)
-	if !manual && lyrics.active >= 0 && (lyrics.active != lyrics.lastActive || lyrics.lastTarget != viewport) {
-		target := max(0, topPad+lyrics.active*rowHeight+rowHeight/2-viewport/3)
-		delta := target - beforeAbsolute
-		lyrics.scroll.SpringTo(beforeOffset + delta)
-		lyrics.followAt = gtx.Now
+	activeLaid := lyrics.generation != 0 &&
+		lyrics.active >= 0 && lyrics.active < len(lyrics.rowSeen) &&
+		lyrics.rowSeen[lyrics.active] == lyrics.generation
+	activeTop := 0
+	if activeLaid {
+		activeTop = lyrics.rowTops[lyrics.active]
+	}
+	if !manual && lyrics.active >= 0 &&
+		(lyrics.forceAnchor || !activeLaid || lyrics.active != lyrics.lastActive || lyrics.lastTarget != viewport) {
+		desiredTop := max(0, viewport/3-rowHeight/2)
+		plan := planLyricsFollow(lyrics.active, activeTop, desiredTop, activeLaid, lyrics.forceAnchor)
+		if plan.anchor {
+			lyrics.scroll.AnchorTo(plan.anchorIndex, plan.anchorOffset)
+		} else if plan.springDelta != 0 {
+			lyrics.scroll.SpringBy(plan.springDelta)
+		}
 		lyrics.lastActive = lyrics.active
 		lyrics.lastTarget = viewport
+		lyrics.forceAnchor = false
 	}
+
+	lyrics.generation++
+	generation := lyrics.generation
+	lyrics.laidRows = lyrics.laidRows[:0]
 	count := len(lyrics.lyrics.Lines) + 2
 	dims := lyrics.scroll.Layout(gtx, e.Th, count, func(gtx layout.Context, index int) layout.Dimensions {
 		if index == 0 {
@@ -331,10 +419,12 @@ func (lyrics *Lyrics) layoutSynced(gtx layout.Context, e *env.Env, size LyricsSi
 			return layout.Dimensions{Size: image.Pt(gtx.Constraints.Max.X, bottomPad)}
 		}
 		lineIndex := index - 1
-		line := lyrics.lyrics.Lines[lineIndex]
 		rowGTX := gtx
 		rowGTX.Constraints.Min.Y = rowHeight
 		rowGTX.Constraints.Max.Y = rowHeight
+		lyrics.rowSeen[lineIndex] = generation
+		lyrics.laidRows = append(lyrics.laidRows, lineIndex)
+		line := lyrics.lyrics.Lines[lineIndex]
 		click := lyrics.lineClick(line, lineIndex, size)
 		dims := click.Layout(rowGTX, func(gtx layout.Context) layout.Dimensions {
 			return lyrics.layoutLine(gtx, e, line, lineIndex == lyrics.active, size)
@@ -342,15 +432,14 @@ func (lyrics *Lyrics) layoutSynced(gtx layout.Context, e *env.Env, size LyricsSi
 		if click.Clicked(gtx) && line.TimeMS != nil {
 			lyrics.seek(e, float64(int64(*line.TimeMS)+lyrics.offsetMS)/1000)
 			lyrics.manualUntil = time.Time{}
+			lyrics.forceAnchor = true
 		}
 		return dims
 	})
-	afterFirst, afterOffset := lyrics.scroll.Offset()
-	afterAbsolute := lyricsAbsolute(afterFirst, afterOffset, topPad, rowHeight)
-	if afterAbsolute != beforeAbsolute && gtx.Now.Sub(lyrics.followAt) > 500*time.Millisecond {
-		lyrics.manualUntil = gtx.Now.Add(lyricsManualHold)
-		lyrics.lastActive = -2
-		gtx.Execute(op.InvalidateCmd{At: lyrics.manualUntil})
+	first, offset := lyrics.scroll.Offset()
+	absolute := lyricsAbsolute(first, offset, topPad, rowHeight)
+	for _, index := range lyrics.laidRows {
+		lyrics.rowTops[index] = topPad + index*rowHeight - absolute
 	}
 	if gtx.Now.Before(lyrics.manualUntil) {
 		buttonGTX := gtx
@@ -364,10 +453,25 @@ func (lyrics *Lyrics) layoutSynced(gtx layout.Context, e *env.Env, size LyricsSi
 		if lyrics.follow.Clicked(buttonGTX) {
 			lyrics.manualUntil = time.Time{}
 			lyrics.lastActive = -2
+			lyrics.forceAnchor = true
 		}
 		offset.Pop()
 	}
 	return dims
+}
+
+func planLyricsFollow(active, activeTop, desiredTop int, laid, forceAnchor bool) lyricFollowPlan {
+	if forceAnchor || !laid {
+		return lyricFollowPlan{anchor: true, anchorIndex: active + 1, anchorOffset: desiredTop}
+	}
+	return lyricFollowPlan{springDelta: activeTop - desiredTop}
+}
+
+func lyricManualDeadline(now, current time.Time, userScrolled bool) time.Time {
+	if userScrolled {
+		return now.Add(lyricsManualHold)
+	}
+	return current
 }
 
 func lyricsAbsolute(first, offset, topPad, rowHeight int) int {
@@ -379,9 +483,9 @@ func lyricsAbsolute(first, offset, topPad, rowHeight int) int {
 
 func (lyrics *Lyrics) lineClick(line model.LyricsLine, index int, size LyricsSize) *kit.Click {
 	if lyrics.lineClicks == nil {
-		lyrics.lineClicks = make(map[string]*kit.Click)
+		lyrics.lineClicks = make(map[lyricLineKey]*kit.Click)
 	}
-	key := fmt.Sprintf("%d:%d:%d", size, valueOrZero(line.TimeMS), index)
+	key := lyricLineKey{size: size, timeMS: valueOrZero(line.TimeMS), index: index}
 	click := lyrics.lineClicks[key]
 	if click == nil {
 		click = new(kit.Click)
