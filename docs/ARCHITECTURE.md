@@ -197,7 +197,11 @@ only the provider rejecting it, or the user signing out, ends it.
   token, and not again for a renewed token TIDAL refused, until it expires.
   A dropped Spotify connection is recovered from the stored credentials:
   once per session when Spotify refuses them, and again on the next request
-  when the network was unreachable or timed out, as after a resume.
+  when the network was unreachable or timed out, as after a resume. When the
+  Premium check after a Spotify login is rate limited, fails with a 5xx or
+  answers unreadably, the session is kept with the product unknown and the
+  check runs again at the next Spotify request after `Retry-After` (a minute
+  by default, an hour at most); only a non-Premium answer then refuses playback.
 - 1.x's Spotify session (`spotify/spotify/credentials.json` and `device.id`
   under the data directory) is migrated once at start and never written by
   2.x; its UUID device id becomes the SHA-1 of its text. An unreadable 1.x

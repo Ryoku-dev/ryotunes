@@ -436,3 +436,16 @@ func TestTransientFailureSeparatesLibrespotRefusalsFromNetwork(t *testing.T) {
 		})
 	}
 }
+
+func TestAccesspointRefusalSaysWhy(t *testing.T) {
+	refusal := func(code spotifypb.ErrorCode) string {
+		err := fmt.Errorf("failed authenticating with accesspoint: %w", &ap.AccesspointLoginError{Message: &spotifypb.APLoginFailed{ErrorCode: code.Enum()}})
+		return classifySignIn(err).Error()
+	}
+	if got := refusal(spotifypb.ErrorCode_PremiumAccountRequired); !strings.Contains(got, "Premium") {
+		t.Fatalf("a free account reads %q, it should say Premium is needed", got)
+	}
+	if bad, other := refusal(spotifypb.ErrorCode_BadCredentials), refusal(spotifypb.ErrorCode_InvalidAppKey); bad == other {
+		t.Fatalf("bad credentials read like any other refusal: %q", bad)
+	}
+}

@@ -55,12 +55,15 @@ type Spotify struct {
 	liblog           *librespotLogger
 	restoreTimeout   time.Duration
 
-	mu          sync.RWMutex
-	sess        *session.Session
-	name        string
-	premium     bool
-	clientToken string
-	closed      bool
+	mu      sync.RWMutex
+	sess    *session.Session
+	name    string
+	premium bool
+	// profileRecheck is set while the product is unknown (the profile check
+	// was rate limited or failed): the next session use after it asks again.
+	profileRecheck time.Time
+	clientToken    string
+	closed         bool
 	// unrecoverable is the dropped session whose one recovery attempt
 	// failed; any installed session gets its own attempt.
 	unrecoverable *session.Session
@@ -72,6 +75,7 @@ type Spotify struct {
 	authGeneration uint64
 
 	restoreMu sync.Mutex
+	profileMu sync.Mutex
 
 	hashMu sync.Mutex
 	hashes *hashRegistry
@@ -174,9 +178,13 @@ func (p *Spotify) session(ctx context.Context) (*session.Session, error) {
 	p.mu.RLock()
 	sess := p.sess
 	premium := p.premium
+	recheck := p.profileRecheck
 	p.mu.RUnlock()
 	if sess == nil {
 		return nil, providerapi.ErrSignInRequired
+	}
+	if !recheck.IsZero() && !time.Now().Before(recheck) {
+		premium = p.recheckProfile(ctx, sess, spclientToken(sess))
 	}
 	if !premium {
 		return nil, providerapi.ErrNotPremium
@@ -187,6 +195,54 @@ func (p *Spotify) session(ctx context.Context) (*session.Session, error) {
 	default:
 		return sess, nil
 	}
+}
+
+// recheckProfile asks for the product once more while it is unknown. It
+// never signs out: a failure only moves the next attempt.
+func (p *Spotify) recheckProfile(ctx context.Context, owner *session.Session, accessToken func(context.Context) (string, error)) bool {
+	if !p.profileMu.TryLock() {
+		p.mu.RLock()
+		defer p.mu.RUnlock()
+		return p.premium
+	}
+	defer p.profileMu.Unlock()
+	p.mu.RLock()
+	due := p.sess == owner && !p.profileRecheck.IsZero() && !time.Now().Before(p.profileRecheck)
+	premium := p.premium
+	p.mu.RUnlock()
+	if !due {
+		return premium
+	}
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	var profile accountProfile
+	var retry time.Duration
+	token, err := accessToken(ctx)
+	if err == nil {
+		profile, retry, err = p.fetchProfile(ctx, token)
+	}
+	if err == nil && retry == 0 && profile.Product == "" {
+		retry = profileRetryDefault
+	}
+	if err != nil {
+		p.log.Warn("Spotify profile re-check failed", "error", err, "cause", errorCause(err))
+		retry = profileRetryDefault
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.sess != owner {
+		return p.premium
+	}
+	if retry > 0 {
+		p.profileRecheck = time.Now().Add(retry)
+		return p.premium
+	}
+	p.profileRecheck = time.Time{}
+	p.premium = profile.Product == "premium"
+	if profile.DisplayName != "" {
+		p.name = profile.DisplayName
+	}
+	return p.premium
 }
 
 func (p *Spotify) recoverSession(ctx context.Context, dead *session.Session) (*session.Session, error) {
@@ -257,6 +313,7 @@ func (p *Spotify) installSession(sess *session.Session, profile accountProfile) 
 	p.unrecoverable = nil
 	p.name = profile.DisplayName
 	p.premium = profile.Product == "premium" || profile.Product == ""
+	p.profileRecheck = profile.recheckAt
 	p.mu.Unlock()
 	if old != nil && old != sess {
 		old.Close()
@@ -271,6 +328,7 @@ func (p *Spotify) clearSession() *session.Session {
 	p.unrecoverable = nil
 	p.name = ""
 	p.premium = false
+	p.profileRecheck = time.Time{}
 	p.mu.Unlock()
 	return old
 }

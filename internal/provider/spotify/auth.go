@@ -16,11 +16,14 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
 	librespot "github.com/devgianlu/go-librespot"
+	"github.com/devgianlu/go-librespot/ap"
 	"github.com/devgianlu/go-librespot/login5"
+	spotifypb "github.com/devgianlu/go-librespot/proto/spotify"
 	pbdata "github.com/devgianlu/go-librespot/proto/spotify/clienttoken/data/v0"
 	pbhttp "github.com/devgianlu/go-librespot/proto/spotify/clienttoken/http/v0"
 	devicespb "github.com/devgianlu/go-librespot/proto/spotify/connectstate/devices"
@@ -54,7 +57,15 @@ type accountProfile struct {
 	ID          string `json:"id"`
 	Email       string `json:"email"`
 	Product     string `json:"product"`
+	// recheckAt is set while the product is unknown: when to ask again.
+	recheckAt time.Time
 }
+
+const (
+	profileURL          = "https://api.spotify.com/v1/me"
+	profileRetryDefault = time.Minute
+	profileRetryMax     = time.Hour
+)
 
 // Restore restores cached Spotify credentials and emits the startup result event.
 func (p *Spotify) Restore(ctx context.Context) error {
@@ -68,6 +79,7 @@ func (p *Spotify) Restore(ctx context.Context) error {
 	}
 	sess, profile, err := p.openStoredSession(ctx)
 	if err != nil {
+		p.log.Warn("Spotify restore failed", "error", err, "cause", errorCause(err))
 		message := "Spotify sign-in no longer works: " + err.Error()
 		p.emitAuth("restore_failed", nil, nil, &message)
 		return err
@@ -128,6 +140,7 @@ func (p *Spotify) SignIn(_ context.Context) (bool, error) {
 		p.authCancel = nil
 		p.authMu.Unlock()
 		if err != nil && ctx.Err() == nil {
+			p.log.Warn("Spotify sign-in failed", "error", err, "cause", errorCause(err))
 			message := "Spotify sign-in failed: " + err.Error()
 			p.emitAuth("error", nil, nil, &message)
 		}
@@ -179,10 +192,13 @@ func (p *Spotify) signIn(ctx context.Context, generation uint64) error {
 	if err != nil {
 		return classifySignIn(err)
 	}
-	profile, err := p.premiumProfile(ctx, sess)
+	profile, err := p.premiumProfile(ctx, spclientToken(sess))
 	if err != nil {
 		sess.Close()
 		return err
+	}
+	if profile.DisplayName == "" {
+		profile.DisplayName = sess.Username()
 	}
 	p.authMu.Lock()
 	if generation != p.authGeneration || ctx.Err() != nil {
@@ -229,10 +245,13 @@ func (p *Spotify) restoreSession(ctx context.Context) (*session.Session, account
 	if err != nil {
 		return nil, accountProfile{}, classifySignIn(err)
 	}
-	profile, err := p.premiumProfile(ctx, sess)
+	profile, err := p.premiumProfile(ctx, spclientToken(sess))
 	if err != nil {
 		sess.Close()
 		return nil, accountProfile{}, err
+	}
+	if profile.DisplayName == "" {
+		profile.DisplayName = sess.Username()
 	}
 
 	p.mu.Lock()
@@ -317,45 +336,33 @@ func (p *Spotify) authorize(ctx context.Context) (string, string, error) {
 		return "", "", fmt.Errorf("Spotify refused authorization (%s)", cb.oauthError)
 	}
 	if cb.state != state || cb.code == "" {
-		return "", "", fmt.Errorf("Spotify refused the session")
+		return "", "", &signInError{message: "Spotify refused the session", cause: errors.New("the OAuth callback had a different state or no code")}
 	}
 	token, err := config.Exchange(ctx, cb.code, oauth2.SetAuthURLParam("code_verifier", verifier))
 	if err != nil {
-		return "", "", fmt.Errorf("Spotify refused the session")
+		return "", "", &signInError{message: "Spotify refused the session", cause: err}
 	}
 	username, _ := token.Extra("username").(string)
 	return token.AccessToken, username, nil
 }
 
-func (p *Spotify) premiumProfile(ctx context.Context, sess *session.Session) (accountProfile, error) {
+// premiumProfile reads the account's product right after login. A rate
+// limit, an outage or an unreadable answer says nothing about the account,
+// so the session is kept with the product unknown and asked again later.
+func (p *Spotify) premiumProfile(ctx context.Context, accessToken func(context.Context) (string, error)) (accountProfile, error) {
 	deadline := time.Now().Add(5 * time.Second)
-	var profile accountProfile
 	for {
-		token, err := sess.Spclient().GetAccessToken(ctx, false)
+		token, err := accessToken(ctx)
 		if err != nil {
-			return profile, classifySignIn(err)
+			return accountProfile{}, classifySignIn(err)
 		}
-		req, _ := http.NewRequestWithContext(ctx, http.MethodGet, "https://api.spotify.com/v1/me", nil)
-		req.Header.Set("Authorization", "Bearer "+token)
-		resp, err := p.http.Do(req)
+		profile, retry, err := p.fetchProfile(ctx, token)
 		if err != nil {
-			return profile, &signInError{message: "Spotify could not be reached", cause: err}
+			return profile, err
 		}
-		if resp.StatusCode == http.StatusUnauthorized {
-			_ = resp.Body.Close()
-			return profile, fmt.Errorf("the stored credentials are no longer valid")
-		}
-		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-			_ = resp.Body.Close()
-			return profile, fmt.Errorf("Spotify refused the session")
-		}
-		err = json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&profile)
-		_ = resp.Body.Close()
-		if err != nil {
-			return profile, fmt.Errorf("Spotify refused the session")
-		}
-		if profile.DisplayName == "" {
-			profile.DisplayName = profile.ID
+		if retry > 0 {
+			profile.recheckAt = time.Now().Add(retry)
+			return profile, nil
 		}
 		if profile.Product == "premium" {
 			return profile, nil
@@ -364,6 +371,7 @@ func (p *Spotify) premiumProfile(ctx context.Context, sess *session.Session) (ac
 			return profile, providerapi.ErrNotPremium
 		}
 		if time.Now().After(deadline) {
+			profile.recheckAt = time.Now()
 			return profile, nil
 		}
 		select {
@@ -372,6 +380,74 @@ func (p *Spotify) premiumProfile(ctx context.Context, sess *session.Session) (ac
 		case <-time.After(100 * time.Millisecond):
 		}
 	}
+}
+
+// fetchProfile asks /v1/me once. A positive retry means Spotify did not
+// answer (429, 5xx, unreadable body) and says when to ask again.
+func (p *Spotify) fetchProfile(ctx context.Context, token string) (accountProfile, time.Duration, error) {
+	var profile accountProfile
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, profileURL, nil)
+	if err != nil {
+		return profile, 0, err
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	resp, err := p.http.Do(req)
+	if err != nil {
+		return profile, 0, &signInError{message: "Spotify could not be reached", cause: err}
+	}
+	defer resp.Body.Close()
+	switch {
+	case resp.StatusCode == http.StatusUnauthorized:
+		return profile, 0, &signInError{message: "the stored credentials are no longer valid", cause: fmt.Errorf("profile answered %s", resp.Status)}
+	case resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode >= 500:
+		retry := retryAfter(resp.Header.Get("Retry-After"), time.Now())
+		p.log.Warn("Spotify profile check deferred", "status", resp.StatusCode, "retry", retry)
+		return profile, retry, nil
+	case resp.StatusCode < 200 || resp.StatusCode >= 300:
+		return profile, 0, &signInError{message: "Spotify refused the session", cause: fmt.Errorf("profile answered %s", resp.Status)}
+	}
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&profile); err != nil {
+		p.log.Warn("Spotify profile check deferred", "error", err, "retry", profileRetryDefault)
+		return accountProfile{}, profileRetryDefault, nil
+	}
+	if profile.DisplayName == "" {
+		profile.DisplayName = profile.ID
+	}
+	return profile, 0, nil
+}
+
+// retryAfter reads a Retry-After header (seconds or an HTTP date), clamped
+// to between one second and an hour; anything else means a minute.
+func retryAfter(header string, now time.Time) time.Duration {
+	header = strings.TrimSpace(header)
+	wait := time.Duration(-1)
+	if seconds, err := strconv.Atoi(header); err == nil {
+		wait = time.Duration(seconds) * time.Second
+	} else if at, err := http.ParseTime(header); err == nil {
+		wait = at.Sub(now)
+	}
+	switch {
+	case wait < 0:
+		return profileRetryDefault
+	case wait < time.Second:
+		return time.Second
+	case wait > profileRetryMax:
+		return profileRetryMax
+	default:
+		return wait
+	}
+}
+
+func spclientToken(sess *session.Session) func(context.Context) (string, error) {
+	return func(ctx context.Context) (string, error) { return sess.Spclient().GetAccessToken(ctx, false) }
+}
+
+func errorCause(err error) string {
+	var classified *signInError
+	if errors.As(err, &classified) && classified.cause != nil {
+		return classified.cause.Error()
+	}
+	return err.Error()
 }
 
 func (p *Spotify) deviceID() (string, error) {
@@ -572,6 +648,17 @@ func (e *signInError) Error() string { return e.message }
 func (e *signInError) Unwrap() error { return e.cause }
 
 func classifySignIn(err error) error {
+	var refused *ap.AccesspointLoginError
+	if errors.As(err, &refused) && refused.Message != nil {
+		switch refused.Message.GetErrorCode() {
+		case spotifypb.ErrorCode_PremiumAccountRequired:
+			return &signInError{message: "Spotify Premium is required", cause: err}
+		case spotifypb.ErrorCode_BadCredentials, spotifypb.ErrorCode_CouldNotValidateCredentials:
+			return &signInError{message: "the stored credentials are no longer valid", cause: err}
+		case spotifypb.ErrorCode_TravelRestriction:
+			return &signInError{message: "the account is out of its home region", cause: err}
+		}
+	}
 	message := err.Error()
 	switch {
 	case containsAny(message, "travel restriction", "country", "region"):
