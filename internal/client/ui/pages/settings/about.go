@@ -1,11 +1,11 @@
 package settings
 
 import (
+	"os"
 	"runtime/debug"
 
 	"gioui.org/layout"
 	"gioui.org/unit"
-
 	"github.com/ryoku-dev/ryoku/docs/lithic/library/go/kit"
 	"github.com/ryoku-dev/ryotunes/internal/client/ui/act"
 	"github.com/ryoku-dev/ryotunes/internal/client/ui/env"
@@ -15,13 +15,18 @@ import (
 	"github.com/ryoku-dev/ryotunes/internal/version"
 )
 
+const (
+	copyrightLine        = "Copyright (C) 2026 Ryoku-dev and contributors"
+	installedLicensesURL = "file:///usr/share/licenses/ryotunes/"
+	repositoryNoticeURL  = "https://github.com/ryoku-dev/ryotunes/blob/hyperion/NOTICE"
+)
+
 var aboutLinks = []struct {
 	label string
 	url   string
 }{
 	{label: "Website", url: "https://github.com/ryoku-dev/ryotunes"},
 	{label: "Issues", url: "https://github.com/ryoku-dev/ryotunes/issues"},
-	{label: "License", url: "https://github.com/ryoku-dev/ryotunes/blob/gio/LICENSE"},
 	{label: "Ryoku", url: "https://github.com/ryoku-dev/ryoku"},
 }
 
@@ -36,12 +41,13 @@ func (p *page) layoutAbout(gtx layout.Context, e *env.Env) layout.Dimensions {
 	}
 	rows := []layout.Widget{
 		p.settingRow(e.Th, "Ryotunes", "A focused Ryoku desktop music instrument: your library, local media, queue, lyrics and playback engine in one Lithic surface.", func(gtx layout.Context) layout.Dimensions {
-			return look.RyokuMark(unit.Dp(40))(gtx)
+			return look.RyokuMark(unit.Dp(40), e.Th.R.Fg)(gtx)
 		}),
 		p.versionRow(e, "App", version.Version),
 		p.versionRow(e, "Daemon", daemon),
 		p.versionRow(e, "Client", clientVersion()),
 		p.versionRow(e, "Engine", engine),
+		p.licenseRow(e),
 		p.updateRow(e),
 	}
 	for i, link := range aboutLinks {
@@ -55,6 +61,29 @@ func (p *page) layoutAbout(gtx layout.Context, e *env.Env) layout.Dimensions {
 		}))
 	}
 	return p.settingRows(gtx, rows...)
+}
+
+func (p *page) licenseRow(e *env.Env) layout.Widget {
+	return p.settingRow(e.Th, "License", copyrightLine, func(gtx layout.Context) layout.Dimensions {
+		p.about.licenses.Kind, p.about.licenses.Label = kit.PlaqueLine, "Licenses"
+		if p.about.licenses.Clicked(gtx) {
+			act.OpenURL(e, licensesURL())
+		}
+		return layout.Flex{Axis: layout.Vertical, Alignment: layout.End}.Layout(gtx,
+			layout.Rigid(kit.Text(e.Th.Theme, e.Th.T.Mono, e.Th.R.Fg, "GPL-3.0-or-later")),
+			layout.Rigid(layout.Spacer{Height: unit.Dp(8)}.Layout),
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				return p.about.licenses.Layout(gtx, e.Th.Theme)
+			}),
+		)
+	})
+}
+
+func licensesURL() string {
+	if info, err := os.Stat("/usr/share/licenses/ryotunes"); err == nil && info.IsDir() {
+		return installedLicensesURL
+	}
+	return repositoryNoticeURL
 }
 
 func (p *page) versionRow(e *env.Env, label, value string) layout.Widget {

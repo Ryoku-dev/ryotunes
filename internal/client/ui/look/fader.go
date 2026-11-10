@@ -78,7 +78,7 @@ func (fader *Fader) update(gtx layout.Context, value float64, style FaderStyle, 
 	filter := pointer.Filter{
 		Target:  &fader.tag,
 		Kinds:   pointer.Enter | pointer.Leave | pointer.Move | pointer.Press | pointer.Drag | pointer.Release | pointer.Cancel | pointer.Scroll,
-		ScrollX: pointer.ScrollRange{Min: -100000, Max: 100000}, ScrollY: pointer.ScrollRange{Min: -100000, Max: 100000},
+		ScrollY: pointer.ScrollRange{Min: -100000, Max: 100000},
 	}
 	for {
 		raw, ok := gtx.Event(filter)
@@ -131,11 +131,7 @@ func (fader *Fader) update(gtx layout.Context, value float64, style FaderStyle, 
 			if style.Disabled {
 				continue
 			}
-			delta := e.Scroll.Y
-			if delta == 0 {
-				delta = e.Scroll.X
-			}
-			fader.wheelFraction += delta / 150
+			fader.wheelFraction += e.Scroll.Y / 150
 			whole := int(fader.wheelFraction)
 			fader.wheelFraction -= float32(whole)
 			if whole != 0 {

@@ -60,6 +60,9 @@ type Page struct {
 	preamp              look.Fader
 	bands               []bandControl
 	strip               look.HScroller
+	stripPrevious       kit.IconPlaque
+	stripNext           kit.IconPlaque
+	stripSteps          bool
 	stripSelection      anim.Tween
 	stripSelectionReady bool
 	removing            int

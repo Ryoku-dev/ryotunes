@@ -3,6 +3,7 @@ package shell
 import (
 	"image"
 	"image/color"
+	"time"
 
 	gioapp "gioui.org/app"
 	"gioui.org/io/event"
@@ -51,8 +52,17 @@ func (s *uiShell) layout(gtx layout.Context, e *env.Env, widthDP float32) layout
 		playerHeight = gtx.Dp(look.PlayerCompact)
 		bottomNavHeight = gtx.Dp(look.BottomNav)
 	}
-	playerY := max(topHeight, size.Y-margin-playerHeight-bottomNavHeight)
-	panesBottom := max(topHeight, playerY-gap)
+	snapshot := e.Store.Snapshot()
+	playerProgress := s.playerBarProgress(
+		gtx, e.Th.Motion.Unfold, snapshot.Provider != "", snapshot.Playback.Now != nil,
+	)
+	playerY, playerBottom, panesBottom := resolvePlayerGeometry(
+		size.Y, topHeight, margin, gap, playerHeight, bottomNavHeight, class == look.Compact, playerProgress,
+	)
+	s.overlayBottom = panesBottom
+	if snapshot.Playback.Now == nil {
+		s.overlays.Close(&s.soundTag)
+	}
 
 	sidebarPaneWidth, sidebarProgress := 0, float32(0)
 	switch class {
@@ -118,13 +128,25 @@ func (s *uiShell) layout(gtx layout.Context, e *env.Env, widthDP float32) layout
 		s.sidebarSheetMotion.Value(gtx)
 	}
 
-	playerRect := image.Rect(margin, playerY, size.X-margin, playerY+playerHeight)
-	s.layoutPaneRect(gtx, playerRect, gtx.Dp(e.Th.Cut.Large), e.Th.R.Stone1, func(gtx layout.Context) layout.Dimensions {
-		if class == look.Compact {
-			return s.player.LayoutCompact(gtx, e)
+	if playerBottom > playerY {
+		playerRects := resolvePlayerReveal(size.X, margin, playerY, playerBottom, playerHeight)
+		reveal := clip.Rect(playerRects.Visible).Push(gtx.Ops)
+		s.player.SetTop(playerY)
+		s.layoutPaneRect(gtx, playerRects.Full, gtx.Dp(e.Th.Cut.Large), e.Th.R.Stone1, func(gtx layout.Context) layout.Dimensions {
+			if class == look.Compact {
+				return s.player.LayoutCompact(gtx, e)
+			}
+			return s.player.Layout(gtx, e)
+		})
+		reveal.Pop()
+	}
+	if s.overlays.IsOpen(&s.soundTag) {
+		if anchor, ok := s.player.SoundAnchor(); ok {
+			s.overlays.Reanchor(&s.soundTag, anchor)
 		}
-		return s.player.Layout(gtx, e)
-	})
+	} else {
+		s.player.ResetSoundAnchor()
+	}
 	if class == look.Compact {
 		bottomRect := image.Rect(0, size.Y-bottomNavHeight, size.X, size.Y)
 		s.layoutPaneRect(gtx, bottomRect, gtx.Dp(e.Th.Cut.Large), e.Th.R.Stone1, func(gtx layout.Context) layout.Dimensions {
@@ -144,6 +166,50 @@ func (s *uiShell) layout(gtx layout.Context, e *env.Env, widthDP float32) layout
 		s.performWindowAction(action)
 	}
 	return layout.Dimensions{Size: size}
+}
+func (s *uiShell) playerBarProgress(gtx layout.Context, duration time.Duration, snapshotReady, loaded bool) float32 {
+	target := float32(0)
+	if loaded {
+		target = 1
+	}
+	s.playerMotion.Duration = duration
+	s.playerMotion.Ease = anim.EaseChisel
+	if !s.playerMotionReady {
+		if !snapshotReady {
+			return 0
+		}
+		s.playerMotion.Set(gtx, target)
+		s.playerMotionReady = true
+	} else {
+		s.playerMotion.Set(gtx, target)
+	}
+	return s.playerMotion.Value(gtx)
+}
+
+func resolvePlayerGeometry(sizeY, top, margin, gap, playerHeight, bottomNavHeight int, compact bool, progress float32) (int, int, int) {
+	progress = min(max(progress, 0), 1)
+	visibleHeight := int(float32(playerHeight)*progress + .5)
+	visibleGap := int(float32(gap)*progress + .5)
+	bottom := sizeY - margin
+	if compact {
+		bottom = sizeY - bottomNavHeight - margin
+	}
+	bottom = max(top, bottom)
+	playerTop := max(top, bottom-visibleHeight)
+	panesBottom := max(top, playerTop-visibleGap)
+	return playerTop, bottom, panesBottom
+}
+
+type playerReveal struct {
+	Visible image.Rectangle
+	Full    image.Rectangle
+}
+
+func resolvePlayerReveal(sizeX, margin, top, bottom, height int) playerReveal {
+	return playerReveal{
+		Visible: image.Rect(margin, top, sizeX-margin, bottom),
+		Full:    image.Rect(margin, top, sizeX-margin, top+height),
+	}
 }
 
 type frameRects struct {

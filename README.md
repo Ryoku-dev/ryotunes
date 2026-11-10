@@ -128,6 +128,8 @@ ryotunes --demo --png out.png
 
 Contributors should read [CONTRIBUTING.md](CONTRIBUTING.md) and run `./release/check.sh` before sending a change.
 
-## License
+## License and credits
 
-Ryotunes is distributed under [GPL-3.0-or-later](LICENSE). Ryotunes 1.x provenance and the 2.0 rebuild note are recorded in [UPSTREAM.md](UPSTREAM.md).
+Copyright (C) 2026 Ryoku-dev and contributors.
+
+Ryotunes' own source code is distributed under [GPL-3.0-or-later](LICENSE). The client and daemon binaries include GPL-3.0-only components and are distributed under GPLv3 only. The project copyright, trademark term, Lithic credit and retained upstream work are recorded in [NOTICE](NOTICE). Licenses for linked Go modules, fonts and icons are in [THIRD_PARTY_NOTICES](THIRD_PARTY_NOTICES), and the full project history is in [UPSTREAM.md](UPSTREAM.md).

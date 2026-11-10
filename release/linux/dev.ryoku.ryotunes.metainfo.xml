@@ -3,6 +3,9 @@
   <id>dev.ryoku.ryotunes</id>
   <name>Ryotunes</name>
   <summary>Ryoku's main music app</summary>
+  <developer id="dev.ryoku">
+    <name>Ryoku-dev</name>
+  </developer>
   <metadata_license>CC0-1.0</metadata_license>
   <project_license>GPL-3.0-or-later</project_license>
   <description>

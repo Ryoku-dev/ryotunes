@@ -2,6 +2,10 @@
 
 Ryotunes is a Go application with a Gio client and a separate playback daemon. Keep changes within the existing package boundaries described in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
+## License
+
+Contributions are distributed under GPL-3.0-or-later, the same license as Ryotunes. Keep existing copyright, license and source credits when changing work that came from another project.
+
 ## Go conventions
 
 - Run `gofmt` on changed Go files.

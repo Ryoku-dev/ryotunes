@@ -30,15 +30,14 @@ var soundPresets = []model.AudioFx{
 
 // Sound owns the anchored sound-shaping overlay content.
 type Sound struct {
-	presets      kit.Filters
-	presetScroll look.HScroller
-	tempo        kit.Slider
-	pitch        kit.Slider
-	reverb       kit.Slider
-	bass         kit.Slider
-	width        kit.Slider
-	reset        kit.Plaque
-	equalizer    kit.Click
+	presets   look.FlowChoice
+	tempo     kit.Slider
+	pitch     kit.Slider
+	reverb    kit.Slider
+	bass      kit.Slider
+	width     kit.Slider
+	reset     kit.Plaque
+	equalizer kit.Click
 
 	initialized bool
 	target      model.AudioFx
@@ -67,9 +66,7 @@ func (sound *Sound) Layout(gtx layout.Context, e *env.Env) layout.Dimensions {
 		layout.Rigid(kit.Text(e.Th.Theme, e.Th.T.Section, e.Th.R.Fg, "Sound")),
 		layout.Rigid(layout.Spacer{Height: 13}.Layout),
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			return sound.presetScroll.Layout(gtx, e.Th, 1, func(gtx layout.Context, _ int) layout.Dimensions {
-				return sound.presets.Layout(gtx, e.Th.Theme)
-			})
+			return sound.presets.Layout(gtx, e.Th)
 		}),
 		layout.Rigid(layout.Spacer{Height: 21}.Layout),
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {

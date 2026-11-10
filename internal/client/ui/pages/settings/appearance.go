@@ -78,6 +78,8 @@ func (p *page) layoutAppearance(gtx layout.Context, e *env.Env, snapshot state.S
 		desktopCorner, _ := look.DesktopCorner()
 		cornerDetail = "Ryoku window corners: " + intString(desktopCorner) + " dp"
 	}
+	openFloating := preferences.OpenFloatingOn()
+	openFloatingDetail := floatingWindowDetail(openFloating, e.Store.MainWindowOpenedFloating())
 	return p.settingRows(gtx,
 		p.settingRow(e.Th, "Colours", "Follow Ryoku, or pin dark or light stones while keeping the live palette accents.", func(gtx layout.Context) layout.Dimensions {
 			dims := p.appearance.colours.Layout(gtx, e.Th, e.Overlays, appearanceLabels, mode)
@@ -179,14 +181,12 @@ func (p *page) layoutAppearance(gtx layout.Context, e *env.Env, snapshot state.S
 			if !preferences.VisualizerOn() || !anyVisualizerInstalled {
 				styleGTX = styleGTX.Disabled()
 			}
-			return p.appearance.visualizerStyleScroll.Layout(styleGTX, e.Th, 1, func(styleGTX layout.Context, _ int) layout.Dimensions {
-				dims := p.appearance.visualizerStyle.Layout(styleGTX, e.Th.Theme)
-				if selected, changed := p.appearance.visualizerStyle.Changed(); changed && preferences.VisualizerOn() && selected >= 0 && selected < len(styleValues) {
-					preferences.VisualizerStyle = string(styleValues[selected])
-					saveClientPreferences(e, preferences)
-				}
-				return dims
-			})
+			dims := p.appearance.visualizerStyle.Layout(styleGTX, e.Th)
+			if selected, changed := p.appearance.visualizerStyle.Changed(); changed && preferences.VisualizerOn() && selected >= 0 && selected < len(styleValues) {
+				preferences.VisualizerStyle = string(styleValues[selected])
+				saveClientPreferences(e, preferences)
+			}
+			return dims
 		}),
 		p.settingRow(e.Th, "Wave progress", waveDetail, func(gtx layout.Context) layout.Dimensions {
 			p.appearance.waveProgress.Value = preferences.WaveOn()
@@ -201,14 +201,12 @@ func (p *page) layoutAppearance(gtx layout.Context, e *env.Env, snapshot state.S
 		p.settingRowWide(e.Th, "Accent colour", accentDetail, func(gtx layout.Context) layout.Dimensions {
 			p.appearance.accent.Labels = accentLabels
 			p.appearance.accent.Selected = indexOf(accentValues, accentMode, 0)
-			return p.appearance.accentScroll.Layout(gtx, e.Th, 1, func(gtx layout.Context, _ int) layout.Dimensions {
-				dims := p.appearance.accent.Layout(gtx, e.Th.Theme)
-				if selected, changed := p.appearance.accent.Changed(); changed && selected >= 0 && selected < len(accentValues) {
-					preferences.Accent = accentValues[selected]
-					saveClientPreferences(e, preferences)
-				}
-				return dims
-			})
+			dims := p.appearance.accent.Layout(gtx, e.Th)
+			if selected, changed := p.appearance.accent.Changed(); changed && selected >= 0 && selected < len(accentValues) {
+				preferences.Accent = accentValues[selected]
+				saveClientPreferences(e, preferences)
+			}
+			return dims
 		}),
 		p.settingRow(e.Th, "Tint the window", func() string {
 			if accentMode != state.AccentArt {
@@ -234,20 +232,18 @@ func (p *page) layoutAppearance(gtx layout.Context, e *env.Env, snapshot state.S
 			p.appearance.corners.Selected = indexOf(cornerValues, cornerPreset, 3)
 			return layout.Flex{Axis: layout.Vertical, Alignment: layout.End}.Layout(gtx,
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					return p.appearance.cornersScroll.Layout(gtx, e.Th, 1, func(gtx layout.Context, _ int) layout.Dimensions {
-						dims := p.appearance.corners.Layout(gtx, e.Th.Theme)
-						if selected, changed := p.appearance.corners.Changed(); changed && selected >= 0 && selected < len(cornerValues) {
-							previousPreset := cornerPreset
-							cornerPreset = cornerValues[selected]
-							preferences.Corners = cornerPreset
-							if cornerPreset == state.CornersCustom {
-								desktopCorner, _ := look.DesktopCorner()
-								preferences.CornerDp = cornerDpForCustom(previousPreset, preferences.CornerDp, desktopCorner)
-							}
-							saveClientPreferences(e, preferences)
+					dims := p.appearance.corners.Layout(gtx, e.Th)
+					if selected, changed := p.appearance.corners.Changed(); changed && selected >= 0 && selected < len(cornerValues) {
+						previousPreset := cornerPreset
+						cornerPreset = cornerValues[selected]
+						preferences.Corners = cornerPreset
+						if cornerPreset == state.CornersCustom {
+							desktopCorner, _ := look.DesktopCorner()
+							preferences.CornerDp = cornerDpForCustom(previousPreset, preferences.CornerDp, desktopCorner)
 						}
-						return dims
-					})
+						saveClientPreferences(e, preferences)
+					}
+					return dims
 				}),
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 					if cornerPreset != state.CornersCustom {
@@ -282,7 +278,29 @@ func (p *page) layoutAppearance(gtx layout.Context, e *env.Env, snapshot state.S
 					})
 				}),
 			)
-		}))
+		}),
+		p.settingRow(e.Th, "Open as a floating window", openFloatingDetail, func(gtx layout.Context) layout.Dimensions {
+			p.appearance.openFloating.Value = openFloating
+			dims := p.appearance.openFloating.Layout(gtx, e.Th.Theme)
+			if p.appearance.openFloating.Changed() {
+				value := p.appearance.openFloating.Value
+				preferences.OpenFloating = &value
+				saveClientPreferences(e, preferences)
+			}
+			return dims
+		}),
+	)
+}
+
+func floatingWindowDetail(preferred, opened bool) string {
+	detail := "Opens tiled in your layout like any other window"
+	if preferred {
+		detail = "Opens at its own size above your tiled windows"
+	}
+	if preferred != opened {
+		detail += " from the next launch"
+	}
+	return detail
 }
 
 func visualizerStyleIndex(styles []state.VisualizerStyle, style state.VisualizerStyle) int {

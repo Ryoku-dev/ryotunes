@@ -58,3 +58,22 @@ func TestCornerDpForCustom(t *testing.T) {
 		t.Fatalf("stored custom value = %d, want 11", got)
 	}
 }
+
+func TestFloatingWindowDetailDefersModeChanges(t *testing.T) {
+	for _, test := range []struct {
+		name              string
+		preferred, opened bool
+		want              string
+	}{
+		{name: "floating now", preferred: true, opened: true, want: "Opens at its own size above your tiled windows"},
+		{name: "tiled now", want: "Opens tiled in your layout like any other window"},
+		{name: "float next launch", preferred: true, want: "Opens at its own size above your tiled windows from the next launch"},
+		{name: "tile next launch", opened: true, want: "Opens tiled in your layout like any other window from the next launch"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if got := floatingWindowDetail(test.preferred, test.opened); got != test.want {
+				t.Fatalf("floatingWindowDetail() = %q, want %q", got, test.want)
+			}
+		})
+	}
+}

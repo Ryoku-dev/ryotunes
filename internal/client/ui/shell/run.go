@@ -31,6 +31,7 @@ func init() {
 type Options struct {
 	Demo          bool
 	DemoPlaying   bool
+	DemoEmpty     bool
 	PNG           string
 	Width, Height int
 	Route         string
@@ -154,7 +155,7 @@ func startRuntime(options Options) (*clientRuntime, error) {
 		}
 		runtime.tempDir = tempDir
 		socketPath = filepath.Join(tempDir, "ryotunesd.sock")
-		go func() { runtime.serveErr <- demo.Serve(ctx, socketPath, options.DemoPlaying) }()
+		go func() { runtime.serveErr <- demo.Serve(ctx, socketPath, options.DemoPlaying, options.DemoEmpty) }()
 		deadline := time.Now().Add(time.Second)
 		for {
 			if _, err := os.Stat(socketPath); err == nil {

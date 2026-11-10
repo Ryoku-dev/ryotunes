@@ -21,7 +21,13 @@ func (s *uiShell) layoutOverlays(gtx layout.Context, e *env.Env) {
 	s.sidebar.LayoutDialogs(gtx, e)
 	s.itemMenu.LayoutDialogs(gtx, e)
 	s.layoutConfirm(gtx, e)
-	s.placards.Layout(gtx, e.Th.Theme)
+	placardContext := gtx
+	if !s.currentMini && s.overlayBottom > 0 {
+		height := min(gtx.Constraints.Max.Y, s.overlayBottom)
+		placardContext.Constraints.Min.Y = height
+		placardContext.Constraints.Max.Y = height
+	}
+	s.placards.Layout(placardContext, e.Th.Theme)
 	s.overlays.Layout(gtx, e.Th)
 }
 

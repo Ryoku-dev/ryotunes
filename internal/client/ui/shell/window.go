@@ -1,6 +1,8 @@
 package shell
 
 import (
+	"image"
+	"os"
 	"sync"
 	"time"
 
@@ -9,7 +11,6 @@ import (
 	"gioui.org/layout"
 	"gioui.org/op"
 	"gioui.org/op/paint"
-	"gioui.org/unit"
 
 	"github.com/ryoku-dev/ryoku/docs/lithic/library/go/anim"
 	"github.com/ryoku-dev/ryoku/docs/lithic/library/go/kit"
@@ -81,6 +82,9 @@ type uiShell struct {
 	panelMotion         anim.Tween
 	sheetMotion         anim.Tween
 	sheetReady          bool
+	playerMotion        anim.Tween
+	playerMotionReady   bool
+	overlayBottom       int
 	sidebarMotion       anim.Tween
 	sidebarMotionReady  bool
 	sidebarSheetMotion  anim.Tween
@@ -97,14 +101,16 @@ type uiShell struct {
 	prefsMu   sync.Mutex
 	prefsSave chan struct{}
 
-	windowMu    sync.Mutex
-	window      *gioapp.Window
-	currentMini bool
-	nextWindow  *gioapp.Window
-	nextMini    bool
-	quitting    bool
-	mainWidth   int
-	mainHeight  int
+	windowMu          sync.Mutex
+	window            *gioapp.Window
+	currentMini       bool
+	nextWindow        *gioapp.Window
+	nextMini          bool
+	nextPlan          windowModePlan
+	windowPersistence windowSizePersistence
+	quitting          bool
+	mainWidth         int
+	mainHeight        int
 }
 
 func newShell(runtime *clientRuntime, initial env.Route, panel env.Panel, mini bool, width, height int) *uiShell {
@@ -141,7 +147,7 @@ func (runtime *clientRuntime) runWindows(options Options) error {
 	unsubscribe := runtime.store.Subscribe(runtime.hub.Invalidate)
 	defer unsubscribe()
 
-	window := shell.newWindow(mini)
+	window, plan := shell.newWindow(mini)
 	go func() {
 		select {
 		case <-runtime.quit:
@@ -150,13 +156,14 @@ func (runtime *clientRuntime) runWindows(options Options) error {
 		}
 	}()
 	for {
-		if err := shell.runWindow(window, mini); err != nil {
+		if err := shell.runWindow(window, mini, plan); err != nil {
 			shell.flushPreferences()
 			return err
 		}
 		shell.windowMu.Lock()
 		next := shell.nextWindow
 		nextMini := shell.nextMini
+		nextPlan := shell.nextPlan
 		quitting := shell.quitting
 		shell.nextWindow = nil
 		shell.window = nil
@@ -170,21 +177,21 @@ func (runtime *clientRuntime) runWindows(options Options) error {
 			shell.flushPreferences()
 			return nil
 		}
-		window, mini = next, nextMini
+		window, mini, plan = next, nextMini, nextPlan
 	}
 }
 
-func (s *uiShell) newWindow(mini bool) *gioapp.Window {
+func (s *uiShell) newWindow(mini bool) (*gioapp.Window, windowModePlan) {
 	window := new(gioapp.Window)
 	if mini {
 		preferences := s.runtime.store.Snapshot().Client
-		scale := clientScale(preferences)
-		window.Option(
+		plan := miniWindowMode(clientScale(preferences))
+		options := []gioapp.Option{
 			gioapp.Title("Ryotunes Mini"),
-			gioapp.Size(unit.Dp(520*scale), unit.Dp(176*scale)),
 			gioapp.Decorated(false),
-		)
-		return window
+		}
+		window.Option(append(options, plan.creationOptions()...)...)
+		return window, plan
 	}
 	preferences := s.runtime.store.Snapshot().Client
 	width, height := preferences.WindowWidth, preferences.WindowHeight
@@ -192,16 +199,17 @@ func (s *uiShell) newWindow(mini bool) *gioapp.Window {
 		width, height = s.mainWidth, s.mainHeight
 		s.mainWidth, s.mainHeight = 0, 0
 	}
-	window.Option(
+	plan := mainWindowMode(width, height, preferences.OpenFloatingOn())
+	s.runtime.store.SetMainWindowOpenedFloating(plan.persistSize)
+	options := []gioapp.Option{
 		gioapp.Title("Ryotunes"),
-		gioapp.Size(unit.Dp(width), unit.Dp(height)),
-		gioapp.MinSize(unit.Dp(480), unit.Dp(560)),
 		gioapp.Decorated(!preferences.Decorations),
-	)
-	return window
+	}
+	window.Option(append(options, plan.creationOptions()...)...)
+	return window, plan
 }
 
-func (s *uiShell) runWindow(window *gioapp.Window, mini bool) error {
+func (s *uiShell) runWindow(window *gioapp.Window, mini bool, plan windowModePlan) error {
 	s.windowMu.Lock()
 	s.window, s.currentMini = window, mini
 	s.config = gioapp.Config{}
@@ -212,24 +220,34 @@ func (s *uiShell) runWindow(window *gioapp.Window, mini bool) error {
 	}
 	removeWindow := s.runtime.hub.Add(window.Invalidate)
 	defer removeWindow()
+	s.windowPersistence.cancel()
+	defer s.windowPersistence.cancel()
 
 	var operations op.Ops
-	minimumSet := !mini
+	creationReissued := false
+	relaxAfterFirstFrame := plan.fixedAtMap
+	padding := windowPaddingTracker{}
+	lastObservedSize := image.Point{}
 	for {
 		raw := window.Event()
 		switch event := raw.(type) {
 		case gioapp.ConfigEvent:
 			s.config = event.Config
-			if !minimumSet {
-				// Gio pads the first minimum with a 40 dp fallback title bar until
-				// decorations are settled, and niri sizes the mini from that first one
-				minimumSet = true
-				scale := clientScale(s.runtime.store.Snapshot().Client)
-				window.Option(gioapp.MinSize(unit.Dp(300*scale), unit.Dp(160*scale)))
+			if !creationReissued {
+				creationReissued = true
+				window.Option(plan.creationOptions()...)
 			}
 		case gioapp.FrameEvent:
-			if !mini {
-				s.persistWindowSize(s.config, event.Metric)
+			if !mini && plan.persistSize {
+				width := int(event.Metric.PxToDp(event.Size.X) + .5)
+				height := padding.contentHeight(int(event.Metric.PxToDp(event.Size.Y)+.5), plan.height)
+				observed := image.Pt(width, height)
+				if width > 0 && height > 0 && observed != lastObservedSize {
+					lastObservedSize = observed
+					s.windowPersistence.schedule(windowSizeCandidate{
+						width: width, height: height, pid: os.Getpid(), title: "Ryotunes",
+					}, s.persistWindowSize)
+				}
 			}
 			s.posts.Drain()
 			if s.runtime.store.ConsumeShow() {
@@ -246,6 +264,10 @@ func (s *uiShell) runWindow(window *gioapp.Window, mini bool) error {
 				s.frameMain(event, &operations)
 			}
 			event.Frame(&operations)
+			if relaxAfterFirstFrame {
+				relaxAfterFirstFrame = false
+				window.Option(relaxedWindowOptions(plan.minimumWidth, plan.minimumHeight)...)
+			}
 		case gioapp.DestroyEvent:
 			return event.Err
 		}
@@ -323,7 +345,7 @@ func (s *uiShell) requestWindow(mini bool) {
 		return
 	}
 	s.nextMini = mini
-	s.nextWindow = s.newWindow(mini)
+	s.nextWindow, s.nextPlan = s.newWindow(mini)
 	current := s.window
 	s.windowMu.Unlock()
 	s.setMiniPreference(mini)
@@ -377,13 +399,8 @@ func (s *uiShell) performWindowAction(action system.Action) {
 	}
 }
 
-func (s *uiShell) persistWindowSize(config gioapp.Config, metric unit.Metric) {
-	if config.Size.X <= 0 || config.Size.Y <= 0 || config.Mode != gioapp.Windowed {
-		return
-	}
+func (s *uiShell) persistWindowSize(width, height int) {
 	preferences := s.runtime.store.Snapshot().Client
-	width := int(metric.PxToDp(config.Size.X) + .5)
-	height := int(metric.PxToDp(config.Size.Y) + .5)
 	if preferences.WindowWidth == width && preferences.WindowHeight == height {
 		return
 	}

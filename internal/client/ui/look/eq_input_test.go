@@ -108,3 +108,110 @@ func TestFaderKeysAndCancelCommit(t *testing.T) {
 		t.Fatalf("released key value = %.1f, want 0.5", value)
 	}
 }
+
+func TestHScrollerHorizontalScrollDoesNotEditFaders(t *testing.T) {
+	const (
+		cellCount = 12
+		cellWidth = 56
+		height    = 120
+	)
+	saved := scrollOnX11
+	scrollOnX11 = false
+	t.Cleanup(func() { scrollOnX11 = saved })
+
+	metric := unit.Metric{PxPerDp: 1, PxPerSp: 1}
+	theme := NewTheme(palette.Signature(true), libtheme.Comfortable)
+	style := FaderStyle{Min: -12, Max: 12, Step: .5, Height: height, Label: "Gain"}
+	var strip HScroller
+	var faders [cellCount]Fader
+	var gains [cellCount]float64
+	var operations op.Ops
+	var router input.Router
+	now := time.Unix(400, 0)
+	frame := func() {
+		operations.Reset()
+		gtx := layout.Context{
+			Ops: &operations, Source: router.Source(), Now: now, Metric: metric,
+			Constraints: layout.Exact(image.Pt(180, height)),
+		}
+		strip.Layout(gtx, theme, cellCount, func(gtx layout.Context, index int) layout.Dimensions {
+			gtx.Constraints = layout.Exact(image.Pt(cellWidth, height))
+			return faders[index].Layout(gtx, theme, gains[index], style)
+		})
+		router.Frame(&operations)
+		now = now.Add(time.Millisecond)
+	}
+
+	frame()
+	router.Queue(
+		pointer.Event{Kind: pointer.Move, Source: pointer.Mouse, PointerID: 1, Position: f32.Pt(20, 60)},
+		pointer.Event{
+			Kind: pointer.Scroll, Source: pointer.Mouse, PointerID: 1,
+			Position: f32.Pt(20, 60), Scroll: f32.Pt(200, 0),
+		},
+	)
+	frame()
+	if distance := strip.Position.First*cellWidth + strip.Position.Offset; distance != 200 {
+		t.Fatalf("strip moved %d px, want 200", distance)
+	}
+	for index := range faders {
+		if value, ok := faders[index].Committed(); ok {
+			t.Fatalf("horizontal strip scroll committed fader %d to %.1f", index, value)
+		}
+		if gains[index] != 0 {
+			t.Fatalf("horizontal strip scroll changed gain %d to %.1f", index, gains[index])
+		}
+	}
+}
+
+func TestHScrollerHorizontalScrollDoesNotEditValueDrags(t *testing.T) {
+	const (
+		cellCount = 12
+		cellWidth = 56
+		height    = 120
+	)
+	saved := scrollOnX11
+	scrollOnX11 = false
+	t.Cleanup(func() { scrollOnX11 = saved })
+
+	metric := unit.Metric{PxPerDp: 1, PxPerSp: 1}
+	theme := NewTheme(palette.Signature(true), libtheme.Comfortable)
+	var strip HScroller
+	var drags [cellCount]ValueDrag
+	var operations op.Ops
+	var router input.Router
+	now := time.Unix(500, 0)
+	frame := func() {
+		operations.Reset()
+		gtx := layout.Context{
+			Ops: &operations, Source: router.Source(), Now: now, Metric: metric,
+			Constraints: layout.Exact(image.Pt(180, height)),
+		}
+		strip.Layout(gtx, theme, cellCount, func(gtx layout.Context, index int) layout.Dimensions {
+			gtx.Constraints = layout.Exact(image.Pt(cellWidth, height))
+			return drags[index].Layout(gtx, 1, .1, 10, func(gtx layout.Context) layout.Dimensions {
+				return layout.Dimensions{Size: gtx.Constraints.Max}
+			})
+		})
+		router.Frame(&operations)
+		now = now.Add(time.Millisecond)
+	}
+
+	frame()
+	router.Queue(
+		pointer.Event{Kind: pointer.Move, Source: pointer.Mouse, PointerID: 2, Position: f32.Pt(20, 60)},
+		pointer.Event{
+			Kind: pointer.Scroll, Source: pointer.Mouse, PointerID: 2,
+			Position: f32.Pt(20, 60), Scroll: f32.Pt(200, 0),
+		},
+	)
+	frame()
+	if distance := strip.Position.First*cellWidth + strip.Position.Offset; distance != 200 {
+		t.Fatalf("strip moved %d px, want 200", distance)
+	}
+	for index := range drags {
+		if value, ok := drags[index].Committed(); ok {
+			t.Fatalf("horizontal strip scroll committed value drag %d to %.2f", index, value)
+		}
+	}
+}

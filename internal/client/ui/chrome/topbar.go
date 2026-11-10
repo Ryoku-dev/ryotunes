@@ -143,7 +143,7 @@ func (top *TopBar) layoutBrand(gtx layout.Context, e *env.Env, frame Frame, heig
 		railX := gtx.Dp(8) + max(0, (paneWidth-markSize)/2)
 		expandedX := gtx.Dp(21)
 		x := expandedX + int(float32(railX-expandedX)*progress+.5)
-		topBarAt(gtx, image.Rect(x, gtx.Dp(16), x+markSize, gtx.Dp(16)+markSize), look.RyokuMark(24))
+		topBarAt(gtx, image.Rect(x, gtx.Dp(16), x+markSize, gtx.Dp(16)+markSize), look.RyokuMark(24, e.Th.R.Fg))
 		titleX := x + markSize + gtx.Dp(8)
 		right := frame.Sidebar
 		alpha := max(0, 1-2*progress)
@@ -163,9 +163,9 @@ func (top *TopBar) layoutBrand(gtx layout.Context, e *env.Env, frame Frame, heig
 			column = gtx.Dp(80)
 		}
 		x := gtx.Dp(8) + max(0, (column-gtx.Dp(8)-markSize)/2)
-		topBarAt(gtx, image.Rect(x, gtx.Dp(16), x+markSize, gtx.Dp(16)+markSize), look.RyokuMark(24))
+		topBarAt(gtx, image.Rect(x, gtx.Dp(16), x+markSize, gtx.Dp(16)+markSize), look.RyokuMark(24, e.Th.R.Fg))
 	default:
-		topBarAt(gtx, image.Rect(gtx.Dp(13), gtx.Dp(16), gtx.Dp(13)+markSize, gtx.Dp(16)+markSize), look.RyokuMark(24))
+		topBarAt(gtx, image.Rect(gtx.Dp(13), gtx.Dp(16), gtx.Dp(13)+markSize, gtx.Dp(16)+markSize), look.RyokuMark(24, e.Th.R.Fg))
 	}
 }
 

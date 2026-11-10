@@ -30,7 +30,7 @@ func (drag *ValueDrag) Layout(gtx layout.Context, value, minValue, maxValue floa
 		raw, ok := gtx.Event(pointer.Filter{
 			Target:  &drag.tag,
 			Kinds:   pointer.Press | pointer.Drag | pointer.Release | pointer.Cancel | pointer.Scroll,
-			ScrollX: pointer.ScrollRange{Min: -100000, Max: 100000}, ScrollY: pointer.ScrollRange{Min: -100000, Max: 100000},
+			ScrollY: pointer.ScrollRange{Min: -100000, Max: 100000},
 		})
 		if !ok {
 			break
@@ -63,11 +63,7 @@ func (drag *ValueDrag) Layout(gtx layout.Context, value, minValue, maxValue floa
 				gtx.Execute(op.InvalidateCmd{})
 			}
 		case pointer.Scroll:
-			delta := e.Scroll.Y
-			if delta == 0 {
-				delta = e.Scroll.X
-			}
-			drag.wheel += delta / 150
+			drag.wheel += e.Scroll.Y / 150
 			whole := int(drag.wheel)
 			drag.wheel -= float32(whole)
 			if whole != 0 {

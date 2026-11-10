@@ -1,0 +1,67 @@
+Ryotunes
+Copyright (C) 2026 Ryoku-dev and contributors
+
+Ryotunes' own source code is free software under the GNU General Public
+License version 3 or later. The grant covers the Ryotunes source code and the
+distributed app assets except where a component is listed under another
+license. The `ryotunes` client and `ryotunesd` daemon binaries include
+GPL-3.0-only code and are distributed under GPLv3 only, as detailed below. The
+full project license is in LICENSE. The licenses and copyright notices for
+linked Go modules, the embedded fonts and the Material Design icons are in
+THIRD_PARTY_NOTICES.
+
+Trademark term
+
+Under section 7(e) of GPLv3, the following additional term applies: the Ryoku
+and Ryotunes names, the Ryoku mark and the Ryotunes app icon are Ryoku
+trademarks. The GPL does not grant permission to use those names or marks. A
+modified version must not be called Ryotunes or use the Ryoku or Ryotunes marks
+without separate permission from Ryoku-dev.
+
+Lithic
+
+The interface uses Lithic, Ryoku's design language and Go UI library. Lithic is
+part of the Ryoku repository under GPL-3.0-only. The `ryotunes` client links
+Lithic, so that binary is distributed under GPLv3 only.
+
+Project history and retained work
+
+Ryotunes 2.x is an original Ryoku Go codebase. It does not compile or ship the
+1.x Rust, QML, Svelte or JavaScript source. It keeps the Ryotunes app icon and
+some Linux package metadata from 1.x, and it preserves the data paths and wire
+contract so existing libraries, settings and sessions still work.
+
+Ryotunes 1.x began as a modified GPL-3.0-or-later work based on LiMusic by
+SimoHypers and contributors:
+
+  https://github.com/SimoHypers/limusic
+
+The YouTube client profile table in internal/provider/youtube/clients.go was
+carried from the GPL-3.0 1.x and LiMusic table. Those values keep the same
+GPL-3.0-compatible terms and LiMusic credit.
+
+The lyric romanization logic in internal/lyrics/romanize is ported from
+PeekMusic at commit 83217188a, itself a fork of Metrolist. PeekMusic is
+GPL-3.0, and this port remains under GPL-3.0-compatible terms:
+
+  https://github.com/PeekMusic/PeekMusic
+  https://github.com/MetrolistGroup/Metrolist
+
+Third-party components
+
+The four Go binaries use the modules listed in THIRD_PARTY_NOTICES. Only the
+`ryotunesd` daemon links go-librespot, which is GPL-3.0-only, so that binary is
+distributed under GPLv3 only. The Space Grotesk and Space Mono fonts are
+OFL-1.1. Material Design icons are Apache-2.0.
+
+The pinned xlab/vorbis-go revision predates that repository's LICENSE file. The
+copyright holder now publishes vorbis-go under MIT. A verbatim copy of that
+current grant is kept in release/notices/xlab-vorbis-go.LICENSE and included in
+THIRD_PARTY_NOTICES.
+
+Ryotunes also uses system components without bundling them into its Go
+binaries. It loads libmpv, runs yt-dlp and FFmpeg for stream and download work,
+and can run cava and PipeWire's pw-record and pw-dump for visualizers. Their
+licenses come with their system packages: mpv is GPL-2.0-or-later by default or
+LGPL-2.1-or-later when built in LGPL mode, yt-dlp is Unlicense, cava and
+PipeWire are MIT, and FFmpeg is LGPL-2.1-or-later or GPL depending on its build.

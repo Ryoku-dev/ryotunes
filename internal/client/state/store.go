@@ -115,9 +115,10 @@ type QueueGroups struct {
 
 // Store holds one synchronized client state and invalidation subscriptions.
 type Store struct {
-	mu       sync.RWMutex
-	state    State
-	snapshot State
+	mu                       sync.RWMutex
+	state                    State
+	snapshot                 State
+	mainWindowOpenedFloating bool
 
 	subscribers          map[uint64]func()
 	nextSubscriber       uint64
@@ -157,6 +158,20 @@ func (s *Store) Snapshot() State {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.snapshot
+}
+
+// MainWindowOpenedFloating reports how the current main window mapped.
+func (s *Store) MainWindowOpenedFloating() bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.mainWindowOpenedFloating
+}
+
+// SetMainWindowOpenedFloating records how a newly created main window maps.
+func (s *Store) SetMainWindowOpenedFloating(opened bool) {
+	s.mu.Lock()
+	s.mainWindowOpenedFloating = opened
+	s.mu.Unlock()
 }
 
 // ApplySnapshot replaces daemon-owned state while preserving newer event updates.

@@ -30,13 +30,10 @@ type compactPlayer struct {
 
 // LayoutCompact renders the 64 dp player above compact bottom navigation.
 func (bar *PlayerBar) LayoutCompact(gtx layout.Context, e *env.Env) layout.Dimensions {
-	snapshot := e.Store.Snapshot()
-	bar.forwardToast(e, snapshot.Toast)
-	if snapshot.Playback.Now == nil {
+	snapshot, track, provider, ok := bar.playback(e)
+	if !ok {
 		return layout.Dimensions{}
 	}
-	track := trackFromPlayback(snapshot.Playback.Now, e.Store.CurrentTrack())
-	provider := model.ProviderOf(track.VideoID)
 	bar.seek.Reconcile(gtx, e, snapshot, track.VideoID)
 
 	width := gtx.Constraints.Max.X

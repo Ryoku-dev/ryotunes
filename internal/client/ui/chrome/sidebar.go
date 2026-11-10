@@ -627,7 +627,7 @@ func (sidebar *Sidebar) layoutCollection(gtx layout.Context, e *env.Env, item si
 				if playing {
 					ink = e.Th.Accent.Ink
 				}
-				artSize := sidebarLerp(gtx.Dp(36), gtx.Dp(40), rail)
+				artSize := min(gtx.Dp(32), height-gtx.Dp(16))
 				artX := sidebarLerp(gtx.Dp(8), (size.X-artSize)/2, rail)
 				sidebarAt(gtx, image.Rect(artX, (height-artSize)/2, artX+artSize, (height+artSize)/2), func(gtx layout.Context) layout.Dimensions {
 					return sidebar.layoutCollectionArt(gtx, e, row, item, artSize)

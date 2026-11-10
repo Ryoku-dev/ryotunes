@@ -32,12 +32,14 @@ func execute() (int, error) {
 	size := flag.String("size", "", "window or PNG size as WIDTHxHEIGHT (default 1280x800)")
 	demoMode := flag.Bool("demo", false, "use the in-process demo daemon")
 	demoPlaying := flag.Bool("demo-playing", false, "play the demo fixture for live visual effects")
+	demoEmpty := flag.Bool("demo-empty", false, "use a demo fixture with nothing loaded")
 	route := flag.String("route", "", "initial route (default home)")
 	query := flag.String("query", "", "initial search query")
 	panel := flag.String("panel", "", "initial panel: queue, lyrics, now-playing, listen-together, or empty")
 	mode := flag.String("mode", "", "palette mode override: follow, dark, or light")
 	mini := flag.Bool("mini", false, "open the mini player")
 	flag.Parse()
+	useDemo := *demoMode || *demoEmpty
 
 	width, height := 0, 0
 	if *size != "" {
@@ -49,7 +51,7 @@ func execute() (int, error) {
 	}
 
 	var clientLock *state.ClientLock
-	if !*demoMode && *pngPath == "" {
+	if !useDemo && *pngPath == "" {
 		var err error
 		clientLock, err = state.AcquireClientLock()
 		if errors.Is(err, state.ErrClientLockHeld) {
@@ -64,7 +66,7 @@ func execute() (int, error) {
 	}
 
 	options := shell.Options{
-		Demo: *demoMode, DemoPlaying: *demoPlaying, PNG: *pngPath, Width: width, Height: height,
+		Demo: useDemo, DemoPlaying: *demoPlaying, DemoEmpty: *demoEmpty, PNG: *pngPath, Width: width, Height: height,
 		Route: *route, Query: *query, Panel: *panel, Mode: *mode, Mini: *mini,
 	}
 	if *pngPath != "" {

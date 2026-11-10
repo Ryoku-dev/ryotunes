@@ -33,6 +33,8 @@ type ClientPreferences struct {
 	CoverTint *bool `json:"coverTint,omitempty"`
 	// WordByWord highlights lyrics word by word as they are sung; missing means on.
 	WordByWord *bool `json:"wordByWord,omitempty"`
+	// OpenFloating opens the main window floating instead of tiled; missing means on.
+	OpenFloating *bool `json:"openFloating,omitempty"`
 }
 
 // VisualizerOn reports the stored visualizer preference; missing means on.
@@ -53,6 +55,11 @@ func (p ClientPreferences) CoverTintOn() bool {
 // WordByWordOn reports the stored karaoke preference; missing means on.
 func (p ClientPreferences) WordByWordOn() bool {
 	return p.WordByWord == nil || *p.WordByWord
+}
+
+// OpenFloatingOn reports the stored window mode preference; missing means on.
+func (p ClientPreferences) OpenFloatingOn() bool {
+	return p.OpenFloating == nil || *p.OpenFloating
 }
 
 // The accent sources: the playing cover, the provider's brand, or the

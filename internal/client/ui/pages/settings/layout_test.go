@@ -31,3 +31,27 @@ func TestScrollspySectionPinsLastAtEnd(t *testing.T) {
 		t.Fatalf("scrollspySection() = %d, want 2", got)
 	}
 }
+
+func TestIndexVisibleOffsetKeepsCurrentSectionInPane(t *testing.T) {
+	const (
+		count    = 12
+		viewport = 492
+		row      = 48
+		gap      = 4
+	)
+	if got := indexVisibleOffset(0, count, viewport, 80, row, gap); got != 0 {
+		t.Fatalf("first section offset = %d, want 0", got)
+	}
+	if got := indexVisibleOffset(11, count, viewport, 0, row, gap); got != 128 {
+		t.Fatalf("last section offset = %d, want 128", got)
+	}
+	if got := indexVisibleOffset(9, count, viewport, 80, row, gap); got != 80 {
+		t.Fatalf("visible section offset = %d, want 80", got)
+	}
+	if got := indexVisibleOffset(11, count, 300, 0, row, gap); got != 320 {
+		t.Fatalf("last section in short pane offset = %d, want 320", got)
+	}
+	if got := indexVisibleOffset(0, count, 300, 320, row, gap); got != 0 {
+		t.Fatalf("first section after index scroll offset = %d, want 0", got)
+	}
+}

@@ -37,8 +37,21 @@ func (q *Queue) playIndex(ctx context.Context, index int, paused bool) error {
 				q.changed()
 				q.mu.Lock()
 				hasNext := index < len(q.state.items)
+				now := q.nowPlayingLocked()
+				empty := now == nil
+				if empty {
+					q.position = 0
+					q.duration = 0
+					q.playing = false
+					q.streamClient = ""
+				}
 				q.mu.Unlock()
 				if !hasNext {
+					if empty {
+						_ = q.player.Stop()
+						q.bus.Emit(protocol.EventNowPlaying, (*model.PlaybackTrack)(nil))
+						q.bus.Emit(protocol.EventPlaybackState, protocol.PlaybackStatePaused)
+					}
 					return err
 				}
 				continue
@@ -114,6 +127,15 @@ func (q *Queue) playIndex(ctx context.Context, index int, paused bool) error {
 
 func (q *Queue) resolve(ctx context.Context, track model.Track, allowCache bool) (model.Stream, bool, error) {
 	kind := model.ProviderOf(track.VideoID)
+	downloaded := kind == model.ProviderYouTube || kind == model.ProviderSoundCloud
+	if allowCache && q.hooks != nil && downloaded {
+		if stream, ok := q.hooks.DownloadedStream(track.VideoID); ok {
+			if cached, found := q.hooks.StreamCacheGet(track.VideoID); found {
+				stream.LoudnessDB = cached.LoudnessDB
+			}
+			return stream, true, nil
+		}
+	}
 	if allowCache && q.hooks != nil && kind != model.ProviderSpotify && kind != model.ProviderTidal && kind != model.ProviderLocal {
 		if stream, ok := q.hooks.StreamCacheGet(track.VideoID); ok && cacheAlive(stream, q.now()) {
 			return stream, true, nil

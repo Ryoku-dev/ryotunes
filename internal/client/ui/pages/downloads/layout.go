@@ -118,7 +118,7 @@ func (p *Page) layoutDownloadSlot(gtx layout.Context, e *env.Env, jobs []model.D
 			}
 			return widgets.EmptyState(e, look.Icon.Download, "No downloads here", "Tracks matching this filter will appear here.")(gtx)
 		}
-		return p.layoutItem(gtx, e, items[index])
+		return p.layoutItem(gtx, e, items[index], items, jobs)
 	}
 	if !wide || index > 0 {
 		return layout.Inset{Bottom: unit.Dp(4)}.Layout(gtx, row)
@@ -135,7 +135,7 @@ func (p *Page) layoutDownloadSlot(gtx layout.Context, e *env.Env, jobs []model.D
 	)
 }
 
-func (p *Page) layoutItem(gtx layout.Context, e *env.Env, item downloadItem) layout.Dimensions {
+func (p *Page) layoutItem(gtx layout.Context, e *env.Env, item downloadItem, items []downloadItem, jobs []model.DownloadEntry) layout.Dimensions {
 	if item.collection != nil {
 		group := *item.collection
 		card := p.collections[group.key]
@@ -143,7 +143,7 @@ func (p *Page) layoutItem(gtx layout.Context, e *env.Env, item downloadItem) lay
 			card = new(collectionCard)
 			p.collections[group.key] = card
 		}
-		return card.layout(gtx, e, group, p.rows)
+		return card.layout(gtx, e, group, p.rows, items, jobs)
 	}
 	if item.job == nil {
 		return layout.Dimensions{}
@@ -154,7 +154,7 @@ func (p *Page) layoutItem(gtx layout.Context, e *env.Env, item downloadItem) lay
 		row = new(downloadRow)
 		p.rows[job.ID] = row
 	}
-	return row.layout(gtx, e, job)
+	return row.layout(gtx, e, job, items)
 }
 
 func filteredDownloads(jobs []model.DownloadEntry, selected int) []downloadItem {

@@ -50,7 +50,15 @@ type PlayerBar struct {
 	sound     kit.IconPlaque
 	soundTip  look.Tip
 
-	lastToast uint64
+	lastToast     uint64
+	lastSnapshot  state.State
+	lastTrack     model.Track
+	lastProvider  model.Provider
+	hasPlayback   bool
+	frameTop      int
+	soundTop      int
+	soundAnchor   image.Rectangle
+	soundAnchored bool
 
 	compact compactPlayer
 }
@@ -112,13 +120,10 @@ func playerBarTrailingWidth(fit playerBarFit, metrics playerBarFitMetrics) int {
 
 // Layout renders the 88 dp three-zone player interior.
 func (bar *PlayerBar) Layout(gtx layout.Context, e *env.Env) layout.Dimensions {
-	snapshot := e.Store.Snapshot()
-	bar.forwardToast(e, snapshot.Toast)
-	if snapshot.Playback.Now == nil {
+	snapshot, track, provider, ok := bar.playback(e)
+	if !ok {
 		return layout.Dimensions{}
 	}
-	track := trackFromPlayback(snapshot.Playback.Now, e.Store.CurrentTrack())
-	provider := model.ProviderOf(track.VideoID)
 
 	barWidth := gtx.Constraints.Max.X
 	height := min(gtx.Constraints.Max.Y, gtx.Dp(88))
@@ -410,10 +415,37 @@ func (bar *PlayerBar) layoutTrailing(gtx layout.Context, e *env.Env, provider mo
 		e.Nav.ToggleMini()
 	}
 	if bar.sound.Clicked(gtx) && e.Overlays != nil {
-		e.Nav.OpenSound(e.Overlays.AnchorOf(&bar.sound.Clickable, soundSize))
+		bar.soundAnchor = e.Overlays.AnchorOf(&bar.sound.Clickable, soundSize)
+		bar.soundTop = bar.frameTop
+		bar.soundAnchored = !bar.soundAnchor.Empty()
+		e.Nav.OpenSound(bar.soundAnchor)
 	}
 	return dimensions
 }
+
+func (bar *PlayerBar) playback(e *env.Env) (state.State, model.Track, model.Provider, bool) {
+	snapshot := e.Store.Snapshot()
+	bar.forwardToast(e, snapshot.Toast)
+	if snapshot.Playback.Now == nil {
+		return bar.lastSnapshot, bar.lastTrack, bar.lastProvider, bar.hasPlayback
+	}
+	track := trackFromPlayback(snapshot.Playback.Now, e.Store.CurrentTrack())
+	provider := model.ProviderOf(track.VideoID)
+	bar.lastSnapshot, bar.lastTrack, bar.lastProvider = snapshot, track, provider
+	bar.hasPlayback = true
+	return snapshot, track, provider, true
+}
+
+func (bar *PlayerBar) SetTop(top int) { bar.frameTop = top }
+
+func (bar *PlayerBar) SoundAnchor() (image.Rectangle, bool) {
+	if !bar.soundAnchored {
+		return image.Rectangle{}, false
+	}
+	return bar.soundAnchor.Add(image.Pt(0, bar.frameTop-bar.soundTop)), true
+}
+
+func (bar *PlayerBar) ResetSoundAnchor() { bar.soundAnchored = false }
 
 func (bar *PlayerBar) forwardToast(e *env.Env, toast *state.Toast) {
 	if toast == nil || toast.Serial == bar.lastToast || e.Toast == nil {

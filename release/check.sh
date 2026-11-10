@@ -31,6 +31,12 @@ if git grep -nEI '#[0-9a-f]{6}([0-9a-f]{2})?' -- internal/client ':(exclude)inte
   exit 1
 fi
 
+go run ./release/generate-third-party-notices.go
+if ! git diff --quiet -- THIRD_PARTY_NOTICES; then
+  echo 'THIRD_PARTY_NOTICES is out of date: commit the regenerated file.' >&2
+  exit 1
+fi
+
 if command -v desktop-file-validate >/dev/null 2>&1; then
   desktop-file-validate release/linux/ryotunes.desktop
 fi

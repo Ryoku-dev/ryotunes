@@ -89,7 +89,7 @@ client preferences. No hex value appears outside `look/brand.go`.
 | stone1 | sidebar, right panel, player bar, slabs and tiles inside the content |
 | stone2 | content pane |
 | stone3 | hover plane of tiles and rows; field and track backgrounds |
-| stone4 | popovers, menus, sheets, the card play plate |
+| stone4 | popovers, menus, sheets, the card play plate. Nothing sits above stone4, so a row on it hovers by mixing `fg` in at 0.06 and presses at 0.08; it never steps down to stone3, which reads as a hole in dark mode |
 | sel / onSel | where you are: current nav row, selected row, active tab blade, a toggle that is on (shuffle, repeat, open panel) |
 | gold / onGold | play. The theme points these roles at the **accent** (below), so every gold plaque is the colour of the music. The player bar's play/pause is the window's standing gold action; a page may spend one more gold on the action that plays it (hero Play, top search result Play). Nothing else is gold: not radio, not download, not navigation. |
 | goldInk | line plaques that accompany a gold action (the accent's ink) |
@@ -218,6 +218,16 @@ Crossing into compact closes a docked panel (it would otherwise cover the
 page) and remembers it; crossing back out restores it. A sheet never opens by
 itself on a class change.
 
+**Nothing loaded.** Until the daemon reports a current track there is no
+player bar and no compact player: the panes run down to `H - 8` (compact: to
+the bottom nav). When a track loads, the bar unfolds from the bottom over
+`Motion.Unfold` while the panes' bottom edges glide up by the bar and its gap;
+when nothing is current anymore it folds away the same way. Reaching the end of
+the queue or stopping keeps the last track in the bar, as music players do. The first snapshot after
+connecting snaps instead, so a launch with a restored track never shows the
+bar arriving and a launch with nothing never flashes an empty one. Reduced
+motion snaps.
+
 Panes cut their two top corners by `th.Cut.Large` (the Corners preference,
 16 by default) and keep the bottom square. Each pane pushes its own clip. The
 window minimum is 480 × 560; the default is 1280 × 800.
@@ -227,7 +237,8 @@ window minimum is 480 × 560; the default is 1280 × 800.
 On ground, 56 high, every blank part drags the window (`system.ActionMove`;
 double click toggles maximise).
 
-- **Expanded:** over the sidebar column, the Ryoku mark (24) at x 21, y 16,
+- **Expanded:** over the sidebar column, the Ryoku mark (24; `look.RyokuMark`,
+  the current v2 mark: its cut strokes in `fg`, its pointer in Ryoku orange) at x 21, y 16,
   then 8 and the word "Ryotunes" in `T.Title` `fg`. At the content's left
   edge: Back and Forward (`IconPlaque` small, quiet, 4 apart; disabled ink
   when the router cannot move). 13 to their right, the search field
@@ -289,7 +300,7 @@ stone1 pane. **Expanded (240):**
 2. 21 gap, then a group row: "Playlists" in `T.Group` `fg3` at x 21 and a small
    quiet "+" icon plaque at the right (New playlist dialog).
 3. The playlist list fills the remaining height and scrolls (look.Scroller).
-   Rows are 48 high: cover 36 (cut 3), 13, title `T.Label` `fg` and a caption
+   Rows are 48 high: cover 32 (cut 3, 8 inside the hover plate), 13, title `T.Label` `fg` and a caption
    `fg3` ("Playlist", "Album", "Liked songs · 128" with the count in mono).
    Order: Liked songs (a heart glyph on an `Accent.Field` tile), then pins
    (`state.Personal.Pins`), then library playlists. The open collection's row
@@ -299,7 +310,7 @@ stone1 pane. **Expanded (240):**
    inset 8.
 
 **Medium (72):** the same order with 56 × 48 icon tiles (`look.Tip` carries the
-label), playlist covers 40 (cut 3) centred with tips, the "+" plaque
+label), playlist covers 32 (cut 3) centred with tips, the "+" plaque
 centred, Settings at the bottom.
 
 **Folding (expanded class).** The sidebar folds to the 72 rail and back: the
@@ -393,8 +404,8 @@ zigzag, a triangle wave with sharp vertices, never a sine.
 
 **Sound popover** (chrome/sound.go): a `look.Overlays` entry anchored to the
 sound plaque's window rectangle, placed above the bar, right edges aligned and
-clamped 8 inside the window. 340 wide, stone4. "Sound" in `T.Section`, 13, preset `kit.Filters`
-(Flat, Slowed and reverb, Nightcore, Bass boost, Wide), 21, five rows of label
+clamped 8 inside the window. 340 wide, stone4. "Sound" in `T.Section`, 13, the presets
+(Flat, Slowed and reverb, Nightcore, Bass boost, Wide) as choice chips that wrap onto a second line instead of scrolling sideways, 21, five rows of label
 `T.Label`, value `T.Mono` right, `kit.Slider` below: Tempo 0.25 to 2.0 ×,
 Pitch −12 to 12 st, Reverb 0 to 100 %, Bass −6 to 12 dB, Width 0 to 100 %;
 changes debounce 80 ms into `set_audio_fx`; a quiet "Reset" plaque at the end.
@@ -724,11 +735,14 @@ scrolls with the page.
 - **Downloads:** "Downloads" and a sentence ("3 downloading, 120 saved");
   `kit.Filters` All, Active, Saved, Failed with counts; `kit.Tablet` rows with
   art in the tablet's 32 mark, title and artists, claim (lapis Downloading with `kit.BladeProgress`,
-  jade Saved, jasper Failed with the reason as proof), one action (Cancel,
-  Retry, Show in folder). At content width ≥ 1000 a facts slab on the right:
+  jade Saved, jasper Failed with the reason as proof) and one action: Cancel
+  while active, Retry when failed or cancelled, and **Play** on a saved row.
+  Double clicking a saved row also plays it, from its file on disk with no
+  network; Show in folder moves to the row's right click menu (Play, Show in folder). A collection card's
+  action plays its saved tracks in order. At content width ≥ 1000 a facts slab on the right:
   location, used space, format.
 - **Settings:** the Lithic settings archetype from `layout.md` with
-  `kit.SectionIndex` and `kit.Section` + slabs, every row from spec 09
+  `kit.SectionIndex` (at medium widths the sections are wrapping `look.FlowChoice` chips, never a sideways strip) and `kit.Section` + slabs, every row from spec 09
   §Settings (`~/Work/ryotunes-rebuild-spec/09-client-ui.md`), including
   **Discord rich presence** under Integrations. About carries the Ryoku mark,
   version in mono and a line plaque to Diagnostics.
@@ -815,7 +829,7 @@ func (t *TrackTable) Row(gtx layout.Context, e *env.Env, items []model.Track, i 
 Rows are `th.RowHeight()` high (56 comfortable, 48 compact). Columns: index
 48 (number at rest; play icon on hover; static `volume_up` in `Accent.Ink` when
 playing, pause icon when hovering the playing row) │ Title flexed (art 40 when
-`ColArt`, 13, title `T.Row` with an `E` mark for explicit, and the like heart
+`ColArt`, 32 in compact rows, 13, title `T.Row` with an `E` mark for explicit, and the like heart
 inline after the title: shown when liked or hovered) │ Artist 21 % │ Album
 27 % │ Plays 108 `T.Mono` (only when some row has plays) │ Length 72 `T.Mono`
 right aligned │ 40 more plaque (hover). Album pages use Title 66.5 % and
@@ -859,7 +873,11 @@ func Count(n int) string              // 1.2K, 3.4M
 Card: art square at the card width (cut 7; artists octagon), 8, title
 `T.Label` `fg` two lines, subtitle `T.Caption` `fg3` one line ("Album · 2021",
 "Artist", "Playlist · 42 songs"). Hover: a stone1 plate (cut 7) fades in
-behind the card with 8 padding, and the **play plate** (40, stone4, cut 6,
+behind the card reaching 8 past the art and the copy on every side; the card's
+resting box and its art's alignment with the section header do not move, and
+shelves and grids leave the plate that room so it is never clipped. Every
+hover plate in the app keeps its content at least 8 from its edges (quick
+tiles keep their art flush, as the art is the plate's edge). The **play plate** (40, stone4, cut 6,
 `fg` play icon) fades in rising 4 dp at the art's bottom right, 8 inset; under
 its own hover the plate turns gold with `onGold` ink. Clicking it plays the
 item; clicking the card opens it; right click opens the item menu. Card widths:
@@ -928,7 +946,7 @@ func BrandFill(p model.Provider, r palette.Roles) color.NRGBA
 func BrandInk(p model.Provider, r palette.Roles) color.NRGBA
 
 // Marks
-func RyokuMark(size unit.Dp) layout.Widget                    // 力, in RyokuOrange
+func RyokuMark(size unit.Dp, ink color.NRGBA) layout.Widget   // the v2 cut-stone 力: strokes in ink (fg), pointer in RyokuOrange
 func ProviderGlyph(p model.Provider, size unit.Dp, ink color.NRGBA) layout.Widget
 func ProviderName(p model.Provider) string                    // "YouTube Music", "Spotify", "SoundCloud", "TIDAL", "Local files", "Radio"
 
@@ -1087,6 +1105,7 @@ instant.
 | equalizer preset chosen or reset | nodes and curve tween to it | field 320 |
 | equalizer band added / removed | node grows from nothing, its column unfolds / shrinks and collapses | notch 200, unfold 200 |
 | equalizer bypassed / on | curve fades to fg3 and its fill out / back | field 320 |
+| a track loads with nothing loaded / the queue empties | the player bar unfolds from the bottom while the panes' bottoms glide up / folds away | unfold 200 |
 | mini resized across landscape and portrait | the two layouts crossfade | field 320 |
 
 Nothing moves at rest: no pulsing, no idle frames. A paused, idle window draws
@@ -1122,7 +1141,11 @@ storage, Diagnostics, About. Rows that were missing in 2.0.0 and come back:
   diagnostics" line plaque.
 - About: App, Daemon, Client, and Engine (the playback engine's name and
   version) in mono; updates with Check, Install, View changelog and Show
-  release notes.
+  release notes; License: `GPL-3.0-or-later` in mono, the copyright line, and
+  a "Licenses" line plaque that opens the license and the third-party notices.
+
+The section index (left of the sections at content width ≥ 900) scrolls on its
+own when it is taller than the pane and keeps the current section in view.
 
 Skins and decor are not restored: colour comes from the Ryoku palette, or from
 the playing cover when the window is tinted. The Appearance section offers
@@ -1130,19 +1153,22 @@ Colours (Follow Ryoku, Dark, Light), Palette file (choose a palette JSON, or
 none), Density, Motion, UI scale, Low resource mode, **Visualizer** (on by
 default; its detail says "Bars that move with the music in page headers and
 the now playing view" or, without cava, "Install cava to see the visualizer"
-with the toggle disabled), **Visualizer style** (`kit.Filters` Bars, Curve,
+with the toggle disabled), **Visualizer style** (`look.FlowChoice` Bars, Curve,
 Oscilloscope, Vectorscope, disabled while the visualizer is off; without
 `pw-record` the last two are disabled and the detail says "Install pw-record
 to see the waveform and stereo field"), **Wave progress** (on by default),
-**Accent colour** (`kit.Filters` Album art, Source, Desktop; details "The
+**Accent colour** (`look.FlowChoice` Album art, Source, Desktop; details "The
 colour of the cover that is playing", "The colour of the service you are
 listening on", "Your Ryoku palette's accent"), **Tint the window** (a toggle,
 on by default, detail "Every surface takes a tint of the cover that's
 playing"; disabled with the detail "Follows the album art accent" while Accent
-colour is not Album art) and **Corners** (`kit.Filters` Desktop, Square, Fine,
+colour is not Album art) and **Corners** (`look.FlowChoice` Desktop, Square, Fine,
 Chisel, Deep, Custom; Custom adds a `kit.Slider` 0 to 32 with the value in
-mono; Desktop's detail names what it follows, "Ryoku window corners: 18 dp").
-Every change applies live with its motion. Reduced motion and low resource
+mono; Desktop's detail names what it follows, "Ryoku window corners: 18 dp"),
+then **Open as a floating window** (a toggle, on by default; detail "Opens at
+its own size above your tiled windows" when on, "Opens tiled in your layout
+like any other window" when off, and both add "from the next launch" once it
+differs from how this window opened). Every other change applies live with its motion. Reduced motion and low resource
 mode turn the visualizer and the wave off without changing the stored
 settings.
 
@@ -1177,8 +1203,15 @@ watch; Spotify uses the `spotify-auth` `url` event, and TIDAL's `tidal-auth`
 ## Input
 
 - Scrolling: `look.Scroller` and `look.HScroller` everywhere content scrolls
-  (pages, sidebar playlists, queue, lyrics, settings). Horizontal trackpad
-  deltas move shelves; vertical wheel over a shelf scrolls the page.
+  (pages, sidebar playlists, queue, lyrics, settings and its index). Every
+  wheel or trackpad delta moves the content by exactly delta × PxPerDp in the
+  frame it arrives, however fast the deltas come and however different the
+  rows' heights are; nothing skips or jumps. Horizontal trackpad deltas move
+  shelves; vertical wheel over a shelf scrolls the page.
+- Sideways scrolling is only for shelves and the equalizer's band strip, and
+  both show where more is: the cut-off item at the edge and step plaques that
+  disable at the ends. Short choice sets (Sound presets, visualizer styles,
+  accents, corners) wrap onto more lines instead.
 - Every clickable is `kit.Click` (or a kit control). Pointer handlers push
   their own clip; catchers use `pointer.PassOp` where content beneath must
   still receive input.
@@ -1192,9 +1225,22 @@ watch; Spotify uses the `spotify-auth` `url` event, and TIDAL's `tidal-auth`
 ## Windows and lifetime (shell)
 
 - app id `ryotunes`, title "Ryotunes", min 480 × 560, default 1280 × 800,
-  decorations per preference (default: the client draws its own). The niri
-  provider floats `^ryotunes$` at 1280 × 800 and "Ryotunes Mini" at 520 × 176;
-  Hyprland already floats `^ryotunes$`.
+  decorations per preference (default: the client draws its own).
+- **Floating or tiled is the app's choice** (Settings → Appearance → Open as a
+  floating window, on by default). Floating, the main window maps with its
+  minimum and maximum both set to its remembered size (default 1280 × 800):
+  niri, Hyprland and Sway float a fixed-size window the way they float a
+  dialog, and floating desktops simply open it at that size. On the first
+  configure, before the first buffer, the shell re-issues those options so
+  Gio drops its 40 dp fallback title bar padding, and after the first
+  presented frame the window becomes freely resizable again (minimum
+  480 × 560). Tiled, it maps with only its minimum, so tiling window managers
+  tile it. The mini always maps fixed at its own size (scaled with the zoom),
+  so it floats either way. The size is remembered only while the main window
+  floats: on niri and Hyprland the shell asks the compositor (debounced, off
+  the UI goroutine) and skips tiled, fullscreen and maximized sizes, so none of
+  them becomes the next floating size. No compositor rule decides this for us:
+  Ryoku's niri and Hyprland providers carry no Ryotunes rule.
 - Single instance: the client holds an exclusive `flock` on
   `$XDG_RUNTIME_DIR/ryotunes/client.lock` for its lifetime. A second
   `ryotunes` that cannot take the lock asks the daemon to `show` and exits 0.

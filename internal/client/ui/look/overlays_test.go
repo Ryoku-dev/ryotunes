@@ -7,6 +7,7 @@ import (
 
 	"gioui.org/f32"
 	"gioui.org/io/input"
+	"gioui.org/io/key"
 	"gioui.org/io/pointer"
 	"gioui.org/layout"
 	"gioui.org/op"
@@ -154,5 +155,72 @@ func TestOverlayRoutesInsideAndOutsidePresses(t *testing.T) {
 	}
 	if underneathClicked {
 		t.Fatal("outside press reached the clickable underneath")
+	}
+}
+
+func TestOverlayReanchorDoesNotUndoDismissal(t *testing.T) {
+	reduced := anim.Reduced()
+	anim.SetReduce(true)
+	defer anim.SetReduce(reduced)
+
+	tests := []struct {
+		name    string
+		dismiss func(*input.Router, *Overlays, any)
+	}{
+		{
+			name: "outside press",
+			dismiss: func(router *input.Router, _ *Overlays, _ any) {
+				router.Queue(
+					pointer.Event{Kind: pointer.Move, Source: pointer.Mouse, Position: f32.Pt(250, 150), PointerID: 1},
+					pointer.Event{Kind: pointer.Press, Source: pointer.Mouse, Buttons: pointer.ButtonPrimary, Position: f32.Pt(250, 150), PointerID: 1},
+				)
+			},
+		},
+		{
+			name: "escape",
+			dismiss: func(router *input.Router, overlays *Overlays, _ any) {
+				router.Source().Execute(key.FocusCmd{Tag: &overlays.focus})
+				router.Queue(key.Event{Name: key.NameEscape, State: key.Press})
+			},
+		},
+		{
+			name: "track unload",
+			dismiss: func(_ *input.Router, overlays *Overlays, tag any) {
+				overlays.Close(tag)
+			},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			theme := NewTheme(palette.Signature(true), libtheme.Comfortable)
+			var overlays Overlays
+			tag := new(int)
+			overlays.Open(tag, image.Rect(20, 20, 40, 40), Placement{Prefer: Below}, layout.Spacer{Width: 100, Height: 40}.Layout)
+
+			var operations op.Ops
+			var router input.Router
+			now := time.Now()
+			frame := func() {
+				operations.Reset()
+				gtx := layout.Context{
+					Ops: &operations, Source: router.Source(), Now: now,
+					Metric:      unit.Metric{PxPerDp: 1, PxPerSp: 1},
+					Constraints: layout.Exact(image.Pt(300, 200)),
+				}
+				overlays.Reanchor(tag, image.Rect(24, 24, 44, 44))
+				overlays.Layout(gtx, theme)
+				router.Frame(&operations)
+				now = now.Add(time.Millisecond)
+			}
+
+			frame()
+			frame()
+			test.dismiss(&router, &overlays, tag)
+			frame()
+			if overlays.IsOpen(tag) {
+				t.Fatal("dismissed overlay was reopened by reanchor")
+			}
+		})
 	}
 }

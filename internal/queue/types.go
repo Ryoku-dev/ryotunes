@@ -28,8 +28,9 @@ type Persist interface {
 	Set(key, value string) error
 }
 
-// Hooks connects queue policy to daemon-owned history, stream cache, and settings.
+// Hooks connects queue policy to daemon-owned downloads, history, stream cache, and settings.
 type Hooks interface {
+	DownloadedStream(trackID string) (model.Stream, bool)
 	OnPlayed(ctx context.Context, track model.Track)
 	StreamCacheGet(trackID string) (model.Stream, bool)
 	StreamCachePut(trackID string, stream model.Stream)

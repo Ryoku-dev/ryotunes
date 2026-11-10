@@ -116,6 +116,13 @@ func (overlays *Overlays) Open(tag any, anchor image.Rectangle, placement Placem
 	overlays.open(tag, anchor, placement, content, false)
 }
 
+// Reanchor moves an open overlay without reopening one that is closing.
+func (overlays *Overlays) Reanchor(tag any, anchor image.Rectangle) {
+	if entry := overlays.entry(tag); entry != nil && entry.desired {
+		entry.anchor = anchor
+	}
+}
+
 func (overlays *Overlays) open(tag any, anchor image.Rectangle, placement Placement, content layout.Widget, tip bool) {
 	if placement.Gap == 0 {
 		placement.Gap = tokens.SizePopoverAnchorGap

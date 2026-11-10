@@ -16,7 +16,8 @@ func TestSVGProviderAndMarkBounds(t *testing.T) {
 		{"Spotify", spotifyGlyphPath, 24, 18},
 		{"SoundCloud", soundCloudGlyphPath, 24, 18},
 		{"TIDAL", tidalGlyphPath, 24, 18},
-		{"Ryoku", ryokuMarkPath, 1000, 900},
+		{"Ryoku bone", ryokuMarkBonePath, 556, 450},
+		{"Ryoku pointer", ryokuMarkTipPath, 556, 130},
 	}
 	for _, test := range tests {
 		geometry, err := parseSVGPath(test.path)

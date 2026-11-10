@@ -66,8 +66,8 @@ github.com/ncruces/go-strftime v1.1.0/go.mod h1:yVaq7iwCN09vHRrKBrrflXT0M9tTMG2K
 github.com/pmezard/go-difflib v1.0.0/go.mod h1:iKH77koFhYxTK1pcRnkKkqfTogsbg7gZNVY4sRDYZ/4=
 github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec h1:W09IVJc94icq4NjY3clb7Lk8O1qJ8BdBEF8z0ibU0rE=
 github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec/go.mod h1:qqbHyh8v60DhA7CoWK5oRCqLrMHRGoxYCSS9EjAz6Eo=
-github.com/ryoku-dev/ryoku/docs/lithic/library/go v0.0.0-20261109022738-f273fa939a18 h1:F269e/R3wNkBN8b0/ftXm44qNFdZvZqHU195Q/npces=
-github.com/ryoku-dev/ryoku/docs/lithic/library/go v0.0.0-20261109022738-f273fa939a18/go.mod h1:zb86GSIEWmbFOjZsz94LN9nOQpiHKRIyWl79wAdB+Tk=
+github.com/ryoku-dev/ryoku/docs/lithic/library/go v0.0.0-20261110025519-59b1704838d8 h1:UiRhwgqDokUGg47S8Zgjw5RVSnhgz0jpGvOLjqASSPY=
+github.com/ryoku-dev/ryoku/docs/lithic/library/go v0.0.0-20261110025519-59b1704838d8/go.mod h1:zb86GSIEWmbFOjZsz94LN9nOQpiHKRIyWl79wAdB+Tk=
 github.com/sirupsen/logrus v1.9.3 h1:dueUQJ1C2q9oE3F7wvmSGAaVtTmUizReu6fjN8uqzbQ=
 github.com/sirupsen/logrus v1.9.3/go.mod h1:naHLuLoDiP4jHNo9R0sCBMtWGeIprob74mVsIT4qYEQ=
 github.com/stretchr/objx v0.1.0/go.mod h1:HFkY916IF+rwdDfMAkV7OtwuqBVzrE8GR6GFx+wExME=

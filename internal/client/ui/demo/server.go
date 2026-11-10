@@ -19,11 +19,11 @@ import (
 )
 
 // Serve runs an in-process fake daemon until ctx is cancelled.
-func Serve(ctx context.Context, socketPath string, playing bool) error {
+func Serve(ctx context.Context, socketPath string, playing, empty bool) error {
 	if err := os.MkdirAll(filepath.Dir(socketPath), 0o700); err != nil {
 		return err
 	}
-	data, err := makeFixtures(filepath.Dir(socketPath), playing)
+	data, err := makeFixtures(filepath.Dir(socketPath), playing, empty)
 	if err != nil {
 		return err
 	}

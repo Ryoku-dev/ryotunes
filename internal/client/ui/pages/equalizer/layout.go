@@ -161,6 +161,12 @@ func (p *Page) layoutGraph(gtx layout.Context, e *env.Env) layout.Dimensions {
 }
 
 func (p *Page) layoutStrip(gtx layout.Context, e *env.Env) layout.Dimensions {
+	if p.stripPrevious.Clicked(gtx) && p.strip.CanPage(-1) {
+		p.strip.Page(gtx, -1)
+	}
+	if p.stripNext.Clicked(gtx) && p.strip.CanPage(1) {
+		p.strip.Page(gtx, 1)
+	}
 	selected := p.graph.Selected()
 	p.stripSelection.Duration = e.Th.Motion.Select
 	p.stripSelection.Ease = anim.EaseChisel
@@ -175,7 +181,7 @@ func (p *Page) layoutStrip(gtx layout.Context, e *env.Env) layout.Dimensions {
 	}
 	selectionAt := p.stripSelection.Value(gtx)
 	count := len(p.working.Bands) + 2
-	return p.strip.Layout(gtx, e.Th, count, func(gtx layout.Context, index int) layout.Dimensions {
+	return p.layoutStripScroller(gtx, e, count, func(gtx layout.Context, index int) layout.Dimensions {
 		switch {
 		case index == 0:
 			return p.layoutPreamp(gtx, e)
@@ -185,6 +191,52 @@ func (p *Page) layoutStrip(gtx layout.Context, e *env.Env) layout.Dimensions {
 			return p.layoutBand(gtx, e, index-1, selectionAt)
 		}
 	})
+}
+
+func (p *Page) layoutStripScroller(gtx layout.Context, e *env.Env, count int, element layout.ListElement) layout.Dimensions {
+	button := gtx.Dp(unit.Dp(32))
+	gap := gtx.Dp(unit.Dp(8))
+	width := gtx.Constraints.Max.X
+	gutter := 0
+	showSteps := p.stripSteps
+	if showSteps {
+		gutter = button + gap
+	}
+	viewport := max(0, width-2*gutter)
+
+	stripGTX := gtx
+	stripGTX.Constraints.Min.X, stripGTX.Constraints.Max.X = viewport, viewport
+	stripGTX.Constraints.Min.Y = 0
+	stripOffset := op.Offset(image.Pt(gutter, 0)).Push(gtx.Ops)
+	stripDimensions := p.strip.Layout(stripGTX, e.Th, count, element)
+	stripOffset.Pop()
+	overflow := p.strip.Position.Length > width
+	if overflow != p.stripSteps {
+		p.stripSteps = overflow
+		gtx.Execute(op.InvalidateCmd{})
+	}
+	if !showSteps {
+		return layout.Dimensions{Size: gtx.Constraints.Constrain(image.Pt(width, stripDimensions.Size.Y))}
+	}
+
+	height := max(button, stripDimensions.Size.Y)
+	p.stripPrevious.Kind, p.stripPrevious.Small = kit.PlaqueQuiet, true
+	p.stripPrevious.Icon, p.stripPrevious.Description = look.Icon.Back, "Previous equalizer bands"
+	p.stripNext.Kind, p.stripNext.Small = kit.PlaqueQuiet, true
+	p.stripNext.Icon, p.stripNext.Description = look.Icon.Forward, "Next equalizer bands"
+	layoutStep := func(x int, plaque *kit.IconPlaque, enabled bool) {
+		buttonGTX := gtx
+		buttonGTX.Constraints = layout.Exact(image.Pt(button, button))
+		if !enabled {
+			buttonGTX = buttonGTX.Disabled()
+		}
+		offset := op.Offset(image.Pt(x, (height-button)/2)).Push(gtx.Ops)
+		plaque.Layout(buttonGTX, e.Th.Theme)
+		offset.Pop()
+	}
+	layoutStep(0, &p.stripPrevious, p.strip.CanPage(-1))
+	layoutStep(width-button, &p.stripNext, p.strip.CanPage(1))
+	return layout.Dimensions{Size: gtx.Constraints.Constrain(image.Pt(width, height))}
 }
 
 func stripCell(gtx layout.Context, width unit.Dp, selected bool, th *look.Theme, body layout.Widget) layout.Dimensions {

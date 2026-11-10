@@ -94,6 +94,30 @@ func sameListPosition(a, b layout.Position) bool {
 	return a.First == b.First && a.Offset == b.Offset
 }
 
+func itemExtent(sizes []image.Point, index, fallback int, axis layout.Axis) int {
+	if index >= 0 && index < len(sizes) {
+		size := axis.Convert(sizes[index]).X
+		if size > 0 {
+			return size
+		}
+	}
+	return max(1, fallback)
+}
+
+func listPositionDelta(before, after layout.Position, sizes []image.Point, fallback, gap int, axis layout.Axis) int {
+	delta := after.Offset - before.Offset
+	if after.First > before.First {
+		for index := before.First; index < after.First; index++ {
+			delta += itemExtent(sizes, index, fallback, axis) + gap
+		}
+	} else {
+		for index := after.First; index < before.First; index++ {
+			delta -= itemExtent(sizes, index, fallback, axis) + gap
+		}
+	}
+	return delta
+}
+
 func scrollThumb(viewport, content, first, offset, count, minimum int) (top, height int, ok bool) {
 	if viewport <= 0 || content <= viewport || count <= 0 {
 		return 0, 0, false
@@ -165,6 +189,7 @@ func (s *Scroller) probeInput(gtx layout.Context) int {
 		return 0
 	}
 	before := s.Position
+	fallback := max(1, before.Length/max(s.itemCount, 1))
 	s.probeOps.Reset()
 	probe := gtx
 	probe.Ops = &s.probeOps
@@ -175,24 +200,25 @@ func (s *Scroller) probeInput(gtx layout.Context) int {
 			size = s.itemSizes[index]
 		}
 		if size.Y <= 0 {
-			size.Y = max(1, before.Length/max(s.itemCount, 1))
+			size.Y = fallback
 		}
 		return layout.Dimensions{Size: size}
 	})
-	if sameListPosition(before, s.Position) {
+	after := s.Position
+	if sameListPosition(before, after) {
 		if !s.List.Dragging() {
 			s.listGesture = false
 		}
 		return 0
 	}
 
+	raw := float32(listPositionDelta(before, after, s.itemSizes, fallback, s.Gap, layout.Vertical))
 	dragging := s.List.Dragging()
 	if !dragging && !s.listGesture {
-		average := max(1, before.Length/max(s.itemCount, 1))
-		raw := float32((s.Position.First-before.First)*average + s.Position.Offset - before.Offset)
-		mapped := mapScrollDelta(raw, gtx.Metric.PxPerDp, scrollOnX11)
-		addListOffset(&s.Position, &s.fraction, mapped-raw)
+		raw = mapScrollDelta(raw, gtx.Metric.PxPerDp, scrollOnX11)
 	}
+	s.Position = before
+	addListOffset(&s.Position, &s.fraction, raw)
 	s.listGesture = dragging || s.listGesture
 	if !s.programmatic {
 		s.stopSpring()
@@ -236,12 +262,12 @@ func (s *Scroller) Layout(gtx layout.Context, th *Theme, count int, el layout.Li
 	s.Axis = layout.Vertical
 	s.UpdateInput(gtx)
 	s.listConstraints = gtx.Constraints
-	// Register first so immediate wheel handling wins before layout.List's gesture.
 	pass := pointer.PassOp{}.Push(gtx.Ops)
 	area := clip.Rect(image.Rectangle{Max: gtx.Constraints.Max}).Push(gtx.Ops)
 	event.Op(gtx.Ops, &s.tag)
 	area.Pop()
 	pass.Pop()
+
 	beforeList := s.Position
 	if len(s.itemSizes) < count {
 		s.itemSizes = append(s.itemSizes, make([]image.Point, count-len(s.itemSizes))...)

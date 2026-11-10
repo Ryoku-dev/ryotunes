@@ -8,6 +8,7 @@ import (
 	"gioui.org/unit"
 
 	"github.com/ryoku-dev/ryoku/docs/lithic/library/go/kit"
+	"github.com/ryoku-dev/ryoku/docs/lithic/library/go/tokens"
 	"github.com/ryoku-dev/ryotunes/internal/client/state"
 	"github.com/ryoku-dev/ryotunes/internal/client/ui/env"
 	"github.com/ryoku-dev/ryotunes/internal/client/ui/look"
@@ -54,9 +55,7 @@ func (p *page) layoutExpanded(gtx layout.Context, e *env.Env, snapshot state.Sta
 		gtx.Constraints.Min.X, gtx.Constraints.Max.X = width, width
 		return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Start}.Layout(gtx,
 			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-				dims := p.index.Layout(gtx, e.Th.Theme, p.sectionLabels, p.currentSection, kit.FrameExpanded)
-				p.consumeIndexSelection()
-				return dims
+				return p.layoutExpandedIndex(gtx, e)
 			}),
 			layout.Rigid(layout.Spacer{Width: unit.Dp(34)}.Layout),
 			layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
@@ -67,14 +66,65 @@ func (p *page) layoutExpanded(gtx layout.Context, e *env.Env, snapshot state.Sta
 	})
 }
 
+func (p *page) layoutExpandedIndex(gtx layout.Context, e *env.Env) layout.Dimensions {
+	gtx.Constraints.Max.X = min(gtx.Constraints.Max.X, gtx.Dp(unit.Dp(tokens.SizeSectionIndexWidth)))
+	p.keepIndexSectionVisible(gtx)
+	dimensions := p.indexScroll.Layout(gtx, e.Th, 1, func(gtx layout.Context, _ int) layout.Dimensions {
+		return p.index.Layout(gtx, e.Th.Theme, p.sectionLabels, p.currentSection, kit.FrameExpanded)
+	})
+	p.consumeIndexSelection()
+	p.keepIndexSectionVisible(gtx)
+	return dimensions
+}
+
+func (p *page) keepIndexSectionVisible(gtx layout.Context) {
+	if p.currentSection == p.indexTrackedSection {
+		return
+	}
+	p.indexTrackedSection = p.currentSection
+	_, offset := p.indexScroll.Offset()
+	scrolled := max(0, offset)
+	row := gtx.Dp(unit.Dp(tokens.SizeSectionIndexRow))
+	gap := gtx.Dp(unit.Dp(tokens.SizeSectionIndexRowGap))
+	target := indexVisibleOffset(p.currentSection, len(p.sectionLabels), gtx.Constraints.Max.Y, scrolled, row, gap)
+	if target != scrolled {
+		p.indexScroll.AnchorTo(0, -target)
+	}
+}
+
+func indexVisibleOffset(current, count, viewport, scrolled, row, gap int) int {
+	if count <= 0 || viewport <= 0 {
+		return 0
+	}
+	current = min(max(current, 0), count-1)
+	total := count*row + max(0, count-1)*gap
+	maximum := max(0, total-viewport)
+	scrolled = min(max(scrolled, 0), maximum)
+	top := current * (row + gap)
+	bottom := top + row
+	switch {
+	case top < scrolled:
+		return min(top, maximum)
+	case bottom > scrolled+viewport:
+		return min(bottom-viewport, maximum)
+	default:
+		return scrolled
+	}
+}
+
 func (p *page) layoutMedium(gtx layout.Context, e *env.Env, snapshot state.State) layout.Dimensions {
 	width := gtx.Constraints.Max.X
 	return layout.Center.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 		gtx.Constraints.Min.X, gtx.Constraints.Max.X = width, width
 		return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
 			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-				dims := p.index.Layout(gtx, e.Th.Theme, p.sectionLabels, p.currentSection, kit.FrameMedium)
-				p.consumeIndexSelection()
+				p.sectionChips.Labels, p.sectionChips.Selected = p.sectionLabels, p.currentSection
+				dims := p.sectionChips.Layout(gtx, e.Th)
+				if selected, ok := p.sectionChips.Changed(); ok {
+					p.scroll.ScrollTo(selected)
+					p.currentSection = selected
+					p.indexHold = selected
+				}
 				return dims
 			}),
 			layout.Rigid(layout.Spacer{Height: unit.Dp(21)}.Layout),

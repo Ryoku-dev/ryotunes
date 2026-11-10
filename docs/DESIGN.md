@@ -135,7 +135,16 @@ the scopes read that sink's stereo samples through `pw-record`, only while one
 is on screen.
 
 Scrolling applies every delta at once. Gio cannot tell a wheel from a
-trackpad, so the client never guesses a wheel from the size of a delta.
+trackpad, so the client never guesses a wheel from the size of a delta. Each
+delta is converted to pixels and accounted against the real height of every
+row it crosses, never an average, so a fast flick over rows of different
+heights lands exactly where the wheel says.
+
+Floating or tiled is the app's own choice. A floating main window maps with
+its minimum and maximum both at its size, which tiling window managers float
+the way they float a dialog, and then becomes resizable; a tiled one maps
+with only its minimum. The desktop carries no rule for Ryotunes, so the
+setting is the only thing deciding.
 
 ## Overlays
 

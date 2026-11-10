@@ -51,7 +51,7 @@ type fixtures struct {
 	equalizerPresets []model.EQPreset
 }
 
-func makeFixtures(directory string, playing bool) (fixtures, error) {
+func makeFixtures(directory string, playing, empty bool) (fixtures, error) {
 	artwork, err := writeArtwork(directory)
 	if err != nil {
 		return fixtures{}, err
@@ -316,8 +316,13 @@ func makeFixtures(directory string, playing bool) (fixtures, error) {
 	equalizerPresets = append(equalizerPresets, model.EQPreset{
 		Name: "Mineral lift", Preamp: equalizer.Preamp, Bands: append([]model.EQBand(nil), equalizer.Bands...),
 	})
+	playback := model.PlaybackSnapshot{Now: &now, Paused: !playing, Position: 105, Duration: 198, Volume: 68}
+	if empty {
+		playback = model.PlaybackSnapshot{Paused: true, Volume: 68}
+		queue = model.QueueSnapshot{CurrentIndex: -1, Repeat: model.RepeatOff}
+	}
 	snapshot := protocol.Snapshot{
-		Playback: model.PlaybackSnapshot{Now: &now, Paused: !playing, Position: 105, Duration: 198, Volume: 68},
+		Playback: playback,
 		Queue:    queue, Settings: settings, Auth: account, AudioFx: model.DefaultAudioFx(),
 		Equalizer: equalizer, Provider: model.ProviderYouTube, Downloads: downloads, Personal: personal,
 		Spotify:    model.SpotifyStatus{SignedIn: true, Stored: true, Name: &spotifyName, Premium: &premium},

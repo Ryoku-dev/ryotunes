@@ -4,10 +4,8 @@ import (
 	"image"
 	"time"
 
-	"gioui.org/io/event"
-	"gioui.org/io/pointer"
 	"gioui.org/layout"
-	"gioui.org/op/clip"
+	"gioui.org/op"
 
 	"github.com/ryoku-dev/ryoku/docs/lithic/library/go/anim"
 )
@@ -16,19 +14,21 @@ import (
 type HScroller struct {
 	layout.List
 
-	tag      struct{}
-	fraction float32
-	viewport int
-	duration time.Duration
+	fraction    float32
+	viewport    int
+	duration    time.Duration
+	listGesture bool
+
+	probeOps        op.Ops
+	itemSizes       []image.Point
+	itemCount       int
+	cacheReady      bool
+	listConstraints layout.Constraints
 
 	page        anim.Tween
 	pageReady   bool
 	pageTarget  float32
 	pageApplied float32
-}
-
-func horizontalScrollRange(position layout.Position) pointer.ScrollRange {
-	return verticalScrollRange(position)
 }
 
 func (s *HScroller) stopPage() {
@@ -42,26 +42,44 @@ func (s *HScroller) stopPage() {
 	s.pageApplied = current
 }
 
-func (s *HScroller) updateInput(gtx layout.Context) int {
-	filter := pointer.Filter{
-		Target:  &s.tag,
-		Kinds:   pointer.Scroll,
-		ScrollX: horizontalScrollRange(s.Position),
+func (s *HScroller) probeInput(gtx layout.Context) int {
+	if !s.cacheReady || s.itemCount <= 0 {
+		return 0
 	}
-	applied := 0
-	for {
-		raw, ok := gtx.Event(filter)
-		if !ok {
-			break
+	before := s.Position
+	fallback := max(1, before.Length/max(s.itemCount, 1))
+	s.probeOps.Reset()
+	probe := gtx
+	probe.Ops = &s.probeOps
+	probe.Constraints = s.listConstraints
+	s.List.Layout(probe, s.itemCount, func(_ layout.Context, index int) layout.Dimensions {
+		size := image.Point{}
+		if index >= 0 && index < len(s.itemSizes) {
+			size = s.itemSizes[index]
 		}
-		e, ok := raw.(pointer.Event)
-		if !ok || e.Kind != pointer.Scroll || e.Scroll.X == 0 {
-			continue
+		if size.X <= 0 {
+			size.X = fallback
 		}
-		s.stopPage()
-		applied += addListOffset(&s.Position, &s.fraction, mapScrollDelta(e.Scroll.X, gtx.Metric.PxPerDp, scrollOnX11))
+		return layout.Dimensions{Size: size}
+	})
+	after := s.Position
+	if sameListPosition(before, after) {
+		if !s.List.Dragging() {
+			s.listGesture = false
+		}
+		return 0
 	}
-	return applied
+
+	raw := float32(listPositionDelta(before, after, s.itemSizes, fallback, s.Gap, layout.Horizontal))
+	dragging := s.List.Dragging()
+	if !dragging && !s.listGesture {
+		raw = mapScrollDelta(raw, gtx.Metric.PxPerDp, scrollOnX11)
+	}
+	s.Position = before
+	s.stopPage()
+	addListOffset(&s.Position, &s.fraction, raw)
+	s.listGesture = dragging || s.listGesture
+	return 1
 }
 
 func (s *HScroller) advancePage(gtx layout.Context) int {
@@ -79,17 +97,20 @@ func (s *HScroller) Layout(gtx layout.Context, th *Theme, count int, el layout.L
 	s.Axis = layout.Horizontal
 	s.duration = th.Motion.Wheel
 	before := s.Position
-	applied := s.updateInput(gtx)
+	applied := s.probeInput(gtx)
 	applied += s.advancePage(gtx)
-	dimensions := s.List.Layout(gtx, count, el)
+	s.listConstraints = gtx.Constraints
+	if len(s.itemSizes) < count {
+		s.itemSizes = append(s.itemSizes, make([]image.Point, count-len(s.itemSizes))...)
+	}
+	s.itemCount = count
+	dimensions := s.List.Layout(gtx, count, func(gtx layout.Context, index int) layout.Dimensions {
+		dimensions := el(gtx, index)
+		s.itemSizes[index] = dimensions.Size
+		return dimensions
+	})
+	s.cacheReady = true
 	s.viewport = dimensions.Size.X
-
-	// A horizontal-only range lets vertical wheel input continue to the page.
-	pass := pointer.PassOp{}.Push(gtx.Ops)
-	area := clip.Rect(image.Rectangle{Max: dimensions.Size}).Push(gtx.Ops)
-	event.Op(gtx.Ops, &s.tag)
-	area.Pop()
-	pass.Pop()
 
 	if applied != 0 && sameListPosition(before, s.Position) {
 		s.fraction = 0

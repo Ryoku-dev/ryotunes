@@ -14,7 +14,7 @@ require (
 	github.com/gorilla/websocket v1.5.3
 	github.com/klauspost/compress v1.20.3
 	github.com/mozillazg/go-pinyin v0.21.0
-	github.com/ryoku-dev/ryoku/docs/lithic/library/go v0.0.0-20261109022738-f273fa939a18
+	github.com/ryoku-dev/ryoku/docs/lithic/library/go v0.0.0-20261110025519-59b1704838d8
 	golang.org/x/exp/shiny v0.0.0-20261106192419-47ce03d25ef0
 	golang.org/x/image v0.47.0
 	golang.org/x/net v0.48.0

@@ -56,16 +56,14 @@ type appearanceControls struct {
 	scale                    kit.Stepper
 	lowResource              kit.Toggle
 	visualizer               kit.Toggle
-	visualizerStyle          kit.Filters
-	visualizerStyleScroll    look.HScroller
+	visualizerStyle          look.FlowChoice
 	waveProgress             kit.Toggle
 	coverTint                kit.Toggle
-	accent                   kit.Filters
-	accentScroll             look.HScroller
-	corners                  kit.Filters
-	cornersScroll            look.HScroller
+	accent                   look.FlowChoice
+	corners                  look.FlowChoice
 	corner                   kit.Slider
 	cornerSaveArmed          bool
+	openFloating             kit.Toggle
 	palette                  fieldValue
 	usePalette, clearPalette kit.Plaque
 	tray, autostart          kit.Toggle
@@ -153,14 +151,17 @@ type diagnosticsControls struct {
 }
 
 type aboutControls struct {
-	check, install, changelog, notes kit.Plaque
-	links                            [4]kit.Plaque
-	showNotes                        bool
+	check, install, changelog, notes, licenses kit.Plaque
+	links                                      [3]kit.Plaque
+	showNotes                                  bool
 }
 
 type page struct {
-	scroll look.Scroller
-	index  kit.SectionIndex
+	scroll              look.Scroller
+	indexScroll         look.Scroller
+	index               kit.SectionIndex
+	sectionChips        look.FlowChoice
+	indexTrackedSection int
 
 	sectionLabels  []string
 	sectionHeights []int
@@ -212,13 +213,14 @@ type page struct {
 func New(r env.Route) env.Page {
 	initialSection := sectionIndex(r.Params)
 	p := &page{
-		sectionLabels:  make([]string, len(settingsSections)),
-		sectionHeights: make([]int, len(settingsSections)),
-		initialSection: initialSection,
-		currentSection: initialSection,
-		indexHold:      initialSection,
-		rowDescriptors: make([][]*settingRowDescriptor, len(settingsSections)),
-		rowChildren:    make([][]layout.FlexChild, len(settingsSections)),
+		sectionLabels:       make([]string, len(settingsSections)),
+		sectionHeights:      make([]int, len(settingsSections)),
+		initialSection:      initialSection,
+		currentSection:      initialSection,
+		indexHold:           initialSection,
+		indexTrackedSection: -1,
+		rowDescriptors:      make([][]*settingRowDescriptor, len(settingsSections)),
+		rowChildren:         make([][]layout.FlexChild, len(settingsSections)),
 	}
 	for i, section := range settingsSections {
 		p.sectionLabels[i] = section.title

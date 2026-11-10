@@ -7,7 +7,18 @@ epoch=1
 pkgdesc="Ryoku's native Lithic music player"
 url='https://github.com/ryoku-dev/ryotunes'
 arch=('x86_64')
-license=('GPL-3.0-or-later')
+license=(
+  'GPL-3.0-or-later'
+  'GPL-3.0-only'
+  'Apache-2.0'
+  'BSD-2-Clause'
+  'BSD-3-Clause'
+  'CC0-1.0'
+  'ISC'
+  'MIT'
+  'OFL-1.1'
+  'Unlicense'
+)
 depends=(
   'mpv'
   'libvorbis'
@@ -88,6 +99,8 @@ package() {
   install -Dm644 assets/icons/ryotunes.svg "$pkgdir/usr/share/icons/hicolor/scalable/apps/ryotunes.svg"
 
   install -Dm644 LICENSE "$pkgdir/usr/share/licenses/ryotunes/LICENSE"
+  install -Dm644 NOTICE "$pkgdir/usr/share/licenses/ryotunes/NOTICE"
+  install -Dm644 THIRD_PARTY_NOTICES "$pkgdir/usr/share/licenses/ryotunes/THIRD_PARTY_NOTICES"
   install -Dm644 README.md "$pkgdir/usr/share/doc/ryotunes/README.md"
   install -Dm644 UPSTREAM.md "$pkgdir/usr/share/doc/ryotunes/UPSTREAM.md"
 }

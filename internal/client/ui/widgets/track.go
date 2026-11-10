@@ -77,6 +77,7 @@ type trackRow struct {
 	fill              look.Fill
 	hover             look.Hover
 	contextTag        int
+	context           contextRelease
 	menu              ItemMenu
 	titleChildren     [3]layout.FlexChild
 	titleLineChildren [3]layout.FlexChild
@@ -387,15 +388,9 @@ func (t *TrackTable) processRow(gtx layout.Context, e *env.Env, row *trackRow, i
 	if row.more.Clicked(gtx) {
 		row.openMenu(e, track, opts.Context, index)
 	}
-	for {
-		raw, ok := gtx.Event(pointer.Filter{Target: &row.contextTag, Kinds: pointer.Press})
-		if !ok {
-			break
-		}
-		if press, ok := raw.(pointer.Event); ok && press.Buttons.Contain(pointer.ButtonSecondary) {
-			row.openMenu(e, track, opts.Context, index)
-		}
-	}
+	row.context.poll(gtx, &row.contextTag, func() {
+		row.openMenu(e, track, opts.Context, index)
+	})
 	for {
 		raw, ok := gtx.Event(
 			key.Filter{Focus: &row.click.Clickable, Name: key.NameEnter},
@@ -491,9 +486,10 @@ func (t *TrackTable) titleCell(gtx layout.Context, e *env.Env, row *trackRow, tr
 	}
 	children := row.titleChildren[:0]
 	if art {
+		artSize := min(gtx.Dp(40), max(1, gtx.Constraints.Max.Y-gtx.Dp(16)))
 		children = append(children,
 			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-				return look.Art(gtx, e.Th, e.Art, textValue(track.Thumbnail), image.Pt(gtx.Dp(40), gtx.Dp(40)), look.Shape{Cut: 3})
+				return look.Art(gtx, e.Th, e.Art, textValue(track.Thumbnail), image.Pt(artSize, artSize), look.Shape{Cut: 3})
 			}),
 			layout.Rigid(layout.Spacer{Width: unit.Dp(13)}.Layout),
 		)

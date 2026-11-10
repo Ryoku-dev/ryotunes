@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- Choose whether Ryotunes opens floating or tiled with Open as a floating window in Settings, Appearance. Tiling window managers like niri and Hyprland follow it, and the mini player always floats.
+- Downloaded music plays now, straight from the file and without a connection: Play on a saved download or double click it, or play the track from anywhere else. Show in folder moved to the right click menu.
+- With nothing playing there's no empty player bar anymore. It slides up when something starts and folds away when the queue empties.
+- Fast scrolling no longer skips ahead in long pages and lists.
+- Hovering a cover, song or row leaves room around it, so titles don't touch the edge of the highlight anymore.
+- Menus light up the row under the pointer instead of darkening it.
+- Sound presets and the appearance choices wrap onto a second line instead of scrolling sideways, the equalizer's bands show when there's more to scroll, and the settings sections list scrolls when the window is short.
+- The Ryoku mark in the top bar and About is the current logo.
+- Ryotunes now has its own notice: GPL-3.0-or-later, copyright Ryoku-dev and contributors, a trademark term for the Ryoku and Ryotunes names and marks, and every bundled component's license, also reachable from Settings, About.
 - Lyrics are sung word by word now: each word fills with the cover's colour as it's sung and lifts a little, and the line being sung grows into place while the last one settles back. Lyrics that only time each line get their word timing estimated, and it can be turned off in Settings, Lyrics.
 - The whole window takes on the colour of the cover that's playing, the sidebar, panels and player bar included, and retints when the track changes. Turn it off with Tint the window in Settings, Appearance.
 - A new cover slides in behind a sharp diagonal cut when the track changes.

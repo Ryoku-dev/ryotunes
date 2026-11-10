@@ -22,6 +22,13 @@ func (p queuePersist) Set(key, value string) error   { return p.kv.Set(key, valu
 
 type queueHooks struct{ app *App }
 
+func (h queueHooks) DownloadedStream(trackID string) (model.Stream, bool) {
+	if h.app.Downloads == nil {
+		return model.Stream{}, false
+	}
+	return h.app.Downloads.Stream(trackID)
+}
+
 func (h queueHooks) OnPlayed(ctx context.Context, track model.Track) {
 	if ctx.Err() != nil {
 		return

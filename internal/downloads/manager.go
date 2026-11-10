@@ -13,6 +13,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 	"unicode/utf8"
 
@@ -71,9 +72,12 @@ type attempt struct {
 
 func (a *attempt) stop() { a.once.Do(func() { close(a.cancel) }) }
 
+type downloadFileIndex map[string][]string
+
 // Manager owns download state, worker admission, and publication.
 type Manager struct {
 	mu         sync.Mutex
+	files      atomic.Pointer[downloadFileIndex]
 	dataDir    string
 	settings   model.DownloadSettings
 	jobs       []model.DownloadEntry
@@ -141,6 +145,8 @@ func New(options Options) (*Manager, error) {
 		if err := manager.saveLocked(); err != nil {
 			return nil, err
 		}
+	} else {
+		manager.rebuildFileIndexLocked()
 	}
 	manager.pump()
 	return manager, nil
@@ -535,6 +541,22 @@ func (m *Manager) ClearHistory() error {
 	return nil
 }
 
+// Stream returns the newest playable downloaded file for a provider track.
+func (m *Manager) Stream(videoID string) (model.Stream, bool) {
+	index := m.files.Load()
+	if index == nil {
+		return model.Stream{}, false
+	}
+	for _, path := range (*index)[videoID] {
+		info, err := os.Stat(path)
+		if err != nil || !info.Mode().IsRegular() || info.Size() == 0 {
+			continue
+		}
+		return model.Stream{URL: (&url.URL{Scheme: "file", Path: path}).String()}, true
+	}
+	return model.Stream{}, false
+}
+
 // Open opens the parent folder of a completed download.
 func (m *Manager) Open(id string) error {
 	m.mu.Lock()
@@ -625,7 +647,22 @@ func (m *Manager) jobIndexLocked(id string) int {
 }
 
 func (m *Manager) saveLocked() error {
-	return saveState(m.dataDir, diskState{Settings: m.settings, Jobs: m.jobs})
+	if err := saveState(m.dataDir, diskState{Settings: m.settings, Jobs: m.jobs}); err != nil {
+		return err
+	}
+	m.rebuildFileIndexLocked()
+	return nil
+}
+
+func (m *Manager) rebuildFileIndexLocked() {
+	index := make(downloadFileIndex)
+	for position := len(m.jobs) - 1; position >= 0; position-- {
+		job := m.jobs[position]
+		if job.Status == model.DownloadStatusCompleted && job.FilePath != nil {
+			index[job.VideoID] = append(index[job.VideoID], *job.FilePath)
+		}
+	}
+	m.files.Store(&index)
 }
 
 func (m *Manager) pruneLocked() {

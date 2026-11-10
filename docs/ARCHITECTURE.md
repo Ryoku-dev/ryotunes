@@ -97,7 +97,8 @@ internal/
   eq/           the parametric equalizer: limits, presets, Equalizer APO and AutoEQ
                 text, the mpv filter chain and the response maths the client draws
   queue/        the queue: manual items, continuation, shuffle, repeat, stop after current,
-                restore; asks a Resolver for streams and a Continuer for more
+                restore; plays a completed download from its file before asking a
+                Resolver for streams, and a Continuer for more
   provider/     the Provider interface and Registry
     youtube/    InnerTube clients, visitorData, cipher (goja), player resolve chain,
                 yt-dlp fallback, browser-cookie sign-in, browse parsers
@@ -186,15 +187,16 @@ internal/client/
                lyrics, listen together; one Store with Invalidate hooks; the
                client lock and preferences
   art/         image loading: http, decode off the UI goroutine, downscale, LRU,
-               collage for device playlists, the cover colour sample behind the
-               accent
+               collage for device playlists, and each cover's palette (vibrant and
+               dominant) behind the accent and the window tint
   spectrum/    the visualizer feeds: cava bands and pw-record stereo samples,
                each running only while a visible visualizer wants it
   ui/
-    look/      the app theme on the library: accent and source colours, pane
-               corners, Ryoku mark, provider glyphs, icons, frame geometry,
-               overlay host, tips, choices, scrolling, scrubbers, artwork,
-               visualizer styles, equalizer graph and faders, playback motion
+    look/      the app theme on the library: accent, cover tint and source colours,
+               pane corners, the Ryoku mark, provider glyphs, icons, frame geometry,
+               overlay host, tips, wrapping choice chips, exact scrolling, scrubbers,
+               artwork, visualizer styles and beat, karaoke lyrics, equalizer graph
+               and faders, playback motion
     env/       what every surface receives: theme, store, connection, router,
                artwork, feeds, overlays, toasts
     act/       daemon actions shared by every surface
@@ -203,8 +205,8 @@ internal/client/
     chrome/    top bar, provider switcher, sidebar, bottom bar, player bar,
                sound, side panel (queue, lyrics, together), now playing, mini
     pages/     one package per page (equalizer included)
-    shell/     windows, frame, router, overlays and keys, theme reconciling,
-               single instance
+    shell/     windows and whether the main one opens floating or tiled, frame,
+               router, overlays and keys, theme reconciling, single instance
 ```
 
 - One `Store` holds the daemon snapshot plus client-only state. Reducers are
@@ -252,10 +254,12 @@ name and renamed.
 `release/` builds the Arch package (`ryotunes 1:<version>-1`, epoch kept),
 the Void depends and installer, the AUR `-bin` recipe. The package installs
 the four binaries, the systemd user units and preset, the desktop entry,
-icons, the metainfo and the matugen template. It never removes
-`ryoku-desktop`. CI runs `gofmt`, `go vet`, `go test ./...`, `go build` with
+icons, the metainfo, the matugen template, and `LICENSE`, `NOTICE` and
+`THIRD_PARTY_NOTICES` under `/usr/share/licenses/ryotunes/`. It never removes
+`ryoku-desktop`. `release/generate-third-party-notices.go` writes the
+third-party notices from the modules the binaries link. CI runs `gofmt`, `go vet`, `go test ./...`, `go build` with
 `CGO_ENABLED=0` for the three pure binaries and the Gio client with cgo, the
-release gates in `release/check.sh`, and the glibc ceiling check.
+release gates in `release/check.sh` (the notices must be current), and the glibc ceiling check.
 
 ## Development
 

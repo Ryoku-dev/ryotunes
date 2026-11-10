@@ -7,10 +7,13 @@ import (
 	"image"
 	"image/color"
 	"image/png"
+	"net/url"
+	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/ryoku-dev/ryotunes/internal/model"
 )
@@ -141,6 +144,59 @@ func TestMetadataBlockPicture(t *testing.T) {
 	if dataLength != len(pngBytes.Bytes()) || !bytes.Equal(block[cursor:], pngBytes.Bytes()) {
 		t.Fatal("picture payload differs")
 	}
+}
+func TestCompletedDownloadResolvesToExistingFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "Saved track.opus")
+	if err := os.WriteFile(path, []byte("audio"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	manager := &Manager{jobs: []model.DownloadEntry{{
+		VideoID: "video-id", Status: model.DownloadStatusCompleted, FilePath: &path,
+	}}}
+	manager.rebuildFileIndexLocked()
+	stream, ok := manager.Stream("video-id")
+	if !ok {
+		t.Fatal("completed download did not resolve")
+	}
+	parsed, err := url.Parse(stream.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if parsed.Scheme != "file" || parsed.Path != path {
+		t.Fatalf("stream URL = %q", stream.URL)
+	}
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := manager.Stream("video-id"); ok {
+		t.Fatal("missing download must fall back to provider resolution")
+	}
+}
+
+func TestDownloadedStreamLookupDoesNotWaitForManagerLock(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "Saved track.opus")
+	if err := os.WriteFile(path, []byte("audio"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	manager := &Manager{jobs: []model.DownloadEntry{{
+		VideoID: "video-id", Status: model.DownloadStatusCompleted, FilePath: &path,
+	}}}
+	manager.rebuildFileIndexLocked()
+	manager.mu.Lock()
+	result := make(chan bool, 1)
+	go func() {
+		_, ok := manager.Stream("video-id")
+		result <- ok
+	}()
+	select {
+	case ok := <-result:
+		if !ok {
+			t.Fatal("completed download did not resolve")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("stream lookup waited for the manager lock")
+	}
+	manager.mu.Unlock()
 }
 
 func containsSequence(values, sequence []string) bool {

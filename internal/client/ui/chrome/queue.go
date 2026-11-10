@@ -296,7 +296,7 @@ func (queue *Queue) layoutRow(gtx layout.Context, e *env.Env, entry queueEntry) 
 			paint.FillShape(gtx.Ops, hoverInk, clip.Rect(bounds).Op())
 		}
 		return item.click.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-			return layout.Inset{Top: 8, Bottom: 8}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+			return layout.Inset{Top: 8, Right: 8, Bottom: 8, Left: 8}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 				item.children[0] = layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 					size := image.Pt(gtx.Dp(40), gtx.Dp(40))
 					return look.Art(gtx, e.Th, e.Art, optionalString(row.Item.Thumbnail), size, look.Shape{Cut: 3})
