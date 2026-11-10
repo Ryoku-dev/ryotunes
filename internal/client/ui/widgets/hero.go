@@ -40,6 +40,7 @@ type Hero struct {
 	tintTween        anim.Tween
 	tintRoles        palette.Roles
 	tintSet          bool
+	backdrop         look.Backdrop
 }
 
 func heroArtSize(width unit.Dp) unit.Dp {
@@ -242,8 +243,8 @@ func (h *Hero) advanceTint(gtx layout.Context) look.Accent {
 	return h.tint
 }
 
-func (h *Hero) field(gtx layout.Context, e *env.Env, tint look.Accent, cuts [4]int, body layout.Widget) layout.Dimensions {
-	return look.FieldAccent(gtx, e.Th, tint, cuts, func(gtx layout.Context) layout.Dimensions {
+func (h *Hero) field(gtx layout.Context, e *env.Env, tint look.Accent, artURL string, cuts [4]int, body layout.Widget) layout.Dimensions {
+	return look.FieldBackdrop(gtx, e.Th, tint, cuts, &h.backdrop, e.Art, artURL, func(gtx layout.Context) layout.Dimensions {
 		record := op.Record(gtx.Ops)
 		dimensions := body(gtx)
 		content := record.Stop()
@@ -315,7 +316,7 @@ func (h *Hero) Layout(gtx layout.Context, e *env.Env, content HeroContent) layou
 	inset := look.ContentInset(e.Th.Class)
 	bottom, _ := headerLaneMetrics(e.Th.Class)
 	cut := gtx.Dp(e.Th.Cut.Large)
-	return h.field(gtx, e, tint, [4]int{cut, cut, 0, 0}, func(gtx layout.Context) layout.Dimensions {
+	return h.field(gtx, e, tint, artURL, [4]int{cut, cut, 0, 0}, func(gtx layout.Context) layout.Dimensions {
 		return layout.Inset{Top: inset, Right: inset, Bottom: bottom, Left: inset}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 			shape := look.Shape{Cut: 7, Octagon: content.Octagon}
 			return layout.Flex{Axis: layout.Horizontal, Alignment: layout.End}.Layout(gtx,

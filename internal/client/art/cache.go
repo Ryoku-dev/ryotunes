@@ -215,19 +215,28 @@ func (c *Cache) Palette(rawURL string) (palette Palette, ready bool) {
 		c.sampleLRU.MoveToFront(entry.lru)
 		return entry.sample.palette, true
 	}
+	if !c.requestSampleLocked(rawURL) {
+		return Palette{}, true
+	}
+	return Palette{}, false
+}
+
+// requestSampleLocked starts the disk read or the cover load that samples
+// rawURL, and reports whether a sample can still come.
+func (c *Cache) requestSampleLocked(rawURL string) bool {
 	key := cacheKey{url: rawURL, size: sampleLoadSize}
 	if c.ctx.Err() != nil || c.failureActiveLocked(key) {
-		return Palette{}, true
+		return false
 	}
 	priority := c.nextPriorityLocked()
 	if job := c.samplePending[rawURL]; job != nil {
 		c.promoteJobLocked(job, priority)
-		return Palette{}, false
+		return true
 	}
 	// The cover load in flight samples the palette and invalidates when done.
 	if job := c.pendingURL[rawURL]; job != nil {
 		c.promoteJobLocked(job, priority)
-		return Palette{}, false
+		return true
 	}
 	if c.diskDir != "" && persistArtwork(rawURL) {
 		job := c.newJobLocked(paletteJob, key, priority)
@@ -235,10 +244,10 @@ func (c *Cache) Palette(rawURL string) (palette Palette, ready bool) {
 		if !c.diskJobs.push(job) {
 			delete(c.samplePending, rawURL)
 		}
-		return Palette{}, false
+		return true
 	}
 	c.enqueueArtworkLocked(key)
-	return Palette{}, false
+	return true
 }
 
 // Failed reports whether rawURL at size cannot load now.

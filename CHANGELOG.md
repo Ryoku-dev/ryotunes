@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Now playing, the album, playlist and artist pages, Home's now playing card and the mini player have a soft blur of the cover behind them. It stays faint, so text reads the same on any cover, and fades over when the track changes.
 - The equalizer's bands spread across the whole row instead of bunching up on the left, and each band's gain, frequency and Q sit centred over its fader. With more bands than fit, the row scrolls and + Band stays in view.
 - The equalizer has a back button next to its title, and Escape leaves it too, back to where you opened it from.
 - YouTube Music and SoundCloud stay signed in. Ryotunes follows the session in your browser instead of keeping a copy that goes stale, so YouTube Music is still signed in after days off, and Sign in works again when an old session ran out. SoundCloud's browser session lasts a day unless soundcloud.com is opened, so after a day away, open it or press Sign in once. It only ever adopts the same account.

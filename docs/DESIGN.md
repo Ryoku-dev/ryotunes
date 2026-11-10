@@ -60,6 +60,14 @@ disagrees. Settings can take it from the provider's brand or the desktop
 palette instead; a grey or missing cover falls back to the desktop palette.
 Album, playlist and artist heroes tint their own field with their own cover.
 
+Where a cover is the subject, a hint of its blur sits on the plane behind it:
+the now playing view, Home's now playing card, the album, playlist and artist
+heroes, and the mini player. It is a hint, not a picture. Each colour keeps its
+hue but stays close to the plane's own lightness and well short of its colour,
+drawn at about a third, so text and veins over it read as they do on bare
+stone. It changes with the cover and never moves at rest. Pages without a
+cover, the player bar, cards and rows stay plain stone.
+
 The window can take the cover's colour too, the way Ryoku's palette takes the
 wallpaper's. With Tint the window on (the default while the accent follows the
 album art), the ground, every stone, the veins and the inks are re-hued toward
@@ -102,13 +110,14 @@ only for data: durations, counts, bitrates and versions.
 Motion answers a press, a hover, a navigation or a playback change and then
 stops: the play button morphs, a liked heart fills, a new cover is revealed
 behind a 45 degree cut that sweeps across the old one while the window
-retints, a scrubber thickens and shows its handle under the pointer, the
-provider plate glides, the panes re-cut when the corner setting changes, the
-sidebar folds with its labels fading, the side panel unfolds, the Home card
-unfolds when music starts, a lyric line grows into place as it becomes the one
-being sung while the last one settles back, and equalizer nodes and curves
-tween to a preset. Each uses the library's chisel curve and duration tokens and
-is instant under reduced motion.
+retints and the blur behind it fades to the new one, a scrubber thickens and
+shows its handle under the pointer, the provider plate glides, the panes
+re-cut when the corner setting changes, the sidebar folds with its labels
+fading, the side panel unfolds, the Home card unfolds when music starts, a
+lyric line grows into place as it becomes the one being sung while the last
+one settles back, and equalizer nodes and curves tween to a preset. Each uses
+the library's chisel curve and duration tokens and is instant under reduced
+motion.
 
 Nothing moves at rest. While music plays, three things move on their own: the
 wave progress (the played part is a travelling zigzag with sharp vertices,

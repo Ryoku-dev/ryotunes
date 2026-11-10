@@ -18,8 +18,9 @@ type Palette struct {
 }
 
 type artworkSample struct {
-	palette Palette
-	ready   bool
+	palette  Palette
+	backdrop *image.RGBA
+	ready    bool
 }
 
 type sampleBucket struct {
@@ -77,7 +78,7 @@ func sampleArtwork(source image.Image) artworkSample {
 		}
 	}
 
-	sample := artworkSample{ready: true}
+	sample := artworkSample{ready: true, backdrop: backdropOf(pixels)}
 	if dominantIndex >= 0 {
 		sample.palette.Dominant = bucketColour(dominantBuckets[dominantIndex])
 	}

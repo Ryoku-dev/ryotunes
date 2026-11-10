@@ -153,6 +153,25 @@ mode or preference change tweens the whole role set together with the accent
 over `Motion.Field`; a palette change snaps. With the tint off, an accent mode
 other than Album art, or nothing loaded, the stones are the desktop palette's.
 
+**Cover backdrop** (`look/backdrop.go`). A hint of the cover's blur sits on the
+planes where a cover is the subject: the now playing view's pane and Home's
+now playing card (the loaded track's cover), the album, playlist and artist
+heroes (their own cover) and the mini window (the loaded track's). Page
+headers, the player bar, the compact player, cards and rows stay plain stone.
+The art cache blurs the 24 × 24 palette sample on its worker (three box passes
+of radius 2, edges held) and keeps it with the palette, in memory and in the
+cover's palette file on disk; a palette file from before the blur is sampled
+again once from the disk cover. Collages have none. `look.Backdrop` tones it
+to the plane under it: each pixel keeps its hue, its OKLCH lightness stays
+within .05 of the plane's and its chroma under .08, so text and veins keep the
+plane's contrast on any cover. It is drawn at .35 opacity, scaled to cover the
+plane (centre crop, linear filtering) inside the plane's cuts, and toned again
+only when the plane's lightness moves by .02 (a tint tween). The first frame
+shows it whole. A new cover fades in over `Motion.Field` with the chisel ease
+while the old one fades out, and a cover that lands mid-fade carries on from
+wherever the fade left the old one. No cover, or one not sampled yet, fades
+the last one out.
+
 **Source colour.** The active provider's brand is identity, not state, so it
 may stand without a word, and since v3 it lives in one place: the provider
 switcher. `look/brand.go` holds the fixed brand fills of YouTube Music,
@@ -485,9 +504,10 @@ on Escape or an outside press, which it swallows.
 
 Opened by the player bar's now playing plaque or the compact player. It
 replaces the sidebar, content and panel area with one stone2 pane (x 8 to
-W-8, top corners cut by `Cut.Large`) whose whole plane is `Accent.Field`. The top bar and
-player bar stay. Escape, Back or the plaque closes it. It enters over
-`Motion.Navigate` (fade, 8 rise).
+W-8, top corners cut by `Cut.Large`) whose whole plane is `Accent.Field`
+under the cover backdrop (see Colour). The top bar and player bar stay.
+Escape, Back or the plaque closes it. It enters over `Motion.Navigate` (fade,
+8 rise).
 
 - Pane width ≥ 900: left column 42 % with the art square
   `min(colW - 110, paneH - 208, 520)`, cut 16, centred; under it, 21, title
@@ -541,6 +561,7 @@ layout's 251 dp fixed rows:
   hides the next line), and the next line (`T.Caption` `fg3`) over
   `Motion.Field`; the controls stay.
 - Every blank part of the strip drags the window.
+- The window is stone1 under the cover backdrop (see Colour).
 
 A taller window that can fit those fixed rows keeps the v2 portrait layout: a
 48 strip with the controls, title and artists centred, the seek row, the
@@ -671,7 +692,8 @@ scrolls with the page.
   empties.
 
   - A stone1 slab across the content width, 13 padding, its top-left and
-    bottom-right corners cut by `Cut.Mid`.
+    bottom-right corners cut by `Cut.Mid`, under the cover backdrop (see
+    Colour).
   - Content width ≥ 720: art 144 (`widgets.PlayArt`, cut 7) │ 21 │ text column
     (flexed) │ 21 │ instrument. The text column's top: a state line (a flake
     and a word: "Playing" with an `Accent.Ink` flake, "Paused" amber, "Loading"
@@ -710,9 +732,10 @@ scrolls with the page.
   playlist" plaque on Playlists. Playlists: grid with Liked songs first. Songs:
   track table. Albums and Artists: grids. Local: folder slab rows (path, count,
   Remove) with "Add folder", then the local track table.
-- **Album / playlist:** hero in the field: art 200 when the hero is at least
-  760 wide, 160 at 560–759, otherwise 120; cut 7; 21; a bottom-aligned
-  column whose natural height may make the hero taller than the art: kind
+- **Album / playlist:** hero in the field, under its cover's backdrop (see
+  Colour): art 200 when the hero is at least 760 wide, 160 at 560–759,
+  otherwise 120; cut 7; 21; a bottom-aligned column whose natural height may
+  make the hero taller than the art: kind
   `T.Group` `fg2`, title `T.Name` (falls to `T.Sentence` under 640 content
   width or past two lines), then meta `T.Proof` `fg2`. Meta wraps only between
   whole facts, uses at most two lines and drops trailing facts that do not fit;
@@ -1034,7 +1057,9 @@ func Art(gtx layout.Context, th *Theme, cache *art.Cache, url string, size image
 // empties it (Cache.Clear) and Cache.Forget drops one URL. Network loads run
 // with enough workers that one slow host cannot starve the rest, the covers
 // being drawn this frame go first, and queued loads for rows that scrolled
-// far away are dropped before they fetch.
+// far away are dropped before they fetch. Cache.Palette and Cache.Backdrop
+// return a cover's palette and its blurred 24 × 24 sample, both made once per
+// cover off the frame goroutine and kept beside it on disk.
 
 // Micro motion
 type Hover struct{ ... }   // pointer hover of an area as a tween 0..1 (hover in/out)
@@ -1047,6 +1072,11 @@ type Fill struct{ ... }    // a glyph filling from its centre outward as a clip 
 func (f *Fill) Layout(gtx layout.Context, th *Theme, on bool, off, onW layout.Widget) layout.Dimensions
 func Bubble(gtx layout.Context, th *Theme, at image.Point, text string, alpha float32) // deferred overlay
 func Field(gtx layout.Context, th *Theme, cuts [4]int, body layout.Widget) layout.Dimensions // Accent.Field plane
+// FieldBackdrop is a field plane with a cover's backdrop; Backdrop.Paint lays
+// one on any plane, toned to its colour.
+func FieldBackdrop(gtx layout.Context, th *Theme, a Accent, cuts [4]int, b *Backdrop, cache *art.Cache, cover string, body layout.Widget) layout.Dimensions
+type Backdrop struct{ ... }
+func (b *Backdrop) Paint(gtx layout.Context, th *Theme, cache *art.Cache, cover string, plane color.NRGBA, bounds image.Rectangle, cuts [4]int)
 
 // Overlays places popovers, menus, tips and choices in WINDOW coordinates.
 // The shell owns one instance, lays out the frame, then calls Layout last
@@ -1131,6 +1161,7 @@ instant.
 | placard | rises 8, blade drains (library) | placard in 300 / life 5000 |
 | now playing view opens / closes | fade with an 8 rise / fade | navigate 200 / hover out 100 |
 | accent changes (new cover, source, preference) | fill, on, ink and field tween together, and with the window tint every stone and ink retints with them | field 320 |
+| a cover backdrop's cover changes (new track, a hero's cover arrives) | the new blur fades in as the old one fades out, carrying on from any fade in progress | field 320 |
 | corners preference changes | every pane re-cuts in place | select 240 |
 | sidebar folds / unfolds | width tweens, labels clip and fade, icons glide to the rail | unfold 200 |
 | medium sidebar sheet | slides 6 in from the left and fades / retreats | menu in 160 / out 100 |

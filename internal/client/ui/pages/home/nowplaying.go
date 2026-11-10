@@ -69,6 +69,7 @@ type nowPlayingCard struct {
 	instrument    kit.Click
 	instrumentTip look.Tip
 	visualizer    look.Visualizer
+	backdrop      look.Backdrop
 }
 
 // Layout grows the card into the Home field only while a track is loaded.
@@ -161,6 +162,7 @@ func (card *nowPlayingCard) layoutSlab(gtx layout.Context, e *env.Env) layout.Di
 	bounds := image.Rectangle{Max: dimensions.Size}
 	cut := gtx.Dp(e.Th.Cut.Mid)
 	kit.FillCutCorners(gtx.Ops, bounds, cut, 0, cut, 0, e.Th.R.Stone1)
+	card.backdrop.Paint(gtx, e.Th, e.Art, homeString(card.track.Thumbnail), e.Th.R.Stone1, bounds, [4]int{cut, 0, cut, 0})
 	content.Add(gtx.Ops)
 	return dimensions
 }

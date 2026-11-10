@@ -111,6 +111,13 @@ func (c *Cache) readDiskArtwork(key cacheKey) (image.Image, artworkSample, bool,
 	return nil, artworkSample{}, false, false
 }
 
+// diskSample is a cover's palette file: its two colours and the pixels of its
+// blurred backdrop.
+type diskSample struct {
+	Palette
+	Backdrop []byte `json:",omitempty"`
+}
+
 func (c *Cache) readDiskPalette(rawURL string) (artworkSample, bool) {
 	if c.diskDir == "" || c.clearDisk.Load() {
 		return artworkSample{}, false
@@ -120,14 +127,19 @@ func (c *Cache) readDiskPalette(rawURL string) (artworkSample, bool) {
 	if err != nil {
 		return artworkSample{}, false
 	}
-	var palette Palette
-	if json.Unmarshal(content, &palette) != nil || (palette.Dominant.A == 0 && palette.Vibrant.A == 0) {
+	var stored diskSample
+	if json.Unmarshal(content, &stored) != nil || (stored.Dominant.A == 0 && stored.Vibrant.A == 0) {
 		c.removeDiskFile(path)
+		return artworkSample{}, false
+	}
+	// a file from before backdrops is sampled again and rewritten
+	if len(stored.Backdrop) != accentSampleSize*accentSampleSize*4 {
 		return artworkSample{}, false
 	}
 	// See readDiskArtwork: atime only.
 	_ = os.Chtimes(path, time.Now(), time.Time{})
-	return artworkSample{palette: palette, ready: true}, true
+	backdrop := &image.RGBA{Pix: stored.Backdrop, Stride: accentSampleSize * 4, Rect: image.Rect(0, 0, accentSampleSize, accentSampleSize)}
+	return artworkSample{palette: stored.Palette, backdrop: backdrop, ready: true}, true
 }
 
 func (c *Cache) writeDiskArtwork(key cacheKey, img image.Image, sample artworkSample) error {
@@ -162,7 +174,11 @@ func (c *Cache) writeDiskPalette(rawURL string, sample artworkSample) error {
 	if c.diskDir == "" || !sample.ready || !persistArtwork(rawURL) {
 		return nil
 	}
-	content, err := json.Marshal(sample.palette)
+	stored := diskSample{Palette: sample.palette}
+	if sample.backdrop != nil {
+		stored.Backdrop = sample.backdrop.Pix
+	}
+	content, err := json.Marshal(stored)
 	if err != nil {
 		return err
 	}

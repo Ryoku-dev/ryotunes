@@ -34,13 +34,18 @@ type NowPlaying struct {
 	artist     kit.Click
 	album      kit.Click
 	stageTab   int
+	backdrop   look.Backdrop
 }
 
 // Layout draws the complete source-field pane.
 func (playing *NowPlaying) Layout(gtx layout.Context, e *env.Env) layout.Dimensions {
 	cuts := [4]int{gtx.Dp(e.Th.Cut.Large), gtx.Dp(e.Th.Cut.Large), 0, 0}
-	return look.Field(gtx, e.Th, cuts, func(gtx layout.Context) layout.Dimensions {
-		snapshot := e.Store.Snapshot()
+	snapshot := e.Store.Snapshot()
+	var cover string
+	if snapshot.Playback.Now != nil {
+		cover = optionalString(trackFromPlayback(snapshot.Playback.Now, e.Store.CurrentTrack()).Thumbnail)
+	}
+	return look.FieldBackdrop(gtx, e.Th, e.Th.Accent, cuts, &playing.backdrop, e.Art, cover, func(gtx layout.Context) layout.Dimensions {
 		if snapshot.Playback.Now == nil {
 			return widgets.EmptyState(e, look.Icon.NowPlaying, "Nothing playing", "Choose a track to see it here.")(gtx)
 		}

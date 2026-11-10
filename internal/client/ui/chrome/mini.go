@@ -30,6 +30,7 @@ type Mini struct {
 	closeTip  look.Tip
 
 	art                 widgets.PlayArt
+	backdrop            look.Backdrop
 	layoutSwap          look.Swap
 	titleSwap           look.Swap
 	artistSwap          look.Swap
@@ -82,6 +83,11 @@ func (mini *Mini) Layout(gtx layout.Context, e *env.Env) layout.Dimensions {
 	paint.FillShape(gtx.Ops, e.Th.R.Stone1, clip.Rect(image.Rectangle{Max: size}).Op())
 
 	snapshot := e.Store.Snapshot()
+	var cover string
+	if snapshot.Playback.Now != nil {
+		cover = optionalString(snapshot.Playback.Now.Thumbnail)
+	}
+	mini.backdrop.Paint(gtx, e.Th, e.Art, cover, e.Th.R.Stone1, image.Rectangle{Max: size}, [4]int{})
 	mini.seek.Reconcile(gtx, e, snapshot, playbackTrackID(snapshot.Playback.Now))
 	layoutKey := "portrait"
 	if miniUsesLandscape(size.X, size.Y, gtx.Dp(251)) {

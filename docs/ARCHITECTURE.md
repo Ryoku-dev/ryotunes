@@ -258,8 +258,9 @@ internal/client/
                client lock and preferences
   art/         image loading: http, decode off the UI goroutine, downscale, LRU,
                collage for device playlists, and each cover's palette (vibrant and
-               dominant) behind the accent and the window tint; network covers and
-               palettes persist in a 256 MB disk cache under the user cache dir
+               dominant) behind the accent and the window tint, with the blurred
+               sample behind the cover backdrop; network covers and palettes
+               persist in a 256 MB disk cache under the user cache dir
                (ryotunes/art), refetched in the background after 30 days
   spectrum/    the visualizer feeds: cava bands and pw-record stereo samples,
                each running only while a visible visualizer wants it
@@ -267,7 +268,7 @@ internal/client/
     look/      the app theme on the library: accent, cover tint and source colours,
                pane corners, the Ryoku mark, provider glyphs, icons, frame geometry,
                overlay host, tips, wrapping choice chips, exact scrolling, scrubbers,
-               artwork, visualizer styles and beat, karaoke lyrics, equalizer graph
+               artwork and its blurred backdrop, visualizer styles and beat, karaoke lyrics, equalizer graph
                and faders, playback motion
     env/       what every surface receives: theme, store, connection, router,
                artwork, feeds, overlays, toasts
