@@ -4,7 +4,7 @@
 
 ## Lifecycle and diagnostics
 
-- `hello`, `subscribe`, `show`, `quit`: handshake, snapshot/event subscription, window raise, and shutdown.
+- `hello`, `subscribe`, `show`, `quit`: handshake, snapshot/event subscription, window raise, and shutdown. `subscribe` attaches the connection to the event stream before it answers, so events can arrive ahead of the snapshot; a client must keep reading while it waits and apply those events after the snapshot.
 - `get_logs`, `log_client_error`, `open_logs_folder`: diagnostics query, client ingestion, and folder reveal.
 - `check_for_updates`, `install_update`: packaged-release discovery and installation.
 - `ryoku_theme_tokens`: compatibility call that returns `client_side`; the Gio client reads the palette directly.

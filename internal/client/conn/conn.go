@@ -35,6 +35,8 @@ type Client struct {
 
 	events    chan protocol.Event
 	snapshots chan protocol.Snapshot
+	replaying bool
+	early     []protocol.Event
 }
 
 // New starts a client for protocol.SocketPath and returns immediately.
@@ -231,13 +233,7 @@ func (c *Client) run() {
 		var hello protocol.Hello
 		err = c.Call(handshake, protocol.MethodHello, protocol.Null{}, &hello)
 		if err == nil {
-			c.eventMu.Lock()
-			var snapshot protocol.Snapshot
-			err = c.Call(handshake, protocol.MethodSubscribe, protocol.SubscribeParams{Events: []string{"*"}}, &snapshot)
-			if err == nil {
-				c.publishSnapshot(snapshot)
-			}
-			c.eventMu.Unlock()
+			err = c.subscribe(handshake)
 		}
 		cancel()
 		if err != nil {
@@ -281,13 +277,19 @@ func (c *Client) readLoop(conn net.Conn) {
 			continue
 		}
 		if envelope.Event != "" {
+			event := protocol.Event{Event: envelope.Event, Data: envelope.Data}
 			c.eventMu.Lock()
 			if !c.isCurrent(conn) {
 				c.eventMu.Unlock()
 				continue
 			}
+			if c.replaying {
+				c.early = append(c.early, event)
+				c.eventMu.Unlock()
+				continue
+			}
 			select {
-			case c.events <- protocol.Event{Event: envelope.Event, Data: envelope.Data}:
+			case c.events <- event:
 				c.eventMu.Unlock()
 			case <-c.ctx.Done():
 				c.eventMu.Unlock()
@@ -295,6 +297,32 @@ func (c *Client) readLoop(conn net.Conn) {
 			}
 		}
 	}
+}
+
+// subscribe replays the daemon snapshot, then the events that arrived before it.
+func (c *Client) subscribe(ctx context.Context) error {
+	// the daemon streams events before it answers, so the read loop must never wait on eventMu here
+	c.eventMu.Lock()
+	c.replaying, c.early = true, nil
+	c.eventMu.Unlock()
+	var snapshot protocol.Snapshot
+	err := c.Call(ctx, protocol.MethodSubscribe, protocol.SubscribeParams{Events: []string{"*"}}, &snapshot)
+	c.eventMu.Lock()
+	defer c.eventMu.Unlock()
+	early := c.early
+	c.replaying, c.early = false, nil
+	if err != nil {
+		return err
+	}
+	c.publishSnapshot(snapshot)
+	for _, event := range early {
+		select {
+		case c.events <- event:
+		case <-c.ctx.Done():
+			return c.ctx.Err()
+		}
+	}
+	return nil
 }
 
 func (c *Client) publishSnapshot(snapshot protocol.Snapshot) {

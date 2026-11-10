@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Ryotunes no longer opens empty for about 12 seconds when music is already playing. It shows what's playing right away.
 - Choose whether Ryotunes opens floating or tiled with Open as a floating window in Settings, Appearance. Tiling window managers like niri and Hyprland follow it, and the mini player always floats.
 - Downloaded music plays now, straight from the file and without a connection: Play on a saved download or double click it, or play the track from anywhere else. Show in folder moved to the right click menu.
 - With nothing playing there's no empty player bar anymore. It slides up when something starts and folds away when the queue empties.

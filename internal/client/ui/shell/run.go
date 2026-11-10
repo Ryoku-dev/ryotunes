@@ -247,6 +247,14 @@ func (r *clientRuntime) drain() {
 			if !ok {
 				return
 			}
+			// select picks at random, and the snapshot an event follows has to land first
+			select {
+			case snapshot, ok := <-r.client.Snapshots():
+				if ok {
+					r.store.ApplySnapshot(snapshot)
+				}
+			default:
+			}
 			if event.Event == protocol.EventQuit {
 				r.quitOnce.Do(func() { close(r.quit) })
 				return

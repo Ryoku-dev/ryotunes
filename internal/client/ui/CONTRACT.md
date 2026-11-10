@@ -1256,5 +1256,8 @@ watch; Spotify uses the `spotify-auth` `url` event, and TIDAL's `tidal-auth`
   without blocking: when it can take it, no client runs, so it releases the
   lock and spawns `ryotunes`; when it cannot, it broadcasts `show` to its
   subscribers. `ryotunes-cli events` never counts as a window.
+- The daemon streams events to a subscriber before it answers `subscribe`.
+  The client holds those events until the snapshot is published and then
+  delivers them after it; the read loop never waits on the handshake.
 - The main window's title is "Ryotunes", the mini's "Ryotunes Mini"; both use
   app id `ryotunes`, so compositor rules tell them apart by title.
