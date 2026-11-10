@@ -252,11 +252,12 @@ func (c *Cache) Failed(rawURL string, size int) bool {
 // Forget removes every cached, failed, and in-flight size and sample for one
 // URL, on disk too, so the next request fetches it again.
 func (c *Cache) Forget(rawURL string) {
+	c.diskEpoch.Add(1)
 	if c.diskDir != "" {
 		for _, size := range requestSizes {
 			c.removeDiskArtwork(cacheKey{url: rawURL, size: size})
 		}
-		c.removeDiskFile(filepath.Join(c.diskDir, diskPaletteName(rawURL)))
+		c.removeDiskPalette(rawURL)
 	}
 	c.mu.Lock()
 	for key, entry := range c.entries {
@@ -527,9 +528,13 @@ func (c *Cache) networkWorker() {
 		}
 		// written after it is shown: encoding a large cover takes long enough to see
 		if shown {
-			// a Clear that came after the cover was shown must not find it written back
-			if diskErr := c.writeDiskArtwork(job.key, img, sample); diskErr != nil || c.diskEpoch.Load() != epoch {
+			if diskErr := c.writeDiskArtwork(job.key, img, sample); diskErr != nil {
 				c.removeDiskArtwork(job.key)
+			}
+			// a Clear or Forget that came after the cover was shown must not find it written back
+			if c.diskEpoch.Load() != epoch {
+				c.removeDiskArtwork(job.key)
+				c.removeDiskPalette(job.key.url)
 			}
 		}
 	}

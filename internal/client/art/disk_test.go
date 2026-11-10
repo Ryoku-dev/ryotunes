@@ -92,17 +92,23 @@ func TestDiskWritesKeepRunningTotalAndPruneToLowWater(t *testing.T) {
 	defer cache.Close()
 	img := decodeTestCover(t, 96)
 	var written []cacheKey
-	for index := 0; directorySizeIfAny(t, cacheDir) <= limit; index++ {
-		if index > 500 {
+	for crossed := false; !crossed; {
+		if len(written) > 500 {
 			t.Fatal("cache never crossed its bound")
 		}
 		before := len(written)
-		key := cacheKey{url: fmt.Sprintf("https://covers.invalid/%d.jpg", index), size: 96}
+		sizeBefore := directorySizeIfAny(t, cacheDir)
+		key := cacheKey{url: fmt.Sprintf("https://covers.invalid/%d.jpg", before), size: 96}
 		if err := cache.writeDiskArtwork(key, img, artworkSample{}); err != nil {
 			t.Fatal(err)
 		}
 		written = append(written, key)
-		if size := directorySizeIfAny(t, cacheDir); size <= limit && countArtworkFiles(t, cacheDir) != before+1 {
+		info, err := os.Stat(filepath.Join(cacheDir, diskArtworkName(key)+".jpg"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		// judged by the sizes going in: by now the prune may already have answered a crossing
+		if crossed = sizeBefore+info.Size() > limit; !crossed && countArtworkFiles(t, cacheDir) != before+1 {
 			t.Fatalf("a write under the bound deleted entries: %d files after %d writes", countArtworkFiles(t, cacheDir), before+1)
 		}
 	}
@@ -467,7 +473,7 @@ func TestClearAndForgetRemoveDiskCovers(t *testing.T) {
 	}
 }
 
-func TestClearDuringACoverWriteLeavesNoCoverOnDisk(t *testing.T) {
+func TestClearOrForgetDuringACoverWriteLeavesNothingOnDisk(t *testing.T) {
 	// a large noisy cover keeps the JPEG encode busy after it is shown
 	img := image.NewNRGBA(image.Rect(0, 0, 2048, 2048))
 	for i := range img.Pix {
@@ -484,13 +490,26 @@ func TestClearDuringACoverWriteLeavesNoCoverOnDisk(t *testing.T) {
 		_, _ = response.Write(encoded.Bytes())
 	}))
 	defer server.Close()
-	cacheDir := filepath.Join(t.TempDir(), "art")
-	cache := New(Options{CacheDir: cacheDir, HTTPClient: server.Client()})
-	waitForArtwork(t, cache, server.URL, 2048)
-	cache.Clear()
-	cache.Close()
-	if count := countArtworkFiles(t, cacheDir); count != 0 {
-		t.Fatalf("a cover shown before Clear was written back: %d files", count)
+	for _, test := range []struct {
+		name string
+		drop func(cache *Cache, url string)
+	}{
+		{"clear", func(cache *Cache, _ string) { cache.Clear() }},
+		{"forget", func(cache *Cache, url string) { cache.Forget(url) }},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			cacheDir := filepath.Join(t.TempDir(), "art")
+			cache := New(Options{CacheDir: cacheDir, HTTPClient: server.Client()})
+			waitForArtwork(t, cache, server.URL, 2048)
+			test.drop(cache, server.URL)
+			cache.Close()
+			if count := countArtworkFiles(t, cacheDir); count != 0 {
+				t.Fatalf("a cover shown before %s was written back: %d files", test.name, count)
+			}
+			if _, err := os.Stat(filepath.Join(cacheDir, diskPaletteName(server.URL))); !os.IsNotExist(err) {
+				t.Fatalf("its palette was written back after %s: %v", test.name, err)
+			}
+		})
 	}
 }
 

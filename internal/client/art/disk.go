@@ -280,6 +280,13 @@ func (c *Cache) removeDiskArtwork(key cacheKey) {
 	c.removeDiskFile(base + ".png")
 }
 
+func (c *Cache) removeDiskPalette(rawURL string) {
+	if c.diskDir == "" {
+		return
+	}
+	c.removeDiskFile(filepath.Join(c.diskDir, diskPaletteName(rawURL)))
+}
+
 func (c *Cache) requestPrune() {
 	if c.diskDir == "" {
 		return
