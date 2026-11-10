@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/ryoku-dev/ryotunes/internal/integrations/listentogether"
@@ -37,6 +38,42 @@ func (h queueHooks) OnPlayed(ctx context.Context, track model.Track) {
 		h.app.Log.Warn("recording played track", "error", err)
 	}
 	h.app.syncIntegrations(false)
+}
+
+func (h queueHooks) OnPlaybackStart(ctx context.Context, track model.Track, playlistID string) {
+	if model.ProviderOf(track.VideoID) != model.ProviderYouTube || h.app.YouTube == nil {
+		return
+	}
+	// taken first so a resolve's ping never outlives the play it was minted for
+	ping, found := h.app.YouTube.TakePlaybackPing(track.VideoID)
+	if !h.app.Store.Settings().EnableHistory {
+		return
+	}
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	if !found {
+		var err error
+		if ping, err = h.app.YouTube.PlaybackPing(ctx, track); err != nil {
+			if ctx.Err() == nil {
+				h.app.Log.Warn("fetching YouTube playback metadata", "track", track.VideoID, "error", err)
+			}
+			return
+		}
+	}
+	if err := h.app.YouTube.ReportPlayback(ctx, ping, youtubePlaylistContext(playlistID)); err != nil && ctx.Err() == nil {
+		h.app.Log.Warn("reporting YouTube playback", "track", track.VideoID, "error", err)
+	}
+}
+
+func youtubePlaylistContext(id string) string {
+	id = strings.TrimSpace(id)
+	id = strings.TrimPrefix(id, "VL")
+	switch {
+	case strings.HasPrefix(id, "PL"), strings.HasPrefix(id, "RD"), strings.HasPrefix(id, "OLAK5uy_"):
+		return id
+	default:
+		return ""
+	}
 }
 
 func (h queueHooks) StreamCacheGet(trackID string) (model.Stream, bool) {
@@ -162,18 +199,7 @@ func (a trayActions) Quit() error      { a.app.Quit(); return nil }
 type listenTogetherHost struct{ app *App }
 
 func (h listenTogetherHost) PlayTrack(ctx context.Context, track model.Track, positionMS int64, playing bool) error {
-	if err := h.app.Queue.Play(ctx, track); err != nil {
-		return err
-	}
-	if positionMS > 0 {
-		if err := h.app.Queue.Seek(float64(positionMS) / 1000); err != nil {
-			return err
-		}
-	}
-	if !playing {
-		return h.app.Queue.Pause()
-	}
-	return nil
+	return h.app.Queue.Follow(ctx, track, float64(positionMS)/1000, playing)
 }
 func (h listenTogetherHost) Pause(context.Context) error      { return h.app.Queue.Pause() }
 func (h listenTogetherHost) Resume(ctx context.Context) error { return h.app.Queue.PlayTransport(ctx) }
@@ -198,10 +224,8 @@ func (h listenTogetherHost) PlaybackSnapshot() listentogether.PlaybackSnapshot {
 	}
 }
 func (h listenTogetherHost) Username() string {
-	ctx, cancel := context.WithTimeout(h.app.ctx, 3*time.Second)
-	defer cancel()
-	account, err := h.app.YouTube.Account(ctx)
-	if err == nil && account.Name != nil && *account.Name != "" {
+	account := h.app.YouTube.CurrentAccount()
+	if account.Name != nil && *account.Name != "" {
 		return *account.Name
 	}
 	return "Host"

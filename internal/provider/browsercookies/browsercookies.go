@@ -10,7 +10,9 @@ import (
 	"crypto/sha1"
 	"crypto/sha256"
 	"database/sql"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"hash"
 	"io"
 	"os"
@@ -18,10 +20,18 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"syscall"
 	"time"
 
+	"github.com/ryoku-dev/ryotunes/internal/protocol"
 	_ "modernc.org/sqlite"
 )
+
+// ErrInvalidSource reports a remembered session source that names something
+// Discover would never return as a cookie store.
+var ErrInvalidSource = errors.New("not a browser cookie store")
+
+const copyPrefix = "ryotunes-browser-cookies-"
 
 // Kind identifies a browser cookie database family.
 type Kind int
@@ -31,12 +41,64 @@ const (
 	Gecko Kind = iota
 	// Chromium is Chrome's cookies database.
 	Chromium
+	unknownKind Kind = -1
 )
+
+// MarshalJSON persists a kind by name so reordering the constants never
+// re-types a stored session.
+func (k Kind) MarshalJSON() ([]byte, error) {
+	switch k {
+	case Gecko:
+		return []byte(`"gecko"`), nil
+	case Chromium:
+		return []byte(`"chromium"`), nil
+	default:
+		return []byte(`"unknown"`), nil
+	}
+}
+
+// UnmarshalJSON reads a kind by name, or the integer an earlier build stored.
+// An unknown kind decodes without error so ValidateSource can refuse it.
+func (k *Kind) UnmarshalJSON(data []byte) error {
+	var name string
+	if json.Unmarshal(data, &name) == nil {
+		switch name {
+		case "gecko":
+			*k = Gecko
+		case "chromium":
+			*k = Chromium
+		default:
+			*k = unknownKind
+		}
+		return nil
+	}
+	var number int
+	if err := json.Unmarshal(data, &number); err != nil {
+		return fmt.Errorf("cookie store kind: %w", err)
+	}
+	switch number {
+	case 0:
+		*k = Gecko
+	case 1:
+		*k = Chromium
+	default:
+		*k = unknownKind
+	}
+	return nil
+}
 
 // Store identifies one discovered browser cookie database.
 type Store struct {
 	Kind Kind
 	Path string
+}
+
+// SessionSource remembers which store and container a provider session was
+// imported from, so the daemon can follow that browser.
+type SessionSource struct {
+	Kind      Kind   `json:"kind"`
+	Path      string `json:"path"`
+	Container string `json:"container,omitempty"`
 }
 
 // Cookie is the portable subset of a browser cookie.
@@ -52,21 +114,9 @@ type Cookie struct {
 
 // Discover returns eligible cookie stores in default-browser-first path order.
 func Discover() []Store {
-	home, err := os.UserHomeDir()
-	if err != nil || home == "" {
-		return nil
-	}
-	config := os.Getenv("XDG_CONFIG_HOME")
-	if !filepath.IsAbs(config) {
-		config = filepath.Join(home, ".config")
-	}
-	roots := []string{config, filepath.Join(home, ".mozilla")}
-	roots = appendContainerRoots(roots, filepath.Join(home, ".var", "app"), []string{"config", ".config", ".mozilla"})
-	roots = appendContainerRoots(roots, filepath.Join(home, "snap"), []string{filepath.Join("common", ".mozilla"), filepath.Join("common", ".config")})
-
 	seen := make(map[string]bool)
 	var stores []Store
-	for _, root := range roots {
+	for _, root := range Roots() {
 		walkStores(root, 0, 5, func(path string, entry os.DirEntry, depth int) {
 			kind, ok := storeKind(path, entry.Name(), depth)
 			if !ok || seen[path] {
@@ -88,6 +138,69 @@ func Discover() []Store {
 		stores = stores[:64]
 	}
 	return stores
+}
+
+// Roots returns the directories Discover walks for cookie stores.
+func Roots() []string {
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		return nil
+	}
+	config := os.Getenv("XDG_CONFIG_HOME")
+	if !filepath.IsAbs(config) {
+		config = filepath.Join(home, ".config")
+	}
+	roots := []string{filepath.Clean(config), filepath.Join(home, ".mozilla")}
+	roots = appendContainerRoots(roots, filepath.Join(home, ".var", "app"), []string{"config", ".config", ".mozilla"})
+	return appendContainerRoots(roots, filepath.Join(home, "snap"), []string{filepath.Join("common", ".mozilla"), filepath.Join("common", ".config")})
+}
+
+// ValidateSource returns the store a remembered source names, refusing any
+// path Discover would not have found: wrong kind or name, a symlink or
+// non-regular file, or a file outside every discovery root.
+func ValidateSource(source SessionSource) (Store, error) {
+	if source.Kind != Gecko && source.Kind != Chromium {
+		return Store{}, fmt.Errorf("%w: unknown kind", ErrInvalidSource)
+	}
+	if !filepath.IsAbs(source.Path) || filepath.Clean(source.Path) != source.Path {
+		return Store{}, fmt.Errorf("%w: %s is not a clean absolute path", ErrInvalidSource, source.Path)
+	}
+	info, err := os.Lstat(source.Path)
+	if err != nil {
+		return Store{}, err
+	}
+	if !info.Mode().IsRegular() {
+		return Store{}, fmt.Errorf("%w: %s is not a regular file", ErrInvalidSource, source.Path)
+	}
+	for _, root := range Roots() {
+		rel, err := filepath.Rel(root, source.Path)
+		if err != nil || rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			continue
+		}
+		parts := strings.Split(rel, string(filepath.Separator))
+		depth := len(parts) - 1
+		if depth > 5 || !realDirectories(root, parts[:depth]) {
+			continue
+		}
+		if kind, ok := storeKind(source.Path, parts[depth], depth); ok && kind == source.Kind {
+			return Store{Kind: kind, Path: source.Path}, nil
+		}
+	}
+	return Store{}, fmt.Errorf("%w: %s", ErrInvalidSource, source.Path)
+}
+
+func realDirectories(root string, parts []string) bool {
+	dir := root
+	for i := -1; i < len(parts); i++ {
+		if i >= 0 {
+			dir = filepath.Join(dir, parts[i])
+		}
+		info, err := os.Lstat(dir)
+		if err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+			return false
+		}
+	}
+	return true
 }
 
 func appendContainerRoots(roots []string, parent string, suffixes []string) []string {
@@ -160,15 +273,13 @@ func storePriority(path, browser string) int {
 }
 
 // Read copies a store and its SQLite sidecars, then returns matching cookies.
+// The copy lives in the private runtime directory and is removed on return.
 func Read(st Store, hostSuffixes ...string) ([]Cookie, error) {
-	tmp, err := os.MkdirTemp("", "ryotunes-browser-cookies-")
+	tmp, err := makeCopyDir()
 	if err != nil {
 		return nil, err
 	}
 	defer os.RemoveAll(tmp)
-	if err := os.Chmod(tmp, 0o700); err != nil {
-		return nil, err
-	}
 	copyPath := filepath.Join(tmp, "cookies.db")
 	if err := copyFile(st.Path, copyPath); err != nil {
 		return nil, err
@@ -189,7 +300,75 @@ func Read(st Store, hostSuffixes ...string) ([]Cookie, error) {
 	return readChromium(db, st, hostSuffixes)
 }
 
+func makeCopyDir() (string, error) {
+	parent := protocol.RuntimeDir()
+	if err := os.MkdirAll(parent, 0o700); err != nil || !privateDir(parent) {
+		// without a private runtime directory, MkdirTemp in the sticky temp
+		// directory is the one place no other user can rename
+		parent = ""
+	}
+	tmp, err := os.MkdirTemp(parent, copyPrefix)
+	if err != nil {
+		return "", err
+	}
+	if err := os.Chmod(tmp, 0o700); err != nil {
+		os.RemoveAll(tmp)
+		return "", err
+	}
+	return tmp, nil
+}
+
+// privateDir reports a real directory owned by this user and closed to others.
+func privateDir(path string) bool {
+	info, err := os.Lstat(path)
+	if err != nil || !info.IsDir() || info.Mode().Perm() != 0o700 {
+		return false
+	}
+	stat, ok := info.Sys().(*syscall.Stat_t)
+	return ok && int(stat.Uid) == os.Getuid()
+}
+
+// staleCopyAge is far longer than any Read, keyring lookup included.
+const staleCopyAge = 15 * time.Second
+
+// RemoveStaleCopies deletes store copies a killed daemon left behind, in the
+// runtime directory and in the temporary directory older builds used.
+func RemoveStaleCopies() error {
+	var failures []error
+	cutoff := time.Now().Add(-staleCopyAge)
+	for _, dir := range []string{protocol.RuntimeDir(), os.TempDir()} {
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			if !errors.Is(err, os.ErrNotExist) {
+				failures = append(failures, err)
+			}
+			continue
+		}
+		for _, entry := range entries {
+			if !entry.IsDir() || !strings.HasPrefix(entry.Name(), copyPrefix) {
+				continue
+			}
+			info, err := entry.Info()
+			if err != nil || info.ModTime().After(cutoff) {
+				continue
+			}
+			if err := os.RemoveAll(filepath.Join(dir, entry.Name())); err != nil {
+				failures = append(failures, err)
+			}
+		}
+	}
+	return errors.Join(failures...)
+}
+
 func copyFile(src, dst string) error {
+	info, err := os.Lstat(src)
+	if err != nil {
+		return err
+	}
+	// a FIFO or device would block the copy forever
+	if !info.Mode().IsRegular() {
+		return fmt.Errorf("%w: %s is not a regular file", ErrInvalidSource, src)
+	}
 	in, err := os.Open(src)
 	if err != nil {
 		return err

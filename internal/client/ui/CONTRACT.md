@@ -1187,9 +1187,37 @@ the session's display and browser, and it can see when opening fails.
 YouTube Music imports one eligible browser session at a time, in discovered
 store order with the default container first. If every session fails it returns
 the sign-in page without an RPC error and keeps watching all stores until one
-succeeds or five minutes pass. SoundCloud keeps its existing cookie-store
-watch; Spotify uses the `spotify-auth` `url` event, and TIDAL's `tidal-auth`
-`waiting` event carries the complete verification `url` and `code`.
+succeeds or five minutes pass. SoundCloud watches its cookie stores the same
+way; a token SoundCloud refuses is not tried again in that flow, a token that
+fails for another reason waits longer each time, and only the flow's final
+outcome is announced (`signed_in`, `error` with the last reason from a store
+that changed during the flow, or `expired` when nothing was found). When a
+YouTube watch ends, the daemon announces the account it still holds. Spotify
+uses the `spotify-auth` `url` event, and TIDAL's `tidal-auth` `waiting` event
+carries the complete verification `url` and `code`.
+
+A browser session is followed, not copied. The daemon remembers which store
+and container a YouTube or SoundCloud session came from. Once in the
+background when it starts, whenever the provider rejects the session (401 or
+403, YouTube's account menu without an active account), and while a
+SoundCloud token is expired, it re-reads that store and adopts the browser's
+current cookies if they prove the same account by channel id, email or
+handle (never by display name alone), then retries once; the user sees
+nothing, and a quiet SoundCloud re-adoption arrives as `restored`, without a
+toast. The subscribe snapshot answers from what the daemon holds, so an
+offline launch still shows the last known account. Only when the browser has
+no working session does the account row fall back to signed out, with the
+provider's reason: YouTube first asks its account menu whether the stored
+session still works, and SoundCloud reports `session_expired` with the
+daemon's message. A SoundCloud token that merely expired, with nothing newer
+in the browser, keeps its source: the daemon announces `stale` once and the
+row reads signed out without a toast, searches and playback go out as a
+guest without the token, and the next re-read adopts quietly. Sign in never
+short-circuits on a session the provider rejected: it runs the full import or
+watch flow, also when the remembered store is missing or unreadable, and an
+offline Sign in reports its error. The
+daemon never refreshes, rotates or writes a browser's cookies itself, so it
+can never sign the user out of their browser.
 
 - `act.OpenURL(e, url)` starts `xdg-open url` through `spawn.Command`
   (its own session, and under a systemd user manager its own scope in

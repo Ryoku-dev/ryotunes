@@ -45,6 +45,7 @@ type Queue struct {
 	lastPositionSave time.Time
 	lastBlobFP       string
 	generation       uint64
+	pendingStart     *playbackStart
 
 	ctx         context.Context
 	cancel      context.CancelFunc
@@ -138,6 +139,10 @@ func (q *Queue) Playback() model.PlaybackSnapshot {
 
 // Play replaces the context with one seed while retaining upcoming manual rows.
 func (q *Queue) Play(ctx context.Context, item model.Track) error {
+	return q.play(ctx, item, false)
+}
+
+func (q *Queue) play(ctx context.Context, item model.Track, paused bool) error {
 	if item.VideoID == "" {
 		return errNothingToPlay
 	}
@@ -149,7 +154,7 @@ func (q *Queue) Play(ctx context.Context, item model.Track) error {
 	q.stopAfterCurrent = false
 	q.mu.Unlock()
 	q.changed()
-	if err := q.playIndex(ctx, 0, false); err != nil {
+	if err := q.playIndex(ctx, 0, paused); err != nil {
 		return err
 	}
 	if forceHydrate {
@@ -398,6 +403,42 @@ func (q *Queue) SetStopAfterCurrent(enabled bool) {
 	q.mu.Unlock()
 	q.bus.Emit(protocol.EventStopAfterCurrent, enabled)
 	q.changed()
+}
+
+// the host sends its position several times a second; seeking on each one would stutter
+const followDriftSeconds = 2.0
+
+// Follow brings playback to track at position, the way a Listen Together guest follows its host. A
+// track already open is never reloaded, since that restarts the song and counts another play, and it
+// seeks only when it drifted. A paused host opens the track paused.
+func (q *Queue) Follow(ctx context.Context, track model.Track, position float64, playing bool) error {
+	if !q.isLoaded(track.VideoID) {
+		if err := q.play(ctx, track, !playing); err != nil {
+			return err
+		}
+		if position > 0 {
+			if err := q.Seek(position); err != nil {
+				return err
+			}
+		}
+	} else if math.Abs(q.Playback().Position-position) > followDriftSeconds {
+		if err := q.Seek(position); err != nil {
+			return err
+		}
+	}
+	if !playing {
+		return q.Pause()
+	}
+	return q.PlayTransport(ctx)
+}
+
+func (q *Queue) isLoaded(videoID string) bool {
+	if q.player.Idle() {
+		return false
+	}
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	return q.state.current >= 0 && q.state.current < len(q.state.items) && q.state.items[q.state.current].VideoID == videoID
 }
 
 // PlayTransport resumes playback, loading a restored queue first when needed.

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	"crypto/sha1"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
@@ -19,6 +20,7 @@ import (
 	"time"
 
 	librespot "github.com/devgianlu/go-librespot"
+	"github.com/devgianlu/go-librespot/login5"
 	pbdata "github.com/devgianlu/go-librespot/proto/spotify/clienttoken/data/v0"
 	pbhttp "github.com/devgianlu/go-librespot/proto/spotify/clienttoken/http/v0"
 	devicespb "github.com/devgianlu/go-librespot/proto/spotify/connectstate/devices"
@@ -56,13 +58,15 @@ type accountProfile struct {
 
 // Restore restores cached Spotify credentials and emits the startup result event.
 func (p *Spotify) Restore(ctx context.Context) error {
+	p.restoreMu.Lock()
+	defer p.restoreMu.Unlock()
 	p.authMu.Lock()
 	generation := p.authGeneration
 	p.authMu.Unlock()
 	if !fileExists(p.credPath) {
 		return nil
 	}
-	sess, profile, err := p.restoreSession(ctx)
+	sess, profile, err := p.openStoredSession(ctx)
 	if err != nil {
 		message := "Spotify sign-in no longer works: " + err.Error()
 		p.emitAuth("restore_failed", nil, nil, &message)
@@ -86,9 +90,6 @@ func (p *Spotify) Restore(ctx context.Context) error {
 	if !current {
 		return nil
 	}
-	p.mu.Lock()
-	p.recoverUsed = false
-	p.mu.Unlock()
 	p.emitAuth("restored", nil, nil, nil)
 	return nil
 }
@@ -134,7 +135,7 @@ func (p *Spotify) SignIn(_ context.Context) (bool, error) {
 	return true, nil
 }
 
-// SignOut closes the session, removes credentials and device identity, and emits signed_out.
+// SignOut closes the session, removes account credentials, and emits signed_out.
 func (p *Spotify) SignOut() error {
 	p.authMu.Lock()
 	if p.authCancel != nil {
@@ -148,14 +149,11 @@ func (p *Spotify) SignOut() error {
 	}
 	p.closeActiveStream()
 	var joined error
-	for _, path := range []string{p.credPath, p.devicePath} {
+	for _, path := range []string{p.credPath, p.legacyCredPath} {
 		if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
 			joined = errors.Join(joined, err)
 		}
 	}
-	p.recoverMu.Lock()
-	p.recoverUsed = false
-	p.recoverMu.Unlock()
 	p.emitAuth("signed_out", nil, nil, nil)
 	return joined
 }
@@ -199,7 +197,6 @@ func (p *Spotify) signIn(ctx context.Context, generation uint64) error {
 	}
 	p.mu.Lock()
 	p.clientToken = clientToken
-	p.recoverUsed = false
 	p.mu.Unlock()
 	if !p.installSession(sess, profile) {
 		p.authMu.Unlock()
@@ -242,6 +239,14 @@ func (p *Spotify) restoreSession(ctx context.Context) (*session.Session, account
 	p.clientToken = clientToken
 	p.mu.Unlock()
 	return sess, profile, nil
+}
+
+// openStoredSession bounds the restore itself, because callers hold restoreMu
+// and may pass a context without a deadline.
+func (p *Spotify) openStoredSession(ctx context.Context) (*session.Session, accountProfile, error) {
+	ctx, cancel := context.WithTimeout(ctx, p.restoreTimeout)
+	defer cancel()
+	return p.restoreSession(ctx)
 }
 
 func (p *Spotify) authorize(ctx context.Context) (string, string, error) {
@@ -334,7 +339,7 @@ func (p *Spotify) premiumProfile(ctx context.Context, sess *session.Session) (ac
 		req.Header.Set("Authorization", "Bearer "+token)
 		resp, err := p.http.Do(req)
 		if err != nil {
-			return profile, fmt.Errorf("Spotify could not be reached")
+			return profile, &signInError{message: "Spotify could not be reached", cause: err}
 		}
 		if resp.StatusCode == http.StatusUnauthorized {
 			_ = resp.Body.Close()
@@ -371,8 +376,12 @@ func (p *Spotify) premiumProfile(ctx context.Context, sess *session.Session) (ac
 
 func (p *Spotify) deviceID() (string, error) {
 	if raw, err := os.ReadFile(p.devicePath); err == nil {
-		id := strings.TrimSpace(string(raw))
-		if decoded, err := hex.DecodeString(id); err == nil && len(decoded) == 20 {
+		if id, ok := librespotDeviceID(string(raw)); ok {
+			if id != strings.TrimSpace(string(raw)) {
+				if err := atomicWrite(p.devicePath, []byte(id+"\n"), 0o600); err != nil {
+					return "", err
+				}
+			}
 			return id, nil
 		}
 	}
@@ -387,12 +396,89 @@ func (p *Spotify) deviceID() (string, error) {
 	return id, nil
 }
 
-func (p *Spotify) saveCredentials(sess *session.Session) error {
-	body, err := json.Marshal(storedCredentials{Username: sess.Username(), Data: base64.StdEncoding.EncodeToString(sess.StoredCredentials())})
+// librespotDeviceID returns the 40 hex id go-librespot requires. A 1.x UUID
+// maps to the SHA-1 of its lower-case text, so a migrated device keeps one
+// stable id; a UUID copied verbatim by an earlier 2.x build maps the same way.
+func librespotDeviceID(raw string) (string, bool) {
+	id := strings.TrimSpace(raw)
+	if decoded, err := hex.DecodeString(id); err == nil && len(decoded) == 20 {
+		return id, true
+	}
+	if len(id) != 36 {
+		return "", false
+	}
+	for i := range id {
+		if i == 8 || i == 13 || i == 18 || i == 23 {
+			if id[i] != '-' {
+				return "", false
+			}
+			continue
+		}
+		if !((id[i] >= '0' && id[i] <= '9') || (id[i] >= 'a' && id[i] <= 'f') || (id[i] >= 'A' && id[i] <= 'F')) {
+			return "", false
+		}
+	}
+	sum := sha1.Sum([]byte(strings.ToLower(id)))
+	return hex.EncodeToString(sum[:]), true
+}
+
+// migrateLegacyCache copies the 1.x session into 2.x once. The marker stops a
+// later sign out from being undone by the 1.x copy on the next start; 2.x
+// never writes the 1.x copy.
+func (p *Spotify) migrateLegacyCache() error {
+	if fileExists(p.migratedPath) || !fileExists(p.legacyCredPath) {
+		return nil
+	}
+	var problems error
+	if !fileExists(p.credPath) {
+		creds, err := readCredentials(p.legacyCredPath)
+		if err != nil {
+			problems = fmt.Errorf("read credentials: %w", err)
+		} else {
+			if err := p.migrateLegacyDeviceID(); err != nil {
+				problems = fmt.Errorf("device id, a new one is made at sign in: %w", err)
+			}
+			if err := writeCredentials(p.credPath, creds); err != nil {
+				return errors.Join(problems, fmt.Errorf("write credentials: %w", err))
+			}
+		}
+	}
+	if err := atomicWrite(p.migratedPath, []byte("1\n"), 0o600); err != nil {
+		problems = errors.Join(problems, fmt.Errorf("record migration: %w", err))
+	}
+	return problems
+}
+
+func (p *Spotify) migrateLegacyDeviceID() error {
+	if raw, err := os.ReadFile(p.devicePath); err == nil {
+		if _, ok := librespotDeviceID(string(raw)); ok {
+			return nil
+		}
+	}
+	raw, err := os.ReadFile(p.legacyDevicePath)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
 	if err != nil {
 		return err
 	}
-	return atomicWrite(p.credPath, append(body, '\n'), 0o600)
+	id, ok := librespotDeviceID(string(raw))
+	if !ok {
+		return fmt.Errorf("invalid device id")
+	}
+	return atomicWrite(p.devicePath, []byte(id+"\n"), 0o600)
+}
+
+func (p *Spotify) saveCredentials(sess *session.Session) error {
+	return writeCredentials(p.credPath, session.StoredCredentials{Username: sess.Username(), Data: sess.StoredCredentials()})
+}
+
+func writeCredentials(path string, creds session.StoredCredentials) error {
+	body, err := json.Marshal(storedCredentials{Username: creds.Username, Data: base64.StdEncoding.EncodeToString(creds.Data)})
+	if err != nil {
+		return err
+	}
+	return atomicWrite(path, append(body, '\n'), 0o600)
 }
 
 func readCredentials(path string) (session.StoredCredentials, error) {
@@ -405,15 +491,23 @@ func readCredentials(path string) (session.StoredCredentials, error) {
 		return session.StoredCredentials{}, err
 	}
 	pick := func(names ...string) json.RawMessage {
-		for _, n := range names {
-			if v := raw[n]; v != nil {
-				return v
+		for _, name := range names {
+			if value := raw[name]; value != nil {
+				return value
 			}
 		}
 		return nil
 	}
 	var username string
-	_ = json.Unmarshal(pick("username", "Username"), &username)
+	if err := json.Unmarshal(pick("username", "Username"), &username); err != nil {
+		return session.StoredCredentials{}, err
+	}
+	if authTypeRaw := pick("auth_type"); authTypeRaw != nil {
+		var authType int
+		if err := json.Unmarshal(authTypeRaw, &authType); err != nil || authType != 1 {
+			return session.StoredCredentials{}, fmt.Errorf("invalid credential type")
+		}
+	}
 	dataRaw := pick("data", "Data", "auth_data")
 	var data []byte
 	var encoded string
@@ -467,17 +561,45 @@ func atomicWrite(path string, body []byte, mode os.FileMode) error {
 	return os.Rename(tmp, path)
 }
 
+// signInError is the sentence shown to the user; the cause stays reachable so
+// recovery can tell a refusal from an unreachable network.
+type signInError struct {
+	message string
+	cause   error
+}
+
+func (e *signInError) Error() string { return e.message }
+func (e *signInError) Unwrap() error { return e.cause }
+
 func classifySignIn(err error) error {
 	message := err.Error()
 	switch {
 	case containsAny(message, "travel restriction", "country", "region"):
-		return fmt.Errorf("the account is out of its home region")
+		return &signInError{message: "the account is out of its home region", cause: err}
 	case containsAny(message, "bad credentials", "invalid credentials", "unauthorized"):
-		return fmt.Errorf("the stored credentials are no longer valid")
-	case containsAny(message, "connection", "timed out", "timeout", "dns", "network", "resolve"):
-		return fmt.Errorf("Spotify could not be reached")
+		return &signInError{message: "the stored credentials are no longer valid", cause: err}
+	case transientFailure(err) || containsAny(message, "connection", "timed out", "timeout", "dns", "network", "resolve"):
+		return &signInError{message: "Spotify could not be reached", cause: err}
 	default:
-		return fmt.Errorf("Spotify refused the session")
+		return &signInError{message: "Spotify refused the session", cause: err}
+	}
+}
+
+// transientFailure reports whether a failure says nothing about the
+// credentials: a dial, DNS or TLS error, a timeout, or a 5xx from login5.
+// go-librespot wraps those with %w; its refusals are
+// *ap.AccesspointLoginError and *login5.LoginError, which are not network
+// errors.
+func transientFailure(err error) bool {
+	var netErr net.Error
+	var login5HTTP *login5.HTTPError
+	switch {
+	case errors.Is(err, context.DeadlineExceeded), errors.As(err, &netErr):
+		return true
+	case errors.As(err, &login5HTTP):
+		return login5HTTP.StatusCode >= 500
+	default:
+		return false
 	}
 }
 

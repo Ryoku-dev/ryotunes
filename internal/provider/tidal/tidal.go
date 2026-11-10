@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"net/url"
@@ -28,6 +29,7 @@ type Options struct {
 	Log        *slog.Logger
 	HTTPClient *http.Client
 	APIBase    string
+	TokenURL   string
 	UserAgent  string
 }
 
@@ -38,6 +40,7 @@ type Provider struct {
 	log       *slog.Logger
 	http      *http.Client
 	apiBase   string
+	tokenURL  string
 	userAgent string
 
 	mu          sync.RWMutex
@@ -46,6 +49,10 @@ type Provider struct {
 	signingIn   bool
 	epoch       uint64
 	refreshLock sync.Mutex
+	// refusedFresh is an access token TIDAL refused right after a refresh.
+	// Refreshing again cannot help, so a 401 with it skips the refresh until
+	// the token expires and a new one replaces it.
+	refusedFresh string
 }
 
 // New creates a TIDAL provider and restores credentials and authorization.
@@ -65,10 +72,13 @@ func New(o Options) (*Provider, error) {
 	if o.APIBase == "" {
 		o.APIBase = tidalAPI
 	}
+	if o.TokenURL == "" {
+		o.TokenURL = tokenURL
+	}
 	if o.UserAgent == "" {
 		o.UserAgent = "Ryotunes"
 	}
-	p := &Provider{kv: o.KV, bus: o.Bus, log: o.Log, http: o.HTTPClient, apiBase: strings.TrimRight(o.APIBase, "/"), userAgent: o.UserAgent, credentials: defaultCredentials()}
+	p := &Provider{kv: o.KV, bus: o.Bus, log: o.Log, http: o.HTTPClient, apiBase: strings.TrimRight(o.APIBase, "/"), tokenURL: o.TokenURL, userAgent: o.UserAgent, credentials: defaultCredentials()}
 	if raw, ok := o.KV.Get(tidalCredentialsKey); ok && raw != "" {
 		var stored storedCredentials
 		if err := json.Unmarshal([]byte(raw), &stored); err != nil {
@@ -81,8 +91,10 @@ func New(o Options) (*Provider, error) {
 		if err := json.Unmarshal([]byte(raw), &auth); err != nil {
 			return nil, fmt.Errorf("read TIDAL authorization: %w", err)
 		}
-		if auth.AccessToken != "" {
+		if reusableAuth(&auth) {
 			p.auth = &auth
+		} else if err := o.KV.Delete(tidalAuthKey); err != nil {
+			o.Log.Warn("tidal: could not remove an authorization without a refresh token", "error", err)
 		}
 	}
 	return p, nil
@@ -529,56 +541,116 @@ func (p *Provider) Account(context.Context) (model.Account, error) {
 	return model.Account{SignedIn: status.SignedIn, Name: status.Name}, nil
 }
 
-func (p *Provider) signedIn() bool { p.mu.RLock(); defer p.mu.RUnlock(); return p.auth != nil }
-
-func (p *Provider) api(ctx context.Context, path string, query url.Values, out any) error {
-	auth, err := p.ensureFresh(ctx)
-	if err != nil {
-		return err
-	}
-	u, err := url.Parse(p.apiBase + path)
-	if err != nil {
-		return err
-	}
-	q := u.Query()
-	for key, values := range query {
-		for _, value := range values {
-			q.Add(key, value)
-		}
-	}
-	q.Set("countryCode", auth.CountryCode)
-	u.RawQuery = q.Encode()
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
-	if err != nil {
-		return err
-	}
-	req.Header.Set("Authorization", "Bearer "+auth.AccessToken)
-	req.Header.Set("User-Agent", p.userAgent)
-	resp, err := p.http.Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode == 401 || resp.StatusCode == 403 {
-		p.expireAuth()
-		return fmt.Errorf("%w: TIDAL authorization expired", baseprovider.ErrSignInRequired)
-	}
-	if resp.StatusCode == 404 {
-		return fmt.Errorf("%w: TIDAL resource", baseprovider.ErrNotFound)
-	}
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("TIDAL answered %d for %s", resp.StatusCode, path)
-	}
-	return json.NewDecoder(resp.Body).Decode(out)
+func (p *Provider) signedIn() bool {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	return reusableAuth(p.auth)
 }
 
-func (p *Provider) expireAuth() {
+func (p *Provider) api(ctx context.Context, path string, query url.Values, out any) error {
+	for attempt := 0; ; attempt++ {
+		auth, err := p.ensureFresh(ctx)
+		if err != nil {
+			return err
+		}
+		u, err := url.Parse(p.apiBase + path)
+		if err != nil {
+			return err
+		}
+		q := u.Query()
+		for key, values := range query {
+			for _, value := range values {
+				q.Add(key, value)
+			}
+		}
+		q.Set("countryCode", auth.CountryCode)
+		u.RawQuery = q.Encode()
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
+		if err != nil {
+			return err
+		}
+		req.Header.Set("Authorization", "Bearer "+auth.AccessToken)
+		req.Header.Set("User-Agent", p.userAgent)
+		resp, err := p.http.Do(req)
+		if err != nil {
+			return err
+		}
+		if resp.StatusCode == http.StatusUnauthorized {
+			renew, readErr := accessTokenRejected(resp.Body)
+			resp.Body.Close()
+			if readErr != nil {
+				return readErr
+			}
+			if renew && attempt == 0 && !p.refusedAfterRefresh(auth.AccessToken) {
+				p.markAccessExpired(auth.AccessToken)
+				continue
+			}
+			if renew && attempt > 0 {
+				p.mu.Lock()
+				p.refusedFresh = auth.AccessToken
+				p.mu.Unlock()
+			}
+			return fmt.Errorf("TIDAL answered %d for %s", resp.StatusCode, path)
+		}
+		if resp.StatusCode == http.StatusNotFound {
+			resp.Body.Close()
+			return fmt.Errorf("%w: TIDAL resource", baseprovider.ErrNotFound)
+		}
+		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+			resp.Body.Close()
+			return fmt.Errorf("TIDAL answered %d for %s", resp.StatusCode, path)
+		}
+		err = json.NewDecoder(resp.Body).Decode(out)
+		resp.Body.Close()
+		return err
+	}
+}
+
+// accessTokenRejected reports whether a 401 is about the access token. TIDAL
+// also answers 401 for reasons a refresh cannot fix, and its own auth SDK
+// refreshes only for these sub-statuses. A body without one counts as a
+// token rejection.
+func accessTokenRejected(body io.Reader) (bool, error) {
+	raw, err := io.ReadAll(io.LimitReader(body, 4096))
+	if err != nil {
+		return false, err
+	}
+	var payload struct {
+		SubStatus json.Number `json:"subStatus"`
+	}
+	if json.Unmarshal(raw, &payload) != nil || payload.SubStatus == "" {
+		return true, nil
+	}
+	switch payload.SubStatus.String() {
+	case "11001", "11002", "11003", "11101", "6001":
+		return true, nil
+	default:
+		return false, nil
+	}
+}
+
+func (p *Provider) markAccessExpired(accessToken string) {
+	p.mu.Lock()
+	if p.auth != nil && p.auth.AccessToken == accessToken {
+		p.auth.ExpiresAt = 0
+	}
+	p.mu.Unlock()
+}
+
+func (p *Provider) refusedAfterRefresh(accessToken string) bool {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	return p.refusedFresh != "" && p.refusedFresh == accessToken
+}
+
+func (p *Provider) expireAuth(message string) error {
 	p.mu.Lock()
 	p.auth = nil
 	p.epoch++
 	p.mu.Unlock()
-	_ = p.kv.Delete(tidalAuthKey)
-	p.bus.Emit(protocol.EventTidalAuth, model.TidalAuthEvent{State: "expired"})
+	err := p.kv.Delete(tidalAuthKey)
+	p.bus.Emit(protocol.EventTidalAuth, model.TidalAuthEvent{State: "session_expired", Message: &message})
+	return err
 }
 
 var (

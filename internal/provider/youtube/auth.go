@@ -1,7 +1,6 @@
 package youtube
 
 import (
-	"bufio"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -9,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"sort"
 	"strings"
 	"time"
 
@@ -23,6 +21,8 @@ const youtubeSignInURL = "https://music.youtube.com"
 // CookieSource supplies browser cookie stores without touching the live browser.
 type CookieSource interface {
 	Discover() []browsercookies.Store
+	// Resolve validates a remembered source before it is read.
+	Resolve(source browsercookies.SessionSource) (browsercookies.Store, error)
 	Read(store browsercookies.Store, hostSuffixes ...string) ([]browsercookies.Cookie, error)
 	ChangedSince(store browsercookies.Store, since time.Time) bool
 }
@@ -30,6 +30,9 @@ type CookieSource interface {
 type systemCookies struct{}
 
 func (systemCookies) Discover() []browsercookies.Store { return browsercookies.Discover() }
+func (systemCookies) Resolve(source browsercookies.SessionSource) (browsercookies.Store, error) {
+	return browsercookies.ValidateSource(source)
+}
 func (systemCookies) Read(store browsercookies.Store, suffixes ...string) ([]browsercookies.Cookie, error) {
 	return browsercookies.Read(store, suffixes...)
 }
@@ -49,7 +52,14 @@ func (c *Client) SignIn(ctx context.Context) (SignInFlow, error) {
 	signedIn := c.cookie != ""
 	c.mu.RUnlock()
 	if signedIn {
-		return SignInFlow{}, nil
+		account, err := c.Account(ctx)
+		if err == nil && account.SignedIn {
+			return SignInFlow{}, nil
+		}
+		var readErr sourceReadError
+		if err != nil && !definitiveSessionFailure(err) && !errors.As(err, &readErr) {
+			return SignInFlow{}, err
+		}
 	}
 	c.signInMu.Lock()
 	if c.signingIn {
@@ -59,8 +69,10 @@ func (c *Client) SignIn(ctx context.Context) (SignInFlow, error) {
 	c.signingIn = true
 	c.signInMu.Unlock()
 
+	// sessions YouTube refused stay refused for the life of this flow
+	refused := make(map[string]bool)
 	stores := c.cookies.Discover()
-	signedIn, failures := c.tryCookieCandidates(ctx, buildYouTubeCookieCandidates(c.cookies, stores, time.Now()))
+	signedIn, failures := c.tryCookieCandidates(ctx, buildYouTubeCookieCandidates(c.cookies, stores, time.Now()), refused)
 	if signedIn {
 		c.signInMu.Lock()
 		c.signingIn = false
@@ -75,7 +87,7 @@ func (c *Client) SignIn(ctx context.Context) (SignInFlow, error) {
 	go func() {
 		defer c.wg.Done()
 		defer cancel()
-		err := c.watchSignIn(flowCtx, stores)
+		err := c.watchSignIn(flowCtx, stores, refused)
 		c.signInMu.Lock()
 		c.signingIn = false
 		c.signInMu.Unlock()
@@ -90,14 +102,21 @@ type cookieCandidateFailure struct {
 	err       error
 }
 
-func (c *Client) tryCookieCandidates(ctx context.Context, candidates []cookieCandidate) (bool, []cookieCandidateFailure) {
+func (c *Client) tryCookieCandidates(ctx context.Context, candidates []cookieCandidate, refused map[string]bool) (bool, []cookieCandidateFailure) {
 	attemptCtx, cancel := context.WithTimeout(ctx, 8*time.Second)
 	defer cancel()
 	failures := make([]cookieCandidateFailure, 0, len(candidates))
 	for _, candidate := range candidates {
-		err := c.applyCookie(attemptCtx, candidate.header)
+		if refused[candidate.header] {
+			continue
+		}
+		source := browsercookies.SessionSource{Kind: candidate.store.Kind, Path: candidate.store.Path, Container: candidate.container}
+		err := c.applyCookie(attemptCtx, candidate.header, source)
 		if err == nil {
 			return true, failures
+		}
+		if definitiveSessionFailure(err) {
+			refused[candidate.header] = true
 		}
 		failures = append(failures, cookieCandidateFailure{candidate: candidate, err: err})
 		if attemptCtx.Err() != nil {
@@ -125,7 +144,7 @@ func (c *Client) warnCookieCandidateFailures(failures []cookieCandidateFailure, 
 	}
 }
 
-func (c *Client) watchSignIn(ctx context.Context, stores []browsercookies.Store) error {
+func (c *Client) watchSignIn(ctx context.Context, stores []browsercookies.Store, refused map[string]bool) error {
 	deadline := time.NewTimer(5 * time.Minute)
 	defer deadline.Stop()
 	ticker := time.NewTicker(2 * time.Second)
@@ -153,7 +172,7 @@ func (c *Client) watchSignIn(ctx context.Context, stores []browsercookies.Store)
 			if !changed {
 				continue
 			}
-			signedIn, failures := c.tryCookieCandidates(ctx, buildYouTubeCookieCandidates(c.cookies, stores, time.Now()))
+			signedIn, failures := c.tryCookieCandidates(ctx, buildYouTubeCookieCandidates(c.cookies, stores, time.Now()), refused)
 			if signedIn {
 				return nil
 			}
@@ -175,89 +194,21 @@ func cookieStoreModTime(store browsercookies.Store) time.Time {
 	return latest
 }
 
-// ImportCookiesFile imports a Netscape cookies.txt session and validates it.
-func (c *Client) ImportCookiesFile(path string) error {
-	return c.ImportCookiesFileContext(context.Background(), path)
-}
-
-// ImportCookiesFileContext imports a Netscape cookies.txt session with cancellation.
-func (c *Client) ImportCookiesFileContext(ctx context.Context, path string) error {
-	file, err := os.Open(path)
-	if err != nil {
-		return err
-	}
-	defer file.Close()
-	var cookies []browsercookies.Cookie
-	scanner := bufio.NewScanner(file)
-	for scanner.Scan() {
-		line := scanner.Text()
-		if strings.HasPrefix(line, "#HttpOnly_") {
-			line = strings.TrimPrefix(line, "#HttpOnly_")
-		} else if strings.HasPrefix(line, "#") || strings.TrimSpace(line) == "" {
-			continue
-		}
-		fields := strings.Split(line, "\t")
-		if len(fields) != 7 {
-			continue
-		}
-		host, name, value := fields[0], fields[5], fields[6]
-		normalized := strings.TrimPrefix(strings.ToLower(host), ".")
-		if name != "" && (normalized == "youtube.com" || strings.HasSuffix(normalized, ".youtube.com")) {
-			cookies = append(cookies, browsercookies.Cookie{Name: name, Value: value, Host: host})
-		}
-	}
-	if err := scanner.Err(); err != nil {
-		return err
-	}
-	sort.SliceStable(cookies, func(i, j int) bool {
-		if cookies[i].Name == cookies[j].Name {
-			return len(cookies[i].Host) < len(cookies[j].Host)
-		}
-		return cookies[i].Name < cookies[j].Name
-	})
-	values := make(map[string]string)
-	for _, cookie := range cookies {
-		values[cookie.Name] = cookie.Value
-	}
-	names := make([]string, 0, len(values))
-	for name := range values {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-	parts := make([]string, 0, len(names))
-	for _, name := range names {
-		parts = append(parts, name+"="+values[name])
-	}
-	return c.applyCookie(ctx, strings.Join(parts, "; "))
-}
-
-func (c *Client) applyCookie(ctx context.Context, cookie string) error {
+func (c *Client) applyCookie(ctx context.Context, cookie string, source browsercookies.SessionSource) error {
 	if sapisidCookie(cookie) == "" {
 		return errors.New("Sign-in didn't complete, try signing in again.")
 	}
-	c.mu.Lock()
-	oldCookie, oldVisitor, oldDataSync := c.cookie, c.visitor, c.dataSync
-	c.cookie, c.dataSync = cookie, ""
-	c.mu.Unlock()
-	account, dataSync, visitor, err := c.fetchAccount(ctx, "")
+	account, dataSync, visitor, err := c.fetchAccountWithCookie(ctx, cookie, "")
 	if err != nil {
-		c.mu.Lock()
-		c.cookie, c.visitor, c.dataSync = oldCookie, oldVisitor, oldDataSync
-		c.mu.Unlock()
 		return err
 	}
 	if account.Name == nil {
-		c.mu.Lock()
-		c.cookie, c.visitor, c.dataSync = oldCookie, oldVisitor, oldDataSync
-		c.mu.Unlock()
-		return errors.New("That session didn't authenticate, sign in again.")
+		return fmt.Errorf("%w: sign in again", errSessionRejected)
 	}
-	if visitor != "" {
-		c.mu.Lock()
-		c.visitor = visitor
-		c.mu.Unlock()
-	}
-	identities, err := c.accountIdentities(ctx)
+	identity := ""
+	identities, err := c.candidateIdentities(ctx, cookie)
+	c.commitMu.Lock()
+	defer c.commitMu.Unlock()
 	if err == nil {
 		account.CanSwitch = len(identities.rows) > 1
 		if len(identities.rows) > 1 && dataSync == "" {
@@ -273,11 +224,23 @@ func (c *Client) applyCookie(ctx context.Context, cookie string) error {
 				}
 			}
 		}
+		// the account this session is using, for re-adoption when the account
+		// menu carries no channel, email or handle; a browser signed in to two
+		// Google accounts lists both, so only the server's selection counts
+		for _, row := range identities.rows {
+			if row.serverSelected {
+				identity = row.public.SelectionKey
+				break
+			}
+		}
 	}
 	if err := c.persistAccount(cookie, dataSync, visitor, account); err != nil {
 		return err
 	}
-	return nil
+	if err := c.persistIdentity(identity); err != nil {
+		return err
+	}
+	return c.persistCookieSource(source)
 }
 
 func (c *Client) persistAccount(cookie, dataSync, visitor string, account model.Account) error {
@@ -300,6 +263,10 @@ func (c *Client) persistAccount(cookie, dataSync, visitor string, account model.
 		}
 	}
 	c.mu.Lock()
+	if c.cookie != cookie {
+		// a ping minted under another session must not go out with this one
+		clear(c.playbackPings)
+	}
 	c.cookie, c.dataSync, c.account = cookie, dataSync, account
 	if visitor != "" {
 		c.visitor = visitor
@@ -310,20 +277,25 @@ func (c *Client) persistAccount(cookie, dataSync, visitor string, account model.
 
 // SignOut clears every persisted YouTube session projection.
 func (c *Client) SignOut() error {
+	c.commitMu.Lock()
+	defer c.commitMu.Unlock()
 	var failures []error
-	for _, key := range []string{cookieKey, dataSyncKey, accountKey, selectionKey, pendingKey} {
+	for _, key := range []string{cookieKey, cookieSourceKey, dataSyncKey, accountKey, identityKey, selectionKey, pendingKey} {
 		if err := c.kv.Delete(key); err != nil {
 			failures = append(failures, err)
 		}
 	}
 	c.mu.Lock()
-	c.cookie, c.dataSync = "", ""
+	c.cookie, c.dataSync, c.identity = "", "", ""
+	clear(c.playbackPings)
+	c.cookieSource = nil
 	c.account = model.Account{}
 	c.mu.Unlock()
 	return errors.Join(failures...)
 }
 
-// Account returns the current account projection, refreshing it when signed in.
+// Account asks the account menu for the current account. It re-reads the
+// remembered browser store only when the menu reports no active account.
 func (c *Client) Account(ctx context.Context) (model.Account, error) {
 	c.mu.RLock()
 	cookie, cached := c.cookie, c.account
@@ -333,15 +305,48 @@ func (c *Client) Account(ctx context.Context) (model.Account, error) {
 	}
 	account, dataSync, visitor, err := c.fetchAccount(ctx, "")
 	if err != nil {
+		if definitiveSessionFailure(err) {
+			// do has already forgotten the rejected session
+			return c.CurrentAccount(), err
+		}
 		if cached.SignedIn {
 			return cached, err
 		}
 		return model.Account{}, err
 	}
 	if account.Name == nil {
-		return model.Account{}, errors.New("That session didn't authenticate, sign in again.")
+		changed, refreshErr := c.refreshFromSource(ctx, cookie)
+		if changed {
+			c.mu.RLock()
+			cookie = c.cookie
+			c.mu.RUnlock()
+			account, dataSync, visitor, err = c.fetchAccount(ctx, "")
+			if err != nil {
+				return c.CurrentAccount(), err
+			}
+		} else if ctxErr := ctx.Err(); ctxErr != nil {
+			return cached, ctxErr
+		}
+		if account.Name == nil {
+			// the menu itself proves this cookie has no account
+			if _, err := c.markSessionRejected(cookie); err != nil {
+				return model.Account{}, err
+			}
+			return c.CurrentAccount(), sessionExpiredError(refreshErr)
+		}
 	}
 	account.CanSwitch = cached.CanSwitch
+	c.commitMu.Lock()
+	defer c.commitMu.Unlock()
+	c.mu.RLock()
+	current, storedDataSync := c.cookie, c.dataSync
+	c.mu.RUnlock()
+	if current != cookie {
+		return c.CurrentAccount(), nil
+	}
+	if dataSync == "" {
+		dataSync = storedDataSync
+	}
 	if err := c.persistAccount(cookie, dataSync, visitor, account); err != nil {
 		return model.Account{}, err
 	}
@@ -366,6 +371,8 @@ func (c *Client) AccountIdentities(ctx context.Context) (model.AccountIdentities
 type identityRow struct {
 	public   model.AccountIdentity
 	dataSync string
+	// serverSelected is isSelected from the response, not our stored choice.
+	serverSelected bool
 }
 
 type identityResult struct {
@@ -374,7 +381,18 @@ type identityResult struct {
 }
 
 func (c *Client) accountIdentities(ctx context.Context) (identityResult, error) {
-	root, err := c.do(ctx, "WEB_REMIX", "account/accounts_list", map[string]any{}, true)
+	return c.listIdentities(ctx, map[string]any{})
+}
+
+// candidateIdentities lists the accounts of a session being proven or
+// imported, without acting as the stored session's channel, so the server's
+// selection is the account that session itself uses.
+func (c *Client) candidateIdentities(ctx context.Context, cookie string) (identityResult, error) {
+	return c.listIdentities(withSessionOverride(ctx, cookie), map[string]any{"__dataSyncOverride": ""})
+}
+
+func (c *Client) listIdentities(ctx context.Context, body map[string]any) (identityResult, error) {
+	root, err := c.do(ctx, "WEB_REMIX", "account/accounts_list", body, true)
 	if err != nil {
 		return identityResult{}, err
 	}
@@ -409,7 +427,7 @@ func (c *Client) accountIdentities(ctx context.Context) (identityResult, error) 
 		}
 		setStringPtr(&row.ChannelID, channelID)
 		result.public = append(result.public, row)
-		result.rows = append(result.rows, identityRow{public: row, dataSync: dataSync})
+		result.rows = append(result.rows, identityRow{public: row, dataSync: dataSync, serverSelected: findBool(item, "isSelected")})
 	})
 	return result, nil
 }
@@ -456,6 +474,8 @@ func (c *Client) SwitchAccount(ctx context.Context, selection string) error {
 	if dataSync == "" {
 		dataSync = chosen.dataSync
 	}
+	c.commitMu.Lock()
+	defer c.commitMu.Unlock()
 	c.mu.RLock()
 	sessionStillCurrent := c.cookie == cookie && cookie != ""
 	c.mu.RUnlock()
@@ -470,6 +490,9 @@ func (c *Client) SwitchAccount(ctx context.Context, selection string) error {
 	if err := c.kv.Set(selectionKey, string(selectedJSON)); err != nil {
 		return fmt.Errorf("Couldn't save the selected YouTube channel: %w", err)
 	}
+	if err := c.persistIdentity(chosen.public.SelectionKey); err != nil {
+		return fmt.Errorf("Couldn't save the selected YouTube channel: %w", err)
+	}
 	_ = c.kv.Delete(pendingKey)
 	return nil
 }
@@ -479,6 +502,16 @@ func (c *Client) fetchAccount(ctx context.Context, candidate string) (model.Acco
 	if candidate != "" {
 		body["__dataSyncOverride"] = candidate
 	}
+	return c.fetchAccountMenu(ctx, body)
+}
+
+// fetchAccountWithoutChannel asks the account menu for cookie's own account,
+// not acting as any remembered channel.
+func (c *Client) fetchAccountWithoutChannel(ctx context.Context, cookie string) (model.Account, string, string, error) {
+	return c.fetchAccountMenu(withSessionOverride(ctx, cookie), map[string]any{"__dataSyncOverride": ""})
+}
+
+func (c *Client) fetchAccountMenu(ctx context.Context, body map[string]any) (model.Account, string, string, error) {
 	root, err := c.do(ctx, "WEB_REMIX", "account/account_menu", body, true)
 	if err != nil {
 		return model.Account{}, "", "", err

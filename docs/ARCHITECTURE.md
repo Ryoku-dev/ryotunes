@@ -153,6 +153,70 @@ package serves the decrypted Ogg Vorbis over `127.0.0.1` with `Range`
 support so mpv seeks like any file. Local returns a `file://` URL. The
 player never knows which provider it is playing.
 
+### Sessions
+
+Each provider's session survives the daemon being off for any length of time;
+only the provider rejecting it, or the user signing out, ends it.
+
+- YouTube Music and SoundCloud sessions belong to the user's browser. The
+  daemon stores the cookies it imported and which store and container they
+  came from (the store's kind is persisted by name, and the path must be a
+  regular `cookies.sqlite` or `Cookies` file under a root `Discover` walks),
+  and follows that browser: once in the background at start, with a
+  deadline, and whenever the provider rejects the session, it re-reads the
+  remembered store and adopts the current cookies if they prove the same
+  account. Proof is the channel id, email or handle, whichever both sides
+  carry, else the identity of the account the server marks selected at sign
+  in, compared with the one it marks selected for the browser's session; a
+  display name never proves an account. A sign out during a proof wins: the
+  session keys are written under one short lock and re-checked before a
+  re-adoption commits. Subscribers are answered from memory and a change
+  arrives as an `auth-changed` or `soundcloud-auth` event (`restored` for a
+  quiet re-adoption). When the store offers nothing newer, YouTube asks the
+  account menu before giving up the session, so a 403 that is not about the
+  session keeps it, and a 403 for a remembered channel that the account menu
+  refuses while it accepts the account itself drops only that channel. A
+  SoundCloud token that merely expired is kept with its source until the
+  browser offers the next one: the client hears `stale` once (signed out, no
+  toast), public requests go without the token, and only a 401 or 403 ends
+  it, as `session_expired`. Only the SoundCloud access token is stored, never
+  the browser's refresh token or session cookie. It never refreshes or rotates
+  a browser's tokens itself, because both copies share one session and the
+  browser would be signed out. Store copies live in `$XDG_RUNTIME_DIR/ryotunes`
+  when that directory is this user's and mode 0700 (else a private temporary
+  directory), and copies older than 15 s are swept at start.
+- Spotify (go-librespot reusable credentials, with a persistent 40 hex device
+  id) and TIDAL (OAuth device flow, refresh token) are the daemon's own
+  sessions. Refreshes are single-flight and persisted before use, and a
+  restore is bounded by a deadline and announced as an event when it finishes
+  after a client subscribed. A failed refresh keeps the session unless the
+  provider says the grant is invalid: for TIDAL that is `invalid_grant` or
+  `access_denied`, while a refused client id or secret keeps the refresh
+  token, and a refresh answer with a blank refresh token keeps the old one.
+  An API 401 refreshes the TIDAL token only when its `subStatus` names the
+  token, and not again for a renewed token TIDAL refused, until it expires.
+  A dropped Spotify connection is recovered from the stored credentials:
+  once per session when Spotify refuses them, and again on the next request
+  when the network was unreachable or timed out, as after a resume.
+- 1.x's Spotify session (`spotify/spotify/credentials.json` and `device.id`
+  under the data directory) is migrated once at start and never written by
+  2.x; its UUID device id becomes the SHA-1 of its text. An unreadable 1.x
+  file is logged as a warning and skipped. Sign out removes both credential
+  copies, and a marker keeps a later start from migrating the 1.x copy again.
+
+YouTube learns what to recommend from plays reported to the signed-in
+account, so the daemon reports a YouTube play the way the web player does,
+unless Watch history is off in Settings. The report goes out once per play,
+when mpv has opened the file and it is actually playing: a track skipped
+before it loads, a prefetch, a seek or a resume never counts, and a Listen
+Together sync of the same track does not reload it. It is the player
+response's `videostatsPlaybackUrl`, sent only to an https `youtube.com` host
+with the session's cookies and SAPISIDHASH. The ping comes from the resolve
+that just ran when that is under 15 minutes old, and otherwise from one
+lightweight `player` request, so a cached stream or a downloaded file counts
+too, and an old response is never replayed under another account. Rows
+queued by hand or by autoplay carry no playlist context.
+
 ### Ids on the wire
 
 Every track id tells its provider: `spotify:track:…` and `spotify:…` are

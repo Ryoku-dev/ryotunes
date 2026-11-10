@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net/http"
 	"net/url"
 	"os/exec"
 	"sort"
@@ -60,6 +59,7 @@ type playerResponse struct {
 
 // Resolve returns a playable audio stream, falling back to yt-dlp after direct clients.
 func (c *Client) Resolve(ctx context.Context, track model.Track, quality model.Quality) (model.Stream, error) {
+	c.rememberPlaybackPing(track.VideoID, model.PlaybackPing{})
 	order := ordinaryStreamClients
 	if track.IsUpload {
 		order = uploadStreamClients
@@ -79,7 +79,7 @@ func (c *Client) Resolve(ctx context.Context, track model.Track, quality model.Q
 		}
 		stream, response, err := c.resolveClient(ctx, cfg, track.VideoID, quality)
 		if err == nil {
-			c.trackPlayback(response, "")
+			c.rememberPlaybackPing(track.VideoID, playbackPing(response, cfg.key))
 			return stream, nil
 		}
 		if errors.Is(err, provider.ErrBotGated) {
@@ -98,12 +98,13 @@ func (c *Client) Resolve(ctx context.Context, track model.Track, quality model.Q
 	return model.Stream{}, errors.Join(failures...)
 }
 
-func (c *Client) resolveClient(ctx context.Context, cfg clientConfig, videoID string, quality model.Quality) (model.Stream, playerResponse, error) {
+// player asks one InnerTube client for videoID's player response.
+func (c *Client) player(ctx context.Context, cfg clientConfig, videoID string) (playerResponse, error) {
 	body := map[string]any{"videoId": videoID, "contentCheckOk": true, "racyCheckOk": true}
 	if cfg.signature {
 		sts, err := c.signatureTimestamp(ctx)
 		if err != nil {
-			return model.Stream{}, playerResponse{}, err
+			return playerResponse{}, err
 		}
 		if sts != 0 {
 			body["playbackContext"] = map[string]any{"contentPlaybackContext": map[string]any{"signatureTimestamp": sts}}
@@ -111,15 +112,26 @@ func (c *Client) resolveClient(ctx context.Context, cfg clientConfig, videoID st
 	}
 	root, err := c.do(ctx, cfg.key, "player", body, true)
 	if err != nil {
-		return model.Stream{}, playerResponse{}, err
+		return playerResponse{}, err
 	}
-	data, _ := json.Marshal(root)
+	data, err := json.Marshal(root)
+	if err != nil {
+		return playerResponse{}, err
+	}
 	var response playerResponse
 	if err := json.Unmarshal(data, &response); err != nil {
-		return model.Stream{}, response, err
+		return playerResponse{}, err
 	}
 	if response.PlayabilityStatus.Status == "LOGIN_REQUIRED" && response.PlayabilityStatus.Reason == "Sign in to confirm you're not a bot" {
-		return model.Stream{}, response, provider.ErrBotGated
+		return response, provider.ErrBotGated
+	}
+	return response, nil
+}
+
+func (c *Client) resolveClient(ctx context.Context, cfg clientConfig, videoID string, quality model.Quality) (model.Stream, playerResponse, error) {
+	response, err := c.player(ctx, cfg, videoID)
+	if err != nil {
+		return model.Stream{}, response, err
 	}
 	if response.PlayabilityStatus.Status != "OK" {
 		reason := response.PlayabilityStatus.Reason
@@ -331,38 +343,6 @@ func (c *Client) resolveYTDLP(ctx context.Context, videoID string, quality model
 	}
 	stream.ExpiresAt = expiryFromURL(stream.URL)
 	return stream, nil
-}
-
-func (c *Client) trackPlayback(response playerResponse, playlistID string) {
-	base := response.PlaybackTracking.VideostatsPlaybackURL.BaseURL
-	if base == "" {
-		return
-	}
-	go func() {
-		parsed, err := url.Parse(base)
-		if err != nil {
-			return
-		}
-		query := parsed.Query()
-		query.Set("c", "WEB_REMIX")
-		query.Set("cpn", playbackNonce())
-		query.Set("ver", "2")
-		if playlistID != "" {
-			query.Set("list", playlistID)
-			query.Set("referrer", playlistID)
-		}
-		parsed.RawQuery = query.Encode()
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-		req, err := http.NewRequestWithContext(ctx, http.MethodGet, parsed.String(), nil)
-		if err != nil {
-			return
-		}
-		resp, err := c.http.Do(req)
-		if err == nil {
-			resp.Body.Close()
-		}
-	}()
 }
 
 func playbackNonce() string {

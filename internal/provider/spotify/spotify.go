@@ -26,6 +26,8 @@ type Options struct {
 	Events     bus.Sink
 	Log        *slog.Logger
 	HTTPClient *http.Client
+	// RestoreTimeout bounds opening the stored session; zero means 45 s.
+	RestoreTimeout time.Duration
 }
 
 // DownloadSourceLabel is the honest source label for Spotify's YouTube search match.
@@ -40,14 +42,18 @@ func DownloadQuery(track model.Track) string {
 
 // Spotify is a signed-in Spotify Premium provider.
 type Spotify struct {
-	root       string
-	credPath   string
-	devicePath string
-	hashPath   string
-	events     bus.Sink
-	log        *slog.Logger
-	http       *http.Client
-	liblog     *librespotLogger
+	root             string
+	credPath         string
+	devicePath       string
+	legacyCredPath   string
+	legacyDevicePath string
+	migratedPath     string
+	hashPath         string
+	events           bus.Sink
+	log              *slog.Logger
+	http             *http.Client
+	liblog           *librespotLogger
+	restoreTimeout   time.Duration
 
 	mu          sync.RWMutex
 	sess        *session.Session
@@ -55,6 +61,9 @@ type Spotify struct {
 	premium     bool
 	clientToken string
 	closed      bool
+	// unrecoverable is the dropped session whose one recovery attempt
+	// failed; any installed session gets its own attempt.
+	unrecoverable *session.Session
 
 	authMu         sync.Mutex
 	signing        bool
@@ -62,8 +71,7 @@ type Spotify struct {
 	authCancel     context.CancelFunc
 	authGeneration uint64
 
-	recoverMu   sync.Mutex
-	recoverUsed bool
+	restoreMu sync.Mutex
 
 	hashMu sync.Mutex
 	hashes *hashRegistry
@@ -88,24 +96,28 @@ func New(opts Options) (*Spotify, error) {
 	if opts.HTTPClient == nil {
 		opts.HTTPClient = netx.Client(30 * time.Second)
 	}
+	if opts.RestoreTimeout <= 0 {
+		opts.RestoreTimeout = 45 * time.Second
+	}
 	root := filepath.Join(opts.DataDir, "spotify")
 	if err := os.MkdirAll(root, 0o700); err != nil {
 		return nil, fmt.Errorf("create Spotify data directory: %w", err)
 	}
+	legacyRoot := filepath.Join(root, "spotify")
 	p := &Spotify{
 		root: root, credPath: filepath.Join(root, "credentials.json"),
 		devicePath: filepath.Join(root, "device.id"), hashPath: filepath.Join(root, "pathfinder.json"),
-		events: opts.Events, log: opts.Log, http: opts.HTTPClient,
+		legacyCredPath: filepath.Join(legacyRoot, "credentials.json"), legacyDevicePath: filepath.Join(legacyRoot, "device.id"),
+		migratedPath: filepath.Join(root, "1x-migrated"),
+		events:       opts.Events, log: opts.Log, http: opts.HTTPClient, restoreTimeout: opts.RestoreTimeout,
 	}
 	p.liblog = &librespotLogger{log: opts.Log}
+	if err := p.migrateLegacyCache(); err != nil {
+		opts.Log.Warn("Spotify 1.x session was not fully migrated", "error", err)
+	}
 	if err := p.startStreamServer(); err != nil {
 		return nil, err
 	}
-	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
-		defer cancel()
-		_ = p.Restore(ctx)
-	}()
 	return p, nil
 }
 
@@ -178,28 +190,39 @@ func (p *Spotify) session(ctx context.Context) (*session.Session, error) {
 }
 
 func (p *Spotify) recoverSession(ctx context.Context, dead *session.Session) (*session.Session, error) {
-	p.recoverMu.Lock()
-	defer p.recoverMu.Unlock()
-	p.mu.RLock()
-	current, used := p.sess, p.recoverUsed
-	p.mu.RUnlock()
+	p.restoreMu.Lock()
+	defer p.restoreMu.Unlock()
+	p.mu.Lock()
+	current := p.sess
+	tried := p.unrecoverable == dead
+	if current == dead && !tried {
+		p.unrecoverable = dead
+	}
+	p.mu.Unlock()
 	if current != dead {
 		if current == nil {
 			return nil, providerapi.ErrSignInRequired
 		}
 		return current, nil
 	}
-	if used {
+	if tried {
 		return nil, fmt.Errorf("%w: Spotify session disconnected", providerapi.ErrSignInRequired)
 	}
-	p.mu.Lock()
-	p.recoverUsed = true
-	p.mu.Unlock()
 	p.authMu.Lock()
 	generation := p.authGeneration
 	p.authMu.Unlock()
-	fresh, profile, err := p.restoreSession(ctx)
+	fresh, profile, err := p.openStoredSession(ctx)
 	if err != nil {
+		if transientFailure(err) {
+			// After a resume the network is often not up yet; the next
+			// request tries again instead of signing the session out.
+			p.mu.Lock()
+			if p.unrecoverable == dead {
+				p.unrecoverable = nil
+			}
+			p.mu.Unlock()
+			return nil, fmt.Errorf("%w: Spotify could not be reached", providerapi.ErrUnavailable)
+		}
 		return nil, fmt.Errorf("%w: %v", providerapi.ErrSignInRequired, err)
 	}
 	p.authMu.Lock()
@@ -231,6 +254,7 @@ func (p *Spotify) installSession(sess *session.Session, profile accountProfile) 
 	}
 	old := p.sess
 	p.sess = sess
+	p.unrecoverable = nil
 	p.name = profile.DisplayName
 	p.premium = profile.Product == "premium" || profile.Product == ""
 	p.mu.Unlock()
@@ -244,6 +268,7 @@ func (p *Spotify) clearSession() *session.Session {
 	p.mu.Lock()
 	old := p.sess
 	p.sess = nil
+	p.unrecoverable = nil
 	p.name = ""
 	p.premium = false
 	p.mu.Unlock()

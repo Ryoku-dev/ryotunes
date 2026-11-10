@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -117,12 +118,29 @@ type tokenResponse struct {
 	} `json:"user"`
 }
 
+type tokenEndpointError struct {
+	Status      int
+	Code        string
+	Description string
+}
+
+func (e *tokenEndpointError) Error() string {
+	detail := strings.TrimSpace(e.Description)
+	if detail == "" {
+		detail = strings.TrimSpace(e.Code)
+	}
+	if detail == "" {
+		return fmt.Sprintf("TIDAL answered %d", e.Status)
+	}
+	return fmt.Sprintf("TIDAL answered %d: %s", e.Status, detail)
+}
+
 // Status returns the current TIDAL authorization and quality ceiling.
 func (p *Provider) Status() model.TidalStatus {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 	status := model.TidalStatus{HasCredentials: p.credentials.DeviceID != "" || (p.credentials.PKCEID != "" && p.credentials.PKCERedirect != "")}
-	if p.auth == nil {
+	if !reusableAuth(p.auth) {
 		return status
 	}
 	status.SignedIn = true
@@ -301,7 +319,7 @@ func (p *Provider) FinishPKCE(ctx context.Context, code, state string, challenge
 		form.Set("client_secret", creds.PKCESecret)
 	}
 	var token tokenResponse
-	if err := p.postForm(ctx, tokenURL, form, &token); err != nil {
+	if err := p.postForm(ctx, p.tokenURL, form, &token); err != nil {
 		return err
 	}
 	auth := p.adoptToken(token, "hires", nil)
@@ -320,21 +338,19 @@ func (p *Provider) SignOut() error {
 }
 
 func (p *Provider) completeSignIn(ctx context.Context, auth Auth, epoch uint64) error {
+	if !reusableAuth(&auth) {
+		return fmt.Errorf("TIDAL did not return a reusable session")
+	}
+	if auth.UserID != 0 {
+		var profile struct {
+			ProfileName *string `json:"profileName"`
+		}
+		if p.profile(ctx, auth, &profile) == nil {
+			auth.ProfileName = profile.ProfileName
+		}
+	}
 	p.mu.Lock()
 	if p.epoch != epoch {
-		p.mu.Unlock()
-		return baseprovider.ErrSignInRequired
-	}
-	p.auth = &auth
-	p.mu.Unlock()
-	var profile struct {
-		ProfileName *string `json:"profileName"`
-	}
-	if auth.UserID != 0 && p.api(ctx, fmt.Sprintf("/users/%d", auth.UserID), nil, &profile) == nil {
-		auth.ProfileName = profile.ProfileName
-	}
-	p.mu.Lock()
-	if p.epoch != epoch || p.auth == nil {
 		p.mu.Unlock()
 		return baseprovider.ErrSignInRequired
 	}
@@ -351,6 +367,25 @@ func (p *Provider) completeSignIn(ctx context.Context, auth Auth, epoch uint64) 
 	quality := ceilingForEntitlement(auth.Entitlement).String()
 	p.bus.Emit(protocol.EventTidalAuth, model.TidalAuthEvent{State: "signed_in", Name: name, Quality: &quality})
 	return nil
+}
+
+func (p *Provider) profile(ctx context.Context, auth Auth, out any) error {
+	endpoint := fmt.Sprintf("%s/users/%d?countryCode=%s", p.apiBase, auth.UserID, url.QueryEscape(auth.CountryCode))
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Authorization", "Bearer "+auth.AccessToken)
+	req.Header.Set("User-Agent", p.userAgent)
+	resp, err := p.http.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("TIDAL answered %d for profile", resp.StatusCode)
+	}
+	return json.NewDecoder(resp.Body).Decode(out)
 }
 
 func (p *Provider) signInEpoch(epoch uint64) bool {
@@ -376,7 +411,7 @@ func (p *Provider) adoptToken(token tokenResponse, entitlement string, prior *Au
 	auth := Auth{AccessToken: token.AccessToken, RefreshToken: token.RefreshToken, ExpiresAt: now + expires, CountryCode: "US", Entitlement: entitlement}
 	if prior != nil {
 		auth.UserID, auth.CountryCode, auth.Username, auth.ProfileName = prior.UserID, prior.CountryCode, prior.Username, prior.ProfileName
-		if auth.RefreshToken == nil {
+		if auth.RefreshToken == nil || strings.TrimSpace(*auth.RefreshToken) == "" {
 			auth.RefreshToken = prior.RefreshToken
 		}
 	}
@@ -394,21 +429,25 @@ func (p *Provider) adoptToken(token tokenResponse, entitlement string, prior *Au
 	return auth
 }
 
+func reusableAuth(auth *Auth) bool {
+	return auth != nil && auth.RefreshToken != nil && strings.TrimSpace(*auth.RefreshToken) != ""
+}
+
 func (p *Provider) ensureFresh(ctx context.Context) (Auth, error) {
 	p.mu.RLock()
-	if p.auth == nil {
+	if !reusableAuth(p.auth) {
 		p.mu.RUnlock()
 		return Auth{}, fmt.Errorf("%w: TIDAL", baseprovider.ErrSignInRequired)
 	}
 	current := *p.auth
 	p.mu.RUnlock()
-	if !tokenExpired(current.ExpiresAt, time.Now().Unix()) {
+	if current.AccessToken != "" && !tokenExpired(current.ExpiresAt, time.Now().Unix()) {
 		return current, nil
 	}
 	p.refreshLock.Lock()
 	defer p.refreshLock.Unlock()
 	p.mu.RLock()
-	if p.auth == nil {
+	if !reusableAuth(p.auth) {
 		p.mu.RUnlock()
 		return Auth{}, baseprovider.ErrSignInRequired
 	}
@@ -416,11 +455,8 @@ func (p *Provider) ensureFresh(ctx context.Context) (Auth, error) {
 	creds := p.credentials
 	epoch := p.epoch
 	p.mu.RUnlock()
-	if !tokenExpired(current.ExpiresAt, time.Now().Unix()) {
+	if current.AccessToken != "" && !tokenExpired(current.ExpiresAt, time.Now().Unix()) {
 		return current, nil
-	}
-	if current.RefreshToken == nil {
-		return Auth{}, baseprovider.ErrSignInRequired
 	}
 	clientID, secret := creds.DeviceID, creds.DeviceSecret
 	if strings.EqualFold(current.Entitlement, "hires") {
@@ -431,12 +467,23 @@ func (p *Provider) ensureFresh(ctx context.Context) (Auth, error) {
 		form.Set("client_secret", secret)
 	}
 	var token tokenResponse
-	if err := p.postForm(ctx, tokenURL, form, &token); err != nil {
+	if err := p.postForm(ctx, p.tokenURL, form, &token); err != nil {
+		if tokenRejectsSession(err) {
+			message := "TIDAL could not renew this session. Sign in again."
+			deleteErr := p.expireAuth(message)
+			return Auth{}, errors.Join(fmt.Errorf("%w: %s", baseprovider.ErrSignInRequired, message), deleteErr)
+		}
+		if clientRefused(err) {
+			return Auth{}, fmt.Errorf("TIDAL refused the client id or secret in Settings: %w", err)
+		}
 		return Auth{}, err
 	}
 	rotated := p.adoptToken(token, current.Entitlement, &current)
+	if !reusableAuth(&rotated) || rotated.AccessToken == "" {
+		return Auth{}, fmt.Errorf("TIDAL returned an incomplete refreshed session")
+	}
 	p.mu.Lock()
-	if p.epoch != epoch || p.auth == nil {
+	if p.epoch != epoch || !reusableAuth(p.auth) {
 		p.mu.Unlock()
 		return Auth{}, baseprovider.ErrSignInRequired
 	}
@@ -448,6 +495,24 @@ func (p *Provider) ensureFresh(ctx context.Context) (Auth, error) {
 	p.mu.Unlock()
 	p.log.Info("tidal: refreshed the access token")
 	return rotated, nil
+}
+
+// tokenRejectsSession reports whether TIDAL says the refresh token itself is
+// dead. invalid_client and unauthorized_client mean the client id or secret
+// was refused, for example after an edit in Settings; the refresh token is
+// kept so restoring the old client works again.
+func tokenRejectsSession(err error) bool {
+	var endpointErr *tokenEndpointError
+	if !errors.As(err, &endpointErr) {
+		return false
+	}
+	return strings.EqualFold(endpointErr.Code, "invalid_grant") || strings.EqualFold(endpointErr.Code, "access_denied")
+}
+
+func clientRefused(err error) bool {
+	var endpointErr *tokenEndpointError
+	return errors.As(err, &endpointErr) &&
+		(strings.EqualFold(endpointErr.Code, "invalid_client") || strings.EqualFold(endpointErr.Code, "unauthorized_client"))
 }
 
 func (p *Provider) postForm(ctx context.Context, endpoint string, form url.Values, out any) error {
@@ -463,14 +528,24 @@ func (p *Provider) postForm(ctx context.Context, endpoint string, form url.Value
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return fmt.Errorf("TIDAL answered %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+		body, readErr := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		if readErr != nil {
+			return readErr
+		}
+		var payload struct {
+			Code        string `json:"error"`
+			Description string `json:"error_description"`
+		}
+		if err := json.Unmarshal(body, &payload); err != nil {
+			payload.Description = strings.TrimSpace(string(body))
+		}
+		return &tokenEndpointError{Status: resp.StatusCode, Code: payload.Code, Description: payload.Description}
 	}
 	return json.NewDecoder(resp.Body).Decode(out)
 }
 
 func (p *Provider) pollToken(ctx context.Context, form url.Values, out any) (bool, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, tokenURL, strings.NewReader(form.Encode()))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, p.tokenURL, strings.NewReader(form.Encode()))
 	if err != nil {
 		return false, err
 	}
@@ -484,7 +559,10 @@ func (p *Provider) pollToken(ctx context.Context, form url.Values, out any) (boo
 	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
 		return false, json.NewDecoder(resp.Body).Decode(out)
 	}
-	body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 4096))
+	if err != nil {
+		return false, err
+	}
 	lower := strings.ToLower(string(body))
 	if strings.Contains(lower, "authorization_pending") || strings.Contains(lower, "slow_down") {
 		return true, nil

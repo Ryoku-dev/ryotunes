@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"math/rand/v2"
 	"reflect"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -26,6 +27,8 @@ type fakeTransport struct {
 	idle     bool
 	stopped  bool
 	loudness *float64
+	// onLoad runs inside Load, like mpv opening the file before the next command lands
+	onLoad func()
 }
 
 func newFakeTransport() *fakeTransport {
@@ -34,6 +37,9 @@ func newFakeTransport() *fakeTransport {
 func (f *fakeTransport) Load(_ context.Context, stream model.Stream, _ float64, paused bool) error {
 	f.loaded = append(f.loaded, stream)
 	f.paused, f.idle = paused, false
+	if f.onLoad != nil {
+		f.onLoad()
+	}
 	return nil
 }
 func (f *fakeTransport) Prefetch(model.Stream)       {}
@@ -50,20 +56,38 @@ func (f *fakeTransport) Paused() bool                { return f.paused }
 func (f *fakeTransport) Idle() bool                  { return f.idle }
 func (f *fakeTransport) Events() <-chan player.Event { return f.events }
 
+type playbackStartCall struct {
+	track      model.Track
+	playlistID string
+}
+
 type fakeHooks struct {
-	autoplay      bool
-	prevent       bool
-	downloads     map[string]model.Stream
-	cache         map[string]model.Stream
-	downloadCalls int
+	autoplay       bool
+	prevent        bool
+	downloads      map[string]model.Stream
+	cache          map[string]model.Stream
+	downloadCalls  atomic.Int32
+	playbackStarts chan playbackStartCall
+	holdPlayback   chan struct{}
 }
 
 func (f *fakeHooks) DownloadedStream(trackID string) (model.Stream, bool) {
-	f.downloadCalls++
+	f.downloadCalls.Add(1)
 	stream, ok := f.downloads[trackID]
 	return stream, ok
 }
 func (f *fakeHooks) OnPlayed(context.Context, model.Track) {}
+func (f *fakeHooks) OnPlaybackStart(ctx context.Context, track model.Track, playlistID string) {
+	if f.playbackStarts != nil {
+		f.playbackStarts <- playbackStartCall{track: track, playlistID: playlistID}
+	}
+	if f.holdPlayback != nil {
+		select {
+		case <-f.holdPlayback:
+		case <-ctx.Done():
+		}
+	}
+}
 func (f *fakeHooks) StreamCacheGet(trackID string) (model.Stream, bool) {
 	stream, ok := f.cache[trackID]
 	return stream, ok
@@ -77,8 +101,8 @@ func (f *fakeHooks) HealIdentity() bool                  { return false }
 type fakeProvider struct {
 	id           model.Provider
 	next         []model.Track
-	nextCalls    int
-	resolveCalls int
+	nextCalls    atomic.Int32
+	resolveCalls atomic.Int32
 	resolveErr   error
 	nextStarted  chan struct{}
 	blockNext    bool
@@ -128,14 +152,14 @@ func (f *fakeProvider) PlaylistMore(context.Context, string) (model.PlaylistTrac
 }
 func (f *fakeProvider) Library(context.Context) (model.Library, error) { return model.Library{}, nil }
 func (f *fakeProvider) Resolve(_ context.Context, track model.Track, _ model.Quality) (model.Stream, error) {
-	f.resolveCalls++
+	f.resolveCalls.Add(1)
 	if f.resolveErr != nil {
 		return model.Stream{}, f.resolveErr
 	}
 	return model.Stream{URL: "https://stream/" + track.VideoID}, nil
 }
 func (f *fakeProvider) Next(ctx context.Context, _ model.Track, _ []string) ([]model.Track, error) {
-	f.nextCalls++
+	f.nextCalls.Add(1)
 	if f.blockNext {
 		close(f.nextStarted)
 		<-ctx.Done()
@@ -254,12 +278,12 @@ func TestAutoplayOnlyNearTail(t *testing.T) {
 	q, _ := testQueue(t, p, &fakeHooks{autoplay: true})
 	q.state.items = tracks("a", "b", "c", "d")
 	q.state.current = 0
-	if got := q.extendAutoplay(context.Background()); got != 0 || p.nextCalls != 0 {
-		t.Fatalf("far-tail extension = %d calls=%d", got, p.nextCalls)
+	if got := q.extendAutoplay(context.Background()); got != 0 || p.nextCalls.Load() != 0 {
+		t.Fatalf("far-tail extension = %d calls=%d", got, p.nextCalls.Load())
 	}
 	q.state.current = 2
-	if got := q.extendAutoplay(context.Background()); got != 1 || p.nextCalls != 1 {
-		t.Fatalf("near-tail extension = %d calls=%d", got, p.nextCalls)
+	if got := q.extendAutoplay(context.Background()); got != 1 || p.nextCalls.Load() != 1 {
+		t.Fatalf("near-tail extension = %d calls=%d", got, p.nextCalls.Load())
 	}
 }
 
@@ -322,8 +346,8 @@ func TestPlayUsesDownloadedFileWithoutProviderResolution(t *testing.T) {
 	if transport.loudness == nil || *transport.loudness != loudness {
 		t.Fatalf("downloaded loudness = %v, want %v", transport.loudness, loudness)
 	}
-	if provider.resolveCalls != 0 {
-		t.Fatalf("provider resolved %d times", provider.resolveCalls)
+	if provider.resolveCalls.Load() != 0 {
+		t.Fatalf("provider resolved %d times", provider.resolveCalls.Load())
 	}
 }
 
@@ -347,8 +371,8 @@ func TestProviderOwnedFileAndRemoteIDsSkipDownloadLookup(t *testing.T) {
 			if err := q.Play(context.Background(), model.Track{VideoID: test.id}); err != nil {
 				t.Fatal(err)
 			}
-			if hooks.downloadCalls != 0 {
-				t.Fatalf("download lookup calls = %d", hooks.downloadCalls)
+			if hooks.downloadCalls.Load() != 0 {
+				t.Fatalf("download lookup calls = %d", hooks.downloadCalls.Load())
 			}
 			if got := transport.loaded[0].URL; got != "https://stream/"+test.id {
 				t.Fatalf("loaded URL = %q", got)
@@ -417,6 +441,220 @@ func TestMissingLocalRowKeepsCurrentPlayback(t *testing.T) {
 	}
 	if playback := q.Playback(); playback.Now == nil || playback.Now.VideoID != "LOCAL:/playing.flac" || playback.Paused {
 		t.Fatalf("playback snapshot = %#v", playback)
+	}
+}
+
+// fileLoaded is mpv opening the stream the queue just loaded.
+func fileLoaded(q *Queue) { q.handlePlayerEvent(player.Event{Kind: player.FileLoaded}) }
+
+func TestPlaybackStartReportsFreshCachedDownloadedAndReplayButNotPrefetch(t *testing.T) {
+	starts := make(chan playbackStartCall, 8)
+	hooks := &fakeHooks{
+		cache: map[string]model.Stream{
+			"cached": {URL: "https://cache/cached"},
+		},
+		downloads: map[string]model.Stream{
+			"downloaded": {URL: "file:///music/downloaded.opus"},
+		},
+		playbackStarts: starts,
+	}
+	q, _ := testQueue(t, &fakeProvider{}, hooks)
+	sourceID := "PLmix"
+	if err := q.PlayPlaylist(context.Background(), tracks("fresh"), nil, &sourceID, nil, false, nil); err != nil {
+		t.Fatal(err)
+	}
+	fileLoaded(q)
+	if got := waitPlaybackStart(t, starts); got.track.VideoID != "fresh" || got.playlistID != sourceID {
+		t.Fatalf("fresh playback start = %#v", got)
+	}
+
+	q.PrefetchStream(context.Background(), model.Track{VideoID: "prefetch"})
+	noPlaybackStart(t, starts)
+
+	if err := q.Play(context.Background(), model.Track{VideoID: "cached"}); err != nil {
+		t.Fatal(err)
+	}
+	fileLoaded(q)
+	if got := waitPlaybackStart(t, starts); got.track.VideoID != "cached" {
+		t.Fatalf("cached playback start = %#v", got)
+	}
+	if err := q.Play(context.Background(), model.Track{VideoID: "downloaded"}); err != nil {
+		t.Fatal(err)
+	}
+	fileLoaded(q)
+	if got := waitPlaybackStart(t, starts); got.track.VideoID != "downloaded" {
+		t.Fatalf("downloaded playback start = %#v", got)
+	}
+	if err := q.PlayIndex(context.Background(), 0); err != nil {
+		t.Fatal(err)
+	}
+	fileLoaded(q)
+	if got := waitPlaybackStart(t, starts); got.track.VideoID != "downloaded" {
+		t.Fatalf("replayed playback start = %#v", got)
+	}
+	fileLoaded(q)
+	noPlaybackStart(t, starts)
+}
+
+func TestPlaybackStartSkipsTracksThatNeverLoaded(t *testing.T) {
+	starts := make(chan playbackStartCall, 8)
+	q, _ := testQueue(t, &fakeProvider{}, &fakeHooks{playbackStarts: starts})
+	if err := q.PlayPlaylist(context.Background(), tracks("skipped", "kept"), nil, nil, nil, false, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := q.Next(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	fileLoaded(q)
+	if got := waitPlaybackStart(t, starts); got.track.VideoID != "kept" {
+		t.Fatalf("playback start = %#v, want only the track that loaded", got)
+	}
+	noPlaybackStart(t, starts)
+}
+
+func TestPlaybackStartWaitsUntilAPausedTrackPlays(t *testing.T) {
+	starts := make(chan playbackStartCall, 8)
+	q, _ := testQueue(t, &fakeProvider{}, &fakeHooks{playbackStarts: starts})
+	if err := q.Play(context.Background(), model.Track{VideoID: "paused"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := q.Pause(); err != nil {
+		t.Fatal(err)
+	}
+	fileLoaded(q)
+	noPlaybackStart(t, starts)
+
+	if err := q.PlayTransport(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	q.handlePlayerEvent(player.Event{Kind: player.PauseChanged})
+	if got := waitPlaybackStart(t, starts); got.track.VideoID != "paused" {
+		t.Fatalf("playback start = %#v", got)
+	}
+	q.handlePlayerEvent(player.Event{Kind: player.PauseChanged})
+	noPlaybackStart(t, starts)
+}
+
+func TestQueuedRowsAreReportedOutsideThePlaylist(t *testing.T) {
+	starts := make(chan playbackStartCall, 8)
+	q, _ := testQueue(t, &fakeProvider{}, &fakeHooks{playbackStarts: starts})
+	sourceID := "PLmix"
+	if err := q.PlayPlaylist(context.Background(), tracks("first", "second"), nil, &sourceID, nil, false, nil); err != nil {
+		t.Fatal(err)
+	}
+	fileLoaded(q)
+	waitPlaybackStart(t, starts)
+	if err := q.PlayNext(tracks("queued"), nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := q.Next(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	fileLoaded(q)
+	if got := waitPlaybackStart(t, starts); got.track.VideoID != "queued" || got.playlistID != "" {
+		t.Fatalf("queued playback start = %#v, want no playlist context", got)
+	}
+}
+
+func TestFollowSeeksOnlyWhenTheGuestDrifted(t *testing.T) {
+	starts := make(chan playbackStartCall, 8)
+	q, transport := testQueue(t, &fakeProvider{}, &fakeHooks{playbackStarts: starts})
+	ctx := context.Background()
+	track := model.Track{VideoID: "shared"}
+	if err := q.Follow(ctx, track, 100, true); err != nil {
+		t.Fatal(err)
+	}
+	fileLoaded(q)
+	waitPlaybackStart(t, starts)
+	for _, host := range []float64{100.25, 100.5, 101.5} {
+		transport.seek = -1
+		if err := q.Follow(ctx, track, host, true); err != nil {
+			t.Fatal(err)
+		}
+		if transport.seek != -1 {
+			t.Fatalf("a host snapshot %.2f s ahead made the guest seek to %v", host-100, transport.seek)
+		}
+	}
+	if err := q.Follow(ctx, track, 0, true); err != nil {
+		t.Fatal(err)
+	}
+	if transport.seek != 0 {
+		t.Fatalf("the host restarted the track and the guest seeked to %v", transport.seek)
+	}
+	if len(transport.loaded) != 1 {
+		t.Fatalf("the shared track loaded %d times", len(transport.loaded))
+	}
+	noPlaybackStart(t, starts)
+}
+
+func TestFollowingAPausedRoomReportsOnlyOnceItPlays(t *testing.T) {
+	starts := make(chan playbackStartCall, 8)
+	q, transport := testQueue(t, &fakeProvider{}, &fakeHooks{playbackStarts: starts})
+	transport.onLoad = func() { fileLoaded(q) }
+	ctx := context.Background()
+	track := model.Track{VideoID: "shared"}
+	if err := q.Follow(ctx, track, 30, false); err != nil {
+		t.Fatal(err)
+	}
+	noPlaybackStart(t, starts)
+
+	transport.onLoad = nil
+	if err := q.Follow(ctx, track, 30.5, true); err != nil {
+		t.Fatal(err)
+	}
+	q.handlePlayerEvent(player.Event{Kind: player.PauseChanged})
+	if got := waitPlaybackStart(t, starts); got.track.VideoID != "shared" {
+		t.Fatalf("playback start = %#v", got)
+	}
+	if len(transport.loaded) != 1 {
+		t.Fatalf("the shared track loaded %d times", len(transport.loaded))
+	}
+}
+
+func TestSlowPlaybackReportNeverHoldsPlayerEvents(t *testing.T) {
+	starts := make(chan playbackStartCall, 1)
+	release := make(chan struct{})
+	defer close(release)
+	hooks := &fakeHooks{
+		downloads:      map[string]model.Stream{"offline": {URL: "file:///music/offline.opus"}},
+		playbackStarts: starts,
+		holdPlayback:   release,
+	}
+	q, _ := testQueue(t, &fakeProvider{}, hooks)
+	if err := q.Play(context.Background(), model.Track{VideoID: "offline"}); err != nil {
+		t.Fatal(err)
+	}
+	handled := make(chan struct{})
+	go func() {
+		fileLoaded(q)
+		q.handlePlayerEvent(player.Event{Kind: player.Position, Position: 1})
+		close(handled)
+	}()
+	waitPlaybackStart(t, starts)
+	select {
+	case <-handled:
+	case <-time.After(time.Second):
+		t.Fatal("a held playback report stalled player events")
+	}
+}
+
+func waitPlaybackStart(t *testing.T, starts <-chan playbackStartCall) playbackStartCall {
+	t.Helper()
+	select {
+	case call := <-starts:
+		return call
+	case <-time.After(time.Second):
+		t.Fatal("playback start was not reported")
+		return playbackStartCall{}
+	}
+}
+
+func noPlaybackStart(t *testing.T, starts <-chan playbackStartCall) {
+	t.Helper()
+	select {
+	case got := <-starts:
+		t.Fatalf("unexpected playback start: %#v", got)
+	case <-time.After(20 * time.Millisecond):
 	}
 }
 

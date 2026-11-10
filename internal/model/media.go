@@ -25,6 +25,12 @@ type Lyrics struct {
 	Lines        []LyricsLine `json:"lines"`
 }
 
+// PlaybackPing identifies a provider watch-history request.
+type PlaybackPing struct {
+	URL    string
+	Client string
+}
+
 // DownloadFormat selects publication encoding.
 type DownloadFormat string
 

@@ -10,7 +10,7 @@ Ryotunes keeps the 1.x data location and schema so rebuilding the application do
 | Playback cache | `$XDG_CACHE_HOME/dev.ryoku.ryotunes/audio` | `$HOME/.cache/dev.ryoku.ryotunes/audio` |
 | User configuration | `$XDG_CONFIG_HOME/ryotunes` | `$HOME/.config/ryotunes` |
 | State and diagnostics | `$XDG_STATE_HOME/ryotunes` | `$HOME/.local/state/ryotunes` |
-| Runtime socket and FIFOs | `$XDG_RUNTIME_DIR/ryotunes` | `/tmp/ryotunes-<uid>` |
+| Runtime socket, FIFOs and short-lived browser cookie store copies | `$XDG_RUNTIME_DIR/ryotunes` | `/tmp/ryotunes-<uid>` |
 
 A relative XDG value is ignored. Ryotunes creates these private directories with mode `0700`. The database and atomically written private files use mode `0600`.
 
@@ -76,6 +76,8 @@ Every value is a string, even when its logical type is boolean, integer, JSON, o
 | `visitor_data` | YouTube visitor token; absent triggers bootstrap | InnerTube anonymous/login session. |
 | `last_visitor_try` | Unix-seconds string; absent means no cooldown | Visitor-data bot-gate retry cooldown. |
 | `session_cookie` | complete YouTube cookie header; absent means signed out | Authenticated InnerTube calls. |
+| `session_cookie_source` | browser store JSON `{kind,path,container}`, `kind` is `gecko` or `chromium` (the integers 0 and 1 from earlier builds still read); absent means the session is not followed | YouTube re-adoption from the browser at start and on rejection. |
+| `account_identity` | digest of the signed-in Google identity, kept only for an account with no channel id, email or handle | Proves the same account on re-adoption. |
 | `selected_identity_json` | selected YouTube identity projection JSON; absent means none | Account restore. |
 | `account_identities_json` | `model.AccountIdentities` JSON array; empty when absent | Account identity picker restore. |
 | `data_sync_id` | delegated YouTube identity token; absent means primary identity | InnerTube `onBehalfOfUser`. |
@@ -83,7 +85,7 @@ Every value is a string, even when its logical type is boolean, integer, JSON, o
 | `account_selection_pending` | JSON/presence marker; absent means no pending selection | Multi-channel first-login flow. |
 | `playlist_index_synced_at` | Unix-seconds string; absent means never | Six-hour YouTube playlist-index TTL. |
 | `potoken_session` | JSON `{session_id,token,expires_at}`; absent means mint on demand | YouTube BotGuard session. |
-| `soundcloud_auth` | SoundCloud auth/session JSON; absent means signed out | SoundCloud provider. |
+| `soundcloud_auth` | SoundCloud auth/session JSON with its remembered browser store; absent means signed out | SoundCloud provider and its re-adoption from the browser. |
 | `tidal_auth` | rotating TIDAL token JSON; absent means signed out | TIDAL provider. |
 | `tidal_credentials` | TIDAL device/PKCE override JSON; shipped defaults when absent | TIDAL sign-in. |
 | `tidal_quality` | TIDAL quality name; `LOSSLESS` when absent | TIDAL playback ceiling below the account entitlement. |
@@ -109,7 +111,8 @@ Provider packages may add an auth/session key only through `provider.KV`; such a
 | `covers/playlists/*.{jpg,jpeg,png}` | `0600`, durable | Validated custom playlist artwork, named from a playlist-ID digest. |
 | `covers/*` | private, durable | Local scanner sidecar or extracted artwork. Cache clearing never removes it. |
 | `spotify/credentials.json` | `0600`, durable | Librespot reusable credentials. |
-| `spotify/device.id` | `0600`, durable | Stable Spotify device identity. |
+| `spotify/device.id` | `0600`, durable | Stable Spotify device identity, 40 hex characters; a 1.x UUID is replaced by its SHA-1. |
+| `spotify/1x-migrated` | durable marker | Written once 1.x's `spotify/spotify/credentials.json` was read, so a sign out is never undone by migrating again. 2.x never writes the 1.x files; sign out removes 1.x's credentials too. |
 | `tidal/*.mpd` | private, replaceable | Temporary decoded TIDAL DASH manifests. |
 
 Playback bytes live under the cache directory's `audio/`, not the data directory. `ClearCaches` empties `stream_url_cache`, `lyrics_cache`, `potoken_session`, and every child of `audio/`; it preserves local and playlist artwork, history, accounts, and radio metadata.

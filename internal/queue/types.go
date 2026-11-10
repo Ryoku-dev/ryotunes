@@ -32,6 +32,7 @@ type Persist interface {
 type Hooks interface {
 	DownloadedStream(trackID string) (model.Stream, bool)
 	OnPlayed(ctx context.Context, track model.Track)
+	OnPlaybackStart(ctx context.Context, track model.Track, playlistID string)
 	StreamCacheGet(trackID string) (model.Stream, bool)
 	StreamCachePut(trackID string, stream model.Stream)
 	Quality() model.Quality

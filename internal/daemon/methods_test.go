@@ -49,6 +49,10 @@ func (f authCookieSource) Discover() []browsercookies.Store {
 	return []browsercookies.Store{{Path: "fake"}}
 }
 
+func (authCookieSource) Resolve(source browsercookies.SessionSource) (browsercookies.Store, error) {
+	return browsercookies.Store{Kind: source.Kind, Path: source.Path}, nil
+}
+
 func (f authCookieSource) Read(browsercookies.Store, ...string) ([]browsercookies.Cookie, error) {
 	return f.cookies, nil
 }

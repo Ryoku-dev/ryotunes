@@ -1,11 +1,10 @@
 package soundcloud
 
 import (
-	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
-	"fmt"
+	"errors"
 	"net/http"
 	"net/url"
 	"strings"
@@ -17,25 +16,26 @@ import (
 	"github.com/ryoku-dev/ryotunes/internal/provider/browsercookies"
 )
 
-const (
-	refreshURL          = "https://soundcloud.com/n/api/refresh-token"
-	soundCloudSignInURL = "https://soundcloud.com/signin"
-)
+const soundCloudSignInURL = "https://soundcloud.com/signin"
 
-// Auth is the persisted SoundCloud browser authorization.
+// Auth is the persisted SoundCloud browser authorization. Only the access
+// token is kept: the browser's refresh token and session cookie are never
+// used, so they are not stored.
 type Auth struct {
-	AccessToken    string  `json:"access_token"`
-	RefreshToken   *string `json:"refresh_token"`
-	ClientID       string  `json:"client_id"`
-	ExpiresAt      int64   `json:"expires_at"`
-	ConnectSession *string `json:"connect_session"`
-	Username       *string `json:"username"`
-	UserID         uint64  `json:"-"`
+	AccessToken string                        `json:"access_token"`
+	ClientID    string                        `json:"client_id"`
+	ExpiresAt   int64                         `json:"expires_at"`
+	Username    *string                       `json:"username"`
+	UserID      uint64                        `json:"user_id,omitempty"`
+	Subject     string                        `json:"subject,omitempty"`
+	Source      *browsercookies.SessionSource `json:"source,omitempty"`
 }
 
 // CookieSource supplies browser cookies without touching the live browser.
 type CookieSource interface {
 	Discover() []browsercookies.Store
+	// Resolve validates a remembered source before it is read.
+	Resolve(source browsercookies.SessionSource) (browsercookies.Store, error)
 	Read(store browsercookies.Store, hostSuffixes ...string) ([]browsercookies.Cookie, error)
 	ChangedSince(store browsercookies.Store, since time.Time) bool
 }
@@ -43,6 +43,9 @@ type CookieSource interface {
 type systemCookies struct{}
 
 func (systemCookies) Discover() []browsercookies.Store { return browsercookies.Discover() }
+func (systemCookies) Resolve(source browsercookies.SessionSource) (browsercookies.Store, error) {
+	return browsercookies.ValidateSource(source)
+}
 func (systemCookies) Read(store browsercookies.Store, suffixes ...string) ([]browsercookies.Cookie, error) {
 	return browsercookies.Read(store, suffixes...)
 }
@@ -54,42 +57,58 @@ func (systemCookies) ChangedSince(store browsercookies.Store, since time.Time) b
 func (p *Provider) Status() model.SoundCloudStatus {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
-	if p.auth == nil {
+	if p.auth == nil || authExpired(p.auth.ExpiresAt, time.Now().Unix()) {
 		return model.SoundCloudStatus{SignedIn: false}
 	}
 	return model.SoundCloudStatus{SignedIn: true, Name: p.auth.Username}
 }
 
-// SignIn starts one browser-cookie import flow and returns its browser handoff.
-func (p *Provider) SignIn(ctx context.Context) string {
-	p.mu.Lock()
-	if p.auth != nil {
-		p.mu.Unlock()
-		return ""
+// SignIn adopts a browser SoundCloud session or starts watching for one, and
+// returns the sign-in page the client should open ("" when already signed in).
+func (p *Provider) SignIn(ctx context.Context) (string, error) {
+	p.mu.RLock()
+	hasAuth := p.auth != nil
+	p.mu.RUnlock()
+	if hasAuth {
+		err := p.validateCurrentSession(ctx)
+		if err == nil {
+			return "", nil
+		}
+		var readErr browserReadError
+		if !definitiveSoundCloudFailure(err) && !errors.As(err, &readErr) {
+			return "", err
+		}
 	}
+
+	p.mu.Lock()
 	if p.signingIn {
 		url := p.signInURL
 		p.mu.Unlock()
-		return url
+		return url, nil
 	}
 	p.signingIn = true
 	epoch := p.epoch
 	p.mu.Unlock()
 
-	stores := p.cookies.Discover()
-	auth, found := p.importCookies(stores, nil)
-	url := ""
-	if !found {
-		url = soundCloudSignInURL
+	attempts := make(candidateAttempts)
+	signedIn, lastErr := p.tryCandidates(ctx, p.cookieAuthCandidates(p.cookies.Discover(), nil), epoch, attempts)
+	if signedIn {
+		p.mu.Lock()
+		if p.epoch == epoch {
+			p.signingIn = false
+		}
+		p.mu.Unlock()
+		return "", nil
 	}
+
 	flowCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Minute)
 	p.mu.Lock()
 	if p.epoch != epoch {
 		p.mu.Unlock()
 		cancel()
-		return ""
+		return "", nil
 	}
-	p.signInURL = url
+	p.signInURL = soundCloudSignInURL
 	p.signInCancel = cancel
 	p.mu.Unlock()
 	go func() {
@@ -103,10 +122,6 @@ func (p *Provider) SignIn(ctx context.Context) string {
 			}
 			p.mu.Unlock()
 		}()
-		if found {
-			_ = p.installAndProve(flowCtx, auth, epoch)
-			return
-		}
 		if !p.signInEpoch(epoch) {
 			return
 		}
@@ -120,21 +135,84 @@ func (p *Provider) SignIn(ctx context.Context) string {
 				if !p.signInEpoch(epoch) {
 					return
 				}
+				if lastErr != nil {
+					message := "SoundCloud sign-in failed: " + lastErr.Error()
+					p.bus.Emit(protocol.EventSoundCloudAuth, model.SoundCloudAuthEvent{State: "error", Message: &message})
+					return
+				}
 				message := "No SoundCloud sign-in was completed in the browser."
 				p.bus.Emit(protocol.EventSoundCloudAuth, model.SoundCloudAuthEvent{State: "expired", Message: &message})
 				return
 			case <-ticker.C:
-				stores = p.cookies.Discover()
-				auth, ok := p.importCookies(stores, &watchSince)
-				if !ok {
+				candidates := p.cookieAuthCandidates(p.cookies.Discover(), &watchSince)
+				if len(candidates) == 0 {
+					// a failure from a store that has not changed since is not this flow's outcome
+					lastErr = nil
 					continue
 				}
-				_ = p.installAndProve(flowCtx, auth, epoch)
-				return
+				done, err := p.tryCandidates(flowCtx, candidates, epoch, attempts)
+				if done || !p.signInEpoch(epoch) {
+					return
+				}
+				if err != nil {
+					lastErr = err
+				}
 			}
 		}
 	}()
-	return url
+	return soundCloudSignInURL, nil
+}
+
+// candidateAttempts remembers, for the life of one sign-in flow, which tokens
+// SoundCloud refused and when a token that failed for another reason may be
+// tried again.
+type candidateAttempts map[string]*candidateAttempt
+
+type candidateAttempt struct {
+	refused bool
+	wait    time.Duration
+	next    time.Time
+}
+
+const (
+	candidateRetryFirst = 4 * time.Second
+	candidateRetryMax   = time.Minute
+)
+
+// tryCandidates installs the first unexpired candidate SoundCloud accepts.
+// Failures stay quiet: the flow reports only its final outcome.
+func (p *Provider) tryCandidates(ctx context.Context, candidates []authCandidate, epoch uint64, attempts candidateAttempts) (bool, error) {
+	var lastErr error
+	for _, candidate := range candidates {
+		token := candidate.auth.AccessToken
+		now := time.Now()
+		attempt := attempts[token]
+		if attempt != nil && (attempt.refused || now.Before(attempt.next)) || authExpired(candidate.auth.ExpiresAt, now.Unix()) {
+			continue
+		}
+		err := p.installAndProve(ctx, candidate.auth, epoch)
+		if err == nil {
+			return true, nil
+		}
+		if errors.Is(err, baseprovider.ErrSignInRequired) {
+			return false, nil
+		}
+		if attempt == nil {
+			attempt = &candidateAttempt{}
+			attempts[token] = attempt
+		}
+		if rejectedStatus(err) {
+			attempt.refused = true
+		} else {
+			attempt.wait = min(max(candidateRetryFirst, 2*attempt.wait), candidateRetryMax)
+			attempt.next = time.Now().Add(attempt.wait)
+		}
+		lastErr = err
+		if ctx.Err() != nil {
+			break
+		}
+	}
+	return false, lastErr
 }
 
 // SignOut clears SoundCloud authorization and emits signed_out.
@@ -155,40 +233,9 @@ func (p *Provider) SignOut() error {
 	return err
 }
 
-func (p *Provider) importCookies(stores []browsercookies.Store, changedAfter *time.Time) (Auth, bool) {
-	for _, store := range stores {
-		if changedAfter != nil && !p.cookies.ChangedSince(store, *changedAfter) {
-			continue
-		}
-		cookies, err := p.cookies.Read(store, "soundcloud.com")
-		if err != nil {
-			continue
-		}
-		var access, refresh, session string
-		for _, cookie := range cookies {
-			switch cookie.Name {
-			case "oauth_token":
-				access = cookie.Value
-			case "oauth_refresh_token":
-				refresh = cookie.Value
-			case "connect_session":
-				session = cookie.Value
-			}
-		}
-		if strings.TrimSpace(access) == "" {
-			continue
-		}
-		return authFromToken(access, pointerIfSet(refresh), pointerIfSet(session)), true
-	}
-	return Auth{}, false
-}
-
-func authFromToken(access string, refresh, session *string) Auth {
+func authFromToken(access string) Auth {
 	now := time.Now().Unix()
-	auth := Auth{
-		AccessToken: access, RefreshToken: refresh, ConnectSession: session,
-		ClientID: fallbackClientID, ExpiresAt: now + 3600,
-	}
+	auth := Auth{AccessToken: access, ClientID: fallbackClientID, ExpiresAt: now + 3600}
 	parts := strings.Split(access, ".")
 	if len(parts) < 2 {
 		return auth
@@ -204,6 +251,7 @@ func authFromToken(access string, refresh, session *string) Auth {
 		ExpiresAt *int64  `json:"exp"`
 		ClientID  *string `json:"client_id"`
 		AZP       *string `json:"azp"`
+		Subject   string  `json:"sub"`
 	}
 	if json.Unmarshal(payload, &claims) != nil {
 		return auth
@@ -216,9 +264,13 @@ func authFromToken(access string, refresh, session *string) Auth {
 	} else if claims.AZP != nil && *claims.AZP != "" {
 		auth.ClientID = *claims.AZP
 	}
+	auth.Subject = claims.Subject
+	auth.UserID = subjectUserID(claims.Subject)
 	return auth
 }
 
+// installAndProve adopts auth once /me accepts it. Failures are returned, not
+// announced, so a sign-in flow reports only its final outcome.
 func (p *Provider) installAndProve(ctx context.Context, auth Auth, epoch uint64) error {
 	p.mu.Lock()
 	if p.epoch != epoch {
@@ -233,15 +285,10 @@ func (p *Provider) installAndProve(ctx context.Context, auth Auth, epoch uint64)
 	err := p.proveMe(ctx, auth, &me)
 	if err != nil {
 		p.mu.Lock()
-		active := p.epoch == epoch
-		if active {
+		if p.epoch == epoch {
 			p.auth = prior
 		}
 		p.mu.Unlock()
-		if active {
-			message := "SoundCloud sign-in failed: " + err.Error()
-			p.bus.Emit(protocol.EventSoundCloudAuth, model.SoundCloudAuthEvent{State: "error", Message: &message})
-		}
 		return err
 	}
 	auth.Username = pointerIfSet(me.Username)
@@ -254,8 +301,6 @@ func (p *Provider) installAndProve(ctx context.Context, auth Auth, epoch uint64)
 	if err := p.persistAuth(auth); err != nil {
 		p.auth = prior
 		p.mu.Unlock()
-		message := "SoundCloud sign-in failed: " + err.Error()
-		p.bus.Emit(protocol.EventSoundCloudAuth, model.SoundCloudAuthEvent{State: "error", Message: &message})
 		return err
 	}
 	p.auth = &auth
@@ -284,7 +329,7 @@ func (p *Provider) proveMe(ctx context.Context, auth Auth, me *user) error {
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("SoundCloud answered %d for /me", resp.StatusCode)
+		return soundCloudHTTPError{operation: "/me", status: resp.StatusCode}
 	}
 	return json.NewDecoder(resp.Body).Decode(me)
 }
@@ -295,107 +340,6 @@ func (p *Provider) persistAuth(auth Auth) error {
 		return err
 	}
 	return p.kv.Set(soundCloudAuthKey, string(raw))
-}
-
-func (p *Provider) ensureFresh(ctx context.Context) error {
-	p.mu.RLock()
-	if p.auth == nil {
-		p.mu.RUnlock()
-		return fmt.Errorf("%w: SoundCloud", baseprovider.ErrSignInRequired)
-	}
-	auth := *p.auth
-	p.mu.RUnlock()
-	if !authExpired(auth.ExpiresAt, time.Now().Unix()) {
-		return nil
-	}
-	if auth.RefreshToken == nil || auth.ConnectSession == nil {
-		return nil
-	}
-	p.refreshLock.Lock()
-	defer p.refreshLock.Unlock()
-	p.mu.RLock()
-	if p.auth == nil {
-		p.mu.RUnlock()
-		return baseprovider.ErrSignInRequired
-	}
-	auth = *p.auth
-	epoch := p.epoch
-	p.mu.RUnlock()
-	if !authExpired(auth.ExpiresAt, time.Now().Unix()) {
-		return nil
-	}
-	rotated, err := p.refresh(ctx, auth)
-	if err != nil {
-		if auth.ExpiresAt <= time.Now().Unix() {
-			p.expireAuth("Your SoundCloud session expired. Sign in again to see your playlists and likes.")
-			return baseprovider.ErrSignInRequired
-		}
-		return nil
-	}
-	p.mu.Lock()
-	if p.epoch != epoch || p.auth == nil {
-		p.mu.Unlock()
-		return baseprovider.ErrSignInRequired
-	}
-	if err := p.persistAuth(rotated); err != nil {
-		p.mu.Unlock()
-		return err
-	}
-	p.auth = &rotated
-	p.mu.Unlock()
-	p.log.Info("soundcloud: refreshed the access token")
-	return nil
-}
-
-func (p *Provider) refresh(ctx context.Context, auth Auth) (Auth, error) {
-	body, err := json.Marshal(map[string]any{
-		"client_id": auth.ClientID, "grant_type": "refresh_token", "refresh_token": auth.RefreshToken,
-	})
-	if err != nil {
-		return Auth{}, err
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, refreshURL, bytes.NewReader(body))
-	if err != nil {
-		return Auth{}, err
-	}
-	cookie := "connect_session=" + *auth.ConnectSession
-	if auth.RefreshToken != nil {
-		cookie += "; oauth_refresh_token=" + *auth.RefreshToken
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Cookie", cookie)
-	req.Header.Set("Referer", homeURL)
-	req.Header.Set("Origin", "https://soundcloud.com")
-	req.Header.Set("User-Agent", userAgent)
-	resp, err := p.http.Do(req)
-	if err != nil {
-		return Auth{}, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return Auth{}, fmt.Errorf("SoundCloud refresh answered %d", resp.StatusCode)
-	}
-	var result struct {
-		AccessToken  string  `json:"access_token"`
-		RefreshToken *string `json:"refresh_token"`
-		ExpiresIn    *int64  `json:"expires_in"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return Auth{}, err
-	}
-	rotated := authFromToken(result.AccessToken, result.RefreshToken, auth.ConnectSession)
-	if rotated.RefreshToken == nil {
-		rotated.RefreshToken = auth.RefreshToken
-	}
-	rotated.Username = auth.Username
-	rotated.UserID = auth.UserID
-	if result.ExpiresIn != nil {
-		promise := time.Now().Unix() + *result.ExpiresIn
-		if promise < rotated.ExpiresAt {
-			rotated.ExpiresAt = promise
-		}
-	}
-	return rotated, nil
 }
 
 func authExpired(expiresAt, now int64) bool { return expiresAt <= now+expiryMarginSeconds }

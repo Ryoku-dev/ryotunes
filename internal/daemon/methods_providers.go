@@ -58,18 +58,22 @@ func signIn(ctx context.Context, a *App, _ protocol.Null) (protocol.AuthFlowResu
 	if err != nil {
 		return protocol.AuthFlowResult{}, err
 	}
-	finish := func(err error) {
+	finish := func(error) {
 		defer a.background.Done()
-		if err != nil {
-			a.Bus.Emit(protocol.EventAuthChanged, model.Account{})
-			return
-		}
-		account, _ := a.YouTube.Account(a.ctx)
-		a.Bus.Emit(protocol.EventAuthChanged, account)
+		// a failed watch ends the flow, not a session the daemon may still hold
+		a.Bus.Emit(protocol.EventAuthChanged, a.YouTube.CurrentAccount())
 	}
 	if flow.Done != nil {
 		a.background.Add(1)
-		go func() { finish(<-flow.Done) }()
+		go func() {
+			select {
+			case err := <-flow.Done:
+				finish(err)
+			case <-a.ctx.Done():
+				// the watch only ends with the YouTube client, which closes after this is waited on
+				a.background.Done()
+			}
+		}()
 	} else if flow.URL == "" {
 		a.background.Add(1)
 		go finish(nil)
@@ -113,7 +117,11 @@ func soundCloudStatus(_ context.Context, a *App, _ protocol.Null) (model.SoundCl
 	return a.SoundCloud.Status(), nil
 }
 func soundCloudSignIn(ctx context.Context, a *App, _ protocol.Null) (protocol.AuthFlowResult, error) {
-	return protocol.AuthFlowResult{URL: a.SoundCloud.SignIn(ctx)}, nil
+	url, err := a.SoundCloud.SignIn(ctx)
+	if err != nil {
+		return protocol.AuthFlowResult{}, providerError(model.ProviderSoundCloud, err)
+	}
+	return protocol.AuthFlowResult{URL: url}, nil
 }
 func soundCloudSignOut(_ context.Context, a *App, _ protocol.Null) (protocol.SignedOutResult, error) {
 	return protocol.SignedOutResult{SignedIn: false}, providerError(model.ProviderSoundCloud, a.SoundCloud.SignOut())

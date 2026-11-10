@@ -28,7 +28,13 @@ func (q *Queue) pump() {
 func (q *Queue) handlePlayerEvent(event player.Event) {
 	switch event.Kind {
 	case player.FileLoaded:
+		q.mu.Lock()
+		if q.pendingStart != nil {
+			q.pendingStart.loaded = true
+		}
+		q.mu.Unlock()
 		q.updatePlaying()
+		q.reportStart()
 	case player.Position:
 		position := event.Position
 		if math.IsNaN(position) || math.IsInf(position, 0) || position < 0 {
@@ -60,6 +66,7 @@ func (q *Queue) handlePlayerEvent(event player.Event) {
 		q.bus.Emit(protocol.EventDuration, protocol.DurationEvent{Duration: duration})
 	case player.PauseChanged, player.Idle:
 		q.updatePlaying()
+		q.reportStart()
 		if q.player.Paused() {
 			q.persistPosition(true)
 			q.mu.Lock()
@@ -83,6 +90,30 @@ func (q *Queue) handlePlayerEvent(event player.Event) {
 		q.mu.Unlock()
 		q.bus.Emit(protocol.EventNowPlaying, now)
 	}
+}
+
+// playbackStart is a play the queue asked for that has not been reported yet.
+type playbackStart struct {
+	track      model.Track
+	playlistID string
+	loaded     bool
+}
+
+// reportStart reports the pending play once its file loaded and it is actually playing,
+// so a track skipped before it loads, or opened paused and never played, is never reported.
+func (q *Queue) reportStart() {
+	if q.hooks == nil {
+		return
+	}
+	q.mu.Lock()
+	start := q.pendingStart
+	if start == nil || !start.loaded || !q.playing {
+		q.mu.Unlock()
+		return
+	}
+	q.pendingStart = nil
+	q.mu.Unlock()
+	q.start(func(ctx context.Context) { q.hooks.OnPlaybackStart(ctx, start.track, start.playlistID) })
 }
 
 func (q *Queue) updatePlaying() {

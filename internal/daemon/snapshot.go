@@ -1,15 +1,13 @@
 package daemon
 
 import (
-	"context"
-	"time"
-
 	"github.com/ryoku-dev/ryotunes/internal/eq"
 	"github.com/ryoku-dev/ryotunes/internal/model"
 	"github.com/ryoku-dev/ryotunes/internal/protocol"
 )
 
-// Snapshot returns the complete state replayed to every subscriber.
+// Snapshot returns the complete state replayed to every subscriber. It answers
+// from memory: the start-up browser re-read announces its result as events.
 func (a *App) Snapshot() protocol.Snapshot {
 	var out protocol.Snapshot
 	if a.Queue != nil {
@@ -34,14 +32,7 @@ func (a *App) Snapshot() protocol.Snapshot {
 		out.Provider = model.ProviderYouTube
 	}
 	if a.YouTube != nil {
-		ctx, cancel := context.WithTimeout(a.ctx, 5*time.Second)
-		account, err := a.YouTube.Account(ctx)
-		cancel()
-		if err == nil {
-			out.Auth = account
-		} else if a.Log != nil {
-			a.Log.Debug("refreshing account for subscribe snapshot", "error", err)
-		}
+		out.Auth = a.YouTube.CurrentAccount()
 	}
 	if a.Spotify != nil {
 		out.Spotify = a.Spotify.Status()

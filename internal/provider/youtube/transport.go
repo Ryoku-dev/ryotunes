@@ -19,22 +19,26 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ryoku-dev/ryotunes/internal/bus"
 	"github.com/ryoku-dev/ryotunes/internal/model"
 	"github.com/ryoku-dev/ryotunes/internal/netx"
 	"github.com/ryoku-dev/ryotunes/internal/provider"
+	"github.com/ryoku-dev/ryotunes/internal/provider/browsercookies"
 )
 
 const (
-	apiBase        = "https://music.youtube.com/youtubei/v1/"
-	musicOrigin    = "https://music.youtube.com"
-	musicReferer   = "https://music.youtube.com/"
-	visitorKey     = "visitor_data"
-	cookieKey      = "session_cookie"
-	dataSyncKey    = "data_sync_id"
-	accountKey     = "account_json"
-	selectionKey   = "selected_identity_json"
-	pendingKey     = "account_selection_pending"
-	lastVisitorKey = "last_visitor_try"
+	defaultAPIBase  = "https://music.youtube.com/youtubei/v1/"
+	musicOrigin     = "https://music.youtube.com"
+	musicReferer    = "https://music.youtube.com/"
+	visitorKey      = "visitor_data"
+	cookieKey       = "session_cookie"
+	cookieSourceKey = "session_cookie_source"
+	dataSyncKey     = "data_sync_id"
+	accountKey      = "account_json"
+	identityKey     = "account_identity"
+	selectionKey    = "selected_identity_json"
+	pendingKey      = "account_selection_pending"
+	lastVisitorKey  = "last_visitor_try"
 )
 
 // Options configures a YouTube provider.
@@ -46,6 +50,10 @@ type Options struct {
 	Proxy                 string
 	DisabledStreamClients string
 	Cookies               CookieSource
+	// Bus receives auth-changed when the session is re-adopted or rejected.
+	Bus bus.Sink
+	// APIBase overrides the InnerTube endpoint base.
+	APIBase string
 }
 
 // Client is a YouTube Music provider and account surface.
@@ -53,21 +61,32 @@ type Client struct {
 	kv      provider.KV
 	http    *http.Client
 	log     *slog.Logger
+	bus     bus.Sink
+	apiBase string
 	dataDir string
 	cookies CookieSource
 
 	mu             sync.RWMutex
 	cookie         string
+	cookieSource   *browsercookies.SessionSource
 	visitor        string
 	dataSync       string
 	account        model.Account
+	identity       string
 	proxy          string
 	disabled       map[string]bool
 	lastVisitorTry time.Time
 	cipher         cipherState
+	playbackPings  map[string]rememberedPing
 
 	signInMu  sync.Mutex
 	signingIn bool
+	refreshMu sync.Mutex
+	// legacyMiss is guarded by refreshMu.
+	legacyMiss *legacyMiss
+	// commitMu serialises writes of the session keys; never held across
+	// network. Order: refreshMu, then commitMu, then mu.
+	commitMu sync.Mutex
 
 	ctx       context.Context
 	cancel    context.CancelFunc
@@ -107,15 +126,30 @@ func New(o Options) (*Client, error) {
 	if o.Cookies == nil {
 		o.Cookies = systemCookies{}
 	}
+	if o.Bus == nil {
+		o.Bus = bus.Discard
+	}
+	if o.APIBase == "" {
+		o.APIBase = defaultAPIBase
+	}
 	c := &Client{
-		kv: o.KV, http: hc, log: o.Log, dataDir: o.DataDir, cookies: o.Cookies, proxy: o.Proxy,
-		disabled: parseDisabled(o.DisabledStreamClients), ctx: clientCtx, cancel: cancel,
+		kv: o.KV, http: hc, log: o.Log, bus: o.Bus, apiBase: strings.TrimRight(o.APIBase, "/") + "/",
+		dataDir: o.DataDir, cookies: o.Cookies, proxy: o.Proxy,
+		disabled: parseDisabled(o.DisabledStreamClients), playbackPings: make(map[string]rememberedPing),
+		ctx: clientCtx, cancel: cancel,
 	}
 	c.cookie, _ = o.KV.Get(cookieKey)
 	c.visitor, _ = o.KV.Get(visitorKey)
 	c.dataSync, _ = o.KV.Get(dataSyncKey)
+	c.identity, _ = o.KV.Get(identityKey)
 	if raw, ok := o.KV.Get(accountKey); ok {
 		_ = json.Unmarshal([]byte(raw), &c.account)
+	}
+	if raw, ok := o.KV.Get(cookieSourceKey); ok {
+		var source browsercookies.SessionSource
+		if json.Unmarshal([]byte(raw), &source) == nil && source.Path != "" {
+			c.cookieSource = &source
+		}
 	}
 	if raw, ok := o.KV.Get(lastVisitorKey); ok {
 		if unix, err := strconv.ParseInt(raw, 10, 64); err == nil {
@@ -286,83 +320,180 @@ func (c *Client) do(ctx context.Context, clientKey, endpoint string, body map[st
 	if !ok {
 		return nil, fmt.Errorf("unknown YouTube client %q", clientKey)
 	}
-	c.mu.RLock()
-	visitor, cookie, dataSync := c.visitor, c.cookie, c.dataSync
-	c.mu.RUnlock()
-	if override, ok := body["__dataSyncOverride"].(string); ok {
-		dataSync = override
-		delete(body, "__dataSyncOverride")
-	}
-	if cfg.loginRequired && cookie == "" {
-		return nil, provider.ErrSignInRequired
-	}
-	videoID, _ := body["videoId"].(string)
-	body["context"] = cfg.context(visitor, dataSync, cookie, videoID)
-	encoded, err := json.Marshal(body)
-	if err != nil {
-		return nil, err
-	}
-	endpointURL := apiBase + endpoint
+	dataSyncOverride, hasDataSyncOverride := body["__dataSyncOverride"].(string)
+	delete(body, "__dataSyncOverride")
+	override, hasSessionOverride := ctx.Value(sessionOverrideKey{}).(sessionOverride)
+	endpointURL := c.apiBase + endpoint
 	if strings.Contains(endpointURL, "?") {
 		endpointURL += "&prettyPrint=false"
 	} else {
 		endpointURL += "?prettyPrint=false"
 	}
-	var last error
-	for attempt := range 3 {
-		if attempt > 0 {
-			select {
-			case <-ctx.Done():
-				return nil, ctx.Err()
-			case <-time.After(time.Duration(attempt) * 500 * time.Millisecond):
-			}
+	for sessionAttempt := range 2 {
+		c.mu.RLock()
+		visitor, cookie, dataSync := c.visitor, c.cookie, c.dataSync
+		c.mu.RUnlock()
+		if hasSessionOverride {
+			cookie = override.cookie
 		}
-		req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpointURL, bytes.NewReader(encoded))
+		if hasDataSyncOverride {
+			dataSync = dataSyncOverride
+		}
+		if cfg.loginRequired && cookie == "" {
+			return nil, provider.ErrSignInRequired
+		}
+		videoID, _ := body["videoId"].(string)
+		body["context"] = cfg.context(visitor, dataSync, cookie, videoID)
+		encoded, err := json.Marshal(body)
 		if err != nil {
 			return nil, err
 		}
-		setHeaders(req, cfg, visitor)
-		if authenticated && cookie != "" {
-			req.Header.Set("Cookie", cookie)
-			if cfg.loginSupported {
-				if sapisid := sapisidCookie(cookie); sapisid != "" {
-					req.Header.Set("Authorization", SAPISIDHash(time.Now(), sapisid))
+		var last error
+		retrySession := false
+		for attempt := range 3 {
+			if attempt > 0 {
+				select {
+				case <-ctx.Done():
+					return nil, ctx.Err()
+				case <-time.After(time.Duration(attempt) * 500 * time.Millisecond):
 				}
 			}
-		}
-		resp, err := c.http.Do(req)
-		if err != nil {
-			last = err
-			continue
-		}
-		data, readErr := io.ReadAll(resp.Body)
-		resp.Body.Close()
-		if readErr != nil {
-			last = readErr
-			continue
-		}
-		if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
-			if cookie != "" {
-				return nil, errors.New("Your YouTube Music session expired, open the account menu and sign in again.")
-			}
-			return nil, fmt.Errorf("youtube: %s", resp.Status)
-		}
-		if resp.StatusCode/100 != 2 {
-			last = fmt.Errorf("youtube: %s", resp.Status)
-			if resp.StatusCode < 500 && resp.StatusCode != http.StatusTooManyRequests {
-				return nil, last
-			}
-			continue
-		}
-		var result map[string]any
-		if len(data) != 0 {
-			if err := json.Unmarshal(data, &result); err != nil {
+			req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpointURL, bytes.NewReader(encoded))
+			if err != nil {
 				return nil, err
 			}
+			setHeaders(req, cfg, visitor)
+			if authenticated && cookie != "" {
+				req.Header.Set("Cookie", cookie)
+				if cfg.loginSupported {
+					if sapisid := sapisidCookie(cookie); sapisid != "" {
+						req.Header.Set("Authorization", SAPISIDHash(time.Now(), sapisid))
+					}
+				}
+			}
+			resp, err := c.http.Do(req)
+			if err != nil {
+				last = err
+				continue
+			}
+			data, readErr := io.ReadAll(resp.Body)
+			resp.Body.Close()
+			if readErr != nil {
+				last = readErr
+				continue
+			}
+			if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
+				if cookie == "" {
+					return nil, fmt.Errorf("youtube: %s", resp.Status)
+				}
+				if hasSessionOverride {
+					return nil, sessionExpiredError(nil)
+				}
+				retry, err := c.handleRejection(ctx, cookie, dataSync, !hasDataSyncOverride, resp.Status, sessionAttempt == 0)
+				if !retry {
+					return nil, err
+				}
+				retrySession = true
+				break
+			}
+			if resp.StatusCode/100 != 2 {
+				last = fmt.Errorf("youtube: %s", resp.Status)
+				if resp.StatusCode < 500 && resp.StatusCode != http.StatusTooManyRequests {
+					return nil, last
+				}
+				continue
+			}
+			var result map[string]any
+			if len(data) != 0 {
+				if err := json.Unmarshal(data, &result); err != nil {
+					return nil, err
+				}
+			}
+			return result, nil
 		}
-		return result, nil
+		if retrySession {
+			continue
+		}
+		return nil, last
 	}
-	return nil, last
+	return nil, sessionExpiredError(nil)
+}
+
+// handleRejection decides what a 401 or 403 means for the session that sent
+// cookie. It first follows the browser; when that offers nothing newer it
+// asks the account menu whether the cookie still works, because InnerTube
+// also answers 403 for reasons that are not the session. retry reports that
+// the request should be sent again with the session now in place.
+func (c *Client) handleRejection(ctx context.Context, cookie, dataSync string, storedChannel bool, status string, mayRefresh bool) (retry bool, err error) {
+	var refreshErr error
+	if mayRefresh {
+		changed, err := c.refreshFromSource(ctx, cookie)
+		if err == nil && changed {
+			return true, nil
+		}
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return false, ctxErr
+		}
+		refreshErr = err
+	}
+	account, _, _, verifyErr := c.fetchAccountWithCookie(ctx, cookie, dataSync)
+	if verifyErr == nil && account.Name != nil {
+		return false, fmt.Errorf("youtube: %s", status)
+	}
+	if verifyErr != nil && !definitiveSessionFailure(verifyErr) {
+		if refreshErr != nil {
+			return false, fmt.Errorf("refresh YouTube browser session: %w", errors.Join(refreshErr, verifyErr))
+		}
+		return false, verifyErr
+	}
+	if storedChannel && dataSync != "" {
+		// the session may be fine and only the remembered channel refused
+		account, _, visitor, plainErr := c.fetchAccountWithoutChannel(ctx, cookie)
+		if plainErr == nil && account.Name != nil {
+			if err := c.forgetChannel(cookie, visitor, account); err != nil {
+				return false, err
+			}
+			if mayRefresh {
+				return true, nil
+			}
+			return false, fmt.Errorf("youtube: %s", status)
+		}
+	}
+	forgot, err := c.markSessionRejected(cookie)
+	if err != nil {
+		return false, err
+	}
+	if !forgot && mayRefresh {
+		c.mu.RLock()
+		replaced := c.cookie != "" && c.cookie != cookie
+		c.mu.RUnlock()
+		if replaced {
+			return true, nil
+		}
+	}
+	return false, sessionExpiredError(refreshErr)
+}
+
+// forgetChannel drops a remembered channel YouTube no longer accepts for a
+// session it still accepts, so requests go to the account itself.
+func (c *Client) forgetChannel(cookie, visitor string, account model.Account) error {
+	c.commitMu.Lock()
+	defer c.commitMu.Unlock()
+	c.mu.RLock()
+	current, canSwitch := c.cookie, c.account.CanSwitch
+	c.mu.RUnlock()
+	if current != cookie {
+		return nil
+	}
+	account.CanSwitch = canSwitch
+	if err := c.persistAccount(cookie, "", visitor, account); err != nil {
+		return err
+	}
+	if err := c.kv.Delete(selectionKey); err != nil {
+		return err
+	}
+	c.emitAccount(account)
+	return nil
 }
 
 func setHeaders(req *http.Request, cfg clientConfig, visitor string) {

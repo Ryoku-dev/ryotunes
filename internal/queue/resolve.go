@@ -74,6 +74,12 @@ func (q *Queue) playIndex(ctx context.Context, index int, paused bool) error {
 			q.pendingSeek = 0
 			q.pendingSeekID = ""
 		}
+		start := &playbackStart{track: item}
+		if q.state.sourceID != nil && !item.Queued && !item.QueuedEnd && !item.Autoplay {
+			start.playlistID = *q.state.sourceID
+		}
+		// armed before Load because mpv can report the file loaded before Load returns
+		q.pendingStart = start
 		q.mu.Unlock()
 		q.player.SetLoudness(stream.LoudnessDB)
 		err = q.player.Load(ctx, stream, startAt, paused)
@@ -88,6 +94,9 @@ func (q *Queue) playIndex(ctx context.Context, index int, paused bool) error {
 			q.log.Info("track load failed", "track_id", item.VideoID, "title", item.Title, "cached", cached, "error", err)
 			q.bus.Emit(protocol.EventPlaybackNotice, protocol.MessageEvent{Message: "Skipped (unavailable): " + item.Title})
 			q.mu.Lock()
+			if q.pendingStart == start {
+				q.pendingStart = nil
+			}
 			if index+1 >= len(q.state.items) {
 				q.mu.Unlock()
 				return err

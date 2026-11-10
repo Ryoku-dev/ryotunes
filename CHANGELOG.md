@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- YouTube Music and SoundCloud stay signed in. Ryotunes follows the session in your browser instead of keeping a copy that goes stale, so YouTube Music is still signed in after days off, and Sign in works again when an old session ran out. SoundCloud's browser session lasts a day unless soundcloud.com is opened, so after a day away, open it or press Sign in once. It only ever adopts the same account.
+- Your Spotify sign-in from Ryotunes 1.x carries over, and TIDAL stays signed in through network trouble, asking again only when TIDAL ends the session.
+- Songs you play in Ryotunes count in your YouTube Music history again, unless Watch history is off in Settings, so Home's recommendations follow what you listen to. A song counts once it actually starts, not when it's skipped past.
+- Listen Together guests hear the song play through. The host's updates no longer restart it a few times a second; a guest only catches up when it's more than two seconds off, and joining a paused room opens the song paused.
 - Ryotunes no longer opens empty for about 12 seconds when music is already playing. It shows what's playing right away.
 - A browser opened from Ryotunes, for sign in or a link, is no longer closed when the playback service stops or restarts.
 - Choose whether Ryotunes opens floating or tiled with Open as a floating window in Settings, Appearance. Tiling window managers like niri and Hyprland follow it, and the mini player always floats.

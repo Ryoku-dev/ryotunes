@@ -733,6 +733,13 @@ func (s *Store) reduceSoundCloudLocked(event model.SoundCloudAuthEvent) {
 			message += " as " + *event.Name
 		}
 		s.setToastLocked(message, ToastSuccess)
+	case "restored":
+		// the daemon quietly followed the browser to a newer token
+		state.SignedIn, state.Name, state.Flow, state.Error = true, event.Name, "", ""
+		s.setAuthFlowLocked(model.ProviderSoundCloud, AuthFlow{})
+	case "stale":
+		// the token ran out and the browser has no newer one yet: signed out, no toast
+		state.SignedIn, state.Name = false, nil
 	case "signed_out":
 		*state = SoundCloudState{}
 		s.setAuthFlowLocked(model.ProviderSoundCloud, AuthFlow{})
@@ -746,7 +753,7 @@ func (s *Store) reduceSoundCloudLocked(event model.SoundCloudAuthEvent) {
 		state.SignedIn, state.Name, state.Flow, state.Error = false, nil, "expired", ""
 		s.setAuthFlowLocked(model.ProviderSoundCloud, AuthFlow{})
 		s.setToastLocked("No SoundCloud sign-in was completed in the browser", ToastInfo)
-	case "restore_failed", "error":
+	case "restore_failed", "session_expired", "error":
 		state.SignedIn, state.Name, state.Flow = false, nil, ""
 		state.Error = eventMessage(event.Message, "SoundCloud sign-in failed")
 		s.setAuthFlowLocked(model.ProviderSoundCloud, AuthFlow{Error: state.Error})

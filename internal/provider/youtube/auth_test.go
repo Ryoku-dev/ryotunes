@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	"io"
+	"io/fs"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -12,21 +12,32 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ryoku-dev/ryotunes/internal/provider"
 	"github.com/ryoku-dev/ryotunes/internal/provider/browsercookies"
 )
 
 type fakeCookieSource struct {
-	mu      sync.Mutex
-	stores  []browsercookies.Store
-	cookies map[string][]browsercookies.Cookie
-	changed bool
+	mu        sync.Mutex
+	stores    []browsercookies.Store
+	cookies   map[string][]browsercookies.Cookie
+	changed   bool
+	missing   map[string]bool
+	discovers int
 }
 
 func (f *fakeCookieSource) Discover() []browsercookies.Store {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.discovers++
 	return append([]browsercookies.Store(nil), f.stores...)
+}
+
+func (f *fakeCookieSource) Resolve(source browsercookies.SessionSource) (browsercookies.Store, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.missing[source.Path] {
+		return browsercookies.Store{}, &fs.PathError{Op: "lstat", Path: source.Path, Err: fs.ErrNotExist}
+	}
+	return browsercookies.Store{Kind: source.Kind, Path: source.Path}, nil
 }
 
 func (f *fakeCookieSource) Read(store browsercookies.Store, _ ...string) ([]browsercookies.Cookie, error) {
@@ -159,7 +170,7 @@ func TestSignInFallsBackAndWatcherContinuesAfterFailure(t *testing.T) {
 			requestNumber := accountMenuRequests
 			mu.Unlock()
 			if requestNumber <= 2 {
-				return jsonResponse(http.StatusUnauthorized, `{}`), nil
+				return jsonResponse(http.StatusBadRequest, `{}`), nil
 			}
 			return accountResponse(), nil
 		}
@@ -199,30 +210,36 @@ func TestSignInFallsBackAndWatcherContinuesAfterFailure(t *testing.T) {
 	}
 }
 
-func newAuthTestClient(t *testing.T, source CookieSource, httpClient *http.Client, logger *slog.Logger) *Client {
-	t.Helper()
-	client, err := New(Options{
-		KV:         provider.MapKV{"visitor_data": "visitor"},
-		HTTPClient: httpClient,
-		Log:        logger,
-		DataDir:    t.TempDir(),
-		Cookies:    source,
-	})
-	if err != nil {
-		t.Fatal(err)
+func TestSignInWatchTriesARefusedSessionOnce(t *testing.T) {
+	store := browsercookies.Store{Path: "revoked-profile"}
+	source := &fakeCookieSource{
+		stores:  []browsercookies.Store{store},
+		cookies: map[string][]browsercookies.Cookie{store.Path: {{Name: "SAPISID", Value: "revoked", Host: ".youtube.com"}}},
+		changed: true,
 	}
-	return client
-}
+	var mu sync.Mutex
+	accountMenuRequests := 0
+	httpClient := &http.Client{Transport: authRoundTripper(func(request *http.Request) (*http.Response, error) {
+		if strings.HasSuffix(request.URL.Path, "/account/account_menu") {
+			mu.Lock()
+			accountMenuRequests++
+			mu.Unlock()
+			return jsonResponse(http.StatusUnauthorized, `{}`), nil
+		}
+		return jsonResponse(http.StatusOK, `{}`), nil
+	})}
+	client := newAuthTestClient(t, source, httpClient, slog.New(slog.DiscardHandler))
+	defer client.Close()
 
-func accountResponse() *http.Response {
-	return jsonResponse(http.StatusOK, `{"activeAccountHeaderRenderer":{"accountName":{"runs":[{"text":"Tester"}]}}}`)
-}
-
-func jsonResponse(status int, body string) *http.Response {
-	return &http.Response{
-		StatusCode: status,
-		Status:     http.StatusText(status),
-		Header:     make(http.Header),
-		Body:       io.NopCloser(strings.NewReader(body)),
+	flow, err := client.SignIn(context.Background())
+	if err != nil || flow.Done == nil {
+		t.Fatalf("flow = %#v, %v", flow, err)
+	}
+	time.Sleep(4300 * time.Millisecond)
+	mu.Lock()
+	requests := accountMenuRequests
+	mu.Unlock()
+	if requests != 1 {
+		t.Fatalf("account menu requests = %d over two watch ticks, want the refused session tried once", requests)
 	}
 }

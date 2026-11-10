@@ -72,6 +72,9 @@ type Provider struct {
 	signInCancel context.CancelFunc
 	epoch        uint64
 	refreshLock  sync.Mutex
+	// legacyMiss and staleAnnounced are guarded by refreshLock.
+	legacyMiss     *legacyMiss
+	staleAnnounced string
 }
 
 // New creates a SoundCloud provider and restores persisted authorization.
@@ -111,6 +114,12 @@ func New(o Options) (*Provider, error) {
 			if validClientIDRE.MatchString(a.ClientID) {
 				p.clientID = a.ClientID
 			}
+			if strings.Contains(raw, `"refresh_token"`) || strings.Contains(raw, `"connect_session"`) {
+				// an earlier build also stored the browser's refresh token and session cookie
+				if err := p.persistAuth(a); err != nil {
+					o.Log.Warn("dropping the stored SoundCloud refresh token", "error", err)
+				}
+			}
 		}
 	}
 	return p, nil
@@ -130,6 +139,12 @@ func (p *Provider) Capabilities() baseprovider.Capabilities {
 // Home returns personal shelves followed by SoundCloud discover shelves.
 func (p *Provider) Home(ctx context.Context, _ string) (model.Feed, error) {
 	sections := make([]model.Shelf, 0)
+	if p.hasAuth() {
+		// an expired token gets its re-read here; without a newer one Home is the guest's
+		if err := p.ensureFresh(ctx); err != nil && !errors.Is(err, baseprovider.ErrSignInRequired) {
+			p.log.Debug("SoundCloud browser session re-read failed", "error", err)
+		}
+	}
 	if p.signedIn() {
 		if library, err := p.Library(ctx); err == nil {
 			personalPlaylists := make([]model.BrowseItem, 0, len(library.Playlists)+len(library.Albums))
@@ -624,7 +639,10 @@ func (p *Provider) Next(ctx context.Context, seed model.Track, played []string) 
 }
 
 // Account returns the SoundCloud account in the common account shape.
-func (p *Provider) Account(context.Context) (model.Account, error) {
+func (p *Provider) Account(ctx context.Context) (model.Account, error) {
+	if err := p.ensureFresh(ctx); err != nil && !errors.Is(err, baseprovider.ErrSignInRequired) {
+		return model.Account{}, err
+	}
 	status := p.Status()
 	return model.Account{SignedIn: status.SignedIn, Name: status.Name}, nil
 }
@@ -720,10 +738,17 @@ func (p *Provider) owns(pl playlist) bool {
 	return p.auth.Username != nil && *p.auth.Username != "" && pl.User.Username == *p.auth.Username
 }
 
-func (p *Provider) signedIn() bool { p.mu.RLock(); defer p.mu.RUnlock(); return p.auth != nil }
+func (p *Provider) hasAuth() bool { p.mu.RLock(); defer p.mu.RUnlock(); return p.auth != nil }
+
+// signedIn agrees with Status: a kept but expired token is not signed in.
+func (p *Provider) signedIn() bool {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	return p.auth != nil && !authExpired(p.auth.ExpiresAt, time.Now().Unix())
+}
 
 func (p *Provider) me(ctx context.Context) (user, error) {
-	if !p.signedIn() {
+	if !p.hasAuth() {
 		return user{}, baseprovider.ErrSignInRequired
 	}
 	var me user
@@ -747,6 +772,7 @@ func (p *Provider) getAbsolute(ctx context.Context, endpoint string, values url.
 	if err != nil {
 		return err
 	}
+	var sent string
 	do := func(id string) (*http.Response, error) {
 		u, err := url.Parse(endpoint)
 		if err != nil {
@@ -766,9 +792,12 @@ func (p *Provider) getAbsolute(ctx context.Context, endpoint string, values url.
 		}
 		req.Header.Set("User-Agent", userAgent)
 		p.mu.RLock()
-		auth := p.auth
-		if auth != nil {
-			req.Header.Set("Authorization", "OAuth "+auth.AccessToken)
+		sent = ""
+		// an expired token makes SoundCloud refuse even public requests, so the
+		// guest's requests go without it
+		if p.auth != nil && (personal || !authExpired(p.auth.ExpiresAt, time.Now().Unix())) {
+			sent = p.auth.AccessToken
+			req.Header.Set("Authorization", "OAuth "+sent)
 		}
 		p.mu.RUnlock()
 		return p.http.Do(req)
@@ -787,14 +816,23 @@ func (p *Provider) getAbsolute(ctx context.Context, endpoint string, values url.
 		if err != nil {
 			return err
 		}
+	} else if (resp.StatusCode == 401 || resp.StatusCode == 403) && sent != "" {
+		resp.Body.Close()
+		if err := p.recoverRejected(ctx, sent); err != nil {
+			return err
+		}
+		resp, err = do(clientID)
+		if err != nil {
+			return err
+		}
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode == 404 {
 		return fmt.Errorf("%w: SoundCloud resource", baseprovider.ErrNotFound)
 	}
 	if resp.StatusCode == 401 || resp.StatusCode == 403 {
-		if personal {
-			p.expireAuth("Your SoundCloud session expired. Sign in again to see your playlists and likes.")
+		if personal && sent != "" {
+			p.expireAuth(sent, "Your SoundCloud session expired. Sign in again to see your playlists and likes.")
 			return baseprovider.ErrSignInRequired
 		}
 		return fmt.Errorf("SoundCloud answered %d", resp.StatusCode)
@@ -841,27 +879,42 @@ func (p *Provider) write(ctx context.Context, method, path string) error {
 	q := u.Query()
 	q.Set("client_id", clientID)
 	u.RawQuery = q.Encode()
-	req, err := http.NewRequestWithContext(ctx, method, u.String(), nil)
+	var sent string
+	do := func() (*http.Response, error) {
+		req, err := http.NewRequestWithContext(ctx, method, u.String(), nil)
+		if err != nil {
+			return nil, err
+		}
+		req.Header.Set("User-Agent", userAgent)
+		p.mu.RLock()
+		sent = ""
+		if p.auth != nil {
+			sent = p.auth.AccessToken
+			req.Header.Set("Authorization", "OAuth "+sent)
+		}
+		p.mu.RUnlock()
+		if sent == "" {
+			return nil, baseprovider.ErrSignInRequired
+		}
+		return p.http.Do(req)
+	}
+	resp, err := do()
 	if err != nil {
 		return err
 	}
-	req.Header.Set("User-Agent", userAgent)
-	p.mu.RLock()
-	auth := p.auth
-	if auth != nil {
-		req.Header.Set("Authorization", "OAuth "+auth.AccessToken)
-	}
-	p.mu.RUnlock()
-	if auth == nil {
-		return baseprovider.ErrSignInRequired
-	}
-	resp, err := p.http.Do(req)
-	if err != nil {
-		return err
+	if resp.StatusCode == 401 || resp.StatusCode == 403 {
+		resp.Body.Close()
+		if err := p.recoverRejected(ctx, sent); err != nil {
+			return err
+		}
+		resp, err = do()
+		if err != nil {
+			return err
+		}
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode == 401 || resp.StatusCode == 403 {
-		p.expireAuth("Your SoundCloud session expired. Sign in again to see your playlists and likes.")
+		p.expireAuth(sent, "Your SoundCloud session expired. Sign in again to see your playlists and likes.")
 		return baseprovider.ErrSignInRequired
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
@@ -965,13 +1018,21 @@ func writeCacheFile(dir, name, value string) error {
 	return os.Rename(tempName, filepath.Join(dir, name))
 }
 
-func (p *Provider) expireAuth(message string) {
+// expireAuth ends a session SoundCloud refused, unless that token was already
+// replaced. Only a provider rejection gets here, never mere expiry.
+func (p *Provider) expireAuth(token, message string) {
 	p.mu.Lock()
+	if p.auth == nil || p.auth.AccessToken != token {
+		p.mu.Unlock()
+		return
+	}
 	p.auth = nil
 	p.epoch++
 	p.mu.Unlock()
-	_ = p.kv.Delete(soundCloudAuthKey)
-	p.bus.Emit(protocol.EventSoundCloudAuth, model.SoundCloudAuthEvent{State: "expired", Message: &message})
+	if err := p.kv.Delete(soundCloudAuthKey); err != nil {
+		p.log.Warn("forgetting the refused SoundCloud session", "error", err)
+	}
+	p.bus.Emit(protocol.EventSoundCloudAuth, model.SoundCloudAuthEvent{State: "session_expired", Message: &message})
 }
 
 type searchToken struct {

@@ -23,6 +23,7 @@ import (
 	"github.com/ryoku-dev/ryotunes/internal/player"
 	"github.com/ryoku-dev/ryotunes/internal/protocol"
 	"github.com/ryoku-dev/ryotunes/internal/provider"
+	"github.com/ryoku-dev/ryotunes/internal/provider/browsercookies"
 	"github.com/ryoku-dev/ryotunes/internal/provider/local"
 	"github.com/ryoku-dev/ryotunes/internal/provider/radio"
 	"github.com/ryoku-dev/ryotunes/internal/provider/soundcloud"
@@ -88,7 +89,7 @@ func New(ctx context.Context, bootstrapLog *slog.Logger) (_ *App, err error) {
 		disabled[i] = string(client)
 	}
 	a.YouTube, err = youtube.New(youtube.Options{
-		KV: kv, Log: log, DataDir: dirs.Data, Proxy: settings.Proxy,
+		KV: kv, Log: log, DataDir: dirs.Data, Proxy: settings.Proxy, Bus: a.Bus,
 		DisabledStreamClients: strings.Join(disabled, ","),
 	})
 	if err != nil {
@@ -176,6 +177,11 @@ func New(ctx context.Context, bootstrapLog *slog.Logger) (_ *App, err error) {
 			log.Warn("Spotify credential restore failed", "error", restoreErr)
 		}
 	}()
+	a.background.Add(1)
+	go func() {
+		defer a.background.Done()
+		a.restoreBrowserSessions(appCtx)
+	}()
 	if folders, foldersErr := a.Store.LocalFolders(); foldersErr != nil {
 		log.Warn("reading local music folders", "error", foldersErr)
 	} else if len(folders) != 0 {
@@ -192,6 +198,32 @@ func (a *App) scanLocalOnStart() {
 	if _, err := a.ScanLocal(a.ctx); err != nil && !errors.Is(err, context.Canceled) {
 		a.Log.Warn("scanning local music at startup", "error", err)
 	}
+}
+
+// browserRestoreTimeout bounds the start-up re-read so a black-holed network
+// or a slow keyring never keeps it running.
+const browserRestoreTimeout = 30 * time.Second
+
+// restoreBrowserSessions is the start-up re-read of the remembered browser
+// stores for YouTube and SoundCloud. Subscribers are answered from memory
+// meanwhile; a changed session arrives as an auth event.
+func (a *App) restoreBrowserSessions(ctx context.Context) {
+	if err := browsercookies.RemoveStaleCopies(); err != nil {
+		a.Log.Warn("removing stale browser cookie copies", "error", err)
+	}
+	ctx, cancel := context.WithTimeout(ctx, browserRestoreTimeout)
+	defer cancel()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		if err := a.SoundCloud.Restore(ctx); err != nil && !errors.Is(err, context.Canceled) {
+			a.Log.Info("SoundCloud browser session was not re-read at start", "error", err)
+		}
+	}()
+	if err := a.YouTube.Restore(ctx); err != nil && !errors.Is(err, context.Canceled) {
+		a.Log.Info("YouTube session was not confirmed at start", "error", err)
+	}
+	<-done
 }
 
 // ScanLocal refreshes configured folders and emits local-changed when the index changes.

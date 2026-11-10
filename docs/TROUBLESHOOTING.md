@@ -14,7 +14,7 @@ It reports the installed package, session, processes and runtime dependencies wi
 
 **Fix:** Open Settings, then Storage, and choose **Force clear caches**. This removes stale stream and lyric caches, mpv audio cache data and the stored playback token so Ryotunes can obtain a new playback identity. It preserves accounts, library data, history and artwork. Try the track again after the action finishes.
 
-If the account session has expired, sign out of YouTube Music and sign in again.
+If YouTube Music shows signed out, press Sign in. Ryotunes reads the session from the browser it came from again; when the browser is still signed in to the same account, nothing else is asked.
 
 ## Spotify asks for sign-in or skips every track
 
@@ -24,7 +24,7 @@ If the problem returns after a daemon restart, capture `ryotunes-cli get_logs` b
 
 ## SoundCloud sign-in does not complete
 
-Ryotunes imports the SoundCloud session from a supported browser profile. Sign in at `soundcloud.com` in Firefox, Chromium, Chrome or a related browser, leave that profile open, then press the SoundCloud connect action again.
+Ryotunes follows the SoundCloud session in the browser profile you signed in with. SoundCloud renews that session only while `soundcloud.com` is open, about once a day, so after a day away SoundCloud can read signed out in Ryotunes. Open `soundcloud.com` in that browser, or press the SoundCloud connect action, and Ryotunes picks the renewed session up without asking again. A first sign-in works the same way: sign in at `soundcloud.com` in Firefox, Chromium, Chrome or a related browser, leave that profile open, then press the connect action.
 
 The importer reads temporary copies of the browser cookie database and does not modify the browser profile. If the browser uses an unsupported profile location, complete sign-in in a standard profile and retry. A guest session can still browse and play public SoundCloud tracks.
 
