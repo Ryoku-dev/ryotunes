@@ -42,8 +42,7 @@ func (playing *NowPlaying) Layout(gtx layout.Context, e *env.Env) layout.Dimensi
 	return look.Field(gtx, e.Th, cuts, func(gtx layout.Context) layout.Dimensions {
 		snapshot := e.Store.Snapshot()
 		if snapshot.Playback.Now == nil {
-			empty := kit.Empty{Icon: look.Icon.NowPlaying, Title: "Nothing playing", Body: "Choose a track to see it here."}
-			return empty.Layout(gtx, e.Th.Theme)
+			return widgets.EmptyState(e, look.Icon.NowPlaying, "Nothing playing", "Choose a track to see it here.")(gtx)
 		}
 		track := trackFromPlayback(snapshot.Playback.Now, e.Store.CurrentTrack())
 		wide := gtx.Constraints.Max.X >= gtx.Dp(900)
@@ -97,23 +96,22 @@ func (playing *NowPlaying) layoutWide(gtx layout.Context, e *env.Env, track mode
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			gtx.Constraints.Min.X = rightWidth
 			gtx.Constraints.Max.X = rightWidth
-			return layout.Inset{Top: 21, Right: 21, Left: 13}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+			column := layout.Inset{Right: 21, Left: 13}
+			return layout.Inset{Top: 21}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 				return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
 					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-						playing.tabs.Labels = []string{"Lyrics", "Queue"}
-						playing.tabs.Selected = playing.stageTab
-						dims := playing.tabs.Layout(gtx, e.Th.Theme)
-						if selected, changed := playing.tabs.Changed(); changed {
-							playing.stageTab = selected
-						}
-						return dims
+						return column.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+							playing.tabs.Labels = []string{"Lyrics", "Queue"}
+							playing.tabs.Selected = playing.stageTab
+							dims := playing.tabs.Layout(gtx, e.Th.Theme)
+							if selected, changed := playing.tabs.Changed(); changed {
+								playing.stageTab = selected
+							}
+							return dims
+						})
 					}),
-					layout.Rigid(layout.Spacer{Height: 13}.Layout),
 					layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-						if playing.stageTab == 1 {
-							return playing.queue.LayoutList(gtx, e)
-						}
-						return playing.lyrics.Layout(gtx, e, LyricsStage)
+						return playing.layoutStage(gtx, e, layout.Inset{Top: 13, Right: column.Right, Left: column.Left})
 					}),
 				)
 			})
@@ -142,16 +140,19 @@ func (playing *NowPlaying) layoutNarrow(gtx layout.Context, e *env.Env, track mo
 				return dims
 			})
 		}),
-		layout.Rigid(layout.Spacer{Height: 8}.Layout),
 		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-			return layout.Inset{Right: 13, Left: 13}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-				if playing.stageTab == 1 {
-					return playing.queue.LayoutList(gtx, e)
-				}
-				return playing.lyrics.Layout(gtx, e, LyricsStage)
-			})
+			return playing.layoutStage(gtx, e, layout.Inset{Top: 8, Right: 13, Left: 13})
 		}),
 	)
+}
+
+// layoutStage draws the selected stage tab inside inset, or its empty state,
+// which owns its spacing, in the whole area under the tabs.
+func (playing *NowPlaying) layoutStage(gtx layout.Context, e *env.Env, inset layout.Inset) layout.Dimensions {
+	if playing.stageTab == 1 {
+		return playing.queue.LayoutList(gtx, e, inset)
+	}
+	return playing.lyrics.Layout(gtx, e, LyricsStage, inset)
 }
 
 func (playing *NowPlaying) layoutNarrowHeader(gtx layout.Context, e *env.Env, track model.Track, rating model.Rating) layout.Dimensions {

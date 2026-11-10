@@ -162,7 +162,7 @@ func (s *demoServer) result(method string, params json.RawMessage) any {
 	case protocol.MethodGetDownloads:
 		return s.data.snapshot.Downloads
 	case protocol.MethodGetDownloadSettings:
-		return s.data.snapshot.Downloads.Jobs[0].Settings
+		return s.data.downloadSettings
 	case protocol.MethodGetPersonal:
 		return protocol.PersonalResult{Personal: s.data.snapshot.Personal}
 	case protocol.MethodLTGetState:

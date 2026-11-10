@@ -331,11 +331,11 @@ func parseRoute(value string) env.Route {
 		if found {
 			route.ID = data
 		}
-	case env.RouteSettings, env.RouteHome:
+	case env.RouteSettings, env.RouteHome, env.RouteLibrary:
 		if found {
 			route.Params = data
 		}
-	case env.RouteLibrary, env.RouteRadio, env.RouteDownloads, env.RouteDiagnostics, env.RouteEqualizer:
+	case env.RouteRadio, env.RouteDownloads, env.RouteDiagnostics, env.RouteEqualizer:
 	default:
 		return env.Route{Kind: env.RouteHome}
 	}

@@ -41,6 +41,7 @@ type Page struct {
 	hero        widgets.Hero
 	heroActions widgets.HeroActions
 	scroll      look.Scroller
+	heroHeight  int
 	table       widgets.TrackTable
 	sortChoice  look.Choice
 	play        kit.Plaque
@@ -143,11 +144,16 @@ func (p *Page) Layout(gtx layout.Context, e *env.Env) layout.Dimensions {
 	items := p.page.Items
 	sortInHero := gtx.Constraints.Max.X >= gtx.Dp(800) || len(items) == 0
 	if len(items) == 0 {
+		viewport := gtx.Constraints.Max.Y
 		dims := p.scroll.Layout(gtx, e.Th, 2, func(gtx layout.Context, index int) layout.Dimensions {
 			if index == 0 {
-				return p.layoutHero(gtx, e, sortInHero)
+				dims := p.layoutHero(gtx, e, sortInHero)
+				p.heroHeight = dims.Size.Y
+				return dims
 			}
-			return p.inset(e, 0, 34, widgets.EmptyState(e, look.Icon.Playlist, "No tracks in this playlist", "Add a song and it will appear here."))(gtx)
+			// Centred in the room under the hero, scrolling when there is none.
+			gtx.Constraints.Min.Y = max(0, viewport-p.heroHeight)
+			return widgets.EmptyState(e, look.Icon.Playlist, "No tracks in this playlist", "Add a song and it will appear here.")(gtx)
 		})
 		p.editDialog.Layout(gtx, e)
 		p.exportDialog.Layout(gtx, e, p)

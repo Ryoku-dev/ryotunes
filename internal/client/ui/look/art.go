@@ -53,17 +53,6 @@ func exactArtContext(gtx layout.Context, size image.Point) layout.Context {
 	return gtx
 }
 
-var artRequestSizes = [...]int{32, 48, 64, 96, 128, 192, 256, 384, 512, 768, 1024, 1536, 2048}
-
-func artRequestSize(size int) int {
-	for _, candidate := range artRequestSizes {
-		if size <= candidate {
-			return candidate
-		}
-	}
-	return artRequestSizes[len(artRequestSizes)-1]
-}
-
 func drawArtPlaceholder(gtx layout.Context, th *Theme, size image.Point, shape Shape) layout.Dimensions {
 	bounds := image.Rectangle{Max: size}
 	path := artPath(gtx, size, shape)
@@ -83,7 +72,7 @@ func Art(gtx layout.Context, th *Theme, cache *art.Cache, url string, size image
 	var source paint.ImageOp
 	loaded := false
 	if cache != nil {
-		source, loaded = cache.Get(url, artRequestSize(max(size.X, size.Y)))
+		source, loaded = cache.Get(url, max(size.X, size.Y))
 	}
 	if loaded {
 		widget.Image{Src: source, Fit: widget.Cover, Position: layout.Center}.Layout(exactArtContext(gtx, size))
@@ -107,7 +96,7 @@ type ArtView struct {
 
 // Layout draws the current cover and retains the outgoing cover only for its reveal.
 func (a *ArtView) Layout(gtx layout.Context, th *Theme, cache *art.Cache, url string, size image.Point, shape Shape, duration time.Duration) layout.Dimensions {
-	requestSize := artRequestSize(max(size.X, size.Y))
+	requestSize := max(size.X, size.Y)
 	loaded := false
 	if cache != nil {
 		_, loaded = cache.Get(url, requestSize)

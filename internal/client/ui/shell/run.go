@@ -185,7 +185,20 @@ func startRuntime(options Options) (*clientRuntime, error) {
 	runtime.client = conn.NewPath(socketPath)
 	runtime.store = state.NewEmpty()
 	_ = runtime.store.LoadClientPreferences()
-	runtime.art = art.New(art.Options{Invalidate: runtime.hub.Invalidate})
+	// Covers are optional, the window is not: without a cache directory the
+	// art cache runs in memory only.
+	cacheDir := ""
+	if options.Demo {
+		cacheDir = filepath.Join(runtime.tempDir, "cache", "art")
+	} else if options.PNG != "" {
+		if tempDir, err := os.MkdirTemp("", "ryotunes-png-"); err == nil {
+			runtime.tempDir = tempDir
+			cacheDir = filepath.Join(tempDir, "cache", "art")
+		}
+	} else if root, err := os.UserCacheDir(); err == nil {
+		cacheDir = filepath.Join(root, "ryotunes", "art")
+	}
+	runtime.art = art.New(art.Options{CacheDir: cacheDir, Invalidate: runtime.hub.Invalidate})
 	if options.Demo {
 		runtime.spectrum = spectrum.NewStatic(demo.SpectrumLevels())
 		runtime.scope = spectrum.NewStaticScope(demo.ScopeSamples())

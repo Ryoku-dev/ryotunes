@@ -58,50 +58,67 @@ func (p *Page) Layout(gtx layout.Context, e *env.Env) layout.Dimensions {
 	if p.copyAll.Clicked(gtx) && len(p.logs.Entries) > 0 {
 		act.CopyText(e, formatLogClipboard(p.logs.Entries), "Logs copied")
 	}
+	if p.loading && !p.loaded {
+		return widgets.Loading(e, widgets.LoadingTable)(gtx)
+	}
+	if p.error != "" {
+		p.retry.Kind, p.retry.Label = kit.PlaqueLine, "Retry"
+		return widgets.Failed(e, "Could not load diagnostics: "+p.error, &p.retry)(gtx)
+	}
 	inset := look.ContentInset(e.Th.Class)
-	return layout.Inset{Right: inset, Bottom: inset, Left: inset}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-		if p.loading && !p.loaded {
-			return widgets.Loading(e, widgets.LoadingTable)(gtx)
+	count := 4 + max(1, len(p.logs.Entries))
+	return p.scroll.Layout(gtx, e.Th, count, func(gtx layout.Context, index int) layout.Dimensions {
+		if index == 0 {
+			return p.header.Layout(gtx, e, "Diagnostics", "Recent daemon and client evidence.", p.headerActions(e))
 		}
-		if p.error != "" {
-			p.retry.Kind, p.retry.Label = kit.PlaqueLine, "Retry"
-			return widgets.Failed(e, "Could not load diagnostics: "+p.error, &p.retry)(gtx)
+		if index == 4 && len(p.logs.Entries) == 0 {
+			return widgets.EmptyState(e, look.Icon.Search, "No log entries", "Try a broader level, source, or search filter.")(gtx)
 		}
-		count := 4 + max(1, len(p.logs.Entries))
-		return p.scroll.Layout(gtx, e.Th, count, func(gtx layout.Context, index int) layout.Dimensions {
-			switch index {
-			case 0:
-				return p.header.Layout(gtx, e, "Diagnostics", "Recent daemon and client evidence.", p.headerActions(e))
-			case 1:
+		var body layout.Widget
+		switch index {
+		case 1:
+			body = func(gtx layout.Context) layout.Dimensions {
 				return layout.Inset{Top: unit.Dp(21)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 					return kit.Section(e.Th.Theme, "Runtime", func(gtx layout.Context) layout.Dimensions {
 						return kit.SlabContent(gtx, e.Th.Theme, kit.Facts(e.Th.Theme, p.runtimeFacts(e)))
 					})(gtx)
 				})
-			case 2:
-				return p.filterLayout(gtx, e)
-			case 3:
-				return layout.Inset{Top: unit.Dp(13), Bottom: unit.Dp(8)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+			}
+		case 2:
+			body = func(gtx layout.Context) layout.Dimensions { return p.filterLayout(gtx, e) }
+		case 3:
+			gap := unit.Dp(8)
+			if len(p.logs.Entries) == 0 {
+				gap = 0
+			}
+			body = func(gtx layout.Context) layout.Dimensions {
+				return layout.Inset{Top: unit.Dp(13), Bottom: gap}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 					return layout.Flex{Axis: layout.Vertical, Alignment: layout.Start}.Layout(gtx,
 						layout.Rigid(kit.GroupHeader(e.Th.Theme, "Log entries", p.logs.Total)),
 						layout.Rigid(layout.Spacer{Height: unit.Dp(4)}.Layout),
 						layout.Rigid(kit.Text(e.Th.Theme, e.Th.T.MonoSm, e.Th.R.Fg3, totalsLine(p.logs))),
 					)
 				})
-			default:
-				if len(p.logs.Entries) == 0 {
-					return widgets.EmptyState(e, look.Icon.Search, "No log entries", "Try a broader level, source, or search filter.")(gtx)
-				}
-				entry := p.logs.Entries[index-4]
-				key := logRowKey(entry)
-				row := p.rows[key]
-				if row == nil {
-					row = new(logRow)
-					p.rows[key] = row
-				}
-				return layout.Inset{Bottom: unit.Dp(4)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions { return row.layout(gtx, e, entry) })
 			}
-		})
+		default:
+			entry := p.logs.Entries[index-4]
+			key := logRowKey(entry)
+			row := p.rows[key]
+			if row == nil {
+				row = new(logRow)
+				p.rows[key] = row
+			}
+			body = func(gtx layout.Context) layout.Dimensions {
+				return layout.Inset{Bottom: unit.Dp(4)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+					return row.layout(gtx, e, entry)
+				})
+			}
+		}
+		bottom := unit.Dp(0)
+		if index+1 == count {
+			bottom = inset
+		}
+		return layout.Inset{Right: inset, Bottom: bottom, Left: inset}.Layout(gtx, body)
 	})
 }
 

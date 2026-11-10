@@ -127,25 +127,34 @@ func (p *page) Layout(gtx layout.Context, e *env.Env) layout.Dimensions {
 		},
 		p.filtersLayout(e),
 	}
+	stateIndex := -1
 	if blocked {
+		stateIndex = len(children)
 		children = append(children, widgets.EmptyState(e, look.Icon.Person, "Sign in to Spotify", "Sign in from Settings to search Spotify."))
 	} else {
-		children = append(children, p.contentWidgets(e, max(1, width))...)
+		content, isState := p.contentWidgets(e, max(1, width))
+		if isState {
+			stateIndex = len(children)
+		}
+		children = append(children, content...)
 	}
-	return layout.Inset{Bottom: unit.Dp(21)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-		return p.scroll.Layout(gtx, e.Th, len(children), func(gtx layout.Context, index int) layout.Dimensions {
-			if index >= len(children)-2 {
-				p.loadSelectedMore(e)
-			}
-			bottom := unit.Dp(34)
-			if index == len(children)-1 {
-				bottom = 0
-			}
-			if index == 0 {
-				return layout.Inset{Bottom: bottom}.Layout(gtx, children[index])
-			}
-			return layout.Inset{Right: inset, Bottom: bottom, Left: inset}.Layout(gtx, children[index])
-		})
+	return p.scroll.Layout(gtx, e.Th, len(children), func(gtx layout.Context, index int) layout.Dimensions {
+		if index >= len(children)-2 {
+			p.loadSelectedMore(e)
+		}
+		if index == stateIndex {
+			return children[index](gtx)
+		}
+		bottom := unit.Dp(34)
+		if index == len(children)-1 {
+			bottom = 21
+		} else if index+1 == stateIndex {
+			bottom = 0
+		}
+		if index == 0 {
+			return layout.Inset{Bottom: bottom}.Layout(gtx, children[index])
+		}
+		return layout.Inset{Right: inset, Bottom: bottom, Left: inset}.Layout(gtx, children[index])
 	})
 }
 

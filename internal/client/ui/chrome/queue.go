@@ -21,6 +21,7 @@ import (
 	"github.com/ryoku-dev/ryotunes/internal/client/ui/act"
 	"github.com/ryoku-dev/ryotunes/internal/client/ui/env"
 	"github.com/ryoku-dev/ryotunes/internal/client/ui/look"
+	"github.com/ryoku-dev/ryotunes/internal/client/ui/widgets"
 	"github.com/ryoku-dev/ryotunes/internal/model"
 	"github.com/ryoku-dev/ryotunes/internal/protocol"
 )
@@ -87,29 +88,25 @@ type Queue struct {
 
 // Layout draws the queue body used by the right panel.
 func (queue *Queue) Layout(gtx layout.Context, e *env.Env) layout.Dimensions {
-	return layout.Inset{Bottom: 13, Left: 13, Right: 13}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-		return queue.layoutList(gtx, e)
-	})
+	return queue.LayoutList(gtx, e, layout.Inset{Bottom: 13, Left: 13, Right: 13})
 }
 
-// LayoutList draws the queue list without the right-panel inset.
-func (queue *Queue) LayoutList(gtx layout.Context, e *env.Env) layout.Dimensions {
-	return queue.layoutList(gtx, e)
-}
-
-func (queue *Queue) layoutList(gtx layout.Context, e *env.Env) layout.Dimensions {
+// LayoutList draws the queue rows inside rows, or the empty state, which owns
+// its spacing, in the whole area.
+func (queue *Queue) LayoutList(gtx layout.Context, e *env.Env, rows layout.Inset) layout.Dimensions {
 	groups := e.Store.QueueGroups()
 	queue.buildEntries(gtx, e.Th.Motion.Notch, groups)
-	if groups.NowPlaying == nil && len(groups.UpNextManual) == 0 && len(groups.Continuation) == 0 {
-		empty := kit.Empty{Icon: look.Icon.Queue, Title: "Nothing queued", Body: "Play something and the next tracks show here."}
-		return empty.Layout(gtx, e.Th.Theme)
+	if len(queue.entries) == 0 {
+		return widgets.EmptyState(e, look.Icon.Queue, "Nothing queued", "Play something and the next tracks show here.")(gtx)
 	}
-	return queue.scroll.Layout(gtx, e.Th, len(queue.entries), func(gtx layout.Context, index int) layout.Dimensions {
-		entry := queue.entries[index]
-		if entry.kind == queueTrack {
-			return queue.layoutRow(gtx, e, entry)
-		}
-		return queue.layoutSection(gtx, e, entry)
+	return rows.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+		return queue.scroll.Layout(gtx, e.Th, len(queue.entries), func(gtx layout.Context, index int) layout.Dimensions {
+			entry := queue.entries[index]
+			if entry.kind == queueTrack {
+				return queue.layoutRow(gtx, e, entry)
+			}
+			return queue.layoutSection(gtx, e, entry)
+		})
 	})
 }
 

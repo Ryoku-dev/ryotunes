@@ -27,6 +27,7 @@ type Page struct {
 	hero        widgets.Hero
 	heroActions widgets.HeroActions
 	scroll      look.Scroller
+	heroHeight  int
 	table       widgets.TrackTable
 	play        kit.Plaque
 	shuffle     kit.IconPlaque
@@ -123,11 +124,16 @@ func (p *Page) Layout(gtx layout.Context, e *env.Env) layout.Dimensions {
 
 	items := p.page.Items
 	if len(items) == 0 {
+		viewport := gtx.Constraints.Max.Y
 		return p.scroll.Layout(gtx, e.Th, 2, func(gtx layout.Context, index int) layout.Dimensions {
 			if index == 0 {
-				return p.layoutHero(gtx, e)
+				dims := p.layoutHero(gtx, e)
+				p.heroHeight = dims.Size.Y
+				return dims
 			}
-			return p.inset(e, 0, 34, widgets.EmptyState(e, look.Icon.Album, "No tracks on this album", "This album does not have any playable tracks."))(gtx)
+			// Centred in the room under the hero, scrolling when there is none.
+			gtx.Constraints.Min.Y = max(0, viewport-p.heroHeight)
+			return widgets.EmptyState(e, look.Icon.Album, "No tracks on this album", "This album does not have any playable tracks.")(gtx)
 		})
 	}
 

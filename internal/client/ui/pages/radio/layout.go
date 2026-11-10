@@ -43,14 +43,17 @@ func (p *Page) Layout(gtx layout.Context, e *env.Env) layout.Dimensions {
 		},
 		p.controls(e),
 	}
+	stateIndex := -1
 	switch {
 	case p.loading && !p.loaded:
-		children = append(children, widgets.Loading(e, widgets.LoadingGrid))
+		children = append(children, widgets.Skeleton(e, widgets.LoadingGrid))
 	case p.error != "" && len(p.stations) == 0:
+		stateIndex = len(children)
 		children = append(children, widgets.Failed(e, p.error, &p.retry))
 	default:
 		groups := p.groups(snapshot.Personal, normalizedQuery(p.filter.Text()))
 		if stationGroupCount(groups) == 0 {
+			stateIndex = len(children)
 			children = append(children, p.empty(e))
 		} else {
 			playing := ""
@@ -64,20 +67,21 @@ func (p *Page) Layout(gtx layout.Context, e *env.Env) layout.Dimensions {
 		}
 	}
 
-	return layout.Inset{Bottom: unit.Dp(21)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-		return p.scroll.Layout(gtx, e.Th, len(children), func(gtx layout.Context, index int) layout.Dimensions {
-			if index >= len(children)-2 {
-				p.loadMore(e)
-			}
-			bottom := unit.Dp(21)
-			if index == len(children)-1 {
-				bottom = 0
-			}
-			if index == 0 {
-				return layout.Inset{Bottom: bottom}.Layout(gtx, children[index])
-			}
-			return layout.Inset{Right: inset, Bottom: bottom, Left: inset}.Layout(gtx, children[index])
-		})
+	return p.scroll.Layout(gtx, e.Th, len(children), func(gtx layout.Context, index int) layout.Dimensions {
+		if index >= len(children)-2 {
+			p.loadMore(e)
+		}
+		if index == stateIndex {
+			return children[index](gtx)
+		}
+		bottom := unit.Dp(21)
+		if index+1 == stateIndex {
+			bottom = 0
+		}
+		if index == 0 {
+			return layout.Inset{Bottom: bottom}.Layout(gtx, children[index])
+		}
+		return layout.Inset{Right: inset, Bottom: bottom, Left: inset}.Layout(gtx, children[index])
 	})
 }
 

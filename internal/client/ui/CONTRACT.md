@@ -439,8 +439,9 @@ on Escape or an outside press, which it swallows.
   opens the item menu; drag reorders with a pointer grab. A removed row
   collapses over `Motion.Unfold`; an added row cuts a notch over
   `Motion.Notch`. The header's more menu: Stop after this track, Save queue as
-  playlist, Clear. Empty: `kit.Empty` "Nothing queued" / "Play something and
-  the next tracks show here."
+  playlist, Clear. Empty: `widgets.EmptyState` "Nothing queued" / "Play
+  something and the next tracks show here.", in the whole body, with no row
+  inset around it.
 - **Lyrics:** synced lines in fixed-height rows, romanized and translated
   lines under each in `T.Caption`. Every line is laid out at the active size
   (`T.Section` here, `T.Sentence` on the now playing stage); lines that are
@@ -474,8 +475,9 @@ on Escape or an outside press, which it swallows.
   a speed change or the surface becoming visible anchors at once. The clock is
   the playback position projected with the playback speed, the same clock
   that schedules the next line and word boundary. Clicking a line seeks to it.
-  Caption proof: where the lyrics came from. No lyrics: `kit.Empty` "No lyrics
-  for this track".
+  Caption proof: where the lyrics came from. No lyrics: `widgets.EmptyState`
+  "No lyrics for this track" in the whole body, with no document inset around
+  it; the mini player's square uses a bare `kit.Empty`, since it is not a page.
 - **Together:** the Listen Together session (existing behaviour, rebuilt on
   kit components).
 
@@ -808,7 +810,17 @@ scrolls with the page.
 
 Page states: `widgets.Loading` (kit.Skeleton shaped like the page), `widgets.
 Failed` (kit.Empty with the daemon's message and a Retry line plaque),
-`widgets.EmptyState`.
+`widgets.EmptyState`. A page state owns its spacing: it sits the page's
+content inset (34 / 21 / 13 by class) below whatever is above it (hero,
+header, filter row; that element drops its own bottom gap) and never touches
+a pane edge or a hero; when it is the only thing under a hero it is centred
+in the remaining height, its top no closer than that inset, and scrolls with
+the hero when that height is too short. Callers pass no insets of their own.
+A skeleton is anchored where its content will appear, never centred: a
+whole-page `widgets.Loading` sits top-start at the content inset, and
+`LoadingHero` is the full-bleed hero at its natural height, flush. Inside a
+list, the page lays `widgets.Skeleton` out in place of the rows it stands
+for, with their insets and gaps, so nothing moves when they arrive.
 
 ## Widgets (widgets/)
 
@@ -861,6 +873,7 @@ func (h *Hero) Layout(gtx layout.Context, e *env.Env, c HeroContent) layout.Dime
 type Header struct{ ... } // retained per page: it owns the header's visualizer
 func (h *Header) Layout(gtx layout.Context, e *env.Env, title, sentence string, trailing layout.Widget) layout.Dimensions
 func Loading(e *env.Env, shape LoadingShape) layout.Widget
+func Skeleton(e *env.Env, shape LoadingShape) layout.Widget
 func Failed(e *env.Env, message string, retry *kit.Plaque) layout.Widget
 func EmptyState(e *env.Env, icon *widget.Icon, title, body string, actions ...*kit.Plaque) layout.Widget
 type ItemMenu struct{ ... } // spec 09 item menus per kind: kit.Menu inside a look.Overlays entry at the press point
@@ -1000,6 +1013,18 @@ type Shape struct{ Cut unit.Dp; Octagon bool; Corners [4]bool }
 type ArtView struct{ ... }
 func (a *ArtView) Layout(gtx layout.Context, th *Theme, cache *art.Cache, url string, size image.Point, sh Shape, fade time.Duration) layout.Dimensions
 func Art(gtx layout.Context, th *Theme, cache *art.Cache, url string, size image.Point, sh Shape) layout.Dimensions
+// art.Cache keeps every decoded cover from the network in a disk cache under
+// os.UserCacheDir()/ryotunes/art (keyed by URL and art.RequestSize, the one
+// size ladder; written atomically; about 256 MB, pruned least recently read
+// first to 90% once over), so a cover seen in any earlier session shows from
+// disk in the first frames after launch. Without a cache directory it runs in
+// memory only. A disk entry older than 30 days is still shown, and refetched
+// in the background to pick up a cover that changed at the same URL. Covers
+// made only of local files are not stored. Settings "Force clear caches"
+// empties it (Cache.Clear) and Cache.Forget drops one URL. Network loads run
+// with enough workers that one slow host cannot starve the rest, the covers
+// being drawn this frame go first, and queued loads for rows that scrolled
+// far away are dropped before they fetch.
 
 // Micro motion
 type Hover struct{ ... }   // pointer hover of an area as a tween 0..1 (hover in/out)

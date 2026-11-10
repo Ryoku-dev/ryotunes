@@ -40,6 +40,7 @@ type page struct {
 	contentRevision uint64
 	contentKey      homeContentKey
 	children        []layout.Widget
+	stateIndex      int
 	feedRevision    uint64
 	shelfRevision   uint64
 	shelfChildren   []layout.Widget
@@ -104,20 +105,24 @@ func (p *page) Layout(gtx layout.Context, e *env.Env) layout.Dimensions {
 
 	children := p.content(e, snapshot)
 	inset := look.ContentInset(e.Th.Class)
-	return layout.Inset{Bottom: unit.Dp(21)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-		return p.scroll.Layout(gtx, e.Th, len(children), func(gtx layout.Context, index int) layout.Dimensions {
-			if index >= len(children)-2 {
-				p.loadMore(e)
-			}
-			bottom := unit.Dp(34)
-			if index == len(children)-1 {
-				bottom = 0
-			}
-			if index == 0 {
-				return layout.Inset{Bottom: bottom}.Layout(gtx, children[index])
-			}
-			return layout.Inset{Right: inset, Bottom: bottom, Left: inset}.Layout(gtx, children[index])
-		})
+	stateIndex := p.stateIndex
+	return p.scroll.Layout(gtx, e.Th, len(children), func(gtx layout.Context, index int) layout.Dimensions {
+		if index >= len(children)-2 {
+			p.loadMore(e)
+		}
+		if index == stateIndex {
+			return children[index](gtx)
+		}
+		bottom := unit.Dp(34)
+		if index == len(children)-1 {
+			bottom = 21
+		} else if index+1 == stateIndex {
+			bottom = 0
+		}
+		if index == 0 {
+			return layout.Inset{Bottom: bottom}.Layout(gtx, children[index])
+		}
+		return layout.Inset{Right: inset, Bottom: bottom, Left: inset}.Layout(gtx, children[index])
 	})
 }
 

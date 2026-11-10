@@ -53,12 +53,15 @@ func (p *page) Layout(gtx layout.Context, e *env.Env) layout.Dimensions {
 	children := []layout.Widget{func(gtx layout.Context) layout.Dimensions {
 		return p.header.Layout(gtx, e, p.Title(), "", nil)
 	}}
+	stateIndex := -1
 	switch {
 	case p.loading && !p.loaded:
-		children = append(children, widgets.Loading(e, widgets.LoadingGrid))
+		children = append(children, widgets.Skeleton(e, widgets.LoadingGrid))
 	case p.error != "" && !p.loaded:
+		stateIndex = len(children)
 		children = append(children, widgets.Failed(e, p.error, &p.retry))
 	case len(p.items) == 0:
+		stateIndex = len(children)
 		children = append(children, widgets.EmptyState(e, look.Icon.Library, "Nothing here.", "This collection has no items."))
 	default:
 		rows := p.grid.Rows(max(1, width), len(p.items))
@@ -69,17 +72,18 @@ func (p *page) Layout(gtx layout.Context, e *env.Env) layout.Dimensions {
 			})
 		}
 	}
-	return layout.Inset{Bottom: unit.Dp(21)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-		return p.scroll.Layout(gtx, e.Th, len(children), func(gtx layout.Context, index int) layout.Dimensions {
-			bottom := unit.Dp(21)
-			if index == len(children)-1 {
-				bottom = 0
-			}
-			if index == 0 {
-				return layout.Inset{Bottom: bottom}.Layout(gtx, children[index])
-			}
-			return layout.Inset{Right: inset, Bottom: bottom, Left: inset}.Layout(gtx, children[index])
-		})
+	return p.scroll.Layout(gtx, e.Th, len(children), func(gtx layout.Context, index int) layout.Dimensions {
+		if index == stateIndex {
+			return children[index](gtx)
+		}
+		bottom := unit.Dp(21)
+		if index+1 == stateIndex {
+			bottom = 0
+		}
+		if index == 0 {
+			return layout.Inset{Bottom: bottom}.Layout(gtx, children[index])
+		}
+		return layout.Inset{Right: inset, Bottom: bottom, Left: inset}.Layout(gtx, children[index])
 	})
 }
 

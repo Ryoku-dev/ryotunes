@@ -18,6 +18,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"gioui.org/op/paint"
@@ -27,37 +28,63 @@ import (
 )
 
 const (
-	defaultMaxBytes   = 64 << 20
-	defaultMaxSamples = 256
-	defaultWorkers    = 4
-	maxSourceBytes    = 32 << 20
-	sampleLoadSize    = 64
-	failureTTL        = 30 * time.Second
+	defaultMaxBytes    = 64 << 20
+	defaultMaxSamples  = 256
+	defaultWorkers     = 12
+	defaultDiskWorkers = 4
+	maxSourceBytes     = 32 << 20
+	sampleLoadSize     = 64
+	failureTTL         = 30 * time.Second
+	// staleRequests is how many newer requests a queued job may fall behind
+	// before a worker drops it. Rows on screen are requested every frame, so
+	// only rows that scrolled away fall this far behind.
+	staleRequests = 512
 )
+
+// requestSizes is the one ladder of cover sizes. Rounding every request onto
+// it bounds the number of decoded copies and disk entries per cover.
+var requestSizes = [...]int{32, 48, 64, 96, 128, 192, 256, 384, 512, 768, 1024, 1536, 2048}
+
+// RequestSize rounds a cover size in pixels up to the cache's size ladder.
+func RequestSize(size int) int {
+	for _, candidate := range requestSizes {
+		if size <= candidate {
+			return candidate
+		}
+	}
+	return requestSizes[len(requestSizes)-1]
+}
 
 // Options configures a bounded artwork cache.
 type Options struct {
-	MaxBytes   int
-	MaxSamples int
-	Workers    int
-	Timeout    time.Duration
-	Invalidate func()
-	HTTPClient *http.Client
+	MaxBytes     int
+	MaxSamples   int
+	Workers      int
+	DiskWorkers  int
+	DiskMaxBytes int64
+	CacheDir     string
+	Timeout      time.Duration
+	Invalidate   func()
+	HTTPClient   *http.Client
 }
 
-// Cache loads artwork on a bounded worker pool and evicts least-recently-used pixels.
+// Cache loads artwork on bounded disk and network worker pools.
 type Cache struct {
-	ctx        context.Context
-	cancel     context.CancelFunc
-	client     *http.Client
-	maxBytes   int
-	maxSamples int
-	invalidate func()
+	ctx          context.Context
+	cancel       context.CancelFunc
+	client       *http.Client
+	maxBytes     int
+	maxSamples   int
+	diskDir      string
+	diskMaxBytes int64
+	invalidate   func()
 
 	mu             sync.Mutex
 	entries        map[cacheKey]*cacheEntry
-	pending        map[cacheKey]uint64
-	pendingURL     map[string]int
+	pending        map[cacheKey]*loadJob
+	pendingURL     map[string]*loadJob
+	samplePending  map[string]*loadJob
+	refreshing     map[cacheKey]*loadJob
 	failed         map[cacheKey]time.Time
 	failedURL      map[string]time.Time
 	lru            list.List
@@ -65,7 +92,16 @@ type Cache struct {
 	samples        map[string]*sampleCacheEntry
 	sampleLRU      list.List
 	nextGeneration uint64
-	jobs           chan loadJob
+	nextPriority   uint64
+	diskJobs       *jobQueue
+	networkJobs    *jobQueue
+	ownsClient     bool
+	prune          chan struct{}
+	pruneMu        sync.Mutex
+	diskScanned    bool
+	diskBytes      atomic.Int64
+	clearDisk      atomic.Bool
+	diskEpoch      atomic.Uint64
 	workers        sync.WaitGroup
 	placeholder    paint.ImageOp
 }
@@ -88,16 +124,15 @@ type sampleCacheEntry struct {
 	lru    *list.Element
 }
 
-type loadJob struct {
-	key        cacheKey
-	generation uint64
-}
-
 // New returns an artwork cache with safe defaults for zero-valued options.
 func New(options Options) *Cache {
-	workers := options.Workers
-	if workers <= 0 {
-		workers = defaultWorkers
+	networkWorkers := options.Workers
+	if networkWorkers <= 0 {
+		networkWorkers = defaultWorkers
+	}
+	diskWorkers := options.DiskWorkers
+	if diskWorkers <= 0 {
+		diskWorkers = defaultDiskWorkers
 	}
 	maxBytes := options.MaxBytes
 	if maxBytes <= 0 {
@@ -107,36 +142,52 @@ func New(options Options) *Cache {
 	if maxSamples <= 0 {
 		maxSamples = defaultMaxSamples
 	}
+	diskMaxBytes := options.DiskMaxBytes
+	if diskMaxBytes <= 0 {
+		diskMaxBytes = defaultDiskMaxBytes
+	}
 	client := options.HTTPClient
-	if client == nil {
+	ownsClient := client == nil
+	if ownsClient {
 		timeout := options.Timeout
 		if timeout <= 0 {
 			timeout = 10 * time.Second
 		}
-		client = &http.Client{Timeout: timeout}
+		// The default of two idle connections per host makes most parallel
+		// fetches to one cover host reconnect.
+		transport := http.DefaultTransport.(*http.Transport).Clone()
+		transport.MaxIdleConnsPerHost = networkWorkers
+		client = &http.Client{Timeout: timeout, Transport: transport}
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	cache := &Cache{
-		ctx: ctx, cancel: cancel, client: client, maxBytes: maxBytes, maxSamples: maxSamples,
-		invalidate: options.Invalidate, entries: make(map[cacheKey]*cacheEntry),
-		samples: make(map[string]*sampleCacheEntry), pending: make(map[cacheKey]uint64),
-		pendingURL: make(map[string]int), failed: make(map[cacheKey]time.Time),
-		failedURL: make(map[string]time.Time), jobs: make(chan loadJob, workers*4),
-		placeholder: Placeholder(),
+		ctx: ctx, cancel: cancel, client: client, ownsClient: ownsClient, maxBytes: maxBytes, maxSamples: maxSamples,
+		diskDir: options.CacheDir, diskMaxBytes: diskMaxBytes, invalidate: options.Invalidate,
+		entries: make(map[cacheKey]*cacheEntry), samples: make(map[string]*sampleCacheEntry),
+		pending: make(map[cacheKey]*loadJob), pendingURL: make(map[string]*loadJob),
+		samplePending: make(map[string]*loadJob), refreshing: make(map[cacheKey]*loadJob),
+		failed:    make(map[cacheKey]time.Time),
+		failedURL: make(map[string]time.Time), diskJobs: newJobQueue(), networkJobs: newJobQueue(),
+		prune: make(chan struct{}, 1), placeholder: Placeholder(),
 	}
-	cache.workers.Add(workers)
-	for range workers {
-		go cache.worker()
+	cache.workers.Add(diskWorkers + networkWorkers)
+	for range diskWorkers {
+		go cache.diskWorker()
+	}
+	for range networkWorkers {
+		go cache.networkWorker()
+	}
+	if cache.diskDir != "" {
+		cache.workers.Add(1)
+		go cache.pruneWorker()
 	}
 	return cache
 }
 
-// Get returns cached artwork immediately or a placeholder while a worker loads it.
+// Get returns cached artwork immediately or a placeholder while a worker loads
+// it. size is rounded with RequestSize.
 func (c *Cache) Get(rawURL string, size int) (paint.ImageOp, bool) {
-	if size <= 0 {
-		size = 1
-	}
-	key := cacheKey{url: rawURL, size: size}
+	key := cacheKey{url: rawURL, size: RequestSize(size)}
 	c.mu.Lock()
 	if entry := c.entries[key]; entry != nil {
 		c.lru.MoveToFront(entry.lru)
@@ -148,13 +199,12 @@ func (c *Cache) Get(rawURL string, size int) (paint.ImageOp, bool) {
 		c.mu.Unlock()
 		return c.placeholder, false
 	}
-	c.enqueueLocked(key)
+	c.enqueueArtworkLocked(key)
 	c.mu.Unlock()
 	return c.placeholder, false
 }
 
 // Palette returns the cached cover palette and whether sampling has completed.
-// On a miss it queues one small load, independent of whether any surface draws the cover.
 func (c *Cache) Palette(rawURL string) (palette Palette, ready bool) {
 	if rawURL == "" {
 		return Palette{}, true
@@ -169,34 +219,65 @@ func (c *Cache) Palette(rawURL string) (palette Palette, ready bool) {
 	if c.ctx.Err() != nil || c.failureActiveLocked(key) {
 		return Palette{}, true
 	}
-	c.enqueueLocked(key)
+	priority := c.nextPriorityLocked()
+	if job := c.samplePending[rawURL]; job != nil {
+		c.promoteJobLocked(job, priority)
+		return Palette{}, false
+	}
+	// The cover load in flight samples the palette and invalidates when done.
+	if job := c.pendingURL[rawURL]; job != nil {
+		c.promoteJobLocked(job, priority)
+		return Palette{}, false
+	}
+	if c.diskDir != "" && persistArtwork(rawURL) {
+		job := c.newJobLocked(paletteJob, key, priority)
+		c.samplePending[rawURL] = job
+		if !c.diskJobs.push(job) {
+			delete(c.samplePending, rawURL)
+		}
+		return Palette{}, false
+	}
+	c.enqueueArtworkLocked(key)
 	return Palette{}, false
 }
 
 // Failed reports whether rawURL at size cannot load now.
 func (c *Cache) Failed(rawURL string, size int) bool {
-	if size <= 0 {
-		size = 1
-	}
+	key := cacheKey{url: rawURL, size: RequestSize(size)}
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return rawURL == "" || c.ctx.Err() != nil || c.failureActiveLocked(cacheKey{url: rawURL, size: size})
+	return rawURL == "" || c.ctx.Err() != nil || c.failureActiveLocked(key)
 }
 
-// Forget removes every cached, failed, and in-flight size and sample for one URL.
+// Forget removes every cached, failed, and in-flight size and sample for one
+// URL, on disk too, so the next request fetches it again.
 func (c *Cache) Forget(rawURL string) {
+	if c.diskDir != "" {
+		for _, size := range requestSizes {
+			c.removeDiskArtwork(cacheKey{url: rawURL, size: size})
+		}
+		c.removeDiskFile(filepath.Join(c.diskDir, diskPaletteName(rawURL)))
+	}
 	c.mu.Lock()
 	for key, entry := range c.entries {
 		if key.url == rawURL {
 			c.removeLocked(entry)
 		}
 	}
-	for key := range c.pending {
+	for key, job := range c.pending {
 		if key.url == rawURL {
 			delete(c.pending, key)
+			if c.pendingURL[rawURL] == job {
+				delete(c.pendingURL, rawURL)
+			}
 		}
 	}
-	delete(c.pendingURL, rawURL)
+	delete(c.samplePending, rawURL)
+	for key := range c.refreshing {
+		if key.url == rawURL {
+			delete(c.refreshing, key)
+		}
+	}
 	for key := range c.failed {
 		if key.url == rawURL {
 			delete(c.failed, key)
@@ -210,10 +291,43 @@ func (c *Cache) Forget(rawURL string) {
 	c.mu.Unlock()
 }
 
+// Clear drops every cover and palette from memory and from the disk cache, so
+// each one is fetched again. The disk entries are removed in the background
+// and are not read in the meantime.
+func (c *Cache) Clear() {
+	c.diskEpoch.Add(1)
+	if c.diskDir != "" {
+		c.clearDisk.Store(true)
+	}
+	c.mu.Lock()
+	clear(c.entries)
+	c.lru.Init()
+	c.bytes = 0
+	clear(c.samples)
+	c.sampleLRU.Init()
+	clear(c.pending)
+	clear(c.pendingURL)
+	clear(c.samplePending)
+	clear(c.refreshing)
+	clear(c.failed)
+	clear(c.failedURL)
+	invalidate := c.invalidate
+	c.mu.Unlock()
+	c.requestPrune()
+	if invalidate != nil {
+		invalidate()
+	}
+}
+
 // Close stops workers and discards future arrivals.
 func (c *Cache) Close() {
 	c.cancel()
+	c.diskJobs.close()
+	c.networkJobs.close()
 	c.workers.Wait()
+	if c.ownsClient {
+		c.client.CloseIdleConnections()
+	}
 }
 
 // Placeholder returns the static transparent artwork placeholder operation.
@@ -223,24 +337,94 @@ func Placeholder() paint.ImageOp {
 	return paint.NewImageOp(pixel)
 }
 
-func (c *Cache) enqueueLocked(key cacheKey) bool {
-	if key.url == "" || c.pendingURL[key.url] > 0 {
-		return false
-	}
-	if _, loading := c.pending[key]; loading {
-		return false
-	}
+func (c *Cache) nextPriorityLocked() uint64 {
+	c.nextPriority++
+	return c.nextPriority
+}
+
+func (c *Cache) newJobLocked(kind jobKind, key cacheKey, priority uint64) *loadJob {
 	c.nextGeneration++
-	generation := c.nextGeneration
-	c.pending[key] = generation
-	c.pendingURL[key.url]++
-	select {
-	case c.jobs <- loadJob{key: key, generation: generation}:
-		return true
-	default:
-		delete(c.pending, key)
-		delete(c.pendingURL, key.url)
+	job := &loadJob{kind: kind, key: key, generation: c.nextGeneration, priority: priority}
+	job.requested.Store(priority)
+	return job
+}
+
+func (c *Cache) promoteJobLocked(job *loadJob, priority uint64) {
+	job.requested.Store(priority)
+	c.diskJobs.promote(job, priority)
+	c.networkJobs.promote(job, priority)
+}
+
+func (c *Cache) enqueueArtworkLocked(key cacheKey) bool {
+	priority := c.nextPriorityLocked()
+	if job := c.pending[key]; job != nil {
+		c.promoteJobLocked(job, priority)
 		return false
+	}
+	if job := c.pendingURL[key.url]; job != nil {
+		c.promoteJobLocked(job, priority)
+		return false
+	}
+	job := c.newJobLocked(artworkJob, key, priority)
+	c.pending[key] = job
+	c.pendingURL[key.url] = job
+	if c.diskJobs.push(job) {
+		return true
+	}
+	delete(c.pending, key)
+	delete(c.pendingURL, key.url)
+	return false
+}
+
+// dropIfStale reports whether a popped job should not run: it was forgotten or
+// cleared, or its row has not been asked for in staleRequests requests. A
+// dropped artwork job is queued again by the next Get.
+func (c *Cache) dropIfStale(job *loadJob) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	switch job.kind {
+	case paletteJob:
+		if c.samplePending[job.key.url] != job {
+			return true
+		}
+	case refreshJob:
+		if c.refreshing[job.key] != job {
+			return true
+		}
+	default:
+		if c.pending[job.key] != job {
+			return true
+		}
+	}
+	if c.nextPriority-job.requested.Load() <= staleRequests {
+		return false
+	}
+	switch job.kind {
+	case paletteJob:
+		delete(c.samplePending, job.key.url)
+	case refreshJob:
+		delete(c.refreshing, job.key)
+	default:
+		delete(c.pending, job.key)
+		if c.pendingURL[job.key.url] == job {
+			delete(c.pendingURL, job.key.url)
+		}
+	}
+	return true
+}
+
+// refresh queues a background refetch of a cover just served from an old disk
+// entry. The old cover stays on screen until the new one arrives.
+func (c *Cache) refresh(job *loadJob) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.ctx.Err() != nil || c.refreshing[job.key] != nil || c.entries[job.key] == nil {
+		return
+	}
+	refresh := c.newJobLocked(refreshJob, job.key, job.requested.Load())
+	c.refreshing[job.key] = refresh
+	if !c.networkJobs.push(refresh) {
+		delete(c.refreshing, job.key)
 	}
 }
 
@@ -289,31 +473,109 @@ func ParseCollage(rawURL string) ([4]string, bool) {
 	return result, true
 }
 
-func (c *Cache) worker() {
+func (c *Cache) diskWorker() {
 	defer c.workers.Done()
 	for {
-		select {
-		case <-c.ctx.Done():
+		job, ok := c.diskJobs.pop(c.ctx)
+		if !ok {
 			return
-		case job := <-c.jobs:
+		}
+		if c.dropIfStale(job) {
+			continue
+		}
+		if job.kind == paletteJob {
+			c.loadPaletteFromDisk(job)
+			continue
+		}
+		if isLocalArtwork(job.key.url) {
 			img, sample, err := c.load(c.ctx, job.key.url, job.key.size, c.needsSample(job.key.url))
 			c.finish(job, img, sample, err)
+			continue
+		}
+		if img, sample, hit, old := c.readDiskArtwork(job.key); hit {
+			c.finish(job, img, sample, nil)
+			if old {
+				c.refresh(job)
+			}
+			continue
+		}
+		if !c.networkJobs.push(job) {
+			c.finish(job, nil, artworkSample{}, c.ctx.Err())
 		}
 	}
 }
 
-func (c *Cache) finish(job loadJob, img image.Image, sample artworkSample, loadErr error) {
+func (c *Cache) networkWorker() {
+	defer c.workers.Done()
+	for {
+		job, ok := c.networkJobs.pop(c.ctx)
+		if !ok {
+			return
+		}
+		if c.dropIfStale(job) {
+			continue
+		}
+		// A refresh always resamples: the cover may have changed.
+		needSample := job.kind == refreshJob || c.needsSample(job.key.url)
+		img, sample, err := c.load(c.ctx, job.key.url, job.key.size, needSample)
+		epoch := c.diskEpoch.Load()
+		var shown bool
+		if job.kind == refreshJob {
+			shown = c.finishRefresh(job, img, sample, err)
+		} else {
+			shown = c.finish(job, img, sample, err)
+		}
+		// written after it is shown: encoding a large cover takes long enough to see
+		if shown {
+			// a Clear that came after the cover was shown must not find it written back
+			if diskErr := c.writeDiskArtwork(job.key, img, sample); diskErr != nil || c.diskEpoch.Load() != epoch {
+				c.removeDiskArtwork(job.key)
+			}
+		}
+	}
+}
+
+func (c *Cache) loadPaletteFromDisk(job *loadJob) {
+	sample, hit := c.readDiskPalette(job.key.url)
 	c.mu.Lock()
-	generation, current := c.pending[job.key]
-	if !current || generation != job.generation {
+	if c.samplePending[job.key.url] != job {
 		c.mu.Unlock()
 		return
 	}
-	delete(c.pending, job.key)
-	delete(c.pendingURL, job.key.url)
+	delete(c.samplePending, job.key.url)
 	if c.ctx.Err() != nil {
 		c.mu.Unlock()
 		return
+	}
+	if hit {
+		c.putSampleLocked(job.key.url, sample)
+		invalidate := c.invalidate
+		c.mu.Unlock()
+		if invalidate != nil {
+			invalidate()
+		}
+		return
+	}
+	if c.pendingURL[job.key.url] == nil {
+		c.enqueueArtworkLocked(job.key)
+	}
+	c.mu.Unlock()
+}
+
+// finish takes a loaded cover in and reports whether it was, so a cover forgotten meanwhile is not kept.
+func (c *Cache) finish(job *loadJob, img image.Image, sample artworkSample, loadErr error) bool {
+	c.mu.Lock()
+	if c.pending[job.key] != job {
+		c.mu.Unlock()
+		return false
+	}
+	delete(c.pending, job.key)
+	if c.pendingURL[job.key.url] == job {
+		delete(c.pendingURL, job.key.url)
+	}
+	if c.ctx.Err() != nil {
+		c.mu.Unlock()
+		return false
 	}
 	invalidate := c.invalidate
 	if loadErr != nil || img == nil {
@@ -324,7 +586,7 @@ func (c *Cache) finish(job loadJob, img image.Image, sample artworkSample, loadE
 		if invalidate != nil {
 			invalidate()
 		}
-		return
+		return false
 	}
 	delete(c.failedURL, job.key.url)
 	for key := range c.failed {
@@ -335,19 +597,54 @@ func (c *Cache) finish(job loadJob, img image.Image, sample artworkSample, loadE
 	if sample.ready {
 		c.putSampleLocked(job.key.url, sample)
 	}
-	bounds := img.Bounds()
-	byteSize := bounds.Dx() * bounds.Dy() * 4
-	entry := &cacheEntry{key: job.key, op: paint.NewImageOp(img), bytes: byteSize}
-	entry.lru = c.lru.PushFront(entry)
-	c.entries[job.key] = entry
-	c.bytes += byteSize
-	for c.bytes > c.maxBytes && c.lru.Len() > 1 {
-		oldest := c.lru.Back().Value.(*cacheEntry)
-		c.removeLocked(oldest)
-	}
+	c.storeLocked(job.key, img)
 	c.mu.Unlock()
 	if invalidate != nil {
 		invalidate()
+	}
+	return true
+}
+
+// finishRefresh swaps a refreshed cover in and reports whether it did. A failed refresh keeps the old one.
+func (c *Cache) finishRefresh(job *loadJob, img image.Image, sample artworkSample, loadErr error) bool {
+	c.mu.Lock()
+	if c.refreshing[job.key] != job {
+		c.mu.Unlock()
+		return false
+	}
+	delete(c.refreshing, job.key)
+	if c.ctx.Err() != nil || loadErr != nil || img == nil || c.entries[job.key] == nil {
+		c.mu.Unlock()
+		return false
+	}
+	if sample.ready {
+		c.putSampleLocked(job.key.url, sample)
+	}
+	c.storeLocked(job.key, img)
+	invalidate := c.invalidate
+	c.mu.Unlock()
+	if invalidate != nil {
+		invalidate()
+	}
+	return true
+}
+
+func (c *Cache) storeLocked(key cacheKey, img image.Image) {
+	bounds := img.Bounds()
+	byteSize := bounds.Dx() * bounds.Dy() * 4
+	if entry := c.entries[key]; entry != nil {
+		c.bytes += byteSize - entry.bytes
+		entry.op, entry.bytes = paint.NewImageOp(img), byteSize
+		c.lru.MoveToFront(entry.lru)
+	} else {
+		entry := &cacheEntry{key: key, op: paint.NewImageOp(img), bytes: byteSize}
+		entry.lru = c.lru.PushFront(entry)
+		c.entries[key] = entry
+		c.bytes += byteSize
+	}
+	for c.bytes > c.maxBytes && c.lru.Len() > 1 {
+		oldest := c.lru.Back().Value.(*cacheEntry)
+		c.removeLocked(oldest)
 	}
 }
 
@@ -426,46 +723,30 @@ func (c *Cache) loadCollage(ctx context.Context, urls [4]string, size int, needS
 
 func (c *Cache) loadSource(ctx context.Context, rawURL string) (image.Image, error) {
 	var reader io.ReadCloser
-	if filepath.IsAbs(rawURL) {
-		// the local provider hands out the cover path itself, which url.Parse would
-		// mangle at the first '?' or '%'
-		file, err := os.Open(rawURL)
+	path, local, err := localArtworkPath(rawURL)
+	if err != nil {
+		return nil, err
+	}
+	if local {
+		file, err := os.Open(path)
 		if err != nil {
 			return nil, err
 		}
 		reader = file
 	} else {
-		parsed, err := url.Parse(rawURL)
+		request, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
 		if err != nil {
 			return nil, err
 		}
-		switch parsed.Scheme {
-		case "file":
-			if parsed.Host != "" && parsed.Host != "localhost" {
-				return nil, errors.New("file artwork host is not local")
-			}
-			file, err := os.Open(parsed.Path)
-			if err != nil {
-				return nil, err
-			}
-			reader = file
-		case "http", "https":
-			request, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
-			if err != nil {
-				return nil, err
-			}
-			response, err := c.client.Do(request)
-			if err != nil {
-				return nil, err
-			}
-			if response.StatusCode < 200 || response.StatusCode >= 300 {
-				_ = response.Body.Close()
-				return nil, errors.New("artwork request failed: " + response.Status)
-			}
-			reader = response.Body
-		default:
-			return nil, errors.New("unsupported artwork URL")
+		response, err := c.client.Do(request)
+		if err != nil {
+			return nil, err
 		}
+		if response.StatusCode < 200 || response.StatusCode >= 300 {
+			_ = response.Body.Close()
+			return nil, errors.New("artwork request failed: " + response.Status)
+		}
+		reader = response.Body
 	}
 	defer reader.Close()
 	img, _, err := image.Decode(io.LimitReader(reader, maxSourceBytes+1))
@@ -473,6 +754,47 @@ func (c *Cache) loadSource(ctx context.Context, rawURL string) (image.Image, err
 		return nil, err
 	}
 	return img, nil
+}
+
+// isLocalArtwork reports a cover made only from local files. It loads on a
+// disk worker and skips the disk cache: the files are already on disk, and
+// caching would keep showing a cover file the user has since replaced.
+func isLocalArtwork(rawURL string) bool {
+	if urls, collage := ParseCollage(rawURL); collage {
+		for _, source := range urls {
+			if !isLocalSource(source) {
+				return false
+			}
+		}
+		return true
+	}
+	return isLocalSource(rawURL)
+}
+
+func isLocalSource(rawURL string) bool {
+	_, local, err := localArtworkPath(rawURL)
+	return err == nil && local
+}
+
+func localArtworkPath(rawURL string) (string, bool, error) {
+	if filepath.IsAbs(rawURL) {
+		return rawURL, true, nil
+	}
+	parsed, err := url.Parse(rawURL)
+	if err != nil {
+		return "", false, err
+	}
+	switch parsed.Scheme {
+	case "file":
+		if parsed.Host != "" && parsed.Host != "localhost" {
+			return "", false, errors.New("file artwork host is not local")
+		}
+		return parsed.Path, true, nil
+	case "http", "https":
+		return "", false, nil
+	default:
+		return "", false, errors.New("unsupported artwork URL")
+	}
 }
 
 func downscale(source image.Image, size int) image.Image {

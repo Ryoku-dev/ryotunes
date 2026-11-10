@@ -21,6 +21,7 @@ import (
 	"github.com/ryoku-dev/ryotunes/internal/client/ui/act"
 	"github.com/ryoku-dev/ryotunes/internal/client/ui/env"
 	"github.com/ryoku-dev/ryotunes/internal/client/ui/look"
+	"github.com/ryoku-dev/ryotunes/internal/client/ui/widgets"
 	"github.com/ryoku-dev/ryotunes/internal/model"
 	"github.com/ryoku-dev/ryotunes/internal/protocol"
 )
@@ -102,13 +103,16 @@ func (lyrics *Lyrics) Refresh(e *env.Env) {
 	lyrics.fetch(e, lyrics.trackID, lyrics.requestedID)
 }
 
-// Layout draws lyrics in the typography and follow mode of their host.
-func (lyrics *Lyrics) Layout(gtx layout.Context, e *env.Env, size LyricsSize) layout.Dimensions {
+// Layout draws lyrics in the typography and follow mode of their host, the
+// document inside outer and the host's inset; an empty state takes the area.
+func (lyrics *Lyrics) Layout(gtx layout.Context, e *env.Env, size LyricsSize, outer layout.Inset) layout.Dimensions {
 	lyrics.ensure(gtx, e)
 	lyrics.romanized = settingEnabled(e.Store.Snapshot().Settings, model.SettingLyricsRomanize, false)
 	var dims layout.Dimensions
 	if size == LyricsCompact {
 		dims = lyrics.layoutCompact(gtx, e)
+	} else if state, shown := lyrics.layoutState(gtx, e); shown {
+		dims = state
 	} else {
 		inset := layout.Inset{Top: 13, Bottom: 13}
 		if size == LyricsPanel {
@@ -116,8 +120,10 @@ func (lyrics *Lyrics) Layout(gtx layout.Context, e *env.Env, size LyricsSize) la
 		} else {
 			inset.Left, inset.Right = 21, 21
 		}
-		dims = inset.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-			return lyrics.layoutDocument(gtx, e, size)
+		dims = outer.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+			return inset.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+				return lyrics.layoutDocument(gtx, e, size)
+			})
 		})
 	}
 	lyrics.scheduleBoundary(gtx, e, size)
@@ -331,36 +337,35 @@ func (lyrics *Lyrics) scheduleBoundary(gtx layout.Context, e *env.Env, size Lyri
 	gtx.Execute(op.InvalidateCmd{At: gtx.Now.Add(delay)})
 }
 
+// layoutState draws the empty or failed state, which owns its spacing, in the
+// whole area, and reports whether one applied.
+func (lyrics *Lyrics) layoutState(gtx layout.Context, e *env.Env) (layout.Dimensions, bool) {
+	switch {
+	case e.Store.Snapshot().Playback.Now == nil:
+	case lyrics.lyrics == nil && lyrics.loading:
+		return layout.Dimensions{}, false
+	case lyrics.lyrics == nil && lyrics.err != "":
+		lyrics.retry.Kind = kit.PlaqueLine
+		lyrics.retry.Icon = look.Icon.Refresh
+		lyrics.retry.Label = "Try again"
+		dims := widgets.EmptyState(e, look.Icon.Lyrics, "Lyrics could not be loaded", lyrics.err, &lyrics.retry)(gtx)
+		if lyrics.retry.Clicked(gtx) {
+			lyrics.Refresh(e)
+		}
+		return dims, true
+	case lyrics.lyrics == nil:
+	case lyrics.lyrics.Instrumental:
+		return widgets.EmptyState(e, look.Icon.Lyrics, "No lyrics for this track", "This recording is instrumental.")(gtx), true
+	case len(lyrics.lyrics.Lines) == 0:
+	default:
+		return layout.Dimensions{}, false
+	}
+	return widgets.EmptyState(e, look.Icon.Lyrics, "No lyrics for this track", "")(gtx), true
+}
+
 func (lyrics *Lyrics) layoutDocument(gtx layout.Context, e *env.Env, size LyricsSize) layout.Dimensions {
-	if e.Store.Snapshot().Playback.Now == nil {
-		empty := kit.Empty{Icon: look.Icon.Lyrics, Title: "No lyrics for this track"}
-		return empty.Layout(gtx, e.Th.Theme)
-	}
 	if lyrics.lyrics == nil {
-		if lyrics.loading {
-			return lyricsCentered(gtx, e, "Resolving lyrics", lyricsTrackProof(e))
-		}
-		if lyrics.err != "" {
-			lyrics.retry.Kind = kit.PlaqueLine
-			lyrics.retry.Icon = look.Icon.Refresh
-			lyrics.retry.Label = "Try again"
-			empty := kit.Empty{Icon: look.Icon.Lyrics, Title: "Lyrics could not be loaded", Body: lyrics.err, Actions: []*kit.Plaque{&lyrics.retry}}
-			dims := empty.Layout(gtx, e.Th.Theme)
-			if lyrics.retry.Clicked(gtx) {
-				lyrics.Refresh(e)
-			}
-			return dims
-		}
-		empty := kit.Empty{Icon: look.Icon.Lyrics, Title: "No lyrics for this track"}
-		return empty.Layout(gtx, e.Th.Theme)
-	}
-	if lyrics.lyrics.Instrumental {
-		empty := kit.Empty{Icon: look.Icon.Lyrics, Title: "No lyrics for this track", Body: "This recording is instrumental."}
-		return empty.Layout(gtx, e.Th.Theme)
-	}
-	if len(lyrics.lyrics.Lines) == 0 {
-		empty := kit.Empty{Icon: look.Icon.Lyrics, Title: "No lyrics for this track"}
-		return empty.Layout(gtx, e.Th.Theme)
+		return lyricsCentered(gtx, e, "Resolving lyrics", lyricsTrackProof(e))
 	}
 	source := strings.TrimSpace(lyrics.lyrics.Source)
 	if source == "" {
@@ -678,6 +683,7 @@ func (lyrics *Lyrics) lineProgress(index int) float32 {
 
 func (lyrics *Lyrics) layoutCompact(gtx layout.Context, e *env.Env) layout.Dimensions {
 	if lyrics.lyrics == nil || lyrics.lyrics.Instrumental || !lyrics.lyrics.Synced || len(lyrics.lyrics.Lines) == 0 {
+		// The mini stage is a small square, not a page: no content inset.
 		empty := kit.Empty{Icon: look.Icon.Lyrics, Title: "No lyrics for this track"}
 		return empty.Layout(gtx, e.Th.Theme)
 	}

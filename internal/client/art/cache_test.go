@@ -4,11 +4,77 @@ import (
 	"image"
 	"image/color"
 	"image/png"
+	"net/http"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 	"testing"
 	"time"
 )
+
+func TestRequestSizeRoundsUpToStableLadder(t *testing.T) {
+	cases := map[int]int{
+		0: 32, 1: 32, 32: 32, 33: 48, 64: 64, 65: 96,
+		191: 192, 193: 256, 512: 512, 513: 768, 2049: 2048,
+	}
+	for input, want := range cases {
+		if got := RequestSize(input); got != want {
+			t.Fatalf("RequestSize(%d) = %d, want %d", input, got, want)
+		}
+	}
+}
+
+func TestCacheHitsDoNotAllocate(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "cover.png")
+	if err := os.WriteFile(path, testCoverPNG(t, false), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cache := New(Options{})
+	defer cache.Close()
+	waitForArtwork(t, cache, path, 96)
+	waitForPalette(t, cache, path)
+	allocations := testing.AllocsPerRun(200, func() {
+		cache.Get(path, 90)
+		cache.Palette(path)
+		cache.Failed(path, 90)
+	})
+	if allocations != 0 {
+		t.Fatalf("cache hit allocations per frame = %v, want 0", allocations)
+	}
+}
+
+func TestSchemeLessArtworkIsNotOpenedFromWorkingDirectory(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "cover.png"), testCoverPNG(t, false), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(dir)
+	var requests atomic.Int32
+	client := &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+		requests.Add(1)
+		return nil, os.ErrInvalid
+	})}
+	changed := make(chan struct{}, 1)
+	cache := New(Options{HTTPClient: client, Invalidate: func() {
+		select {
+		case changed <- struct{}{}:
+		default:
+		}
+	}})
+	defer cache.Close()
+	cache.Get("cover.png", 96)
+	select {
+	case <-changed:
+	case <-time.After(2 * time.Second):
+		t.Fatal("scheme-less artwork did not finish")
+	}
+	if _, ready := cache.Get("cover.png", 96); ready || !cache.Failed("cover.png", 96) {
+		t.Fatalf("scheme-less artwork ready=%v, want a failed load", ready)
+	}
+	if got := requests.Load(); got != 0 {
+		t.Fatalf("network requests = %d", got)
+	}
+}
 
 func TestCacheLoadsLocalCoverFromBarePath(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "Songs ? 100%")

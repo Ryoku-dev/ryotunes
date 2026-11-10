@@ -42,14 +42,16 @@ func (p *page) content(e *env.Env, snapshot state.State) []layout.Widget {
 		return p.children
 	}
 	p.contentKey = key
+	p.stateIndex = -1
 
 	children := make([]layout.Widget, 0, len(p.feed.Sections)+6)
 	children = append(children, p.headerLayout(e, snapshot))
 	if p.loading && !p.loaded {
-		p.children = append(children, widgets.Loading(e, widgets.LoadingGrid))
+		p.children = append(children, widgets.Skeleton(e, widgets.LoadingGrid))
 		return p.children
 	}
 	if p.errorText != "" && !p.loaded {
+		p.stateIndex = len(children)
 		children = append(children, func(gtx layout.Context) layout.Dimensions {
 			dimensions := widgets.Failed(e, p.errorText, &p.retry)(gtx)
 			if p.retry.Clicked(gtx) {
@@ -66,12 +68,14 @@ func (p *page) content(e *env.Env, snapshot state.State) []layout.Widget {
 		children = append(children, p.feedFiltersLayout(e))
 	}
 	if p.loading && p.pendingChip > 0 {
-		p.children = append(children, widgets.Loading(e, widgets.LoadingShelf))
+		p.children = append(children, widgets.Skeleton(e, widgets.LoadingShelf))
 		return p.children
 	}
 	if p.activeChip > 0 {
-		children = append(children, p.feedShelves(e)...)
-		if len(children) == 2 {
+		shelves := p.feedShelves(e)
+		children = append(children, shelves...)
+		if len(shelves) == 0 {
+			p.stateIndex = len(children)
 			children = append(children, widgets.EmptyState(e, look.Icon.Sparkle, "Nothing here yet", ""))
 		}
 		p.children = children

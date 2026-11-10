@@ -34,7 +34,7 @@ func (p *page) layoutData(gtx layout.Context, e *env.Env) layout.Dimensions {
 			p.data.rotate.Label = "Rotate playback identity"
 			return p.data.rotate.Layout(gtx, e.Th.Theme)
 		}),
-		p.settingRow(e.Th, "Playback caches", "Clear cached stream URLs and downloaded audio bytes, and reset the YouTube playback identity.", func(gtx layout.Context) layout.Dimensions {
+		p.settingRow(e.Th, "Caches", "Clear cached stream URLs, downloaded audio bytes and cover art, and reset the YouTube playback identity.", func(gtx layout.Context) layout.Dimensions {
 			p.data.clear.Kind, p.data.clear.Busy = kit.PlaqueDangerLine, p.clearing
 			p.data.clear.Label = "Force clear caches"
 			if p.clearing {
@@ -42,6 +42,9 @@ func (p *page) layoutData(gtx layout.Context, e *env.Env) layout.Dimensions {
 			}
 			if p.data.clear.Clicked(gtx) && !p.clearing {
 				p.clearing = true
+				if e.Art != nil {
+					e.Art.Clear()
+				}
 				act.Call[protocol.ClearCachesResult](e, protocol.MethodClearCaches, protocol.ClearCachesParams{Rotate: new(p.data.rotate.Value)}, func(result protocol.ClearCachesResult, err error) {
 					p.clearing = false
 					if err != nil {
@@ -51,7 +54,7 @@ func (p *page) layoutData(gtx layout.Context, e *env.Env) layout.Dimensions {
 					if !result.VisitorDataRefreshed && p.data.rotate.Value {
 						e.Toast("Caches cleared, offline, playback ID will retry on next play", env.ToastInfo)
 					} else {
-						e.Toast("Playback caches cleared", env.ToastSuccess)
+						e.Toast("Caches cleared", env.ToastSuccess)
 					}
 				})
 			}

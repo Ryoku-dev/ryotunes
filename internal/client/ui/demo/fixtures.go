@@ -48,6 +48,7 @@ type fixtures struct {
 	radio            []model.RadioStation
 	logs             model.LogsResult
 	stats            model.ListeningStats
+	downloadSettings model.DownloadSettings
 	equalizerPresets []model.EQPreset
 }
 
@@ -320,6 +321,24 @@ func makeFixtures(directory string, playing, empty bool) (fixtures, error) {
 	if empty {
 		playback = model.PlaybackSnapshot{Paused: true, Volume: 68}
 		queue = model.QueueSnapshot{CurrentIndex: -1, Repeat: model.RepeatOff}
+		downloads = model.DownloadSnapshot{}
+		playlist.Items = nil
+		album.Items = nil
+		artist.TopSongs = nil
+		artist.Sections = nil
+		tracks = nil
+		cards = nil
+		library = nil
+		feed = model.Feed{}
+		focusFeed = model.Feed{}
+		radio = nil
+		logs.Entries = nil
+		logs.Total, logs.Errors, logs.Warnings = 0, 0, 0
+		stats = model.ListeningStats{Period: model.ListeningWeek}
+		personal, err = state.MarshalPersonal(state.EmptyPersonal())
+		if err != nil {
+			return fixtures{}, err
+		}
 	}
 	snapshot := protocol.Snapshot{
 		Playback: playback,
@@ -333,7 +352,7 @@ func makeFixtures(directory string, playing, empty bool) (fixtures, error) {
 	return fixtures{
 		snapshot: snapshot, tracks: tracks, cards: cards, library: library, feed: feed, focusFeed: focusFeed,
 		playlist: playlist, album: album, artist: artist, lyrics: lyrics, radio: radio, logs: logs, stats: stats,
-		equalizerPresets: equalizerPresets,
+		equalizerPresets: equalizerPresets, downloadSettings: downloadSettings,
 	}, nil
 }
 

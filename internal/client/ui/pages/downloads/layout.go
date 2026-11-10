@@ -43,9 +43,12 @@ func (p *Page) Layout(gtx layout.Context, e *env.Env) layout.Dimensions {
 		if index == 0 {
 			return p.layoutHeader(gtx, e, counts[downloadFilterActive], counts[downloadFilterSaved])
 		}
+		if index == 2 && len(items) == 0 {
+			return p.layoutDownloadSlot(gtx, e, snapshot.Jobs, items, 0)
+		}
 		return layout.Inset{Right: inset, Left: inset}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 			if index == 1 {
-				return p.layoutControls(gtx, e)
+				return p.layoutControls(gtx, e, len(items) == 0)
 			}
 			rowIndex := index - 2
 			slot := func(gtx layout.Context) layout.Dimensions {
@@ -76,7 +79,7 @@ func (p *Page) layoutHeader(gtx layout.Context, e *env.Env, active, saved int) l
 	return p.header.Layout(gtx, e, "Downloads", sentence, nil)
 }
 
-func (p *Page) layoutControls(gtx layout.Context, e *env.Env) layout.Dimensions {
+func (p *Page) layoutControls(gtx layout.Context, e *env.Env, empty bool) layout.Dimensions {
 	p.openFolder.Kind, p.openFolder.Icon, p.openFolder.Label = kit.PlaqueQuiet, look.Icon.Folder, "Open folder"
 	p.clear.Kind, p.clear.Label = kit.PlaqueQuiet, "Clear history"
 	p.settings.Kind, p.settings.Icon, p.settings.Label = kit.PlaqueQuiet, look.Icon.Settings, "Settings"
@@ -97,22 +100,38 @@ func (p *Page) layoutControls(gtx layout.Context, e *env.Env) layout.Dimensions 
 			layout.Rigid(func(gtx layout.Context) layout.Dimensions { return p.settings.Layout(gtx, e.Th.Theme) }),
 		)
 	}
-	return layout.Inset{Top: unit.Dp(21), Bottom: unit.Dp(21)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+	bottom := unit.Dp(21)
+	if empty {
+		bottom = 0
+	}
+	return layout.Inset{Top: unit.Dp(21), Bottom: bottom}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 		return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx, children...)
 	})
 }
 
+// layoutDownloadSlot lays out one row, and the Storage facts beside the first
+// one when wide. With no items the slot is the page state, which arrives
+// without the page inset because it owns its own.
 func (p *Page) layoutDownloadSlot(gtx layout.Context, e *env.Env, jobs []model.DownloadEntry, items []downloadItem, index int) layout.Dimensions {
-	wide := gtx.Constraints.Max.X >= gtx.Dp(1000)
+	empty := len(items) == 0
+	inset := gtx.Dp(look.ContentInset(e.Th.Class))
+	content := gtx.Constraints.Max.X
+	if empty {
+		content -= 2 * inset
+	}
+	wide := content >= gtx.Dp(1000)
 	factsWidth := gtx.Dp(300)
 	gap := gtx.Dp(34)
 	rowWidth := gtx.Constraints.Max.X
 	if wide {
 		rowWidth -= factsWidth + gap
+		if empty {
+			rowWidth -= inset
+		}
 	}
 	row := func(gtx layout.Context) layout.Dimensions {
 		gtx.Constraints.Min.X, gtx.Constraints.Max.X = rowWidth, rowWidth
-		if len(items) == 0 {
+		if empty {
 			if index > 0 {
 				return layout.Dimensions{}
 			}
@@ -120,17 +139,29 @@ func (p *Page) layoutDownloadSlot(gtx layout.Context, e *env.Env, jobs []model.D
 		}
 		return p.layoutItem(gtx, e, items[index], items, jobs)
 	}
+	rowWidget := row
+	if !empty {
+		rowWidget = func(gtx layout.Context) layout.Dimensions {
+			return layout.Inset{Bottom: unit.Dp(4)}.Layout(gtx, row)
+		}
+	}
 	if !wide || index > 0 {
-		return layout.Inset{Bottom: unit.Dp(4)}.Layout(gtx, row)
+		return rowWidget(gtx)
+	}
+	factsInset := layout.Inset{}
+	if empty {
+		factsInset = layout.Inset{Top: look.ContentInset(e.Th.Class), Right: look.ContentInset(e.Th.Class)}
 	}
 	return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Start}.Layout(gtx,
-		layout.Rigid(func(gtx layout.Context) layout.Dimensions { return layout.Inset{Bottom: unit.Dp(4)}.Layout(gtx, row) }),
+		layout.Rigid(rowWidget),
 		layout.Rigid(layout.Spacer{Width: unit.Dp(34)}.Layout),
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			gtx.Constraints.Min.X, gtx.Constraints.Max.X = factsWidth, factsWidth
-			return kit.Section(e.Th.Theme, "Storage", func(gtx layout.Context) layout.Dimensions {
-				return kit.SlabContent(gtx, e.Th.Theme, kit.Facts(e.Th.Theme, downloadFacts(jobs, p.usedBytes)))
-			})(gtx)
+			return factsInset.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+				gtx.Constraints.Min.X, gtx.Constraints.Max.X = factsWidth, factsWidth
+				return kit.Section(e.Th.Theme, "Storage", func(gtx layout.Context) layout.Dimensions {
+					return kit.SlabContent(gtx, e.Th.Theme, kit.Facts(e.Th.Theme, downloadFacts(jobs, p.usedBytes)))
+				})(gtx)
+			})
 		}),
 	)
 }

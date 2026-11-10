@@ -54,7 +54,7 @@ func (panel *RightPanel) Layout(gtx layout.Context, e *env.Env) layout.Dimension
 		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
 			switch current {
 			case env.PanelLyrics:
-				return panel.lyrics.Layout(gtx, e, LyricsPanel)
+				return panel.lyrics.Layout(gtx, e, LyricsPanel, layout.Inset{})
 			case env.PanelListen:
 				return panel.together.Layout(gtx, e)
 			default:

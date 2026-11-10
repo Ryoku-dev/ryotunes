@@ -12,7 +12,7 @@ It reports the installed package, session, processes and runtime dependencies wi
 
 **Symptom:** Tracks are skipped as unavailable, or the error says that YouTube rejected the stream link or bot-gated every playback client.
 
-**Fix:** Open Settings, then Storage, and choose **Force clear caches**. This removes stale stream and lyric caches, mpv audio cache data and the stored playback token so Ryotunes can obtain a new playback identity. It preserves accounts, library data, history and artwork. Try the track again after the action finishes.
+**Fix:** Open Settings, then Storage, and choose **Force clear caches**. This removes stale stream and lyric caches, mpv audio cache data, saved covers and the stored playback token so Ryotunes can obtain a new playback identity. It preserves accounts, library data and history; covers load again from the network. Try the track again after the action finishes.
 
 If YouTube Music shows signed out, press Sign in. Ryotunes reads the session from the browser it came from again; when the browser is still signed in to the same account, nothing else is asked.
 

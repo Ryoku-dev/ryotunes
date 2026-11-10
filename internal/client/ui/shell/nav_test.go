@@ -49,6 +49,14 @@ func TestParseHomeRoutePreservesChipParams(t *testing.T) {
 	}
 }
 
+func TestRelaunchReopensLikedSongsTab(t *testing.T) {
+	liked := env.Route{Kind: env.RouteLibrary, Params: "songs", Title: "Liked songs"}
+	route := initialRoute(persistedRoute(liked), Options{})
+	if route.Kind != env.RouteLibrary || route.Params != "songs" {
+		t.Fatalf("relaunched route = %#v, want Library songs", route)
+	}
+}
+
 func TestNavigatorBackClosesNowPlayingFirst(t *testing.T) {
 	nav := newNavigator(env.Route{Kind: env.RouteHome}, env.PanelNone, false, nil)
 	nav.ToggleNowPlaying()

@@ -8,6 +8,7 @@ Ryotunes keeps the 1.x data location and schema so rebuilding the application do
 |---|---|---|
 | Data | `$XDG_DATA_HOME/dev.ryoku.ryotunes` | `$HOME/.local/share/dev.ryoku.ryotunes` |
 | Playback cache | `$XDG_CACHE_HOME/dev.ryoku.ryotunes/audio` | `$HOME/.cache/dev.ryoku.ryotunes/audio` |
+| Cover art cache (client) | `$XDG_CACHE_HOME/ryotunes/art` | `$HOME/.cache/ryotunes/art`; covers stay in memory only when neither resolves |
 | User configuration | `$XDG_CONFIG_HOME/ryotunes` | `$HOME/.config/ryotunes` |
 | State and diagnostics | `$XDG_STATE_HOME/ryotunes` | `$HOME/.local/state/ryotunes` |
 | Runtime socket, FIFOs and short-lived browser cookie store copies | `$XDG_RUNTIME_DIR/ryotunes` | `/tmp/ryotunes-<uid>` |
@@ -115,6 +116,6 @@ Provider packages may add an auth/session key only through `provider.KV`; such a
 | `spotify/1x-migrated` | durable marker | Written once 1.x's `spotify/spotify/credentials.json` was read, so a sign out is never undone by migrating again. 2.x never writes the 1.x files; sign out removes 1.x's credentials too. |
 | `tidal/*.mpd` | private, replaceable | Temporary decoded TIDAL DASH manifests. |
 
-Playback bytes live under the cache directory's `audio/`, not the data directory. `ClearCaches` empties `stream_url_cache`, `lyrics_cache`, `potoken_session`, and every child of `audio/`; it preserves local and playlist artwork, history, accounts, and radio metadata.
+Playback bytes live under the cache directory's `audio/`, not the data directory. `ClearCaches` empties `stream_url_cache`, `lyrics_cache`, `potoken_session`, and every child of `audio/`; it preserves local and playlist artwork, history, accounts, and radio metadata. The client's Force clear caches also empties its cover art cache. Cached covers are JPEG or PNG files named by a digest of URL and size, bounded at 256 MB by least recent use, and fetched again in the background once they are 30 days old.
 
 All application-owned file replacement uses a temporary file in the destination directory, `fsync`, and rename. Custom playlist covers are accepted only from regular JPEG/PNG files no larger than 8 MiB. Automatic playlist artwork uses the first four distinct nonempty track thumbnails in order: zero produces no art, one to three use the first cover, and exactly four produce `ryotunes-collage:` followed by a JSON array of those four URLs.

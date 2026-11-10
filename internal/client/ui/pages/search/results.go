@@ -15,13 +15,23 @@ import (
 	"github.com/ryoku-dev/ryotunes/internal/model"
 )
 
-func (p *page) contentWidgets(e *env.Env, width int) []layout.Widget {
+// contentWidgets returns the selected tab's rows, and whether its only row is
+// a page state that owns its spacing.
+func (p *page) contentWidgets(e *env.Env, width int) ([]layout.Widget, bool) {
 	if p.query == "" {
-		return []layout.Widget{widgets.EmptyState(e, look.Icon.Search, "Search Ryotunes", "Use the search field above for a song, album, artist, or playlist.")}
+		return []layout.Widget{widgets.EmptyState(e, look.Icon.Search, "Search Ryotunes", "Use the search field above for a song, album, artist, or playlist.")}, true
 	}
 	switch p.selected {
 	case 0:
-		return []layout.Widget{p.mixedLayout(e)}
+		switch {
+		case p.mixed.loading && !p.mixed.loaded:
+			return []layout.Widget{loadingSearch(e, widgets.LoadingHero)}, false
+		case p.mixed.error != "" && !p.mixed.loaded:
+			return []layout.Widget{widgets.Failed(e, p.mixed.error, &p.retry)}, true
+		case mixedCount(p.mixed.result) == 0:
+			return []layout.Widget{noResults(e, p.query)}, true
+		}
+		return []layout.Widget{p.mixedLayout(e)}, false
 	case 1:
 		return p.trackWidgets(e)
 	default:
@@ -31,15 +41,6 @@ func (p *page) contentWidgets(e *env.Env, width int) []layout.Widget {
 
 func (p *page) mixedLayout(e *env.Env) layout.Widget {
 	return func(gtx layout.Context) layout.Dimensions {
-		switch {
-		case p.mixed.loading && !p.mixed.loaded:
-			return loadingSearch(e, widgets.LoadingHero)(gtx)
-		case p.mixed.error != "" && !p.mixed.loaded:
-			return widgets.Failed(e, p.mixed.error, &p.retry)(gtx)
-		case mixedCount(p.mixed.result) == 0:
-			return noResults(e, p.query)(gtx)
-		}
-
 		children := make([]layout.FlexChild, 0, 8)
 		if len(p.mixed.result.Top) != 0 {
 			top := p.mixed.result.Top[0]
@@ -116,14 +117,14 @@ func (p *page) songPreview(gtx layout.Context, e *env.Env, songs []model.Track) 
 	return layout.Flex{Axis: layout.Vertical}.Layout(gtx, children...)
 }
 
-func (p *page) trackWidgets(e *env.Env) []layout.Widget {
+func (p *page) trackWidgets(e *env.Env) ([]layout.Widget, bool) {
 	switch {
 	case p.tracks.loading && !p.tracks.loaded:
-		return []layout.Widget{loadingSearch(e, widgets.LoadingTable)}
+		return []layout.Widget{loadingSearch(e, widgets.LoadingTable)}, false
 	case p.tracks.error != "" && !p.tracks.loaded:
-		return []layout.Widget{widgets.Failed(e, p.tracks.error, &p.retry)}
+		return []layout.Widget{widgets.Failed(e, p.tracks.error, &p.retry)}, true
 	case len(p.tracks.items) == 0:
-		return []layout.Widget{noResults(e, p.query)}
+		return []layout.Widget{noResults(e, p.query)}, true
 	}
 	items := p.tracks.items
 	opts := widgets.TrackTableOpts{Columns: widgets.ColArt | widgets.ColArtist | widgets.ColAlbum | widgets.ColPlays, Context: "search", DisplayItems: items}
@@ -137,21 +138,21 @@ func (p *page) trackWidgets(e *env.Env) []layout.Widget {
 	if p.tracks.paging {
 		children = append(children, kit.Text(e.Th.Theme, e.Th.T.Proof, e.Th.R.Fg2, "Loading more songs..."))
 	}
-	return children
+	return children, false
 }
 
-func (p *page) cardWidgets(e *env.Env, index, width int) []layout.Widget {
+func (p *page) cardWidgets(e *env.Env, index, width int) ([]layout.Widget, bool) {
 	if index < 0 || index >= len(p.cards) {
-		return nil
+		return nil, false
 	}
 	state := &p.cards[index]
 	switch {
 	case state.loading && !state.loaded:
-		return []layout.Widget{loadingSearch(e, widgets.LoadingGrid)}
+		return []layout.Widget{loadingSearch(e, widgets.LoadingGrid)}, false
 	case state.error != "" && !state.loaded:
-		return []layout.Widget{widgets.Failed(e, state.error, &p.retry)}
+		return []layout.Widget{widgets.Failed(e, state.error, &p.retry)}, true
 	case len(state.items) == 0:
-		return []layout.Widget{noResults(e, p.query)}
+		return []layout.Widget{noResults(e, p.query)}, true
 	}
 	rows := state.grid.Rows(width, len(state.items))
 	children := make([]layout.Widget, 0, rows+1)
@@ -164,13 +165,14 @@ func (p *page) cardWidgets(e *env.Env, index, width int) []layout.Widget {
 	if state.paging {
 		children = append(children, kit.Text(e.Th.Theme, e.Th.T.Proof, e.Th.R.Fg2, "Loading more..."))
 	}
-	return children
+	return children, false
 }
 
+// loadingSearch is laid out as a result row, so it takes the rows' insets.
 func loadingSearch(e *env.Env, shape widgets.LoadingShape) layout.Widget {
 	return func(gtx layout.Context) layout.Dimensions {
 		return layout.Flex{Axis: layout.Vertical, Alignment: layout.Start}.Layout(gtx,
-			layout.Rigid(widgets.Loading(e, shape)),
+			layout.Rigid(widgets.Skeleton(e, shape)),
 			layout.Rigid(layout.Spacer{Height: unit.Dp(13)}.Layout),
 			layout.Rigid(kit.Text(e.Th.Theme, e.Th.T.Proof, e.Th.R.Fg2, "Resolving songs, artists, albums and playlists...")),
 		)

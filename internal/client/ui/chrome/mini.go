@@ -360,7 +360,7 @@ func miniMoveArea(gtx layout.Context) layout.Dimensions {
 func (mini *Mini) layoutStage(gtx layout.Context, e *env.Env, now *model.PlaybackTrack, side int) layout.Dimensions {
 	gtx.Constraints = layout.Exact(image.Pt(side, side))
 	if mini.showLyrics {
-		return mini.lyrics.Layout(gtx, e, LyricsCompact)
+		return mini.lyrics.Layout(gtx, e, LyricsCompact, layout.Inset{})
 	}
 	return mini.art.Layout(gtx, e, optionalString(now.Thumbnail), image.Pt(side, side), look.Shape{Cut: 7}, e.Th.Motion.Navigate)
 }

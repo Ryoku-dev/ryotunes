@@ -254,7 +254,9 @@ internal/client/
                client lock and preferences
   art/         image loading: http, decode off the UI goroutine, downscale, LRU,
                collage for device playlists, and each cover's palette (vibrant and
-               dominant) behind the accent and the window tint
+               dominant) behind the accent and the window tint; network covers and
+               palettes persist in a 256 MB disk cache under the user cache dir
+               (ryotunes/art), refetched in the background after 30 days
   spectrum/    the visualizer feeds: cava bands and pw-record stereo samples,
                each running only while a visible visualizer wants it
   ui/

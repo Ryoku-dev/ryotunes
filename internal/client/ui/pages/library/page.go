@@ -400,7 +400,11 @@ func (p *Page) layoutTabs(gtx layout.Context, e *env.Env) layout.Dimensions {
 		}
 		return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx, filter)
 	}
-	return p.inset(e, 13, 13, func(gtx layout.Context) layout.Dimensions {
+	bottom := unit.Dp(13)
+	if p.stateFollowsTabs() {
+		bottom = 0
+	}
+	return p.inset(e, 13, bottom, func(gtx layout.Context) layout.Dimensions {
 		if e.Th.Class == look.Compact {
 			return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
@@ -418,6 +422,19 @@ func (p *Page) layoutTabs(gtx layout.Context, e *env.Env) layout.Dimensions {
 			layout.Rigid(actions),
 		)
 	})(gtx)
+}
+
+// stateFollowsTabs reports whether the tab's first element is a page state,
+// which brings its own gap.
+func (p *Page) stateFollowsTabs() bool {
+	switch p.selected {
+	case 0, 2, 3:
+		return len(p.filteredCards) == 0
+	case 1:
+		return len(p.filteredTracks) == 0
+	default:
+		return !p.localLoading && p.localError != "" && len(p.local.Folders)+len(p.local.Songs) == 0
+	}
 }
 
 func (p *Page) inset(e *env.Env, top, bottom unit.Dp, body layout.Widget) layout.Widget {
@@ -472,7 +489,7 @@ func (p *Page) layoutTabElement(gtx layout.Context, e *env.Env, index int) layou
 
 func (p *Page) layoutGridElement(gtx layout.Context, e *env.Env, grid *widgets.Grid, items []model.BrowseItem, index int) layout.Dimensions {
 	if len(items) == 0 {
-		return p.inset(e, 13, 34, widgets.EmptyState(e, look.Icon.Library, p.emptyTitle(e), "Save something and it will appear here."))(gtx)
+		return widgets.EmptyState(e, look.Icon.Library, p.emptyTitle(e), "Save something and it will appear here.")(gtx)
 	}
 	bottom := unit.Dp(0)
 	inner := max(1, gtx.Constraints.Max.X-2*gtx.Dp(look.ContentInset(e.Th.Class)))
@@ -488,7 +505,7 @@ func (p *Page) layoutTrackElement(gtx layout.Context, e *env.Env, items []model.
 		if strings.TrimSpace(p.filter.Text()) != "" {
 			body = "Clear the filter to see every song."
 		}
-		return p.inset(e, 13, 34, widgets.EmptyState(e, look.Icon.HeartOutline, p.emptyTitle(e), body))(gtx)
+		return widgets.EmptyState(e, look.Icon.HeartOutline, p.emptyTitle(e), body)(gtx)
 	}
 	opts := widgets.TrackTableOpts{
 		Columns:       widgets.ColArt | widgets.ColAlbum,
@@ -535,10 +552,10 @@ func (p *Page) localElementCount() int {
 
 func (p *Page) layoutLocalElement(gtx layout.Context, e *env.Env, index int) layout.Dimensions {
 	if p.localLoading && len(p.local.Folders)+len(p.local.Songs) == 0 {
-		return p.inset(e, 13, 34, widgets.Loading(e, widgets.LoadingTable))(gtx)
+		return p.inset(e, 13, 34, widgets.Skeleton(e, widgets.LoadingTable))(gtx)
 	}
 	if p.localError != "" && len(p.local.Folders)+len(p.local.Songs) == 0 {
-		return p.inset(e, 13, 34, widgets.Failed(e, p.localError, &p.retry))(gtx)
+		return widgets.Failed(e, p.localError, &p.retry)(gtx)
 	}
 	if index == 0 {
 		p.addFolder.Kind, p.addFolder.Icon, p.addFolder.Label = kit.PlaqueLine, look.Icon.Add, "Add folder"
@@ -556,25 +573,35 @@ func (p *Page) layoutLocalElement(gtx layout.Context, e *env.Env, index int) lay
 		folderRows = 1
 	}
 	if index < folderRows {
+		// The local empty state below brings its own gap.
+		stateNext := index+1 == folderRows && len(p.filteredTracks) == 0
 		if len(folders) == 0 {
-			return p.inset(e, 0, 21, kit.Text(e.Th.Theme, e.Th.T.Body, e.Th.R.Fg2, "No folders yet. Add the one your music sits in."))(gtx)
+			bottom := unit.Dp(21)
+			if stateNext {
+				bottom = 0
+			}
+			return p.inset(e, 0, bottom, kit.Text(e.Th.Theme, e.Th.T.Body, e.Th.R.Fg2, "No folders yet. Add the one your music sits in."))(gtx)
 		}
-		return p.layoutFolder(gtx, e, folders[index])
+		bottom := unit.Dp(4)
+		if stateNext {
+			bottom = 0
+		}
+		return p.layoutFolder(gtx, e, folders[index], bottom)
 	}
 	index -= folderRows
 	if len(p.filteredTracks) == 0 {
-		return p.inset(e, 21, 34, widgets.EmptyState(e, look.Icon.Folder, "No local music yet", "Add or rescan a folder that contains music."))(gtx)
+		return widgets.EmptyState(e, look.Icon.Folder, "No local music yet", "Add or rescan a folder that contains music.")(gtx)
 	}
 	return p.layoutTrackElement(gtx, e, p.filteredTracks, p.filteredIndices, "local", "Local files", &p.localTracks, index)
 }
 
-func (p *Page) layoutFolder(gtx layout.Context, e *env.Env, folder string) layout.Dimensions {
+func (p *Page) layoutFolder(gtx layout.Context, e *env.Env, folder string, bottom unit.Dp) layout.Dimensions {
 	actions := p.folders[folder]
 	actions.rescan.Kind, actions.rescan.Icon, actions.rescan.Label = kit.PlaqueQuiet, look.Icon.Refresh, "Rescan"
 	actions.rescan.Busy = p.localLoading
 	actions.remove.Kind, actions.remove.Icon, actions.remove.Label = kit.PlaqueDangerLine, look.Icon.Remove, "Remove"
 	count := folderTrackCount(folder, p.local.Songs)
-	return p.inset(e, 0, 4, func(gtx layout.Context) layout.Dimensions {
+	return p.inset(e, 0, bottom, func(gtx layout.Context) layout.Dimensions {
 		return kit.SlabContent(gtx, e.Th.Theme, func(gtx layout.Context) layout.Dimensions {
 			return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
 				layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
