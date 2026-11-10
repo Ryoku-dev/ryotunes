@@ -319,6 +319,7 @@ func makeFixtures(directory string, playing, empty bool) (fixtures, error) {
 	})
 	playback := model.PlaybackSnapshot{Now: &now, Paused: !playing, Position: 105, Duration: 198, Volume: 68}
 	if empty {
+		equalizer = eq.Default()
 		playback = model.PlaybackSnapshot{Paused: true, Volume: 68}
 		queue = model.QueueSnapshot{CurrentIndex: -1, Repeat: model.RepeatOff}
 		downloads = model.DownloadSnapshot{}

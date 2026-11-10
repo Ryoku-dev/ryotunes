@@ -159,6 +159,47 @@ func TestEscapeClosesMediumSidebarSheetBeforeOtherSheets(t *testing.T) {
 	}
 }
 
+func TestEscapeLeavesTheEqualizerOnlyAfterEverythingAboveIt(t *testing.T) {
+	nav := newNavigator(env.Route{Kind: env.RouteHome}, env.PanelNone, false, nil)
+	nav.Push(env.Route{Kind: env.RouteEqualizer})
+	nav.ToggleNowPlaying()
+	shell := &uiShell{nav: nav, pages: map[string]env.Page{}}
+	e := &env.Env{Nav: nav, Overlays: new(look.Overlays)}
+
+	shell.escape(layout.Context{}, e)
+	if nav.NowPlaying() || nav.Current().Kind != env.RouteEqualizer {
+		t.Fatalf("first Escape: now playing %v over %q, want only now playing closed", nav.NowPlaying(), nav.Current().Kind)
+	}
+	shell.currentMini = true
+	shell.escape(layout.Context{}, e)
+	if nav.Current().Kind != env.RouteEqualizer {
+		t.Fatal("Escape in the mini window left the main window's equalizer")
+	}
+	shell.currentMini = false
+	shell.escape(layout.Context{}, e)
+	if nav.Current().Kind != env.RouteHome {
+		t.Fatalf("Escape on the equalizer went to %q, want back to where it was opened", nav.Current().Kind)
+	}
+	shell.escape(layout.Context{}, e)
+	if nav.Current().Kind != env.RouteHome {
+		t.Fatalf("Escape on home navigated to %q", nav.Current().Kind)
+	}
+}
+
+func TestLeavingAnEqualizerRestoredAtLaunchOpensSoundSettings(t *testing.T) {
+	nav := newNavigator(parseRoute(persistedRoute(env.Route{Kind: env.RouteEqualizer})), env.PanelNone, false, nil)
+	shell := &uiShell{nav: nav, pages: map[string]env.Page{}}
+
+	shell.escape(layout.Context{}, &env.Env{Nav: nav, Overlays: new(look.Overlays)})
+
+	if current := nav.Current(); current.Kind != env.RouteSettings || current.Params != "sound" {
+		t.Fatalf("leaving the first page's equalizer went to %#v, want Settings at Sound", current)
+	}
+	if nav.CanBack() {
+		t.Fatal("the equalizer stayed in the history behind Settings")
+	}
+}
+
 func TestEffectiveWidthKeepsDefaultWindowExpandedAtSupportedZoom(t *testing.T) {
 	preferences := state.DefaultClientPreferences()
 	for _, zoom := range []int{100, 110} {

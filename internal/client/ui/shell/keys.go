@@ -109,6 +109,10 @@ func (s *uiShell) escape(gtx layout.Context, e *env.Env) {
 	}
 	if e.Nav.NowPlaying() {
 		e.Nav.ToggleNowPlaying()
+		return
+	}
+	if page, ok := s.page(e.Nav.Current()).(env.Leaver); ok && !s.currentMini {
+		page.Leave(e)
 	}
 }
 

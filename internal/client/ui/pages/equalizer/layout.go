@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"image"
 	"image/color"
+	"slices"
 	"strings"
 
 	"gioui.org/layout"
@@ -67,6 +68,9 @@ func (p *Page) Layout(gtx layout.Context, e *env.Env) layout.Dimensions {
 }
 
 func (p *Page) handleTitleActions(gtx layout.Context, e *env.Env) {
+	if p.back.Clicked(gtx) {
+		p.Leave(e)
+	}
 	if p.presetButton.Clicked(gtx) {
 		p.openPresetMenu(gtx, e)
 	}
@@ -116,15 +120,23 @@ func (p *Page) layoutTitle(gtx layout.Context, e *env.Env) layout.Dimensions {
 			layout.Rigid(func(gtx layout.Context) layout.Dimensions { return p.reset.Layout(gtx, e.Th.Theme) }),
 		)
 	}
+	p.back.Kind, p.back.Small, p.back.Icon, p.back.Description = kit.PlaqueQuiet, true, look.Icon.Back, "Back"
+	title := func(gtx layout.Context) layout.Dimensions {
+		return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions { return p.back.Layout(gtx, e.Th.Theme) }),
+			layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
+			layout.Rigid(kit.Text(e.Th.Theme, e.Th.T.Section, e.Th.R.Fg, "Equalizer")),
+		)
+	}
 	var dimensions layout.Dimensions
 	if gtx.Constraints.Max.X >= gtx.Dp(760) {
 		dimensions = layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
-			layout.Flexed(1, kit.Text(e.Th.Theme, e.Th.T.Section, e.Th.R.Fg, "Equalizer")),
+			layout.Flexed(1, title),
 			layout.Rigid(controls),
 		)
 	} else {
 		dimensions = layout.Flex{Axis: layout.Vertical}.Layout(gtx,
-			layout.Rigid(kit.Text(e.Th.Theme, e.Th.T.Section, e.Th.R.Fg, "Equalizer")),
+			layout.Rigid(title),
 			layout.Rigid(layout.Spacer{Height: unit.Dp(13)}.Layout),
 			layout.Rigid(controls),
 		)
@@ -180,20 +192,32 @@ func (p *Page) layoutStrip(gtx layout.Context, e *env.Env) layout.Dimensions {
 		p.stripSelection.Set(gtx, float32(selected))
 	}
 	selectionAt := p.stripSelection.Value(gtx)
-	count := len(p.working.Bands) + 2
-	return p.layoutStripScroller(gtx, e, count, func(gtx layout.Context, index int) layout.Dimensions {
-		switch {
-		case index == 0:
+	columns := p.unfoldBands(gtx, e)
+
+	// the add tile is measured first so the bands spread over exactly what it leaves,
+	// and it stays in reach while they scroll
+	addGTX := gtx
+	addGTX.Constraints.Min = image.Point{}
+	addMacro := op.Record(gtx.Ops)
+	add := p.layoutAdd(addGTX, e)
+	addCall := addMacro.Stop()
+
+	stripGTX := gtx
+	stripGTX.Constraints.Min.X = 0
+	stripGTX.Constraints.Max.X = max(0, gtx.Constraints.Max.X-add.Size.X)
+	strip := p.layoutStripScroller(stripGTX, e, len(p.working.Bands)+1, columns, func(gtx layout.Context, index int) layout.Dimensions {
+		if index == 0 {
 			return p.layoutPreamp(gtx, e)
-		case index == count-1:
-			return p.layoutAdd(gtx, e)
-		default:
-			return p.layoutBand(gtx, e, index-1, selectionAt)
 		}
+		return p.layoutBand(gtx, e, index-1, selectionAt)
 	})
+	offset := op.Offset(image.Pt(strip.Size.X, 0)).Push(gtx.Ops)
+	addCall.Add(gtx.Ops)
+	offset.Pop()
+	return layout.Dimensions{Size: image.Pt(strip.Size.X+add.Size.X, max(strip.Size.Y, add.Size.Y))}
 }
 
-func (p *Page) layoutStripScroller(gtx layout.Context, e *env.Env, count int, element layout.ListElement) layout.Dimensions {
+func (p *Page) layoutStripScroller(gtx layout.Context, e *env.Env, count int, columns float32, element layout.ListElement) layout.Dimensions {
 	button := gtx.Dp(unit.Dp(32))
 	gap := gtx.Dp(unit.Dp(8))
 	width := gtx.Constraints.Max.X
@@ -203,9 +227,10 @@ func (p *Page) layoutStripScroller(gtx layout.Context, e *env.Env, count int, el
 		gutter = button + gap
 	}
 	viewport := max(0, width-2*gutter)
+	p.stripPitch = stripPitch(gtx.Metric, viewport, columns)
 
 	stripGTX := gtx
-	stripGTX.Constraints.Min.X, stripGTX.Constraints.Max.X = viewport, viewport
+	stripGTX.Constraints.Min.X, stripGTX.Constraints.Max.X = 0, viewport
 	stripGTX.Constraints.Min.Y = 0
 	stripOffset := op.Offset(image.Pt(gutter, 0)).Push(gtx.Ops)
 	stripDimensions := p.strip.Layout(stripGTX, e.Th, count, element)
@@ -216,7 +241,7 @@ func (p *Page) layoutStripScroller(gtx layout.Context, e *env.Env, count int, el
 		gtx.Execute(op.InvalidateCmd{})
 	}
 	if !showSteps {
-		return layout.Dimensions{Size: gtx.Constraints.Constrain(image.Pt(width, stripDimensions.Size.Y))}
+		return stripDimensions
 	}
 
 	height := max(button, stripDimensions.Size.Y)
@@ -239,27 +264,82 @@ func (p *Page) layoutStripScroller(gtx layout.Context, e *env.Env, count int, el
 	return layout.Dimensions{Size: gtx.Constraints.Constrain(image.Pt(width, height))}
 }
 
-func stripCell(gtx layout.Context, width unit.Dp, selected bool, th *look.Theme, body layout.Widget) layout.Dimensions {
-	widthPx := gtx.Dp(width)
-	gtx.Constraints.Min.X, gtx.Constraints.Max.X = widthPx, widthPx
-	if selected {
-		return kit.Slab(gtx, th.R.Sel, unit.Dp(6), body)
+// A band's controls keep this width however far apart the columns spread,
+// so a wide strip spaces the faders out instead of stretching them.
+const (
+	bandColumn   = unit.Dp(56)
+	bandPitch    = unit.Dp(60)
+	preampColumn = unit.Dp(64)
+	preampGap    = unit.Dp(13)
+)
+
+// stripPitch spreads columns band columns over the strip after the preamp.
+// Past three natural pitches the faders stop reading as one instrument, so the
+// rest stays free; below one the strip scrolls instead.
+func stripPitch(metric unit.Metric, viewport int, columns float32) int {
+	natural := metric.Dp(bandPitch)
+	if columns <= 0 {
+		return natural
 	}
-	return body(gtx)
+	spread := int(float32(viewport-metric.Dp(preampColumn)-metric.Dp(preampGap)) / columns)
+	return min(max(spread, natural), 3*natural)
 }
 
-func movingStripCell(gtx layout.Context, width unit.Dp, index int, selectionAt float32, th *look.Theme, body layout.Widget) layout.Dimensions {
-	widthPx := gtx.Dp(width)
-	gtx.Constraints.Min.X, gtx.Constraints.Max.X = widthPx, widthPx
+// unfoldBands advances every band column's unfold and returns their sum, the
+// number of columns the strip spreads over this frame, so the others narrow
+// smoothly while one unfolds.
+func (p *Page) unfoldBands(gtx layout.Context, e *env.Env) float32 {
+	p.ensureBandControls()
+	p.stripUnfold = slices.Grow(p.stripUnfold[:0], len(p.working.Bands))[:len(p.working.Bands)]
+	var columns float32
+	for index := range p.working.Bands {
+		control := &p.bands[index]
+		control.unfold.Duration = e.Th.Motion.Unfold
+		control.unfold.Ease = anim.EaseChisel
+		if !control.ready {
+			if control.existing {
+				control.unfold.Set(gtx, 1)
+			} else {
+				control.unfold.Set(gtx, 0)
+				control.unfold.Set(gtx, 1)
+			}
+			control.ready = true
+		}
+		progress := control.unfold.Value(gtx)
+		if index == p.removing && progress <= .001 {
+			p.removeComplete = true
+			gtx.Execute(op.InvalidateCmd{})
+			progress = 0
+		}
+		p.stripUnfold[index] = progress
+		columns += progress
+	}
+	return columns
+}
+
+func stripColumn(gtx layout.Context, pitch, index int, selectionAt float32, th *look.Theme, body layout.Widget) layout.Dimensions {
+	content := gtx.Dp(bandColumn)
+	pitch = max(pitch, content)
+	left := (pitch - content) / 2
+	bodyGTX := gtx
+	bodyGTX.Constraints.Min.X, bodyGTX.Constraints.Max.X = content, content
 	macro := op.Record(gtx.Ops)
-	dimensions := body(gtx)
+	dimensions := body(bodyGTX)
 	call := macro.Stop()
-	area := clip.Rect(image.Rectangle{Max: dimensions.Size}).Push(gtx.Ops)
-	x := int((selectionAt - float32(index)) * float32(gtx.Dp(60)))
-	kit.FillCut(gtx.Ops, image.Rect(x, 0, x+widthPx, dimensions.Size.Y), gtx.Dp(6), th.R.Sel)
+	size := image.Pt(pitch, dimensions.Size.Y)
+	area := clip.Rect(image.Rectangle{Max: size}).Push(gtx.Ops)
+	// the sel slab glides a pitch per band, and each column draws its own part of it
+	x := left + int((selectionAt-float32(index))*float32(pitch))
+	kit.FillCut(gtx.Ops, image.Rect(x, 0, x+content, size.Y), gtx.Dp(6), th.R.Sel)
+	offset := op.Offset(image.Pt(left, 0)).Push(gtx.Ops)
 	call.Add(gtx.Ops)
+	offset.Pop()
 	area.Pop()
-	return dimensions
+	return layout.Dimensions{Size: size}
+}
+
+func centered(w layout.Widget) layout.Widget {
+	return func(gtx layout.Context) layout.Dimensions { return layout.Center.Layout(gtx, w) }
 }
 
 func stripFaderHeight(class look.Class) unit.Dp {
@@ -274,19 +354,19 @@ func stripFaderHeight(class look.Class) unit.Dp {
 }
 
 func (p *Page) layoutPreamp(gtx layout.Context, e *env.Env) layout.Dimensions {
-	dimensions := layout.Inset{Right: unit.Dp(13)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-		return stripCell(gtx, 64, false, e.Th, func(gtx layout.Context) layout.Dimensions {
-			return layout.Inset{Top: unit.Dp(8), Bottom: unit.Dp(8)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-				return layout.Flex{Axis: layout.Vertical, Alignment: layout.Middle}.Layout(gtx,
-					layout.Rigid(kit.Text(e.Th.Theme, e.Th.T.MonoSm, e.Th.R.Fg2, look.FormatGain(p.working.Preamp))),
-					layout.Rigid(layout.Spacer{Height: unit.Dp(6)}.Layout),
-					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-						return p.preamp.Layout(gtx, e.Th, p.working.Preamp, look.FaderStyle{Min: model.EQMinPreamp, Max: model.EQMaxPreamp, Reset: 0, Step: .5, Height: stripFaderHeight(e.Th.Class), Label: "Preamp"})
-					}),
-					layout.Rigid(layout.Spacer{Height: unit.Dp(6)}.Layout),
-					layout.Rigid(kit.Text(e.Th.Theme, e.Th.T.Caption, e.Th.R.Fg3, "Pre")),
-				)
-			})
+	dimensions := layout.Inset{Right: preampGap}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+		width := gtx.Dp(preampColumn)
+		gtx.Constraints.Min.X, gtx.Constraints.Max.X = width, width
+		return layout.Inset{Top: unit.Dp(8), Bottom: unit.Dp(8)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+			return layout.Flex{Axis: layout.Vertical, Alignment: layout.Middle}.Layout(gtx,
+				layout.Rigid(centered(kit.Text(e.Th.Theme, e.Th.T.MonoSm, e.Th.R.Fg2, look.FormatGain(p.working.Preamp)))),
+				layout.Rigid(layout.Spacer{Height: unit.Dp(6)}.Layout),
+				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+					return p.preamp.Layout(gtx, e.Th, p.working.Preamp, look.FaderStyle{Min: model.EQMinPreamp, Max: model.EQMaxPreamp, Reset: 0, Step: .5, Height: stripFaderHeight(e.Th.Class), Label: "Preamp"})
+				}),
+				layout.Rigid(layout.Spacer{Height: unit.Dp(6)}.Layout),
+				layout.Rigid(centered(kit.Text(e.Th.Theme, e.Th.T.Caption, e.Th.R.Fg3, "Pre"))),
+			)
 		})
 	})
 	x := dimensions.Size.X - gtx.Dp(7)
@@ -322,64 +402,46 @@ func revealHorizontal(gtx layout.Context, progress float32, body layout.Widget) 
 }
 
 func (p *Page) layoutBand(gtx layout.Context, e *env.Env, index int, selectionAt float32) layout.Dimensions {
-	if index < 0 || index >= len(p.working.Bands) {
+	if index < 0 || index >= len(p.working.Bands) || index >= len(p.stripUnfold) {
 		return layout.Dimensions{}
 	}
-	if index >= len(p.bands) {
-		p.bands = append(p.bands, make([]bandControl, index-len(p.bands)+1)...)
+	progress := p.stripUnfold[index]
+	if index == p.removing && progress <= .001 {
+		return layout.Dimensions{}
 	}
 	control := &p.bands[index]
-	control.unfold.Duration = e.Th.Motion.Unfold
-	control.unfold.Ease = anim.EaseChisel
-	if !control.ready {
-		if control.existing {
-			control.unfold.Set(gtx, 1)
-		} else {
-			control.unfold.Set(gtx, 0)
-			control.unfold.Set(gtx, 1)
-		}
-		control.ready = true
-	}
-	progress := control.unfold.Value(gtx)
-	if index == p.removing && progress <= .001 {
-		p.removeComplete = true
-		gtx.Execute(op.InvalidateCmd{})
-		return layout.Dimensions{}
-	}
 	band := &p.working.Bands[index]
 	selected := index == p.graph.Selected()
-	gainText := " "
+	gainText := " "
 	if band.HasGain() {
 		gainText = look.FormatGain(band.Gain)
 	}
 	return revealHorizontal(gtx, progress, func(gtx layout.Context) layout.Dimensions {
-		return layout.Inset{Right: unit.Dp(4)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-			return movingStripCell(gtx, 56, index, selectionAt, e.Th, func(gtx layout.Context) layout.Dimensions {
-				ink := e.Th.R.Fg2
-				if selected {
-					ink = e.Th.R.OnSel
-				}
-				return layout.Inset{Top: unit.Dp(8), Bottom: unit.Dp(8)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-					dimensions := layout.Flex{Axis: layout.Vertical, Alignment: layout.Middle}.Layout(gtx,
-						layout.Rigid(kit.Text(e.Th.Theme, e.Th.T.MonoSm, ink, gainText)),
-						layout.Rigid(layout.Spacer{Height: unit.Dp(6)}.Layout),
-						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-							return control.fader.Layout(gtx, e.Th, band.Gain, look.FaderStyle{Min: model.EQMinGain, Max: model.EQMaxGain, Reset: 0, Step: .5, Height: stripFaderHeight(e.Th.Class), Label: "Band gain", Disabled: !band.HasGain()})
-						}),
-						layout.Rigid(layout.Spacer{Height: unit.Dp(6)}.Layout),
-						layout.Rigid(kit.Text(e.Th.Theme, e.Th.T.MonoSm, ink, look.FormatFrequency(band.Frequency))),
-						layout.Rigid(layout.Spacer{Height: unit.Dp(3)}.Layout),
-						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-							return p.layoutShapeButton(gtx, e, index, &control.shape, band.Type, ink)
-						}),
-						layout.Rigid(layout.Spacer{Height: unit.Dp(3)}.Layout),
-						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-							return control.q.Layout(gtx, band.Q, model.EQMinQ, model.EQMaxQ, kit.Text(e.Th.Theme, e.Th.T.MonoSm, ink, fmt.Sprintf("Q %.2f", band.Q)))
-						}),
-					)
-					p.consumeBand(gtx, e, index, control)
-					return dimensions
-				})
+		return stripColumn(gtx, p.stripPitch, index, selectionAt, e.Th, func(gtx layout.Context) layout.Dimensions {
+			ink := e.Th.R.Fg2
+			if selected {
+				ink = e.Th.R.OnSel
+			}
+			return layout.Inset{Top: unit.Dp(8), Bottom: unit.Dp(8)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+				dimensions := layout.Flex{Axis: layout.Vertical, Alignment: layout.Middle}.Layout(gtx,
+					layout.Rigid(centered(kit.Text(e.Th.Theme, e.Th.T.MonoSm, ink, gainText))),
+					layout.Rigid(layout.Spacer{Height: unit.Dp(6)}.Layout),
+					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+						return control.fader.Layout(gtx, e.Th, band.Gain, look.FaderStyle{Min: model.EQMinGain, Max: model.EQMaxGain, Reset: 0, Step: .5, Height: stripFaderHeight(e.Th.Class), Label: "Band gain", Disabled: !band.HasGain()})
+					}),
+					layout.Rigid(layout.Spacer{Height: unit.Dp(6)}.Layout),
+					layout.Rigid(centered(kit.Text(e.Th.Theme, e.Th.T.MonoSm, ink, look.FormatFrequency(band.Frequency)))),
+					layout.Rigid(layout.Spacer{Height: unit.Dp(3)}.Layout),
+					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+						return p.layoutShapeButton(gtx, e, index, &control.shape, band.Type, ink)
+					}),
+					layout.Rigid(layout.Spacer{Height: unit.Dp(3)}.Layout),
+					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+						return control.q.Layout(gtx, band.Q, model.EQMinQ, model.EQMaxQ, centered(kit.Text(e.Th.Theme, e.Th.T.MonoSm, ink, fmt.Sprintf("Q %.2f", band.Q))))
+					}),
+				)
+				p.consumeBand(gtx, e, index, control)
+				return dimensions
 			})
 		})
 	})

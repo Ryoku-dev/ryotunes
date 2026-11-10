@@ -48,6 +48,7 @@ type Page struct {
 	presetTag      struct{}
 	presetCommands []int
 
+	back                                     kit.IconPlaque
 	toggle                                   kit.Toggle
 	reset, importButton, exportButton, lower kit.Plaque
 	add                                      kit.Plaque
@@ -63,6 +64,8 @@ type Page struct {
 	stripPrevious       kit.IconPlaque
 	stripNext           kit.IconPlaque
 	stripSteps          bool
+	stripPitch          int
+	stripUnfold         []float32
 	stripSelection      anim.Tween
 	stripSelectionReady bool
 	removing            int

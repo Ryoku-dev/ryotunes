@@ -155,3 +155,8 @@ type Refresher interface {
 type Filterer interface {
 	FocusFilter(gtx layout.Context)
 }
+
+// Leaver is a page Escape leaves, a tool opened from somewhere else.
+type Leaver interface {
+	Leave(e *Env)
+}

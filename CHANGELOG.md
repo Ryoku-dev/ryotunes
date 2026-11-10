@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- The equalizer's bands spread across the whole row instead of bunching up on the left, and each band's gain, frequency and Q sit centred over its fader. With more bands than fit, the row scrolls and + Band stays in view.
+- The equalizer has a back button next to its title, and Escape leaves it too, back to where you opened it from.
 - YouTube Music and SoundCloud stay signed in. Ryotunes follows the session in your browser instead of keeping a copy that goes stale, so YouTube Music is still signed in after days off, and Sign in works again when an old session ran out. SoundCloud's browser session lasts a day unless soundcloud.com is opened, so after a day away, open it or press Sign in once. It only ever adopts the same account.
 - Your Spotify sign-in from Ryotunes 1.x carries over, and Spotify being busy when Ryotunes starts no longer signs you out. TIDAL stays signed in through network trouble, asking again only when TIDAL ends the session.
 - Songs you play in Ryotunes count in your YouTube Music history again, unless Watch history is off in Settings, so Home's recommendations follow what you listen to. A song counts once it actually starts, not when it's skipped past.

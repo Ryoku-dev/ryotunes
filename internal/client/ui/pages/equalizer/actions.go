@@ -19,6 +19,16 @@ import (
 
 const equalizerDragInterval = 80 * time.Millisecond
 
+// Leave goes back to where the equalizer was opened, or to Settings, Sound
+// when it is the first page the window shows and there is no way back.
+func (p *Page) Leave(e *env.Env) {
+	if e.Nav.CanBack() {
+		e.Nav.Back()
+		return
+	}
+	e.Nav.Replace(env.Route{Kind: env.RouteSettings, Title: "Settings", Params: "sound"})
+}
+
 func (p *Page) reconcile(e *env.Env) {
 	current := e.Store.Snapshot().Equalizer
 	if !p.initialized {

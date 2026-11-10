@@ -755,11 +755,15 @@ scrolls with the page.
   strip of faders. Model, presets, the Equalizer APO format and the response
   maths live in `internal/model/equalizer.go` and `internal/eq`.
 
-  - Title row: "Equalizer" `T.Section`; at its right a `kit.Toggle` whose word
-    is "On" or "Bypassed", the preset plaque (a line plaque with the preset's
-    name or "Custom" and a chevron, opening a `look.Overlays` `kit.Menu`: the
+  - Title row: a small quiet back plaque ("Back"), then "Equalizer"
+    `T.Section`; at its right a `kit.Toggle` whose word is "On" or
+    "Bypassed", the preset plaque (a line plaque with the preset's name or
+    "Custom" and a chevron, opening a `look.Overlays` `kit.Menu`: the
     built-ins, a vein, the saved presets, then "Save as preset"), and quiet
-    plaques Import, Export and Reset.
+    plaques Import, Export and Reset. The back plaque, like Escape, goes back
+    to where the equalizer was opened from; when the equalizer is the first
+    page (restored at launch) it opens Settings at Sound instead, so the page
+    always has a way out, also in the compact class whose top bar has no Back.
   - Graph: a stone1 slab (cut 6) `clamp(H × .4, 220, 360)` high. Verticals at
     20, 50, 100, 200, 500, 1k, 2k, 5k, 10k and 20k Hz (vein; labels `T.Mono`
     `fg3` under), horizontals at +12, +6, 0, −6 and −12 dB (0 in `fg3`, the
@@ -778,17 +782,23 @@ scrolls with the page.
     accumulate); a double click on empty graph adds a peak band there while
     fewer than 20 exist; right click opens the band's menu: the seven shapes,
     Enable or Disable, Remove.
-  - Strip (look.HScroller when it overflows): Preamp first (a vertical fader
-    −24 to +12 dB, its value in mono above, "Pre" under), a vein, then a 56
-    column per band: gain in mono above (an en space for shapes without
-    gain), a vertical fader (2 track, a 14 × 3 blade handle; double click
-    resets the gain to 0), the frequency in mono ("1.2k"), a small quiet shape
-    plaque (glyphs drawn in `look`: bell, the two shelves, the two passes,
-    notch, band) that opens the shape menu, and "Q 1.40" in mono that steps
-    with the wheel or a vertical drag. The selected column stands on a sel
-    slab that glides over `Motion.Select`. A last "+" tile adds a peak band in
-    the widest gap; at 20 bands it is disabled with the tip "Twenty bands is
-    the most".
+  - Strip (look.HScroller when it overflows): Preamp first (a 64 column: a
+    vertical fader −24 to +12 dB, its value in mono above, "Pre" under), a
+    vein, then a column per band whose controls stay 56 wide and centred in
+    it: gain in mono above (an en space for shapes without gain), a vertical
+    fader (2 track, a 14 × 3 blade handle; double click resets the gain to
+    0), the frequency in mono ("1.2k"), a small quiet shape plaque (glyphs
+    drawn in `look`: bell, the two shelves, the two passes, notch, band) that
+    opens the shape menu, and "Q 1.40" in mono that steps with the wheel or a
+    vertical drag. Every number is centred over its fader. The band columns
+    share the strip's width so a few bands fill it: at least 60 apart, at
+    most 180, and only when 60 apart does not fit does the strip scroll, with
+    step plaques at its ends. A column unfolding or collapsing counts by its
+    progress, so the others narrow or widen with it. The selected column's
+    controls stand on a sel slab that glides over `Motion.Select`. After the
+    strip, outside the scroller so it is always in reach, a "+ Band" tile
+    adds a peak band in the widest gap; at 20 bands it is disabled with the
+    tip "Twenty bands is the most".
   - Headroom: when the curve's peak is above 0 dB, an amber claim "May clip"
     with the proof "Peaks reach +3.2 dB" and a line plaque "Lower preamp" that
     lowers the preamp by that much. No claim otherwise.
@@ -1128,7 +1138,7 @@ instant.
 | Home now playing card appears / leaves | height unfolds, contents rise 8 / folds | unfold 200, navigate 200 |
 | hover or click the playing art | plate fades in; the glyph morphs; the plate lingers 700 ms after a click | hover in 160, notch 200 |
 | equalizer preset chosen or reset | nodes and curve tween to it | field 320 |
-| equalizer band added / removed | node grows from nothing, its column unfolds / shrinks and collapses | notch 200, unfold 200 |
+| equalizer band added / removed | node grows from nothing, its column unfolds / shrinks and collapses while the other columns narrow / widen with it | notch 200, unfold 200 |
 | equalizer bypassed / on | curve fades to fg3 and its fill out / back | field 320 |
 | a track loads with nothing loaded / the queue empties | the player bar unfolds from the bottom while the panes' bottoms glide up / folds away | unfold 200 |
 | mini resized across landscape and portrait | the two layouts crossfade | field 320 |
@@ -1275,7 +1285,7 @@ can never sign the user out of their browser.
   current list, Ctrl L like, Ctrl R refresh, Ctrl , settings, Ctrl Q quit,
   F11 full screen, Ctrl B fold or show the sidebar, Escape closes the topmost
   thing: overlay or menu, sheet, search suggestions, now playing view, then
-  nothing.
+  leaves the equalizer page the way its back plaque does, then nothing.
 
 ## Windows and lifetime (shell)
 
