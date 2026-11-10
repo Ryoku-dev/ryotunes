@@ -16,19 +16,22 @@ import (
 	"github.com/ryoku-dev/ryotunes/internal/client/art"
 )
 
-// A backdrop is a hint, not a picture: its lightness stays this close to the
-// field's in OKLCH and its colour this muted, so text over it keeps the
-// field's contrast whatever the cover.
+// The backdrop shows the cover, blurred, with its tones pressed into a band
+// around the plane's OKLCH lightness: deep on the side away from the text and
+// shallow toward it, so type keeps the contrast it has on the bare plane
+// whatever the cover. Chroma is capped so a loud cover stays a colour, not a
+// glare.
 const (
-	backdropLightness = .05
-	backdropChroma    = .08
-	backdropOpacity   = .35
-	// how far the field may drift, as it does while a tint tweens, before the
+	backdropDeep    = .16
+	backdropShallow = .05
+	backdropChroma  = .12
+	backdropOpacity = .9
+	// how far the plane may drift, as it does while a tint tweens, before the
 	// cover is toned again
 	backdropRetone = .02
 )
 
-// Backdrop draws a blurred cover faintly over a field and fades between covers.
+// Backdrop draws a cover's blur over a plane and fades between covers.
 type Backdrop struct {
 	shown, leaving backdropLayer
 	// how much of the leaving cover still showed when it began to leave
@@ -40,6 +43,7 @@ type Backdrop struct {
 type backdropLayer struct {
 	source    *image.RGBA
 	lightness float64
+	dark      bool
 	op        paint.ImageOp
 	toned     bool
 }
@@ -63,7 +67,7 @@ func (b *Backdrop) paintSource(gtx layout.Context, theme *Theme, source *image.R
 	} else if source != b.shown.source {
 		b.change(gtx, theme, source)
 	}
-	b.shown.tone(field)
+	b.shown.tone(field, theme.R.Dark)
 	progress := b.fade.Value(gtx)
 	if progress >= 1 {
 		b.leaving = backdropLayer{}
@@ -104,16 +108,16 @@ func (b *Backdrop) change(gtx layout.Context, theme *Theme, source *image.RGBA) 
 	b.fade.Set(gtx, 1)
 }
 
-func (layer *backdropLayer) tone(field color.NRGBA) {
+func (layer *backdropLayer) tone(field color.NRGBA, dark bool) {
 	if layer.source == nil {
 		return
 	}
 	lightness := colorToOKLCH(field).L
-	if layer.toned && math.Abs(layer.lightness-lightness) < backdropRetone {
+	if layer.toned && layer.dark == dark && math.Abs(layer.lightness-lightness) < backdropRetone {
 		return
 	}
-	layer.op = paint.NewImageOp(toneBackdrop(layer.source, lightness))
-	layer.lightness, layer.toned = lightness, true
+	layer.op = paint.NewImageOp(toneBackdrop(layer.source, lightness, dark))
+	layer.lightness, layer.dark, layer.toned = lightness, dark, true
 }
 
 func (layer *backdropLayer) paint(gtx layout.Context, bounds image.Rectangle, opacity float32) {
@@ -127,9 +131,13 @@ func (layer *backdropLayer) paint(gtx layout.Context, bounds image.Rectangle, op
 	alpha.Pop()
 }
 
-// toneBackdrop keeps each pixel's hue but holds its lightness near the
-// field's and mutes its colour.
-func toneBackdrop(source *image.RGBA, lightness float64) *image.RGBA {
+// toneBackdrop keeps each pixel's hue and order of tones but presses its
+// lightness into the band around the plane's and caps its colour.
+func toneBackdrop(source *image.RGBA, lightness float64, dark bool) *image.RGBA {
+	low, high := lightness-backdropShallow, min(lightness+backdropDeep, 1)
+	if dark {
+		low, high = max(lightness-backdropDeep, 0), lightness+backdropShallow
+	}
 	toned := image.NewRGBA(source.Rect)
 	for at := 0; at+3 < len(source.Pix); at += 4 {
 		alpha := source.Pix[at+3]
@@ -140,7 +148,7 @@ func toneBackdrop(source *image.RGBA, lightness float64) *image.RGBA {
 			return uint8(min(float64(channel)*255/float64(alpha)+.5, 255))
 		}
 		pixel := colorToOKLCH(color.NRGBA{R: straight(source.Pix[at]), G: straight(source.Pix[at+1]), B: straight(source.Pix[at+2]), A: 255})
-		pixel.L = lightness + min(max(pixel.L-lightness, -backdropLightness), backdropLightness)
+		pixel.L = low + pixel.L*(high-low)
 		pixel.C = min(pixel.C, backdropChroma)
 		out := oklchToColor(pixel)
 		premultiply := func(channel uint8) uint8 { return uint8((uint32(channel)*uint32(alpha) + 127) / 255) }
@@ -149,7 +157,7 @@ func toneBackdrop(source *image.RGBA, lightness float64) *image.RGBA {
 	return toned
 }
 
-// FieldBackdrop paints a field with a hint of its cover's blur behind body.
+// FieldBackdrop paints a field with its cover's blur behind body.
 func FieldBackdrop(gtx layout.Context, theme *Theme, accent Accent, cuts [4]int, backdrop *Backdrop, cache *art.Cache, cover string, body layout.Widget) layout.Dimensions {
 	record := op.Record(gtx.Ops)
 	dimensions := body(gtx)

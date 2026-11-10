@@ -65,33 +65,70 @@ func TestBackdropComesBackFromDiskAndOldPaletteFilesAreSampledAgain(t *testing.T
 	if err := json.Unmarshal(content, &stored); err != nil {
 		t.Fatal(err)
 	}
-	if len(stored.Backdrop) != accentSampleSize*accentSampleSize*4 {
-		t.Fatalf("rewritten palette file holds %d backdrop bytes, want %d", len(stored.Backdrop), accentSampleSize*accentSampleSize*4)
+	if len(stored.Backdrop) != backdropSize*backdropSize*4 {
+		t.Fatalf("rewritten palette file holds %d backdrop bytes, want %d", len(stored.Backdrop), backdropSize*backdropSize*4)
 	}
 }
 
 func TestBackdropIsASoftBlurOfTheCover(t *testing.T) {
-	sample := image.NewNRGBA(image.Rect(0, 0, accentSampleSize, accentSampleSize))
-	for index := range sample.Pix {
-		sample.Pix[index] = 255
+	cover := image.NewNRGBA(image.Rect(0, 0, 2*backdropSize, 2*backdropSize))
+	for index := range cover.Pix {
+		cover.Pix[index] = 255
 	}
-	// one black column on white
-	for y := range accentSampleSize {
-		sample.Pix[y*sample.Stride+12*4], sample.Pix[y*sample.Stride+12*4+1], sample.Pix[y*sample.Stride+12*4+2] = 0, 0, 0
+	// one thin black line down the middle of a white cover
+	for y := range 2 * backdropSize {
+		for x := backdropSize; x < backdropSize+2; x++ {
+			at := y*cover.Stride + x*4
+			cover.Pix[at], cover.Pix[at+1], cover.Pix[at+2] = 0, 0, 0
+		}
 	}
-	backdrop := backdropOf(sample)
-	row := backdrop.Pix[10*backdrop.Stride : 11*backdrop.Stride]
-	centre := row[12*4]
-	if centre < 150 || centre > 230 {
-		t.Fatalf("hard edge survived the blur: centre %d, want a soft grey", centre)
+	backdrop := backdropOf(cover)
+	if size := backdrop.Bounds().Size(); size != image.Pt(backdropSize, backdropSize) {
+		t.Fatalf("backdrop is %v, want %d px square", size, backdropSize)
 	}
-	for x := range accentSampleSize - 1 {
+	row := backdrop.Pix[(backdropSize/2)*backdrop.Stride : (backdropSize/2+1)*backdrop.Stride]
+	centre := row[(backdropSize/2)*4]
+	if centre < 100 || centre > 240 {
+		t.Fatalf("the line reads %d after the blur, want a soft grey", centre)
+	}
+	for x := range backdropSize - 1 {
 		if step := int(row[(x+1)*4]) - int(row[x*4]); step > 40 || step < -40 {
 			t.Fatalf("step of %d between columns %d and %d, want a smooth ramp", step, x, x+1)
 		}
 	}
 	if row[0] != 255 || row[3] != 255 {
 		t.Fatalf("far edge = %v, want untouched opaque white", row[:4])
+	}
+}
+
+func TestLoadingTheCoverKeepsTheBackdropItAlreadyShows(t *testing.T) {
+	encoded := testCoverPNG(t, false)
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, _ *http.Request) {
+		_, _ = response.Write(encoded)
+	}))
+	defer server.Close()
+	cacheDir := t.TempDir()
+
+	first := New(Options{CacheDir: cacheDir, HTTPClient: server.Client()})
+	waitForArtwork(t, first, server.URL, 128)
+	palettePath := filepath.Join(cacheDir, diskPaletteName(server.URL))
+	deadline := time.Now().Add(4 * time.Second)
+	for _, err := os.Stat(palettePath); err != nil; _, err = os.Stat(palettePath) {
+		if time.Now().After(deadline) {
+			t.Fatal("palette was not written to disk")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	first.Close()
+
+	// After a restart the backdrop comes from the palette file first, then the
+	// cover itself loads from disk and samples the same picture again.
+	second := New(Options{CacheDir: cacheDir, HTTPClient: server.Client()})
+	defer second.Close()
+	shown := waitForBackdrop(t, second, server.URL)
+	waitForArtwork(t, second, server.URL, 128)
+	if got, _ := second.Backdrop(server.URL); got != shown {
+		t.Fatal("loading the cover swapped in a copy of its backdrop, which fades in again for nothing")
 	}
 }
 

@@ -132,13 +132,13 @@ func (c *Cache) readDiskPalette(rawURL string) (artworkSample, bool) {
 		c.removeDiskFile(path)
 		return artworkSample{}, false
 	}
-	// a file from before backdrops is sampled again and rewritten
-	if len(stored.Backdrop) != accentSampleSize*accentSampleSize*4 {
+	// a file without a backdrop of this size is sampled again and rewritten
+	if len(stored.Backdrop) != backdropSize*backdropSize*4 {
 		return artworkSample{}, false
 	}
 	// See readDiskArtwork: atime only.
 	_ = os.Chtimes(path, time.Now(), time.Time{})
-	backdrop := &image.RGBA{Pix: stored.Backdrop, Stride: accentSampleSize * 4, Rect: image.Rect(0, 0, accentSampleSize, accentSampleSize)}
+	backdrop := &image.RGBA{Pix: stored.Backdrop, Stride: backdropSize * 4, Rect: image.Rect(0, 0, backdropSize, backdropSize)}
 	return artworkSample{palette: stored.Palette, backdrop: backdrop, ready: true}, true
 }
 

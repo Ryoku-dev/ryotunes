@@ -16,7 +16,7 @@ import (
 	libtheme "github.com/ryoku-dev/ryoku/docs/lithic/library/go/theme"
 )
 
-func TestBackdropToneKeepsTheFieldsLightnessWhateverTheCover(t *testing.T) {
+func TestBackdropShowsTheCoverButKeepsTypeReadable(t *testing.T) {
 	cover := image.NewRGBA(image.Rect(0, 0, 4, 1))
 	copy(cover.Pix, []uint8{
 		255, 255, 255, 255,
@@ -26,9 +26,10 @@ func TestBackdropToneKeepsTheFieldsLightnessWhateverTheCover(t *testing.T) {
 		64, 64, 0, 128,
 	})
 	for _, dark := range []bool{true, false} {
-		field := NewTheme(palette.Signature(dark), libtheme.Comfortable).Accent.Field
-		want := colorToOKLCH(field).L
-		toned := toneBackdrop(cover, want)
+		theme := NewTheme(palette.Signature(dark), libtheme.Comfortable)
+		field := theme.Accent.Field
+		toned := toneBackdrop(cover, colorToOKLCH(field).L, dark)
+		var lightness [4]float64
 		for index := range 4 {
 			at := index * 4
 			alpha := toned.Pix[at+3]
@@ -38,13 +39,20 @@ func TestBackdropToneKeepsTheFieldsLightnessWhateverTheCover(t *testing.T) {
 			straight := func(channel uint8) uint8 {
 				return uint8(min(float64(channel)*255/float64(alpha)+.5, 255))
 			}
-			pixel := colorToOKLCH(color.NRGBA{R: straight(toned.Pix[at]), G: straight(toned.Pix[at+1]), B: straight(toned.Pix[at+2]), A: 255})
-			if math.Abs(pixel.L-want) > backdropLightness+.01 {
-				t.Errorf("dark=%v pixel %d lightness %.3f strays from the field's %.3f", dark, index, pixel.L, want)
+			pixel := color.NRGBA{R: straight(toned.Pix[at]), G: straight(toned.Pix[at+1]), B: straight(toned.Pix[at+2]), A: 255}
+			value := colorToOKLCH(pixel)
+			if value.C > backdropChroma+.01 {
+				t.Errorf("dark=%v pixel %d chroma %.3f, want at most %.3f", dark, index, value.C, backdropChroma)
 			}
-			if pixel.C > backdropChroma+.01 {
-				t.Errorf("dark=%v pixel %d chroma %.3f, want at most %.3f", dark, index, pixel.C, backdropChroma)
+			drawn := palette.Mix(field, pixel, backdropOpacity)
+			if ratio := palette.ContrastRatio(theme.R.Fg, drawn); ratio < 4.5 {
+				t.Errorf("dark=%v pixel %d: type over it reads at %.2f:1, want 4.5:1", dark, index, ratio)
 			}
+			lightness[index] = value.L
+		}
+		// white and black must stay apart, or the cover's shape is lost
+		if spread := lightness[0] - lightness[2]; spread < .06 {
+			t.Errorf("dark=%v white and black end %.3f apart, want the cover to show", dark, spread)
 		}
 	}
 }

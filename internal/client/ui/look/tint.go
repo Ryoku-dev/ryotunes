@@ -8,7 +8,8 @@ import (
 )
 
 // CoverTint re-hues the neutral roles toward a cover while preserving each
-// role's OKLCH lightness and every state mineral.
+// role's OKLCH lightness and every state mineral. A cover without colour
+// turns them grey.
 func CoverTint(base palette.Roles, cover art.Palette) (palette.Roles, bool) {
 	hue, strength, ok := coverTintSource(cover)
 	if !ok {
@@ -48,6 +49,10 @@ func coverTintSource(cover art.Palette) (hue, strength float64, ok bool) {
 	}
 	if cover.Vibrant.A != 0 {
 		return colorToOKLCH(cover.Vibrant).H, .35, true
+	}
+	// a black and white cover shouldn't be framed in the desktop's hue
+	if cover.Dominant.A != 0 {
+		return 0, 0, true
 	}
 	return 0, 0, false
 }

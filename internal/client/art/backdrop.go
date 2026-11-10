@@ -2,19 +2,24 @@ package art
 
 import (
 	"image"
-	"image/draw"
 	"strings"
+
+	xdraw "golang.org/x/image/draw"
 
 	"github.com/ryoku-dev/ryotunes/internal/model"
 )
 
-// three box passes of this reach over the 24 px sample come close to a
-// gaussian, and drawn large the cover only shows as soft colour
-const backdropRadius = 2
+// The backdrop is the cover at 48 px blurred by three box passes of radius 2,
+// close to a gaussian: drawn across a pane its big shapes and colours survive
+// and its detail doesn't.
+const (
+	backdropSize   = 48
+	backdropRadius = 2
+)
 
 // Backdrop returns a heavily blurred copy of the cover, made with its palette
-// sample, for drawing large and faint behind a surface, and whether it is
-// ready. The image is shared and never changes.
+// sample, for drawing large behind a surface, and whether it is ready. The
+// image is shared and never changes.
 func (c *Cache) Backdrop(rawURL string) (*image.RGBA, bool) {
 	// a collage is never sampled, so asking would only queue loads
 	if rawURL == "" || strings.HasPrefix(rawURL, model.CollageThumbnailPrefix) {
@@ -30,16 +35,24 @@ func (c *Cache) Backdrop(rawURL string) (*image.RGBA, bool) {
 	return nil, false
 }
 
-func backdropOf(sample *image.NRGBA) *image.RGBA {
-	bounds := sample.Bounds()
-	blurred := image.NewRGBA(bounds)
-	draw.Draw(blurred, bounds, sample, bounds.Min, draw.Src)
+func backdropOf(source image.Image) *image.RGBA {
+	blurred := image.NewRGBA(image.Rect(0, 0, backdropSize, backdropSize))
+	xdraw.CatmullRom.Scale(blurred, blurred.Bounds(), source, source.Bounds(), xdraw.Src, nil)
 	scratch := make([]uint8, len(blurred.Pix))
 	for range 3 {
-		blurPass(scratch, blurred.Pix, bounds.Dx(), bounds.Dy(), blurred.Stride, false)
-		blurPass(blurred.Pix, scratch, bounds.Dx(), bounds.Dy(), blurred.Stride, true)
+		blurPass(scratch, blurred.Pix, backdropSize, backdropSize, blurred.Stride, false)
+		blurPass(blurred.Pix, scratch, backdropSize, backdropSize, blurred.Stride, true)
 	}
 	return blurred
+}
+
+// greyscale drops a backdrop's colour for a cover the sampler found none in:
+// its shadows can still lean blue, and the window around it is grey.
+func greyscale(backdrop *image.RGBA) {
+	for at := 0; at+3 < len(backdrop.Pix); at += 4 {
+		luma := (2126*uint32(backdrop.Pix[at]) + 7152*uint32(backdrop.Pix[at+1]) + 722*uint32(backdrop.Pix[at+2]) + 5000) / 10000
+		backdrop.Pix[at], backdrop.Pix[at+1], backdrop.Pix[at+2] = uint8(luma), uint8(luma), uint8(luma)
+	}
 }
 
 // blurPass averages every pixel with its neighbours along one axis, holding

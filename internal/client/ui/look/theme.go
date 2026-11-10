@@ -138,8 +138,11 @@ func (theme *Theme) ArtScheme(cover art.Palette, tinted bool) (palette.Roles, Ac
 		}
 	}
 	accent := AccentFromDesktop(roles)
-	if cover.Vibrant.A != 0 {
+	switch {
+	case cover.Vibrant.A != 0:
 		accent = AccentFromSample(cover.Vibrant, roles)
+	case cover.Dominant.A != 0:
+		accent = NeutralAccent(roles)
 	}
 	theme.schemeCache[theme.schemeCacheNext] = schemeCacheEntry{
 		key: key, roles: roles, accent: accent, used: true,
@@ -148,9 +151,10 @@ func (theme *Theme) ArtScheme(cover art.Palette, tinted bool) (palette.Roles, Ac
 	return roles, accent
 }
 
-// ArtAccent derives a hero accent without changing the window roles.
-func (theme *Theme) ArtAccent(sample color.NRGBA) Accent {
-	_, accent := theme.ArtScheme(art.Palette{Vibrant: sample}, false)
+// ArtAccent derives a hero accent from its cover without changing the window
+// roles.
+func (theme *Theme) ArtAccent(cover art.Palette) Accent {
+	_, accent := theme.ArtScheme(cover, false)
 	return accent
 }
 

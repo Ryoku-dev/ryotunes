@@ -212,8 +212,8 @@ func (h *Hero) resolveTint(gtx layout.Context, e *env.Env, rawURL string) look.A
 		return h.advanceTint(gtx)
 	}
 	target := e.Th.Accent
-	if coverPalette.Vibrant.A != 0 {
-		target = e.Th.ArtAccent(coverPalette.Vibrant)
+	if coverPalette.Vibrant.A != 0 || coverPalette.Dominant.A != 0 {
+		target = e.Th.ArtAccent(coverPalette)
 	}
 	if !h.tintSet {
 		h.tint, h.tintFrom, h.tintTo = target, target, target

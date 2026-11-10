@@ -13,12 +13,25 @@ import (
 func AccentFromSample(sample color.NRGBA, roles palette.Roles) Accent {
 	hue, saturation, _ := brandRGBToHSL(sample)
 	saturation = min(max(saturation, .55), .85)
-	lightness := .42
-	if roles.Dark {
-		lightness = .70
+	return accentFromFill(brandHSLToRGB(hue, saturation, accentLightness(roles.Dark), 0xff), roles)
+}
+
+// NeutralAccent is the grey accent of a cover without colour. Its ink is fg,
+// the strongest type, so sung words still stand apart from the rest of the
+// line instead of matching fg2.
+func NeutralAccent(roles palette.Roles) Accent {
+	accent := accentFromFill(brandHSLToRGB(0, 0, accentLightness(roles.Dark), 0xff), roles)
+	accent.Ink = roles.Fg
+	return accent
+}
+
+// accentLightness puts every cover accent at one lightness per mode, so it
+// reads on every stone.
+func accentLightness(dark bool) float64 {
+	if dark {
+		return .70
 	}
-	fill := brandHSLToRGB(hue, saturation, lightness, 0xff)
-	return accentFromFill(fill, roles)
+	return .42
 }
 
 // AccentFromSource resolves the active provider's fixed identity as a play accent.

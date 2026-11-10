@@ -57,15 +57,16 @@ so it reads on every stone, with its ink re-toned to 4.5:1 on `stone2`. The
 play buttons, the progress wave, the visualizer, liked hearts, the playing
 track, the sung words and the header fields all wear it, so nothing on screen
 disagrees. Settings can take it from the provider's brand or the desktop
-palette instead; a grey or missing cover falls back to the desktop palette.
+palette instead; a black and white cover takes a grey accent, and a missing
+cover falls back to the desktop palette.
 Album, playlist and artist heroes tint their own field with their own cover.
 
-Where a cover is the subject, a hint of its blur sits on the plane behind it:
-the now playing view, Home's now playing card, the album, playlist and artist
-heroes, and the mini player. It is a hint, not a picture. Each colour keeps its
-hue but stays close to the plane's own lightness and well short of its colour,
-drawn at about a third, so text and veins over it read as they do on bare
-stone. It changes with the cover and never moves at rest. Pages without a
+Where a cover is the subject, the cover itself, heavily blurred, fills the
+plane behind it: the now playing view, Home's now playing card, the album,
+playlist and artist heroes, and the mini player. Its big shapes and colours
+show, but its tones are pressed toward the plane's own lightness, a little
+toward the text and further away from it, so type over it reads as it does on
+bare stone. It changes with the cover and never moves at rest. Pages without a
 cover, the player bar, cards and rows stay plain stone.
 
 The window can take the cover's colour too, the way Ryoku's palette takes the
@@ -73,9 +74,9 @@ wallpaper's. With Tint the window on (the default while the accent follows the
 album art), the ground, every stone, the veins and the inks are re-hued toward
 the cover's dominant colour in OKLCH, each keeping its own lightness so every
 contrast pair holds, with a chroma that grows with how colourful the cover is.
-States keep their minerals on any cover, and a black and white cover leaves the
-desktop palette alone. A new track retints the whole window together with the
-accent.
+States keep their minerals on any cover, and a black and white cover turns the
+window grey instead of leaving the desktop's hue on it. A new track retints
+the whole window together with the accent.
 
 The active provider's brand colour is identity, not state, and now lives only
 in the provider switcher and the small provider glyphs. The brand colours and

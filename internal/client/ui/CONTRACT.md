@@ -114,16 +114,20 @@ every frame, so library gold plaques follow without a wrapper. Where the accent
 comes from is the **Accent colour** preference (`ClientPreferences.Accent`):
 
 1. **Album art** (default). The loaded track's cover, sampled off the frame
-   goroutine by the art cache into an `art.Palette`. `Vibrant` is 1.x's rule: a
-   24 × 24 downsample, pixels with alpha under 128 or saturation under .12
-   skipped, colours bucketed by 3 bits per channel, each pixel scoring
-   `saturation × (1 − |max − .65|)`, the bucket with the best total wins and
-   its average is the sample. `Dominant` is the most populous bucket over all
-   opaque pixels, whatever their saturation. The accent keeps `Vibrant`'s hue;
+   goroutine by the art cache into an `art.Palette`. `Vibrant`: a 24 × 24
+   downsample, pixels with alpha under 128 or a channel spread (max − min)
+   under 40 of 255 skipped, colours bucketed by 3 bits per channel, each pixel
+   scoring `spread / 255 × (1 − |max − .65|)`, the bucket with the best total
+   wins and its average is the sample. (1.x divided the spread by the maximum,
+   which called blue-tinted blacks vivid, so dark covers took a bright blue
+   accent from their shadows.) `Dominant` is the most populous bucket over all
+   opaque pixels, whatever their colour. The accent keeps `Vibrant`'s hue;
    saturation is clamped to .55–.85 and lightness set to .70 in dark mode and
-   .42 in light, so it reads on every stone. A cover that is still loading
-   keeps the previous accent; a track without a cover, a grey cover (no
-   vibrant bucket) or nothing loaded uses the desktop accent.
+   .42 in light, so it reads on every stone. A grey cover (sampled, no vibrant
+   bucket) takes the neutral accent: the grey at that lightness, with `fg` as
+   its ink so sung words stand apart from the rest of the line in `fg2`. A
+   cover that is still loading keeps the previous accent; a track without a
+   cover or nothing loaded uses the desktop accent.
 2. **Source.** The active provider's brand (`look/brand.go`), as v2 did for
    everything but play.
 3. **Desktop.** The Ryoku palette's gold roles as loaded.
@@ -132,8 +136,8 @@ Every accent change (a new track, a provider switch in Source mode, the
 preference itself) tweens all four colours over `Motion.Field` (320) with the
 chisel ease; a palette or mode change snaps. Album, playlist and artist heroes
 tint only their own field (and its visualizer lane) with their own cover's
-vibrant colour, tweening in when it arrives; their Play plaque stays the global
-accent.
+accent (the neutral one for a grey cover), tweening in when it arrives; their
+Play plaque stays the global accent.
 
 **Cover tint.** While the accent comes from the album art and **Tint the
 window** is on (`ClientPreferences.CoverTintOn()`, default on), every surface
@@ -146,31 +150,38 @@ sel .018; light mode .8 of those) times a strength, reduced until it fits
 sRGB. The minerals, scrim, onSel and onSel2 never change, so states read the
 same on any cover. Hue and strength come from the palette: the dominant
 colour's hue when its OKLCH chroma is at least .04 (strength
-`min(1, chroma / .12)`), else the vibrant colour's hue at strength .35, else
-no tint (a black and white cover keeps the desktop stones). The accent is then
-derived against the tinted stone2, so `Accent.Ink` still meets 4.5:1. A track,
-mode or preference change tweens the whole role set together with the accent
-over `Motion.Field`; a palette change snaps. With the tint off, an accent mode
-other than Album art, or nothing loaded, the stones are the desktop palette's.
+`min(1, chroma / .12)`), else the vibrant colour's hue at strength .35, else,
+for a black and white cover, chroma 0: every one of those roles turns grey at
+its own lightness, so the cover is never framed in the desktop's hue. The
+accent is then derived against the tinted stone2, so `Accent.Ink` still meets
+4.5:1. A track, mode or preference change tweens the whole role set together
+with the accent over `Motion.Field`; a palette change snaps. With the tint
+off, an accent mode other than Album art, or nothing loaded, the stones are
+the desktop palette's.
 
-**Cover backdrop** (`look/backdrop.go`). A hint of the cover's blur sits on the
-planes where a cover is the subject: the now playing view's pane and Home's
-now playing card (the loaded track's cover), the album, playlist and artist
-heroes (their own cover) and the mini window (the loaded track's). Page
-headers, the player bar, the compact player, cards and rows stay plain stone.
-The art cache blurs the 24 × 24 palette sample on its worker (three box passes
-of radius 2, edges held) and keeps it with the palette, in memory and in the
-cover's palette file on disk; a palette file from before the blur is sampled
-again once from the disk cover. Collages have none. `look.Backdrop` tones it
-to the plane under it: each pixel keeps its hue, its OKLCH lightness stays
-within .05 of the plane's and its chroma under .08, so text and veins keep the
-plane's contrast on any cover. It is drawn at .35 opacity, scaled to cover the
-plane (centre crop, linear filtering) inside the plane's cuts, and toned again
-only when the plane's lightness moves by .02 (a tint tween). The first frame
-shows it whole. A new cover fades in over `Motion.Field` with the chisel ease
-while the old one fades out, and a cover that lands mid-fade carries on from
-wherever the fade left the old one. No cover, or one not sampled yet, fades
-the last one out.
+**Cover backdrop** (`look/backdrop.go`). The cover, heavily blurred, sits on
+the planes where a cover is the subject: the now playing view's pane and
+Home's now playing card (the loaded track's cover), the album, playlist and
+artist heroes (their own cover) and the mini window (the loaded track's).
+Page headers, the player bar, the compact player, cards and rows stay plain
+stone. The art cache scales the cover to 48 × 48 and blurs it on its worker
+(three box passes of radius 2, edges held), in grey when the sampler found no
+colour in it, and keeps it with the palette, in memory and in the cover's
+palette file on disk; a palette file without a 48 × 48 backdrop is sampled
+again once from the disk cover. A cover's first sample stays: loading the
+same cover at another size keeps it, and only a background refresh that
+brings a changed cover replaces it. Collages have none. `look.Backdrop` tones
+it to the plane under it: each pixel keeps its hue and the order of its tones,
+its OKLCH lightness is pressed into a band around the plane's, .16 deep on the
+side away from the text and .05 toward it (darker in dark mode, lighter in
+light), and its chroma is capped at .12, so the cover's big shapes and
+colours show while type over it keeps 4.5:1. It is drawn at .9 opacity,
+scaled to cover the plane (centre crop, linear filtering) inside the plane's
+cuts, and toned again only when the plane's lightness moves by .02 (a tint
+tween) or the mode changes. The first frame shows it whole. A new cover fades
+in over `Motion.Field` with the chisel ease while the old one fades out, and a
+cover that lands mid-fade carries on from wherever the fade left the old one.
+No cover, or one not sampled yet, fades the last one out.
 
 **Source colour.** The active provider's brand is identity, not state, so it
 may stand without a word, and since v3 it lives in one place: the provider
@@ -1058,7 +1069,7 @@ func Art(gtx layout.Context, th *Theme, cache *art.Cache, url string, size image
 // with enough workers that one slow host cannot starve the rest, the covers
 // being drawn this frame go first, and queued loads for rows that scrolled
 // far away are dropped before they fetch. Cache.Palette and Cache.Backdrop
-// return a cover's palette and its blurred 24 × 24 sample, both made once per
+// return a cover's palette and its blurred 48 × 48 backdrop, both made once per
 // cover off the frame goroutine and kept beside it on disk.
 
 // Micro motion

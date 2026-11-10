@@ -1,6 +1,7 @@
 package art
 
 import (
+	"bytes"
 	"image"
 	"image/color"
 	"math"
@@ -9,6 +10,11 @@ import (
 )
 
 const accentSampleSize = 24
+
+// A pixel counts as vibrant only when its channels spread this far apart out
+// of 255. Spread over the maximum, the old measure, calls a blue-tinted black
+// vivid, and a dark cover picked a bright blue accent from its shadows.
+const vibrantMinimumChroma = 40
 
 // Palette contains the cover colours used by the client. A zero-alpha colour
 // means that the corresponding pick was not available.
@@ -21,6 +27,13 @@ type artworkSample struct {
 	palette  Palette
 	backdrop *image.RGBA
 	ready    bool
+}
+
+func sameSample(a, b artworkSample) bool {
+	if a.palette != b.palette || (a.backdrop == nil) != (b.backdrop == nil) {
+		return false
+	}
+	return a.backdrop == nil || bytes.Equal(a.backdrop.Pix, b.backdrop.Pix)
 }
 
 type sampleBucket struct {
@@ -58,32 +71,31 @@ func sampleArtwork(source image.Image) artworkSample {
 
 			maximum := max(pixel.R, pixel.G, pixel.B)
 			minimum := min(pixel.R, pixel.G, pixel.B)
-			if maximum == 0 {
+			if maximum-minimum < vibrantMinimumChroma {
 				continue
 			}
-			saturation := float64(maximum-minimum) / float64(maximum)
-			if saturation < .12 {
-				continue
-			}
+			chroma := float64(maximum-minimum) / 255
 			value := float64(maximum) / 255
 			vibrant := &vibrantBuckets[key]
 			vibrant.count++
 			vibrant.red += uint64(pixel.R)
 			vibrant.green += uint64(pixel.G)
 			vibrant.blue += uint64(pixel.B)
-			vibrant.score += saturation * (1 - math.Abs(value-.65))
+			vibrant.score += chroma * (1 - math.Abs(value-.65))
 			if vibrantIndex < 0 || vibrant.score > vibrantBuckets[vibrantIndex].score {
 				vibrantIndex = key
 			}
 		}
 	}
 
-	sample := artworkSample{ready: true, backdrop: backdropOf(pixels)}
+	sample := artworkSample{ready: true, backdrop: backdropOf(source)}
 	if dominantIndex >= 0 {
 		sample.palette.Dominant = bucketColour(dominantBuckets[dominantIndex])
 	}
 	if vibrantIndex >= 0 {
 		sample.palette.Vibrant = bucketColour(vibrantBuckets[vibrantIndex])
+	} else {
+		greyscale(sample.backdrop)
 	}
 	return sample
 }

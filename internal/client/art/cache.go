@@ -562,7 +562,7 @@ func (c *Cache) loadPaletteFromDisk(job *loadJob) {
 		return
 	}
 	if hit {
-		c.putSampleLocked(job.key.url, sample)
+		c.putSampleLocked(job.key.url, sample, false)
 		invalidate := c.invalidate
 		c.mu.Unlock()
 		if invalidate != nil {
@@ -609,7 +609,7 @@ func (c *Cache) finish(job *loadJob, img image.Image, sample artworkSample, load
 		}
 	}
 	if sample.ready {
-		c.putSampleLocked(job.key.url, sample)
+		c.putSampleLocked(job.key.url, sample, false)
 	}
 	c.storeLocked(job.key, img)
 	c.mu.Unlock()
@@ -632,7 +632,7 @@ func (c *Cache) finishRefresh(job *loadJob, img image.Image, sample artworkSampl
 		return false
 	}
 	if sample.ready {
-		c.putSampleLocked(job.key.url, sample)
+		c.putSampleLocked(job.key.url, sample, true)
 	}
 	c.storeLocked(job.key, img)
 	invalidate := c.invalidate
@@ -668,12 +668,17 @@ func (c *Cache) removeLocked(entry *cacheEntry) {
 	c.bytes -= entry.bytes
 }
 
-func (c *Cache) putSampleLocked(rawURL string, sample artworkSample) {
+// putSampleLocked keeps a cover's first sample. Every load of a cover samples
+// the same picture, and a new backdrop image for it would fade in again for
+// nothing, so only a refresh that brought a changed cover replaces it.
+func (c *Cache) putSampleLocked(rawURL string, sample artworkSample, refreshed bool) {
 	if rawURL == "" {
 		return
 	}
 	if entry := c.samples[rawURL]; entry != nil {
-		entry.sample = sample
+		if refreshed && !sameSample(entry.sample, sample) {
+			entry.sample = sample
+		}
 		c.sampleLRU.MoveToFront(entry.lru)
 		return
 	}

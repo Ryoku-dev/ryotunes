@@ -50,6 +50,46 @@ func TestSampleArtworkPicksVibrantAndDominantBuckets(t *testing.T) {
 	}
 }
 
+func TestSampleArtworkFindsColourOnlyWhereThereIsSome(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		shadow  color.NRGBA
+		vibrant bool
+	}{
+		// a black and white photo whose shadows lean blue, as JPEG and old film leave them
+		{name: "tinted black", shadow: color.NRGBA{R: 10, G: 15, B: 30, A: 0xff}},
+		{name: "navy", shadow: color.NRGBA{R: 20, G: 30, B: 90, A: 0xff}, vibrant: true},
+	} {
+		img := image.NewNRGBA(image.Rect(0, 0, 48, 48))
+		for y := range 48 {
+			for x := range 48 {
+				pixel := test.shadow
+				if y < 16 {
+					pixel = color.NRGBA{R: 200, G: 200, B: 205, A: 0xff}
+				}
+				img.SetNRGBA(x, y, pixel)
+			}
+		}
+		sample := sampleArtwork(img)
+		if got := sample.palette.Vibrant.A != 0; got != test.vibrant {
+			t.Errorf("%s: vibrant = %#v, want one: %v", test.name, sample.palette.Vibrant, test.vibrant)
+		}
+		if test.vibrant && sample.palette.Vibrant.B <= sample.palette.Vibrant.R {
+			t.Errorf("%s: vibrant = %#v, want the navy", test.name, sample.palette.Vibrant)
+		}
+		coloured := false
+		for at := 0; at+3 < len(sample.backdrop.Pix); at += 4 {
+			if sample.backdrop.Pix[at] != sample.backdrop.Pix[at+2] {
+				coloured = true
+				break
+			}
+		}
+		if coloured != test.vibrant {
+			t.Errorf("%s: backdrop has colour: %v, want %v, as the window around it", test.name, coloured, test.vibrant)
+		}
+	}
+}
+
 func TestCacheSamplesDecodedArtworkWithoutAnotherDownload(t *testing.T) {
 	img := image.NewNRGBA(image.Rect(0, 0, 48, 48))
 	for y := range 48 {
