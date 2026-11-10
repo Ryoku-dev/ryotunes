@@ -1191,8 +1191,10 @@ succeeds or five minutes pass. SoundCloud keeps its existing cookie-store
 watch; Spotify uses the `spotify-auth` `url` event, and TIDAL's `tidal-auth`
 `waiting` event carries the complete verification `url` and `code`.
 
-- `act.OpenURL(e, url)` starts `xdg-open url` detached (its own session, no
-  inherited descriptors) and waits for it off the frame goroutine. Each flow's
+- `act.OpenURL(e, url)` starts `xdg-open url` through `spawn.Command`
+  (its own session, and under a systemd user manager its own scope in
+  `app.slice`, so a browser it starts never lives inside a service that can
+  stop) and waits for it off the frame goroutine. Each flow's
   URL opens once. A missing opener or a non-zero exit shows a placard "Could
   not open your browser" and leaves the link on the account row.
 - While a flow waits, its account row says "Waiting for your browser" and
@@ -1254,7 +1256,8 @@ watch; Spotify uses the `spotify-auth` `url` event, and TIDAL's `tidal-auth`
   never loops and never leaves a blank frame.
 - The daemon's `Show` (MPRIS Raise, tray, a second launch) tries the same lock
   without blocking: when it can take it, no client runs, so it releases the
-  lock and spawns `ryotunes`; when it cannot, it broadcasts `show` to its
+  lock and spawns `ryotunes` through `spawn.Command`, so the window and what
+  it opens live outside `ryotunesd.service`; when it cannot, it broadcasts `show` to its
   subscribers. `ryotunes-cli events` never counts as a window.
 - The daemon streams events to a subscriber before it answers `subscribe`.
   The client holds those events until the snapshot is published and then

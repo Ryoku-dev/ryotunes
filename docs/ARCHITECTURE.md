@@ -112,6 +112,8 @@ internal/
   integrations/ mpris/ tray/ discord/ lastfm/ listentogether/ (ltproto/ is the shared room protocol)
   diag/         the log ring and file, get_logs, client error intake
   update/       release lookup, verification, pacman / xbps / dnf paths
+  spawn/        starts the window and browser handoffs in their own systemd scope, so
+                stopping ryotunesd.service never takes them with it
   daemon/       App, Server, Methods, Lifecycle, Diagnostics, Logs
 ```
 

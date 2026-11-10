@@ -5,11 +5,9 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"os/exec"
 	"regexp"
 	"strings"
 	"sync"
-	"syscall"
 
 	"gioui.org/io/clipboard"
 	"gioui.org/layout"
@@ -19,6 +17,7 @@ import (
 	"github.com/ryoku-dev/ryotunes/internal/client/ui/env"
 	"github.com/ryoku-dev/ryotunes/internal/model"
 	"github.com/ryoku-dev/ryotunes/internal/protocol"
+	"github.com/ryoku-dev/ryotunes/internal/spawn"
 )
 
 var pending struct {
@@ -80,9 +79,7 @@ func OpenURL(e *env.Env, rawURL string) {
 		return
 	}
 	e.Go(func(ctx context.Context) {
-		command := exec.CommandContext(ctx, "xdg-open", rawURL)
-		command.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
-		if err := command.Run(); err != nil {
+		if err := spawn.Command(ctx, "xdg-open", rawURL).Run(); err != nil {
 			toast(e, "Could not open your browser", env.ToastError)
 		}
 	})

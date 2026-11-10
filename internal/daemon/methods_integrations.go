@@ -4,11 +4,11 @@ import (
 	"context"
 	"fmt"
 	"net/url"
-	"os/exec"
 
 	"github.com/ryoku-dev/ryotunes/internal/integrations/listentogether"
 	"github.com/ryoku-dev/ryotunes/internal/model"
 	"github.com/ryoku-dev/ryotunes/internal/protocol"
+	"github.com/ryoku-dev/ryotunes/internal/spawn"
 	"github.com/ryoku-dev/ryotunes/internal/update"
 )
 
@@ -137,7 +137,7 @@ func openExternal(_ context.Context, _ *App, p protocol.URLParams) (protocol.Nul
 	if u.User != nil {
 		return protocol.Null{}, fmt.Errorf("Links containing embedded credentials are not opened.")
 	}
-	if err := exec.Command("xdg-open", p.URL).Start(); err != nil {
+	if err := spawn.Command(context.Background(), "xdg-open", p.URL).Start(); err != nil {
 		return protocol.Null{}, fmt.Errorf("Couldn't open the browser: %v", err)
 	}
 	return protocol.Null{}, nil

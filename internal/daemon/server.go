@@ -9,7 +9,6 @@ import (
 	"io"
 	"net"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strconv"
 	"sync"
@@ -18,6 +17,7 @@ import (
 
 	clientstate "github.com/ryoku-dev/ryotunes/internal/client/state"
 	"github.com/ryoku-dev/ryotunes/internal/protocol"
+	"github.com/ryoku-dev/ryotunes/internal/spawn"
 )
 
 var umaskMu sync.Mutex
@@ -371,9 +371,8 @@ func (s *Server) Show() error {
 		return err
 	}
 	defer devnull.Close()
-	cmd := exec.Command("ryotunes")
+	cmd := spawn.Command(context.Background(), "ryotunes")
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = devnull, devnull, devnull
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("start Ryotunes: %w", err)
 	}
