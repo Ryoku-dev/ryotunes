@@ -1434,6 +1434,15 @@ impl AppState {
         {
             return Err("This has no radio behind it.".into());
         }
+        // A Spotify / SoundCloud / Tidal track streams from its own service, so its id means
+        // nothing to YouTube (`RDAMVMspotify:track:…` always comes back empty). Match it to a
+        // YouTube Music song first and run the radio off that.
+        if kind == "song" && is_foreign_track_id(id) {
+            let title = name.map(|n| format!("{n} Radio"));
+            let (items, seed, matched) = self.foreign_song_radio(id).await?;
+            self.install_radio(items, seed, title, matched, id).await;
+            return Ok(());
+        }
         let client = self.clients.get(innertube::METADATA_CLIENT).ok_or("no metadata client")?;
         // Resolve the seed to (videoId?, radio playlist id). Album and artist need a page fetch:
         // an album's radio keys off its audio playlist, not its `MPRE…` browseId, and an artist
@@ -1463,26 +1472,124 @@ impl AppState {
 
         let (items, seed) = self.fetch_radio(video_id.as_deref(), &playlist_id).await?;
         let title = name.map(|n| format!("{n} Radio"));
+        let playing_id = video_id.clone().unwrap_or_default();
+        self.install_radio(items, seed, title, video_id, &playing_id).await;
+        Ok(())
+    }
 
+    /// Put a fetched radio in the queue. `seed_video` is the YouTube song the radio was seeded on
+    /// (if any) and `playing_id` the id that counts as "that song is already playing" — the same
+    /// id for a YouTube seed, the original `spotify:track:…` (etc.) for a matched one.
+    async fn install_radio(
+        self: &std::sync::Arc<Self>,
+        mut items: Vec<SongItem>,
+        seed: String,
+        title: Option<String>,
+        seed_video: Option<String>,
+        playing_id: &str,
+    ) {
         // Radio on the song that's already playing: splice instead of replacing, so the track
         // keeps playing without a re-buffer (Metrolist's `startRadioSeamlessly`).
         let playing_seed = {
             let q = self.queue.lock().await;
-            video_id.is_some() && q.items.get(q.current).map(|i| &i.video_id) == video_id.as_ref()
+            !playing_id.is_empty()
+                && q.items.get(q.current).is_some_and(|i| i.video_id == playing_id)
         };
         if playing_seed && !self.player.is_idle() {
+            // A matched seed's YouTube copy would play the same song twice in a row.
+            if seed_video.as_deref() != Some(playing_id) {
+                items.retain(|i| Some(&i.video_id) != seed_video.as_ref());
+            }
             self.splice_radio(items, seed, title).await;
-            return Ok(());
+            return;
         }
         // The seed song comes back inside the first page (usually first, but the panel decides) —
         // start there so a radio on song X actually opens on X.
-        let start = video_id
+        let start = seed_video
             .as_ref()
             .and_then(|v| items.iter().position(|i| &i.video_id == v))
             .unwrap_or(0);
         self.play_tracks(items, Some(start), Some(seed), title, Some(false), None).await;
         self.queue.lock().await.radio = true;
-        Ok(())
+    }
+
+    /// Radio for a track that doesn't live on YouTube (Spotify, SoundCloud, Tidal). Looks the
+    /// song up on YouTube Music with the songs filter — official audio tracks (ATV / "Topic"),
+    /// never uploads — then walks the best few matches until one has a radio, and finally falls
+    /// back to the matched artist's mix. Returns the radio, its seed, and the matched videoId.
+    async fn foreign_song_radio(
+        &self,
+        id: &str,
+    ) -> Result<(Vec<SongItem>, String, Option<String>), String> {
+        const NO_RADIO: &str = "YouTube has no radio for this.";
+        const MAX_CANDIDATES: usize = 3;
+        let (title, artists) = self
+            .foreign_track_meta(id)
+            .await
+            .ok_or("Couldn't look this track up to find it on YouTube.")?;
+        // Spotify fills a missing name with a placeholder; matching on it finds songs literally
+        // called "Unknown". No title, no match; an unknown artist just doesn't count.
+        let (title, artists) = (known_meta(&title), known_meta(&artists));
+        if title.is_empty() {
+            return Err(NO_RADIO.into());
+        }
+        tracing::debug!(%title, %artists, "matching foreign track on YouTube Music");
+        let client = self.clients.get(innertube::METADATA_CLIENT).ok_or("no metadata client")?;
+        let query = format!("{title} {}", primary_artist(&artists));
+        let found = self.it.search_songs(client, &query).await.map_err(|e| e.to_string())?;
+        let candidates = rank_song_matches(&title, &artists, found.items);
+        if candidates.is_empty() {
+            return Err(NO_RADIO.into());
+        }
+        for c in candidates.iter().take(MAX_CANDIDATES) {
+            let rd = format!("RDAMVM{}", c.video_id);
+            match self.fetch_radio(Some(&c.video_id), &rd).await {
+                Ok((items, seed)) => return Ok((items, seed, Some(c.video_id.clone()))),
+                Err(e) => {
+                    tracing::debug!(video_id = %c.video_id, error = %e, "matched song has no radio")
+                }
+            }
+        }
+        // Last rung: the artist's mix. Not the same song, but the same neighbourhood, which is
+        // what someone asking for a radio wants more than an error.
+        for aid in candidates.iter().filter_map(|c| c.artist_id.as_deref()).take(MAX_CANDIDATES) {
+            let Ok(page) = self.it.artist(client, aid).await else { continue };
+            if let Some(pl) = page.radio_playlist_id {
+                if let Ok((items, seed)) = self.fetch_radio(None, &pl).await {
+                    return Ok((items, seed, None));
+                }
+            }
+        }
+        Err(NO_RADIO.into())
+    }
+
+    /// Title and artist line of a non-YouTube track: from the queue when it's there (no round
+    /// trip), else from Spotify itself. The Spotify lookup is bounded: a session that is still
+    /// (re)connecting would otherwise hold the `start_radio` call open indefinitely.
+    async fn foreign_track_meta(&self, id: &str) -> Option<(String, String)> {
+        const SPOTIFY_LOOKUP_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+        {
+            let q = self.queue.lock().await;
+            if let Some(i) = q.items.iter().find(|i| i.video_id == id) {
+                return Some((i.title.clone(), i.artists.clone()));
+            }
+        }
+        let tid = crate::spotify::spotify_track_id(id)?;
+        let lookup = async {
+            let client = self.spotify.client().await.ok_or("no Spotify session".to_owned())?;
+            client.track(tid).await.map_err(|e| e.to_string())
+        };
+        match tokio::time::timeout(SPOTIFY_LOOKUP_TIMEOUT, lookup).await {
+            Ok(Ok(t)) => Some((t.name, t.artists)),
+            Ok(Err(e)) => {
+                tracing::warn!(error = %e, "spotify track lookup for radio failed");
+                None
+            }
+            Err(_) => {
+                tracing::warn!("spotify track lookup for radio timed out");
+                None
+            }
+        }
     }
 
     /// Fetch a radio's first page, escalating when YouTube hands back a dead one. Returns the
@@ -3785,6 +3892,75 @@ fn guest_insert_index(items: &[SongItem], current: usize) -> usize {
 /// (`VL…` browseId or bare `OLAK5uy_…`/`PL…`) → `RDAMPL<id>` playlist radio. `None` (single
 /// song / artist top-songs) → no pinned seed; autoplay seeds `RDAMVM<last video>` at extension
 /// time instead.
+/// A track id minted for another service (Spotify / SoundCloud / Tidal): no YouTube radio behind
+/// it until it's matched to a YouTube Music song.
+fn is_foreign_track_id(id: &str) -> bool {
+    crate::spotify::spotify_track_id(id).is_some()
+        || crate::spotify::sc_track_id(id).is_some()
+        || crate::spotify::tidal_track_id(id).is_some()
+}
+
+/// `s` trimmed, or empty when it's a provider placeholder ("Unknown") rather than real metadata.
+fn known_meta(s: &str) -> String {
+    let s = s.trim();
+    if s.eq_ignore_ascii_case("unknown") || s.eq_ignore_ascii_case("unknown artist") {
+        String::new()
+    } else {
+        s.to_owned()
+    }
+}
+
+/// The first name on an artist line ("A, B & C" → "A") — the extras only add search noise.
+fn primary_artist(artists: &str) -> &str {
+    artists
+        .split([',', '&', '•'])
+        .next()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .unwrap_or(artists)
+}
+
+/// Lowercased alphanumeric words, with "(feat. …)", "[Remastered]" and " - Live" style tails
+/// dropped, so "Song (Remastered 2011)" and "Song" compare equal.
+fn norm_title(s: &str) -> String {
+    let base = s.split(['(', '[']).next().unwrap_or(s);
+    let base = base.split(" - ").next().unwrap_or(base);
+    norm(base)
+}
+
+fn norm(s: &str) -> String {
+    s.chars()
+        .map(|c| if c.is_alphanumeric() { c.to_lowercase().next().unwrap_or(c) } else { ' ' })
+        .collect::<String>()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn loosely_eq(a: &str, b: &str) -> bool {
+    !a.is_empty() && !b.is_empty() && (a == b || a.contains(b) || b.contains(a))
+}
+
+/// Order YouTube Music song hits by how well they match `title` / `artists`: title *and* artist
+/// first, then title only, then artist only; hits matching neither are dropped (a radio on the
+/// wrong song is worse than none). Ties keep YouTube's own order.
+fn rank_song_matches(title: &str, artists: &str, items: Vec<SongItem>) -> Vec<SongItem> {
+    let want_title = norm_title(title);
+    let want_artist = norm(primary_artist(artists));
+    let mut scored: Vec<(u8, SongItem)> = items
+        .into_iter()
+        .filter(|i| !i.is_video && !i.video_id.is_empty())
+        .map(|i| {
+            let t = loosely_eq(&norm_title(&i.title), &want_title);
+            let a = loosely_eq(&norm(&i.artists), &want_artist);
+            (u8::from(t) * 2 + u8::from(a), i)
+        })
+        .filter(|(s, _)| *s > 0)
+        .collect();
+    scored.sort_by_key(|(s, _)| std::cmp::Reverse(*s));
+    scored.into_iter().map(|(_, i)| i).collect()
+}
+
 fn radio_seed_for(source_id: Option<String>) -> Option<String> {
     source_id.map(|id| {
         let id = id.strip_prefix("VL").unwrap_or(&id);
@@ -5146,5 +5322,70 @@ mod tidal_credentials_tests {
             TidalCredentials { device_id: Some("mine".into()), ..Default::default() }.into();
         assert_eq!(merged.device_id.as_deref(), Some("mine"));
         assert_eq!(merged.device_secret, ryotunes_tidal::Credentials::default().device_secret);
+    }
+}
+
+#[cfg(test)]
+mod foreign_radio_tests {
+    fn hit(id: &str, title: &str, artists: &str) -> innertube::SongItem {
+        innertube::SongItem {
+            video_id: id.into(),
+            title: title.into(),
+            artists: artists.into(),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn foreign_track_ids_are_recognised() {
+        assert!(super::is_foreign_track_id("spotify:track:6rqhFgbbKwnb9MLmUQDhG6"));
+        assert!(super::is_foreign_track_id("sc:track:123"));
+        assert!(super::is_foreign_track_id("tidal:track:456"));
+        assert!(!super::is_foreign_track_id("dQw4w9WgXcQ"));
+        assert!(!super::is_foreign_track_id("spotify:album:abc"));
+    }
+
+    #[test]
+    fn primary_artist_takes_the_first_name() {
+        assert_eq!(super::primary_artist("Daft Punk, Pharrell Williams"), "Daft Punk");
+        assert_eq!(super::primary_artist("Future & Metro Boomin"), "Future");
+        assert_eq!(super::primary_artist("Aqua"), "Aqua");
+    }
+
+    #[test]
+    fn placeholder_metadata_never_matches() {
+        assert_eq!(super::known_meta("Unknown"), "");
+        assert_eq!(super::known_meta(" Unknown Artist "), "");
+        assert_eq!(super::known_meta("Tainy, Bad Bunny"), "Tainy, Bad Bunny");
+        // An unknown artist line must not pair up with YouTube's "Unknown Artist" uploads.
+        let ranked = super::rank_song_matches(
+            "MOJABI GHOST",
+            &super::known_meta("Unknown"),
+            vec![
+                hit("bogus", "B. Unknown", "Unknown Artist"),
+                hit("real", "MOJABI GHOST", "Tainy & Bad Bunny"),
+            ],
+        );
+        let ids: Vec<&str> = ranked.iter().map(|i| i.video_id.as_str()).collect();
+        assert_eq!(ids, ["real"]);
+    }
+
+    #[test]
+    fn song_matches_prefer_title_and_artist_and_drop_strangers() {
+        let mut video = hit("vid", "Get Lucky", "Daft Punk");
+        video.is_video = true;
+        let ranked = super::rank_song_matches(
+            "Get Lucky (feat. Pharrell Williams)",
+            "Daft Punk, Pharrell Williams",
+            vec![
+                hit("cover", "Get Lucky", "Some Cover Band"),
+                video,
+                hit("other", "Around the World", "Daft Punk"),
+                hit("stranger", "Barbie Girl", "Aqua"),
+                hit("official", "Get Lucky (Radio Edit)", "Daft Punk • Pharrell Williams"),
+            ],
+        );
+        let ids: Vec<&str> = ranked.iter().map(|i| i.video_id.as_str()).collect();
+        assert_eq!(ids, ["official", "cover", "other"]);
     }
 }
