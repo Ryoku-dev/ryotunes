@@ -13,6 +13,7 @@ import (
 	"gioui.org/unit"
 
 	"github.com/ryoku-dev/ryoku/docs/lithic/library/go/kit"
+	"github.com/ryoku-dev/ryotunes/internal/client/state"
 	"github.com/ryoku-dev/ryotunes/internal/client/ui/act"
 	"github.com/ryoku-dev/ryotunes/internal/client/ui/env"
 	"github.com/ryoku-dev/ryotunes/internal/client/ui/look"
@@ -73,6 +74,23 @@ type Page struct {
 	trackIDs    map[string]struct{}
 	reveal      sheet.Reveal
 	moreLine    pagesheet.More
+	session     playlistSession
+}
+
+// playlistSession is who the providers say is signed in when the page was asked for. A page
+// asked for before the daemon adopted the browser's session (a route restored at launch)
+// comes back empty, so the page asks again once the session it was read with changes.
+type playlistSession struct {
+	youtube, spotify, soundcloud, tidal bool
+	channel                             string
+}
+
+func sessionOf(snapshot state.State) playlistSession {
+	return playlistSession{
+		youtube: snapshot.Auth.SignedIn, spotify: snapshot.Spotify.SignedIn,
+		soundcloud: snapshot.SoundCloud.SignedIn, tidal: snapshot.Tidal.SignedIn,
+		channel: value(snapshot.Auth.ChannelID),
+	}
 }
 
 // New constructs a playlist detail page for r.ID.
@@ -80,7 +98,8 @@ func New(r env.Route) env.Page {
 	return &Page{route: r, seenTokens: make(map[string]struct{}), trackIDs: make(map[string]struct{})}
 }
 
-// Title returns the loaded playlist title.
+// Title returns the loaded playlist title, the route's, or the liked songs' own name: the
+// daemon sends no title for YouTube's Liked music, and a route restored at launch has none.
 func (p *Page) Title() string {
 	if title := value(p.page.Title); title != "" {
 		return title
@@ -88,7 +107,14 @@ func (p *Page) Title() string {
 	if p.route.Title != "" {
 		return p.route.Title
 	}
+	if isLiked(p.route.ID) {
+		return "Liked songs"
+	}
 	return "Playlist"
+}
+
+func isLiked(id string) bool {
+	return id == "VLLM" || id == "spotify:playlist:liked" || id == "liked" || id == model.LocalLikedPlaylistID
 }
 
 // Masthead leaves the part to the route (the frame reads "Playlist") and says how far the
@@ -105,7 +131,9 @@ func (p *Page) Refresh(e *env.Env) {
 	p.moreError = ""
 	p.request++
 	p.seenTokens = make(map[string]struct{})
-	p.libraryRev = e.Store.Snapshot().LibraryRevision
+	snapshot := e.Store.Snapshot()
+	p.libraryRev = snapshot.LibraryRevision
+	p.session = sessionOf(snapshot)
 	req := p.request
 	params := protocol.PlaylistParams{ID: p.route.ID}
 	if selected := p.selectedSort(); selected != model.PlaylistSortDefault {
@@ -138,6 +166,8 @@ func (p *Page) Layout(gtx layout.Context, e *env.Env) layout.Dimensions {
 		} else {
 			p.libraryRev = stateSnapshot.LibraryRevision
 		}
+	} else if !p.loading && sessionOf(stateSnapshot) != p.session {
+		p.Refresh(e)
 	}
 	p.handleActions(gtx, e)
 	if selected, ok := p.sortChoice.Changed(); ok && !p.sortPending && selected >= 0 && selected < len(sortValues) {
@@ -557,7 +587,7 @@ func playlistFact(part string) bool {
 }
 
 func playlistKind(id string) string {
-	if id == "VLLM" || id == "spotify:playlist:liked" || id == "liked" || id == model.LocalLikedPlaylistID {
+	if isLiked(id) {
 		return "Your library"
 	}
 	switch id {
