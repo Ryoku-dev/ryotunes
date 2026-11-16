@@ -199,13 +199,13 @@ const (
 	groupHeadTall = unit.Dp(40)
 )
 
-// ruledHead lays out one ruled group head across the width given: name,
-// then lead (a sentence-case phrase such as the queue's source, fg2), the
-// leader, the count (none when count < 0) and trailing (may be nil), centred
-// in groupHeadTall.
-func ruledHead(gtx layout.Context, th *look.Theme, name, lead string, count int, trailing layout.Widget) layout.Dimensions {
+// ruledHead lays out one ruled group head across the width given, tall
+// high: name, then lead (a sentence-case phrase such as the queue's source,
+// fg2), the leader, the mark in the smallest mono (a count "06", a place
+// "31 / 67"; none when empty) and trailing (may be nil), all centred.
+func ruledHead(gtx layout.Context, th *look.Theme, name, lead, mark string, tall unit.Dp, trailing layout.Widget) layout.Dimensions {
 	width := gtx.Constraints.Max.X
-	height := gtx.Dp(groupHeadTall)
+	height := gtx.Dp(tall)
 	gtx.Constraints = layout.Exact(image.Pt(width, height))
 	gap := gtx.Dp(groupGap)
 
@@ -225,9 +225,9 @@ func ruledHead(gtx layout.Context, th *look.Theme, name, lead string, count int,
 	}
 	measure := gtx
 	measure.Constraints = layout.Constraints{Max: image.Pt(width, height)}
-	if count >= 0 {
+	if mark != "" {
 		record := op.Record(gtx.Ops)
-		dims := kit.LayoutSpacedCaps(measure, th.Theme, th.T.MonoSm, th.R.Fg3, 0, kit.Pad2(count))
+		dims := kit.LayoutSpacedCaps(measure, th.Theme, th.T.MonoSm, th.R.Fg3, 0, mark)
 		call := record.Stop()
 		right -= dims.Size.X
 		offset := op.Offset(image.Pt(right, (height-dims.Size.Y)/2)).Push(gtx.Ops)

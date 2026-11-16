@@ -64,6 +64,7 @@ type NowPlaying struct {
 	stage      look.Swap
 	lyrics     Lyrics
 	queue      Queue
+	upNext     upNext
 	like       likePlaque
 	likeTip    look.Tip
 	playlist   nowAct
@@ -234,15 +235,58 @@ func (playing *NowPlaying) layoutNarrow(gtx layout.Context, e *env.Env, track mo
 		}
 		return playing.layoutDetails(gtx, e, track, rating, width, height, false, 0)
 	}
+	headAndTabs := func(gtx layout.Context) layout.Dimensions {
+		return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+			layout.Rigid(header),
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				return layout.Inset{Right: 13, Left: 13}.Layout(gtx, playing.layoutTabs(e))
+			}),
+		)
+	}
 	return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
-		layout.Rigid(header),
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			return layout.Inset{Right: 13, Left: 13}.Layout(gtx, playing.layoutTabs(e))
+			if height >= gtx.Dp(650) || width < gtx.Dp(nowUpNextFrom) {
+				return headAndTabs(gtx)
+			}
+			return playing.layoutHeadWithUpNext(gtx, e, track, headAndTabs)
 		}),
 		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
 			return playing.layoutStage(gtx, e, layout.Inset{Top: 8, Right: 13, Left: 13})
 		}),
 	)
+}
+
+// Up next beside the short head: shown from a pane this wide, taking this
+// share of it within these bounds, set this far from the head.
+const (
+	nowUpNextFrom  unit.Dp = 720
+	nowUpNextShare         = .4
+	nowUpNextMin   unit.Dp = 280
+	nowUpNextMax   unit.Dp = 420
+	nowUpNextGap   unit.Dp = 21
+)
+
+// layoutHeadWithUpNext lays the head and its tabs out in the left of the
+// width and the up next block in the right, as tall as they are (from the
+// cover's top to the tabs' foot), so the block fills what the head leaves
+// empty and the lyric stage under them keeps its height.
+func (playing *NowPlaying) layoutHeadWithUpNext(gtx layout.Context, e *env.Env, track model.Track, headAndTabs layout.Widget) layout.Dimensions {
+	width := gtx.Constraints.Max.X
+	block := int(float32(width) * nowUpNextShare)
+	block = min(max(block, gtx.Dp(nowUpNextMin)), gtx.Dp(nowUpNextMax))
+	right, top := gtx.Dp(nowMastheadX), gtx.Dp(8)
+	left := width - block - gtx.Dp(nowUpNextGap) - right
+	head := gtx
+	head.Constraints = layout.Constraints{Max: image.Pt(max(0, left), gtx.Constraints.Max.Y)}
+	dims := headAndTabs(head)
+	if tall := dims.Size.Y - top; tall > 0 {
+		offset := op.Offset(image.Pt(width-right-block, top)).Push(gtx.Ops)
+		child := gtx
+		child.Constraints = layout.Exact(image.Pt(block, tall))
+		playing.upNext.Layout(child, e, track)
+		offset.Pop()
+	}
+	return layout.Dimensions{Size: image.Pt(width, dims.Size.Y)}
 }
 
 // layoutStage draws the selected stage tab inside inset, or its empty state,

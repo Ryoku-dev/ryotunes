@@ -231,6 +231,11 @@ func (bar *PlayerBar) layoutTrack(gtx layout.Context, e *env.Env, snapshot state
 		}),
 		layout.Rigid(layout.Spacer{Width: 13}.Layout),
 		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+			// the words stand as one block no taller than the cover and centred
+			// on it: title, artists and facts on their own line heights, the
+			// facts 2 below; the bar's height reaches the column as a minimum,
+			// which would pin the block to the bar's top hairline
+			gtx.Constraints.Min.Y = 0
 			return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 					return bar.titleSwap.Layout(gtx, e.Th, key, 8, e.Th.Motion.Navigate, func(gtx layout.Context, _ string) layout.Dimensions {
@@ -239,7 +244,7 @@ func (bar *PlayerBar) layoutTrack(gtx layout.Context, e *env.Env, snapshot state
 						})
 					})
 				}),
-				layout.Rigid(layout.Spacer{Height: 2}.Layout),
+				// the artists follow the title's line directly
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 					return bar.artistSwap.Layout(gtx, e.Th, key, 8, e.Th.Motion.Navigate, func(gtx layout.Context, _ string) layout.Dimensions {
 						return bar.artist.Layout(gtx, e.Th, func(gtx layout.Context) layout.Dimensions {
@@ -247,7 +252,7 @@ func (bar *PlayerBar) layoutTrack(gtx layout.Context, e *env.Env, snapshot state
 						})
 					})
 				}),
-				layout.Rigid(layout.Spacer{Height: 5}.Layout),
+				layout.Rigid(layout.Spacer{Height: 2}.Layout),
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 					return bar.factsSwap.Layout(gtx, e.Th, bar.facts.key, 0, e.Th.Motion.Navigate, func(gtx layout.Context, _ string) layout.Dimensions {
 						return layoutFacts(gtx, e.Th, provider, bar.facts.name, bar.facts.place)

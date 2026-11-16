@@ -338,6 +338,9 @@ func (h *Hero) Layout(gtx layout.Context, e *env.Env, content HeroContent) layou
 			glossed := e.Th.Desktop.Gloss && gloss != ""
 			return layout.Flex{Axis: layout.Horizontal, Alignment: layout.End}.Layout(gtx,
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+					if coverMissing(artURL) {
+						return EmptyCover(gtx, e.Th, image.Pt(artPixels, artPixels), shape, emptyCoverIcon(content.Kind, false))
+					}
 					return h.art.Layout(gtx, e.Th, e.Art, artURL, image.Pt(artPixels, artPixels), shape, e.Th.Motion.Field)
 				}),
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {

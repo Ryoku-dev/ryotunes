@@ -219,14 +219,23 @@ func (p *Page) layoutHero(gtx layout.Context, e *env.Env, sortInHero bool) layou
 
 func (p *Page) layoutHeroField(gtx layout.Context, e *env.Env, sortInHero bool) layout.Dimensions {
 	return p.hero.Layout(gtx, e, widgets.HeroContent{
-		Art:     value(p.page.Thumbnail),
+		Art:     p.cover(),
 		Place:   sheet.Playlists,
-		Collage: strings.HasPrefix(value(p.page.Thumbnail), model.CollageThumbnailPrefix),
+		Collage: strings.HasPrefix(p.cover(), model.CollageThumbnailPrefix),
 		Kind:    playlistKind(p.route.ID),
 		Title:   p.Title(),
 		Meta:    p.meta,
 		Acts:    p.layoutActs(e, sortInHero),
 	})
+}
+
+// cover is the playlist's art: the daemon's custom or derived cover (a device or derived
+// playlist's own songs), else the provider's thumbnail; "" draws the empty plate.
+func (p *Page) cover() string {
+	if cover := value(p.page.Cover); cover != "" {
+		return cover
+	}
+	return value(p.page.Thumbnail)
 }
 
 func (p *Page) sortAvailable() bool {
@@ -303,7 +312,11 @@ func (p *Page) saved(e *env.Env) bool {
 // setSaved saves the playlist to or removes it from the library through the item menu's
 // helpers, so a removal's Undo puts it back where it stood, silently, as the menu's does.
 func (p *Page) setSaved(e *env.Env, save bool) {
-	card := model.BrowseItem{Kind: "playlist", ID: p.route.ID, Title: p.Title(), Thumbnail: p.page.Thumbnail, Subtitle: p.page.Subtitle}
+	cover := p.cover()
+	card := model.BrowseItem{Kind: "playlist", ID: p.route.ID, Title: p.Title(), Subtitle: p.page.Subtitle}
+	if cover != "" {
+		card.Thumbnail = &cover
+	}
 	for _, item := range e.Store.Snapshot().Personal.Saved {
 		if item.ID == card.ID && strings.EqualFold(item.Kind, card.Kind) {
 			card = item

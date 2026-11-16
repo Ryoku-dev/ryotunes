@@ -153,6 +153,10 @@ func cardArtShape(item model.BrowseItem) look.Shape {
 }
 
 func (c *Card) artLayout(gtx layout.Context, e *env.Env, item model.BrowseItem, size int) layout.Dimensions {
+	if url := textValue(item.Thumbnail); coverMissing(url) {
+		liked := e.Store != nil && IsLikedCollection(item, e.Store.Snapshot().Provider)
+		return EmptyCover(gtx, e.Th, image.Pt(size, size), cardArtShape(item), emptyCoverIcon(item.Kind, liked))
+	}
 	return c.art.Layout(gtx, e.Th, e.Art, textValue(item.Thumbnail), image.Pt(size, size), cardArtShape(item), e.Th.Motion.Navigate)
 }
 

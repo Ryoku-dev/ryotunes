@@ -2,6 +2,7 @@ package chrome
 
 import (
 	"image"
+	"image/color"
 	"strconv"
 	"strings"
 
@@ -29,24 +30,22 @@ type Mini struct {
 	close     look.WindowControl
 	closeTip  look.Tip
 
-	art                 widgets.PlayArt
-	backdrop            look.Backdrop
-	layoutSwap          look.Swap
-	titleSwap           look.Swap
-	artistSwap          look.Swap
-	landscapeTitleSwap  look.Swap
-	landscapeArtistSwap look.Swap
-	lyrics              Lyrics
-	showLyrics          bool
+	art                widgets.PlayArt
+	backdrop           look.Backdrop
+	layoutSwap         look.Swap
+	titleSwap          look.Swap
+	artistSwap         look.Swap
+	landscapeTitleSwap look.Swap
+	facts              playerFacts
+	lyrics             Lyrics
+	showLyrics         bool
 
-	landscapeTrackID      string
-	landscapeTrackKey     string
-	landscapeLyricID      string
-	landscapeLyricIndex   int
-	landscapeLyricKey     string
-	landscapeLyricReady   bool
-	landscapeWraps        map[string]bool
-	landscapeLyricWrapped bool
+	landscapeTrackID    string
+	landscapeTrackKey   string
+	landscapeLyricID    string
+	landscapeLyricIndex int
+	landscapeLyricKey   string
+	landscapeLyricReady bool
 
 	seek        widgets.Seek
 	transport   widgets.Transport
@@ -86,7 +85,7 @@ func (mini *Mini) Layout(gtx layout.Context, e *env.Env) layout.Dimensions {
 	plane := e.Th.Planes()
 	paint.FillShape(gtx.Ops, plane.Pane, clip.Rect(image.Rectangle{Max: size}).Op())
 	mini.layoutSwap.Ease, mini.titleSwap.Ease, mini.artistSwap.Ease = anim.EaseOutCubic, anim.EaseOutCubic, anim.EaseOutCubic
-	mini.landscapeTitleSwap.Ease, mini.landscapeArtistSwap.Ease = anim.EaseOutCubic, anim.EaseOutCubic
+	mini.landscapeTitleSwap.Ease = anim.EaseOutCubic
 
 	snapshot := e.Store.Snapshot()
 	var cover string
@@ -225,60 +224,22 @@ func (mini *Mini) layoutLandscapeColumn(gtx layout.Context, e *env.Env, snapshot
 		mini.transport.Gap = 8
 	}
 
+	mini.landscapeTitleSwap.Ease = anim.EaseOutCubic
 	return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
-		layout.Rigid(miniFixedHeight(gtx.Dp(44), func(gtx layout.Context) layout.Dimensions {
-			gtx.Constraints.Min.X = gtx.Constraints.Max.X
-			mini.landscapeLyricWrapped = false
-			return layout.Stack{}.Layout(gtx,
-				layout.Stacked(func(gtx layout.Context) layout.Dimensions {
-					return layout.Inset{Right: 54}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-						return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
-							layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-								dims := mini.landscapeTitleSwap.Layout(gtx, e.Th, key, 0, e.Th.Motion.Field, func(gtx layout.Context, swapKey string) layout.Dimensions {
-									return mini.layoutLandscapePrimary(gtx, e, swapKey, title, swapKey == key)
-								})
-								height := gtx.Sp(e.Th.T.Label.Line)
-								if mini.landscapeLyricWrapped {
-									height *= 2
-								}
-								dims.Size.Y = min(gtx.Constraints.Max.Y, height)
-								return dims
-							}),
-							layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-								return layout.Inset{Top: 2}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-									return mini.landscapeArtistSwap.Layout(gtx, e.Th, key, 0, e.Th.Motion.Field, func(gtx layout.Context, swapKey string) layout.Dimensions {
-										return mini.layoutLandscapeSecondary(gtx, e, swapKey, artists)
-									})
-								})
-							}),
-						)
-					})
-				}),
-				layout.Stacked(func(gtx layout.Context) layout.Dimensions {
-					size := gtx.Constraints.Max
-					child := gtx
-					child.Constraints.Min = image.Point{}
-					child.Constraints.Max = image.Pt(gtx.Dp(54), gtx.Dp(24))
-					move := op.Offset(image.Pt(max(0, size.X-child.Constraints.Max.X), 0)).Push(gtx.Ops)
-					layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(child,
-						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-							return mini.expandTip.Layout(gtx, e.Th, e.Overlays, "Expand", func(gtx layout.Context) layout.Dimensions {
-								return mini.expand.Layout(gtx, e.Th)
-							})
-						}),
-						layout.Rigid(layout.Spacer{Width: 6}.Layout),
-						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-							return mini.closeTip.Layout(gtx, e.Th, e.Overlays, "Close", func(gtx layout.Context) layout.Dimensions {
-								return mini.close.Layout(gtx, e.Th)
-							})
-						}),
-					)
-					move.Pop()
-					return layout.Dimensions{Size: size}
-				}),
-			)
-		})),
-		layout.Flexed(1, layout.Spacer{}.Layout),
+		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+			size := gtx.Constraints.Max
+			gtx.Constraints = layout.Exact(size)
+			stage := clip.Rect(image.Rectangle{Max: size}).Push(gtx.Ops)
+			mini.landscapeTitleSwap.Layout(gtx, e.Th, key, 8, e.Th.Motion.Field, func(gtx layout.Context, swapKey string) layout.Dimensions {
+				if index, ok := miniLyricIndex(swapKey); ok {
+					return mini.layoutLyricStage(gtx, e, index, swapKey == key)
+				}
+				return mini.layoutTrackStage(gtx, e, title, artists, provider, snapshot)
+			})
+			stage.Pop()
+			mini.layoutLandscapeControls(gtx, e)
+			return layout.Dimensions{Size: size}
+		}),
 		layout.Rigid(miniFixedHeight(gtx.Dp(18), func(gtx layout.Context) layout.Dimensions {
 			if !fit.ShowSeek || snapshot.Playback.Now == nil {
 				return layout.Dimensions{}
@@ -292,54 +253,189 @@ func (mini *Mini) layoutLandscapeColumn(gtx layout.Context, e *env.Env, snapshot
 	)
 }
 
-func (mini *Mini) layoutLandscapePrimary(gtx layout.Context, e *env.Env, key, title string, current bool) layout.Dimensions {
-	mini.setLandscapeWrapped(key, current, false)
-	if index, ok := miniLyricIndex(key); ok {
-		if current {
-			defer mini.lyrics.scheduleBoundary(gtx, e, LyricsCompact)
+// The landscape stage's room for the window controls at its top right.
+const (
+	miniControlsWide unit.Dp = 54
+	miniControlsTall unit.Dp = 24
+	miniLineGap      unit.Dp = 4
+)
+
+// layoutLandscapeControls draws expand and close at the stage's top right.
+func (mini *Mini) layoutLandscapeControls(gtx layout.Context, e *env.Env) {
+	size := gtx.Constraints.Max
+	child := gtx
+	child.Constraints.Min = image.Point{}
+	child.Constraints.Max = image.Pt(gtx.Dp(miniControlsWide), gtx.Dp(miniControlsTall))
+	move := op.Offset(image.Pt(max(0, size.X-child.Constraints.Max.X), 0)).Push(gtx.Ops)
+	layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(child,
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			return mini.expandTip.Layout(gtx, e.Th, e.Overlays, "Expand", func(gtx layout.Context) layout.Dimensions {
+				return mini.expand.Layout(gtx, e.Th)
+			})
+		}),
+		layout.Rigid(layout.Spacer{Width: 6}.Layout),
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			return mini.closeTip.Layout(gtx, e.Th, e.Overlays, "Close", func(gtx layout.Context) layout.Dimensions {
+				return mini.close.Layout(gtx, e.Th)
+			})
+		}),
+	)
+	move.Pop()
+}
+
+// stageLine records w laid out at width, for a stage that places its lines
+// after measuring them.
+func stageLine(gtx layout.Context, width int, w layout.Widget) (op.CallOp, layout.Dimensions) {
+	child := gtx
+	child.Constraints = layout.Constraints{Max: image.Pt(max(0, width), gtx.Constraints.Max.Y)}
+	record := op.Record(gtx.Ops)
+	dims := w(child)
+	return record.Stop(), dims
+}
+
+// stageWidth is the width a line may take with its top at y: clear of the
+// window controls while it stands beside them.
+func stageWidth(gtx layout.Context, y int) int {
+	width := gtx.Constraints.Max.X
+	if y < gtx.Dp(miniControlsTall) {
+		width -= gtx.Dp(miniControlsWide)
+	}
+	return width
+}
+
+// layoutTrackStage fills the stage with the track as one block centred in
+// it: the title, the artists and the facts line (provider and place in the
+// queue), as the player bar sets them.
+func (mini *Mini) layoutTrackStage(gtx layout.Context, e *env.Env, title, artists string, provider model.Provider, snapshot state.State) layout.Dimensions {
+	size := gtx.Constraints.Max
+	mini.facts.update(provider, snapshot.Queue.CurrentIndex, len(snapshot.Queue.Items))
+	block := func(gtx layout.Context) layout.Dimensions {
+		children := [4]layout.FlexChild{
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				return (kit.Label{Style: e.Th.T.Title, Color: e.Th.R.Fg, MaxLines: 2}).Layout(gtx, e.Th.Theme, title)
+			}),
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				if artists == "" {
+					return layout.Dimensions{}
+				}
+				return layout.Inset{Top: 2}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+					return (kit.Label{Style: e.Th.T.Caption, Color: e.Th.R.Fg2, MaxLines: 1}).Layout(gtx, e.Th.Theme, artists)
+				})
+			}),
+			layout.Rigid(layout.Spacer{Height: 4}.Layout),
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				if provider == "" {
+					return layout.Dimensions{}
+				}
+				return layoutFacts(gtx, e.Th, provider, mini.facts.name, mini.facts.place)
+			}),
 		}
-		if mini.lyrics.lyrics == nil {
-			return (kit.Label{Style: e.Th.T.Label, Color: e.Th.R.Fg, MaxLines: 1}).Layout(gtx, e.Th.Theme, "Resolving lyrics")
+		return layout.Flex{Axis: layout.Vertical}.Layout(gtx, children[:]...)
+	}
+	call, dims := stageLine(gtx, size.X, block)
+	top := (size.Y - dims.Size.Y) / 2
+	if top < gtx.Dp(miniControlsTall) {
+		call, dims = stageLine(gtx, stageWidth(gtx, 0), block)
+		top = (size.Y - dims.Size.Y) / 2
+	}
+	offset := op.Offset(image.Pt(0, max(0, top))).Push(gtx.Ops)
+	call.Add(gtx.Ops)
+	offset.Pop()
+	return layout.Dimensions{Size: size}
+}
+
+// layoutLyricStage fills the stage with the lyric lines around index: the
+// line being sung centred in the stage (word by word when the listener
+// asks), the lines to come under it (the next in fg2, later ones in fg3) and
+// the lines sung above it in fg3, as many as fit. The line follows the
+// lyrics' own clock and motion (Lyrics.ensure, updateLineMotion); only the
+// drawing is the stage's.
+func (mini *Mini) layoutLyricStage(gtx layout.Context, e *env.Env, index int, current bool) layout.Dimensions {
+	size := gtx.Constraints.Max
+	if current {
+		defer mini.lyrics.scheduleBoundary(gtx, e, LyricsCompact)
+	}
+	document := mini.lyrics.lyrics
+	centre := func(message string) layout.Dimensions {
+		call, dims := stageLine(gtx, stageWidth(gtx, 0), func(gtx layout.Context) layout.Dimensions {
+			return (kit.Label{Style: e.Th.T.Label, Color: e.Th.R.Fg2, MaxLines: 1}).Layout(gtx, e.Th.Theme, message)
+		})
+		offset := op.Offset(image.Pt(0, (size.Y-dims.Size.Y)/2)).Push(gtx.Ops)
+		call.Add(gtx.Ops)
+		offset.Pop()
+		return layout.Dimensions{Size: size}
+	}
+	if document == nil {
+		return centre("Resolving lyrics")
+	}
+	if !document.Synced || len(document.Lines) == 0 || index >= len(document.Lines) {
+		return centre("No synced lyrics")
+	}
+	gap := gtx.Dp(miniLineGap)
+	plain := func(at int, ink color.NRGBA) layout.Widget {
+		return func(gtx layout.Context) layout.Dimensions {
+			return (kit.Label{Style: e.Th.T.Label, Color: ink, MaxLines: 1}).Layout(gtx, e.Th.Theme, strings.TrimSpace(document.Lines[at].Text))
 		}
-		if index < 0 || index >= len(mini.lyrics.lyrics.Lines) {
-			return (kit.Label{Style: e.Th.T.Label, Color: e.Th.R.Fg, MaxLines: 1}).Layout(gtx, e.Th.Theme, "No synced lyrics")
-		}
-		line := mini.lyrics.lyrics.Lines[index]
+	}
+	sung := func(gtx layout.Context) layout.Dimensions {
 		if e.Store.Snapshot().Client.WordByWordOn() && index < len(mini.lyrics.words) && len(mini.lyrics.words[index]) > 0 {
-			result := mini.lyrics.karaoke[index].Layout(gtx, e.Th, mini.lyrics.words[index], look.KaraokeStyle{
+			return mini.lyrics.karaoke[index].Layout(gtx, e.Th, mini.lyrics.words[index], look.KaraokeStyle{
 				Key: mini.lyrics.trackID, Text: e.Th.T.Label, Base: karaokeRest(e.Th), Highlight: e.Th.Accent.Ink,
 				Align: text.Start, PreferredRows: 1, MaxRows: 2, MinScale: .8,
 				Lift: unit.Dp(2 * mini.lyrics.lineProgress(index)), PositionMS: mini.lyrics.positionMS(gtx, e),
-			})
-			mini.setLandscapeWrapped(key, current, result.Rows > 1)
-			return result.Dimensions
+			}).Dimensions
 		}
-		dims := (kit.Label{Style: e.Th.T.Label, Color: e.Th.R.Fg, MaxLines: 2}).Layout(gtx, e.Th.Theme, strings.TrimSpace(line.Text))
-		mini.setLandscapeWrapped(key, current, dims.Size.Y > gtx.Sp(e.Th.T.Label.Line))
-		return dims
+		return (kit.Label{Style: e.Th.T.Label, Color: e.Th.R.Fg, MaxLines: 2}).Layout(gtx, e.Th.Theme, strings.TrimSpace(document.Lines[index].Text))
 	}
-	return (kit.Label{Style: e.Th.T.Row, Color: e.Th.R.Fg, MaxLines: 1}).Layout(gtx, e.Th.Theme, title)
-}
 
-func (mini *Mini) layoutLandscapeSecondary(gtx layout.Context, e *env.Env, key, artists string) layout.Dimensions {
-	if index, ok := miniLyricIndex(key); ok {
-		if mini.landscapeWraps[key] || mini.lyrics.lyrics == nil || index+1 < 0 || index+1 >= len(mini.lyrics.lyrics.Lines) {
-			return layout.Dimensions{}
+	// the centre line: the one being sung, or before the first line the
+	// first to come
+	next := index + 1
+	centreLine := layout.Widget(sung)
+	if index < 0 {
+		centreLine, next = plain(0, e.Th.R.Fg2), 1
+	}
+	call, dims := stageLine(gtx, size.X, centreLine)
+	top := (size.Y - dims.Size.Y) / 2
+	if top < gtx.Dp(miniControlsTall) {
+		call, dims = stageLine(gtx, stageWidth(gtx, top), centreLine)
+		top = (size.Y - dims.Size.Y) / 2
+	}
+	place := func(call op.CallOp, y int) {
+		offset := op.Offset(image.Pt(0, y)).Push(gtx.Ops)
+		call.Add(gtx.Ops)
+		offset.Pop()
+	}
+	place(call, top)
+
+	// the lines to come, under it
+	y := top + dims.Size.Y + gap
+	for at := next; at < len(document.Lines); at++ {
+		ink := e.Th.R.Fg3
+		if at == next {
+			ink = e.Th.R.Fg2
 		}
-		next := strings.TrimSpace(mini.lyrics.lyrics.Lines[index+1].Text)
-		return (kit.Label{Style: e.Th.T.Caption, Color: e.Th.R.Fg3, MaxLines: 1}).Layout(gtx, e.Th.Theme, next)
+		call, line := stageLine(gtx, size.X, plain(at, ink))
+		if y+line.Size.Y > size.Y {
+			break
+		}
+		place(call, y)
+		y += line.Size.Y + gap
 	}
-	return (kit.Label{Style: e.Th.T.Caption, Color: e.Th.R.Fg2, MaxLines: 1}).Layout(gtx, e.Th.Theme, artists)
-}
-
-func (mini *Mini) setLandscapeWrapped(key string, current, wrapped bool) {
-	if mini.landscapeWraps == nil {
-		mini.landscapeWraps = make(map[string]bool)
+	// the lines sung, above it
+	y = top - gap
+	for at := min(index, next-1) - 1; at >= 0; at-- {
+		line := plain(at, e.Th.R.Fg3)
+		_, measured := stageLine(gtx, size.X, line)
+		lineTop := y - measured.Size.Y
+		if lineTop < 0 {
+			break
+		}
+		call, _ := stageLine(gtx, stageWidth(gtx, lineTop), line)
+		place(call, lineTop)
+		y = lineTop - gap
 	}
-	mini.landscapeWraps[key] = wrapped
-	if current {
-		mini.landscapeLyricWrapped = wrapped
-	}
+	return layout.Dimensions{Size: size}
 }
 
 func (mini *Mini) layoutStrip(gtx layout.Context, e *env.Env) layout.Dimensions {
@@ -531,9 +627,6 @@ func (mini *Mini) landscapeHeadingKey(trackID string, lyrics bool, lyricIndex in
 			mini.landscapeTrackKey = "track:" + trackID
 		}
 		return mini.landscapeTrackKey
-	}
-	if mini.landscapeLyricID != trackID && mini.landscapeWraps != nil {
-		clear(mini.landscapeWraps)
 	}
 	if !mini.landscapeLyricReady || mini.landscapeLyricID != trackID || mini.landscapeLyricIndex != lyricIndex {
 		mini.landscapeLyricID = trackID

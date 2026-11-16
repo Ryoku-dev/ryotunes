@@ -63,6 +63,9 @@ func (bar *PlayerBar) LayoutCompact(gtx layout.Context, e *env.Env) layout.Dimen
 			}),
 			layout.Rigid(layout.Spacer{Width: 13}.Layout),
 			layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+				// the strip's height reaches here as a minimum; the words centre on
+				// the cover instead of hanging from the strip's top
+				gtx.Constraints.Min.Y = 0
 				return compact.text.Layout(gtx, e.Th, func(gtx layout.Context) layout.Dimensions {
 					return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
 						layout.Rigid(func(gtx layout.Context) layout.Dimensions {

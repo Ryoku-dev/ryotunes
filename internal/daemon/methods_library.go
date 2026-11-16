@@ -66,16 +66,11 @@ func getLibrary(ctx context.Context, a *App, _ protocol.Null) ([]model.BrowseIte
 		return nil, err
 	}
 	items := make([]model.BrowseItem, 0, len(device)+len(library.Playlists)+3)
-	for _, smartID := range []string{model.OnRepeatPlaylistID, model.RecentlyPlayedPlaylistID, model.RediscoverPlaylistID} {
-		page, pageErr := smartPlaylist(ctx, a, smartID)
-		if pageErr != nil {
-			return nil, pageErr
-		}
-		if len(page.Items) == 0 || page.Title == nil {
-			continue
-		}
-		items = append(items, model.BrowseItem{Kind: "playlist", ID: smartID, Title: *page.Title, Subtitle: page.Subtitle})
+	smart, err := smartPlaylistCards(ctx, a)
+	if err != nil {
+		return nil, err
 	}
+	items = append(items, smart...)
 	for _, row := range device {
 		subtitle := fmt.Sprintf("%d tracks · Stored on this device", row.TrackCount)
 		item := model.BrowseItem{Kind: "playlist", ID: row.ID, Title: row.Title, Subtitle: &subtitle}
@@ -92,6 +87,24 @@ func getLibrary(ctx context.Context, a *App, _ protocol.Null) ([]model.BrowseIte
 	items = append(items, library.Playlists...)
 	return items, nil
 }
+
+// smartPlaylistCards are the library cards of the derived playlists that have songs, each
+// wearing its own songs' covers (smartPlaylist's Cover).
+func smartPlaylistCards(ctx context.Context, a *App) ([]model.BrowseItem, error) {
+	var cards []model.BrowseItem
+	for _, smartID := range []string{model.OnRepeatPlaylistID, model.RecentlyPlayedPlaylistID, model.RediscoverPlaylistID} {
+		page, err := smartPlaylist(ctx, a, smartID)
+		if err != nil {
+			return nil, err
+		}
+		if len(page.Items) == 0 || page.Title == nil {
+			continue
+		}
+		cards = append(cards, model.BrowseItem{Kind: "playlist", ID: smartID, Title: *page.Title, Subtitle: page.Subtitle, Thumbnail: page.Cover})
+	}
+	return cards, nil
+}
+
 func getLibraryAlbums(ctx context.Context, a *App, _ protocol.Null) ([]model.BrowseItem, error) {
 	pr := selectedProvider(a)
 	if pr.ID() == model.ProviderTidal || pr.ID() == model.ProviderSoundCloud {

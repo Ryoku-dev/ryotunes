@@ -214,7 +214,11 @@ func (queue *Queue) layoutSection(gtx layout.Context, e *env.Env, entry queueEnt
 			return dims
 		}
 	}
-	return ruledHead(gtx, e.Th, entry.title, lead, count, trailing)
+	mark := ""
+	if count >= 0 {
+		mark = kit.Pad2(count)
+	}
+	return ruledHead(gtx, e.Th, entry.title, lead, mark, groupHeadTall, trailing)
 }
 
 func (queue *Queue) layoutMenu(gtx layout.Context, e *env.Env) layout.Dimensions {
@@ -334,6 +338,8 @@ func (queue *Queue) layoutRow(gtx layout.Context, e *env.Env, entry queueEntry) 
 				}
 				return kit.Text(e.Th.Theme, e.Th.T.Mono, e.Th.R.Fg3, optionalString(row.Item.Duration))(gtx)
 			})
+			// clear the row's minimum height so the length centres on the cover
+			gtx.Constraints.Min.Y = 0
 			return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx, item.children[:]...)
 		})
 	})

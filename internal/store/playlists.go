@@ -171,13 +171,20 @@ func (s *Store) PlaylistArtwork(playlistID string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	covers := make([]string, 0, len(tracks))
+	return TracksArtwork(tracks), nil
+}
+
+// TracksArtwork is a collection's automatic cover from its own tracks, in order: the first
+// cover, or the four-cover mosaic when four distinct covers exist (DerivePlaylistArtwork).
+// Tracks without covers give "": the client draws its empty plate then.
+func TracksArtwork(tracks []model.Track) string {
+	covers := make([]string, 0, min(len(tracks), 16))
 	for _, track := range tracks {
 		if track.Thumbnail != nil {
-			covers = append(covers, *track.Thumbnail)
+			covers = append(covers, strings.TrimSpace(*track.Thumbnail))
 		}
 	}
-	return DerivePlaylistArtwork(covers), nil
+	return DerivePlaylistArtwork(covers)
 }
 
 // DerivePlaylistArtwork derives the legacy single-cover or exact four-cover marker.

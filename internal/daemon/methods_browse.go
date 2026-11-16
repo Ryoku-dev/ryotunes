@@ -10,6 +10,7 @@ import (
 	"github.com/ryoku-dev/ryotunes/internal/protocol"
 	"github.com/ryoku-dev/ryotunes/internal/provider"
 	"github.com/ryoku-dev/ryotunes/internal/provider/radio"
+	"github.com/ryoku-dev/ryotunes/internal/store"
 )
 
 func init() {
@@ -213,7 +214,12 @@ func smartPlaylist(ctx context.Context, a *App, id string) (model.PlaylistPage, 
 	if items == nil {
 		items = []model.Track{}
 	}
-	return model.PlaylistPage{Title: &title, Subtitle: &subtitle, Items: items}, nil
+	page := model.PlaylistPage{Title: &title, Subtitle: &subtitle, Items: items}
+	// a derived playlist wears its own songs' covers: the first, or the four-cover mosaic
+	if cover := store.TracksArtwork(items); cover != "" {
+		page.Cover = &cover
+	}
+	return page, nil
 }
 func getPlaylistMore(ctx context.Context, a *App, p protocol.TokenParams) (model.PlaylistTracksPage, error) {
 	return a.YouTube.PlaylistMore(ctx, p.Token)

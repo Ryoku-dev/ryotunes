@@ -1,6 +1,7 @@
 package demo
 
 import (
+	"encoding/json"
 	"fmt"
 	"image"
 	"image/color"
@@ -116,6 +117,7 @@ func makeFixtures(directory string, playing, empty bool) (fixtures, error) {
 	likedSubtitle := "128 songs"
 	liked := model.BrowseItem{Kind: "playlist", ID: "RYOTUNES_LIKED", Title: "Liked songs", Subtitle: &likedSubtitle, Thumbnail: &artwork[7]}
 	library := []model.BrowseItem{liked}
+	library = append(library, derivedPlaylists(artwork)...)
 	library = append(library, cardsOfKind(cards, "playlist")[:8]...)
 
 	sourceName := "Mineral lines"
@@ -287,7 +289,7 @@ func makeFixtures(directory string, playing, empty bool) (fixtures, error) {
 		})
 	}
 	personalState.Saved = append(personalState.Saved, library...)
-	personalState.Pins = []string{library[1].ID, library[2].ID, library[3].ID}
+	personalState.Pins = []string{library[3].ID, library[4].ID, library[5].ID}
 	for index := 0; index < 4; index++ {
 		track := tracks[index]
 		item := model.BrowseItem{Kind: "song", ID: track.VideoID, Title: track.Title, Subtitle: &track.Artists, Thumbnail: track.Thumbnail}
@@ -421,4 +423,18 @@ func demoListeningDays(now time.Time, empty bool) model.ListeningDays {
 		out.Days[len(plays)-1].KnownDurationSeconds -= 8
 	}
 	return out
+}
+
+// derivedPlaylists are the library's daemon-made cards: On Repeat wearing the four-cover
+// mosaic of its own songs (as the daemon derives it), and a device playlist with no songs
+// yet, which has no cover at all and shows the empty plate.
+func derivedPlaylists(artwork []string) []model.BrowseItem {
+	mosaic, _ := json.Marshal([]string{artwork[0], artwork[1], artwork[2], artwork[3]})
+	cover := model.CollageThumbnailPrefix + string(mosaic)
+	repeatSubtitle := "24 songs you've played most this month"
+	emptySubtitle := "0 tracks · Stored on this device"
+	return []model.BrowseItem{
+		{Kind: "playlist", ID: model.OnRepeatPlaylistID, Title: "On Repeat", Subtitle: &repeatSubtitle, Thumbnail: &cover},
+		{Kind: "playlist", ID: model.LocalPlaylistPrefix + "demo-empty", Title: "Road trip", Subtitle: &emptySubtitle},
+	}
 }

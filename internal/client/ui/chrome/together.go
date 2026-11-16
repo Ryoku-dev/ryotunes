@@ -249,7 +249,7 @@ func (together *Together) roomHeader(e *env.Env, lt model.LTState) layout.Widget
 // togetherSection is a ruled group head with its count, as the queue's.
 func togetherSection(e *env.Env, title string, count int) layout.Widget {
 	return func(gtx layout.Context) layout.Dimensions {
-		return ruledHead(gtx, e.Th, title, "", count, nil)
+		return ruledHead(gtx, e.Th, title, "", kit.Pad2(count), groupHeadTall, nil)
 	}
 }
 

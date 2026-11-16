@@ -126,7 +126,11 @@ func (s *Scrubber) updatePointer(gtx layout.Context, value float32, width int, s
 		if !ok {
 			continue
 		}
-		s.pointer = image.Pt(int(math.Round(float64(e.Position.X))), int(math.Round(float64(e.Position.Y))))
+		if e.Kind != pointer.Cancel {
+			// a cancel carries no position (it reads 0, 0): keeping it put
+			// the time bubble at the track's start
+			s.pointer = image.Pt(int(math.Round(float64(e.Position.X))), int(math.Round(float64(e.Position.Y))))
+		}
 		switch e.Kind {
 		case pointer.Enter:
 			s.hovered = true
@@ -154,6 +158,9 @@ func (s *Scrubber) updatePointer(gtx layout.Context, value float32, width int, s
 				s.commit(gtx, s.preview)
 			}
 		case pointer.Cancel:
+			// the pointer went to another handler (a grab elsewhere, the window
+			// losing it): no Leave follows, so the hover ends here
+			s.hovered = false
 			if s.active && e.PointerID == s.pointerID {
 				s.active = false
 			}

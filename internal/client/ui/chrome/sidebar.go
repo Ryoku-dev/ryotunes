@@ -358,6 +358,10 @@ func (sidebar *Sidebar) layoutCollectionArt(gtx layout.Context, e *env.Env, row 
 	if item.card.Thumbnail != nil {
 		thumbnail = *item.card.Thumbnail
 	}
+	if strings.TrimSpace(thumbnail) == "" {
+		// a playlist with nothing to show wears the empty plate, not the loading hatch
+		return widgets.EmptyCover(gtx, e.Th, image.Pt(size, size), look.Shape{Cut: 3}, look.Icon.Playlist)
+	}
 	return row.art.Layout(gtx, e.Th, e.Art, thumbnail, image.Pt(size, size), look.Shape{Cut: 3}, e.Th.Motion.Field)
 }
 
