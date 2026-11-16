@@ -45,81 +45,76 @@ func (track *lrclibTrack) best() *model.Lyrics {
 	return plainLyrics(track.PlainLyrics, "LRCLIB")
 }
 
-func (s *Service) lrclibExact(ctx context.Context, req Request) (*lrclibTrack, error) {
-	query := url.Values{"track_name": {req.Title}, "artist_name": {req.Artists}}
-	if req.Album != nil && strings.TrimSpace(*req.Album) != "" {
-		query.Set("album_name", *req.Album)
+func describeLRCLIB(track lrclibTrack) candidate {
+	about := candidate{title: track.TrackName, artists: track.ArtistName}
+	if track.Duration != nil {
+		about.duration, about.known = *track.Duration, true
 	}
-	if req.Duration != nil && *req.Duration > 0 {
-		query.Set("duration", strconv.FormatInt(int64(*req.Duration+0.5), 10))
+	return about
+}
+
+// lrclibExact asks LRCLIB for the song by its exact names. A tempo variant
+// leaves the length out so LRCLIB answers with the original to retime.
+func (s *Service) lrclibExact(ctx context.Context, q query) (*model.Lyrics, error) {
+	values := url.Values{"track_name": {q.Title}, "artist_name": {q.Artists}}
+	if q.Album != nil && strings.TrimSpace(*q.Album) != "" {
+		values.Set("album_name", *q.Album)
+	}
+	if q.Duration != nil && !q.Variant {
+		values.Set("duration", strconv.FormatInt(int64(*q.Duration+0.5), 10))
 	}
 	var track lrclibTrack
-	status, err := s.getJSON(ctx, 15*time.Second, lrclibRoot+"/get?"+query.Encode(), nil, &track)
+	status, err := s.getJSON(ctx, 15*time.Second, lrclibRoot+"/get?"+values.Encode(), nil, &track)
 	if status == http.StatusNotFound {
 		return nil, nil
 	}
 	if err != nil {
 		return nil, err
 	}
-	return &track, nil
+	hit, how, ok := pick(q, []lrclibTrack{track}, describeLRCLIB)
+	if !ok {
+		return nil, nil
+	}
+	return how.apply(hit.best()), nil
 }
 
-func (s *Service) lrclibSearch(ctx context.Context, req Request) (*lrclibTrack, error) {
-	query := url.Values{"track_name": {req.Title}, "artist_name": {req.Artists}}
+func (s *Service) lrclibSearch(ctx context.Context, q query) (*model.Lyrics, error) {
+	values := url.Values{"track_name": {q.Title}, "artist_name": {q.Artists}}
 	var tracks []lrclibTrack
-	_, err := s.getJSON(ctx, 15*time.Second, lrclibRoot+"/search?"+query.Encode(), nil, &tracks)
+	_, err := s.getJSON(ctx, 15*time.Second, lrclibRoot+"/search?"+values.Encode(), nil, &tracks)
 	if err != nil {
 		return nil, err
 	}
-	close := make([]lrclibTrack, 0, len(tracks))
+	synced := make([]lrclibTrack, 0, len(tracks))
+	plain := make([]lrclibTrack, 0, len(tracks))
 	for _, track := range tracks {
-		if req.Duration != nil && *req.Duration > 0 && track.Duration != nil && abs(*track.Duration-*req.Duration) > matchToleranceSeconds {
-			continue
-		}
-		close = append(close, track)
-	}
-	if len(close) == 0 {
-		return nil, nil
-	}
-	pick := func(candidates []lrclibTrack) *lrclibTrack {
-		track, ok := bestByDuration(req.Duration, candidates, func(candidate lrclibTrack) (float64, bool) {
-			if candidate.Duration == nil {
-				return 0, false
-			}
-			return *candidate.Duration, true
-		}, func(candidate lrclibTrack) bool {
-			return namesMatch(req.Title, req.Artists, candidate.TrackName, candidate.ArtistName)
-		})
-		if !ok {
-			return nil
-		}
-		return &track
-	}
-	synced := make([]lrclibTrack, 0, len(close))
-	plain := make([]lrclibTrack, 0, len(close))
-	for _, track := range close {
 		if strings.TrimSpace(track.SyncedLyrics) != "" {
 			synced = append(synced, track)
 		} else {
 			plain = append(plain, track)
 		}
 	}
-	if track := pick(synced); track != nil {
-		return track, nil
+	for _, candidates := range [][]lrclibTrack{synced, plain} {
+		if hit, how, ok := pick(q, candidates, describeLRCLIB); ok {
+			return how.apply(hit.best()), nil
+		}
 	}
-	return pick(plain), nil
+	return nil, nil
 }
 
-func (s *Service) boidu(ctx context.Context, req Request) (fetchOutcome, error) {
-	query := url.Values{"s": {req.Title}, "a": {req.Artists}}
-	if req.Album != nil && strings.TrimSpace(*req.Album) != "" {
-		query.Set("al", *req.Album)
+// boidu asks Boidu, which matches names and length on its side and answers
+// with TTML that states the recording's length; that length is checked
+// like any other provider's.
+func (s *Service) boidu(ctx context.Context, q query) (fetchOutcome, error) {
+	values := url.Values{"s": {q.Title}, "a": {q.Artists}}
+	if q.Album != nil && strings.TrimSpace(*q.Album) != "" {
+		values.Set("al", *q.Album)
 	}
-	if req.Duration != nil && *req.Duration > 0 {
-		query.Set("d", strconv.FormatInt(int64(*req.Duration+0.5), 10))
+	if q.Duration != nil {
+		values.Set("d", strconv.FormatInt(int64(*q.Duration+0.5), 10))
 	}
 	var response map[string]any
-	status, err := s.getJSON(ctx, 8*time.Second, "https://lyrics-api.boidu.dev/getLyrics?"+query.Encode(), nil, &response)
+	status, err := s.getJSON(ctx, 8*time.Second, "https://lyrics-api.boidu.dev/getLyrics?"+values.Encode(), nil, &response)
 	if status == http.StatusNotFound {
 		return fetchOutcome{definitive: true}, nil
 	}
@@ -137,15 +132,23 @@ func (s *Service) boidu(ctx context.Context, req Request) (fetchOutcome, error) 
 		} else if encoded, marshalErr := json.Marshal(value); marshalErr == nil {
 			text = string(encoded)
 		}
-		if lyrics := lyricsFromLines("Boidu", parseProviderText(text)); lyrics != nil {
-			return fetchOutcome{lyrics: lyrics, definitive: true}, nil
+		lyrics := lyricsFromLines("Boidu", parseProviderText(text))
+		if lyrics == nil {
+			continue
 		}
+		about := candidate{title: q.Title, artists: q.Artists}
+		about.duration, about.known = ttmlDuration(text)
+		_, how, matched := pick(q, []candidate{about}, func(value candidate) candidate { return value })
+		if !matched {
+			return fetchOutcome{definitive: true}, nil
+		}
+		return fetchOutcome{lyrics: how.apply(lyrics), definitive: true}, nil
 	}
 	return fetchOutcome{definitive: true}, nil
 }
 
-func (s *Service) netease(ctx context.Context, req Request) (fetchOutcome, error) {
-	form := url.Values{"s": {strings.TrimSpace(req.Title + " " + req.Artists)}, "type": {"1"}, "limit": {"5"}, "offset": {"0"}}
+func (s *Service) netease(ctx context.Context, q query) (fetchOutcome, error) {
+	form := url.Values{"s": {strings.TrimSpace(q.Title + " " + q.Artists)}, "type": {"1"}, "limit": {"5"}, "offset": {"0"}}
 	headers := map[string]string{"Referer": "https://music.163.com/"}
 	var search map[string]any
 	_, err := s.postFormJSON(ctx, 8*time.Second, "https://music.163.com/api/search/get", form, headers, &search)
@@ -153,11 +156,9 @@ func (s *Service) netease(ctx context.Context, req Request) (fetchOutcome, error
 		return fetchOutcome{}, err
 	}
 	songs := objectSlice(pointer(search, "result", "songs"))
-	hit, ok := bestByDuration(req.Duration, songs, func(song map[string]any) (float64, bool) {
-		duration, ok := number(song["duration"])
-		return duration / 1000, ok
-	}, func(song map[string]any) bool {
-		return namesMatch(req.Title, req.Artists, stringValue(song["name"]), neteaseArtists(song["artists"]))
+	hit, how, ok := pick(q, songs, func(song map[string]any) candidate {
+		duration, known := number(song["duration"])
+		return candidate{title: stringValue(song["name"]), artists: neteaseArtists(song["artists"]), duration: duration / 1000, known: known}
 	})
 	if !ok {
 		return fetchOutcome{definitive: true}, nil
@@ -195,23 +196,22 @@ func (s *Service) netease(ctx context.Context, req Request) (fetchOutcome, error
 			}
 		}
 	}
-	return fetchOutcome{lyrics: lyricsFromLines("Netease Cloud Music", lines), definitive: true}, nil
+	return fetchOutcome{lyrics: how.apply(lyricsFromLines("Netease Cloud Music", lines)), definitive: true}, nil
 }
 
-func (s *Service) qqMusic(ctx context.Context, req Request) (fetchOutcome, error) {
-	query := strings.TrimSpace(req.Title + " " + req.Artists)
-	endpoint := "https://c.y.qq.com/soso/fcgi-bin/client_search_cp?" + url.Values{"w": {query}, "format": {"json"}}.Encode()
+func (s *Service) qqMusic(ctx context.Context, q query) (fetchOutcome, error) {
+	search := strings.TrimSpace(q.Title + " " + q.Artists)
+	endpoint := "https://c.y.qq.com/soso/fcgi-bin/client_search_cp?" + url.Values{"w": {search}, "format": {"json"}}.Encode()
 	headers := map[string]string{"Referer": "https://y.qq.com/"}
-	var search map[string]any
-	_, err := s.getJSON(ctx, 8*time.Second, endpoint, headers, &search)
+	var found map[string]any
+	_, err := s.getJSON(ctx, 8*time.Second, endpoint, headers, &found)
 	if err != nil {
 		return fetchOutcome{}, err
 	}
-	songs := objectSlice(pointer(search, "data", "song", "list"))
-	hit, ok := bestByDuration(req.Duration, songs, func(song map[string]any) (float64, bool) {
-		return number(song["interval"])
-	}, func(song map[string]any) bool {
-		return namesMatch(req.Title, req.Artists, stringValue(song["songname"]), qqArtists(song["singer"]))
+	songs := objectSlice(pointer(found, "data", "song", "list"))
+	hit, how, ok := pick(q, songs, func(song map[string]any) candidate {
+		duration, known := number(song["interval"])
+		return candidate{title: stringValue(song["songname"]), artists: qqArtists(song["singer"]), duration: duration, known: known}
 	})
 	if !ok {
 		return fetchOutcome{definitive: true}, nil
@@ -230,22 +230,21 @@ func (s *Service) qqMusic(ctx context.Context, req Request) (fetchOutcome, error
 	if decoded, decodeErr := base64.StdEncoding.DecodeString(lyric); decodeErr == nil && utf8.Valid(decoded) {
 		lyric = string(decoded)
 	}
-	return fetchOutcome{lyrics: lyricsFromLines("QQ Music", parseProviderText(lyric)), definitive: true}, nil
+	return fetchOutcome{lyrics: how.apply(lyricsFromLines("QQ Music", parseProviderText(lyric))), definitive: true}, nil
 }
 
-func (s *Service) kugou(ctx context.Context, req Request) (fetchOutcome, error) {
-	query := strings.TrimSpace(req.Title + " " + req.Artists)
-	endpoint := "https://songsearch.kugou.com/song_search_v2?" + url.Values{"keyword": {query}, "page": {"1"}, "pagesize": {"5"}}.Encode()
+func (s *Service) kugou(ctx context.Context, q query) (fetchOutcome, error) {
+	keyword := strings.TrimSpace(q.Title + " " + q.Artists)
+	endpoint := "https://songsearch.kugou.com/song_search_v2?" + url.Values{"keyword": {keyword}, "page": {"1"}, "pagesize": {"5"}}.Encode()
 	var search map[string]any
 	_, err := s.getJSON(ctx, 8*time.Second, endpoint, nil, &search)
 	if err != nil {
 		return fetchOutcome{}, err
 	}
 	songs := objectSlice(pointer(search, "data", "lists"))
-	hit, ok := bestByDuration(req.Duration, songs, func(song map[string]any) (float64, bool) {
-		return number(song["Duration"])
-	}, func(song map[string]any) bool {
-		return namesMatch(req.Title, req.Artists, stringValue(song["SongName"]), stringValue(song["SingerName"]))
+	hit, how, ok := pick(q, songs, func(song map[string]any) candidate {
+		duration, known := number(song["Duration"])
+		return candidate{title: stringValue(song["SongName"]), artists: stringValue(song["SingerName"]), duration: duration, known: known}
 	})
 	if !ok {
 		return fetchOutcome{definitive: true}, nil
@@ -279,7 +278,7 @@ func (s *Service) kugou(ctx context.Context, req Request) (fetchOutcome, error) 
 	if err != nil || !utf8.Valid(decoded) {
 		return fetchOutcome{definitive: true}, nil
 	}
-	return fetchOutcome{lyrics: lyricsFromLines("Kugou", parseProviderText(string(decoded))), definitive: true}, nil
+	return fetchOutcome{lyrics: how.apply(lyricsFromLines("Kugou", parseProviderText(string(decoded)))), definitive: true}, nil
 }
 
 func (s *Service) getJSON(ctx context.Context, timeout time.Duration, endpoint string, headers map[string]string, target any) (int, error) {

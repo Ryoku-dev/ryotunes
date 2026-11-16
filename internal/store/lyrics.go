@@ -9,11 +9,19 @@ import (
 	"github.com/ryoku-dev/ryotunes/internal/model"
 )
 
+// lyricsKeyPrefix versions every lyrics_cache row by the lyrics matcher
+// that chose it. Change it whenever matching changes what a track gets:
+// rows from an older matcher (wrong lyrics, or misses the new matcher would
+// fill) are never read again, and Open drops them.
+const lyricsKeyPrefix = "m2:"
+
+func lyricsKey(videoID string) string { return lyricsKeyPrefix + videoID }
+
 // GetLyrics returns a positive or negative cache hit; a hit with nil lyrics is negative.
 func (s *Store) GetLyrics(videoID string, now time.Time, missTTL time.Duration) (*model.Lyrics, bool, error) {
 	var raw sql.NullString
 	var fetchedAt int64
-	err := s.db.QueryRow("SELECT lyrics,fetched_at FROM lyrics_cache WHERE video_id=?", videoID).Scan(&raw, &fetchedAt)
+	err := s.db.QueryRow("SELECT lyrics,fetched_at FROM lyrics_cache WHERE video_id=?", lyricsKey(videoID)).Scan(&raw, &fetchedAt)
 	if err == sql.ErrNoRows {
 		return nil, false, nil
 	}
@@ -22,7 +30,7 @@ func (s *Store) GetLyrics(videoID string, now time.Time, missTTL time.Duration) 
 	}
 	if !raw.Valid {
 		if now.Sub(time.Unix(fetchedAt, 0)) > missTTL {
-			if _, err := s.db.Exec("DELETE FROM lyrics_cache WHERE video_id=?", videoID); err != nil {
+			if _, err := s.db.Exec("DELETE FROM lyrics_cache WHERE video_id=?", lyricsKey(videoID)); err != nil {
 				return nil, false, fmt.Errorf("expire cached lyrics miss: %w", err)
 			}
 			return nil, false, nil
@@ -48,7 +56,7 @@ func (s *Store) PutLyrics(videoID string, lyrics *model.Lyrics, fetchedAt time.T
 	}
 	_, err := s.db.Exec(`INSERT INTO lyrics_cache(video_id,lyrics,fetched_at) VALUES(?,?,?)
 		ON CONFLICT(video_id) DO UPDATE SET lyrics=excluded.lyrics,fetched_at=excluded.fetched_at`,
-		videoID, raw, fetchedAt.Unix())
+		lyricsKey(videoID), raw, fetchedAt.Unix())
 	if err != nil {
 		return fmt.Errorf("put cached lyrics: %w", err)
 	}

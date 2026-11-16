@@ -170,19 +170,22 @@ func (s *Service) resolve(ctx context.Context, req Request) (*model.Lyrics, erro
 	return out.lyrics, err
 }
 
+// fetch asks the providers in order and returns the first timed document;
+// untimed ones wait in plain, in the same order, until none is timed.
 func (s *Service) fetch(ctx context.Context, req Request, forced string) (fetchOutcome, error) {
+	q := newQuery(req)
 	if forced != "" {
 		var out fetchOutcome
 		var err error
 		switch forced {
 		case "boidu":
-			out, err = s.boidu(ctx, req)
+			out, err = s.boidu(ctx, q)
 		case "netease":
-			out, err = s.netease(ctx, req)
+			out, err = s.netease(ctx, q)
 		case "qq":
-			out, err = s.qqMusic(ctx, req)
+			out, err = s.qqMusic(ctx, q)
 		case "kugou":
-			out, err = s.kugou(ctx, req)
+			out, err = s.kugou(ctx, q)
 		default:
 			s.log.Warn("RYOTUNES_LYRICS_ONLY: unknown provider", "provider", forced)
 			return fetchOutcome{}, nil
@@ -203,6 +206,17 @@ func (s *Service) fetch(ctx context.Context, req Request, forced string) (fetchO
 	}
 
 	var errs []error
+	var plain []*model.Lyrics
+	timed := func(lyrics *model.Lyrics) bool {
+		if lyrics == nil {
+			return false
+		}
+		if lyrics.Synced || lyrics.Instrumental {
+			return true
+		}
+		plain = append(plain, lyrics)
+		return false
+	}
 	definitive := false
 	boiduEnabled := true
 	if s.settings != nil {
@@ -211,29 +225,26 @@ func (s *Service) fetch(ctx context.Context, req Request, forced string) (fetchO
 		}
 	}
 	if boiduEnabled {
-		if out, err := s.boidu(ctx, req); err != nil {
+		if out, err := s.boidu(ctx, q); err != nil {
 			errs = append(errs, fmt.Errorf("boidu: %w", err))
 		} else {
 			definitive = out.definitive
-			if out.lyrics != nil {
+			if timed(out.lyrics) {
 				return out, nil
 			}
 		}
 	}
 
-	exact, err := s.lrclibExact(ctx, req)
+	exact, err := s.lrclibExact(ctx, q)
 	if err != nil {
 		errs = append(errs, fmt.Errorf("LRCLIB exact: %w", err))
 	} else {
 		definitive = true
-		if exact != nil {
-			if lyrics := exact.best(); lyrics != nil && (lyrics.Synced || lyrics.Instrumental) {
-				return fetchOutcome{lyrics: lyrics, definitive: true}, nil
-			}
+		if timed(exact) {
+			return fetchOutcome{lyrics: exact, definitive: true}, nil
 		}
 	}
 
-	var youtubePlain *model.Lyrics
 	if s.youtube != nil && model.ProviderOf(req.VideoID) == model.ProviderYouTube {
 		lyrics, lyricErr := s.youtube.Lyrics(ctx, track)
 		if errors.Is(lyricErr, provider.ErrNotFound) || errors.Is(lyricErr, provider.ErrUnsupported) {
@@ -242,57 +253,47 @@ func (s *Service) fetch(ctx context.Context, req Request, forced string) (fetchO
 			errs = append(errs, fmt.Errorf("YouTube Music: %w", lyricErr))
 		} else {
 			definitive = true
-			if lyrics != nil {
-				if lyrics.Synced || lyrics.Instrumental {
-					return fetchOutcome{lyrics: lyrics, definitive: true}, nil
-				}
-				youtubePlain = lyrics
+			if q.Variant {
+				// YouTube's timing belongs to the recording it matched,
+				// and its length is not in the answer to retime from.
+				lyrics = timing{unsynced: true}.apply(lyrics)
+			}
+			if timed(lyrics) {
+				return fetchOutcome{lyrics: lyrics, definitive: true}, nil
 			}
 		}
 	}
 
 	for _, fetch := range []struct {
 		name string
-		fn   func(context.Context, Request) (fetchOutcome, error)
+		fn   func(context.Context, query) (fetchOutcome, error)
 	}{
 		{"Netease Cloud Music", s.netease},
 		{"QQ Music", s.qqMusic},
 		{"Kugou", s.kugou},
 	} {
-		out, fetchErr := fetch.fn(ctx, req)
+		out, fetchErr := fetch.fn(ctx, q)
 		if fetchErr != nil {
 			errs = append(errs, fmt.Errorf("%s: %w", fetch.name, fetchErr))
 			continue
 		}
 		definitive = definitive || out.definitive
-		if out.lyrics != nil {
+		if timed(out.lyrics) {
 			return fetchOutcome{lyrics: out.lyrics, definitive: definitive}, nil
 		}
 	}
 
-	fuzzy, fuzzyErr := s.lrclibSearch(ctx, req)
+	fuzzy, fuzzyErr := s.lrclibSearch(ctx, q)
 	if fuzzyErr != nil {
 		errs = append(errs, fmt.Errorf("LRCLIB search: %w", fuzzyErr))
 	} else {
 		definitive = true
-		if fuzzy != nil {
-			if lyrics := fuzzy.best(); lyrics != nil && lyrics.Synced {
-				return fetchOutcome{lyrics: lyrics, definitive: true}, nil
-			}
+		if timed(fuzzy) {
+			return fetchOutcome{lyrics: fuzzy, definitive: true}, nil
 		}
 	}
-	if exact != nil {
-		if lyrics := plainLyrics(exact.PlainLyrics, "LRCLIB"); lyrics != nil {
-			return fetchOutcome{lyrics: lyrics, definitive: definitive}, nil
-		}
-	}
-	if youtubePlain != nil {
-		return fetchOutcome{lyrics: youtubePlain, definitive: true}, nil
-	}
-	if fuzzy != nil {
-		if lyrics := fuzzy.best(); lyrics != nil {
-			return fetchOutcome{lyrics: lyrics, definitive: definitive}, nil
-		}
+	if len(plain) != 0 {
+		return fetchOutcome{lyrics: plain[0], definitive: definitive}, nil
 	}
 	if !definitive && len(errs) != 0 {
 		return fetchOutcome{}, errors.Join(errs...)

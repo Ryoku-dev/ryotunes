@@ -108,6 +108,10 @@ func migrate(db *sql.DB) error {
 			}
 		}
 	}
+	// Lyrics chosen by an older matcher are never read again; drop them.
+	if _, err := tx.Exec("DELETE FROM lyrics_cache WHERE substr(video_id,1,?)<>?", len(lyricsKeyPrefix), lyricsKeyPrefix); err != nil {
+		return fmt.Errorf("drop stale lyrics cache: %w", err)
+	}
 	if version < schemaVersion {
 		if _, err := tx.Exec(fmt.Sprintf("PRAGMA user_version=%d", schemaVersion)); err != nil {
 			return fmt.Errorf("record schema version: %w", err)

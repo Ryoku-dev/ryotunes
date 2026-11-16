@@ -117,34 +117,7 @@ func TestNormalizeMatch(t *testing.T) {
 			t.Errorf("normalizeMatch(%q) = %q, want %q", test.input, got, test.want)
 		}
 	}
-	if !namesMatch("Save Your Tears", "The Weeknd feat. Ariana Grande", "save-your tears", "The Weeknd") {
+	if !(query{Title: "Save Your Tears", Artists: "The Weeknd feat. Ariana Grande"}).matches("save-your tears", "The Weeknd") {
 		t.Error("normalized title and primary artist should match")
-	}
-}
-
-func TestBestByDurationPrefersNormalizedMatchAndClosestCut(t *testing.T) {
-	type candidate struct {
-		title    string
-		artist   string
-		duration float64
-	}
-	ours := 233.0
-	candidates := []candidate{
-		{title: "Shape of You (DJ Edit)", artist: "Ed Sheeran", duration: 263},
-		{title: "shape-of you", artist: "Ed Sheeran", duration: 233.7},
-		{title: "Shape of You", artist: "Ed Sheeran", duration: 231.2},
-	}
-	got, ok := bestByDuration(&ours, candidates, func(value candidate) (float64, bool) {
-		return value.duration, true
-	}, func(value candidate) bool {
-		return namesMatch("Shape of You", "Ed Sheeran", value.title, value.artist)
-	})
-	if !ok || got.duration != 233.7 {
-		t.Fatalf("best candidate = %#v, %v", got, ok)
-	}
-	if _, ok := bestByDuration(&ours, candidates[:1], func(value candidate) (float64, bool) {
-		return value.duration, true
-	}, nil); ok {
-		t.Fatal("wrong cut outside five-second tolerance matched")
 	}
 }

@@ -428,6 +428,27 @@ func parseJSONTime(value any) (uint64, bool) {
 	return uint64(number), true
 }
 
+// ttmlDuration reads the recording length a TTML document states on its
+// body, in seconds.
+func ttmlDuration(source string) (float64, bool) {
+	if !strings.Contains(source, "<tt") {
+		return 0, false
+	}
+	decoder := xml.NewDecoder(strings.NewReader(source))
+	for {
+		token, err := decoder.Token()
+		if err != nil {
+			return 0, false
+		}
+		if start, ok := token.(xml.StartElement); ok && start.Name.Local == "body" {
+			if value := xmlTimeAttr(start.Attr, "dur"); value != nil && *value > 0 {
+				return float64(*value) / 1000, true
+			}
+			return 0, false
+		}
+	}
+}
+
 func parseTTML(source string) []model.LyricsLine {
 	decoder := xml.NewDecoder(strings.NewReader(source))
 	var lines []model.LyricsLine

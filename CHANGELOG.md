@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Lyrics belong to the song you're playing. A video whose title holds the artist ("PIXY - LEGACY") on someone else's channel, or carries tags like Official Video, Lyrics or ft., now finds the right song, and lyrics for a different song of about the same length are no longer shown. Slowed, sped up, nightcore, reverb, 8D and daycore uploads get the original song's lyrics stretched to their speed, or shown without timing when the speed can't be worked out. Lyrics saved by earlier versions are looked up again once.
 - Discord shows the song you are playing first, in your member list entry and profile, instead of "Ryotunes", and the small badge on the cover is the current Ryoku mark rather than the old music note.
 - Ryotunes follows the Style page in Ryoku Settings now. Design, colours, light or dark, contrast, tint, reduced motion and the Japanese words all come from there and change while Ryotunes is open, and Settings, Appearance shows what the desktop uses with a button that opens Ryoku Settings.
 - Material, Adwaita and Fluent work in Ryotunes too, with their own rounded corners and surfaces like the rest of Ryoku. Covers stay rounded squares and the visualizer bars stay sharp.
