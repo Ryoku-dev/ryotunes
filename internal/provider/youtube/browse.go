@@ -338,7 +338,22 @@ func (c *Client) Playlist(ctx context.Context, id string, sortOrder model.Playli
 	if err != nil {
 		return model.PlaylistPage{}, err
 	}
-	return parsePlaylistPage(root), nil
+	return playlistPageOf(root)
+}
+
+// errEmptyPlaylistPage is a playlist answer with nothing to read: no header, no songs and no
+// continuation. YouTube sends it while the session is still settling; a real playlist,
+// even an empty one, keeps its header (a title or its cover).
+var errEmptyPlaylistPage = errors.New("YouTube Music sent an empty page. Try again.")
+
+// playlistPageOf parses a playlist browse answer, refusing one that carries nothing, so a
+// blank list is never presented as the playlist.
+func playlistPageOf(root any) (model.PlaylistPage, error) {
+	page := parsePlaylistPage(root)
+	if page.Title == nil && page.Thumbnail == nil && len(page.Items) == 0 && (page.Continuation == nil || *page.Continuation == "") {
+		return model.PlaylistPage{}, errEmptyPlaylistPage
+	}
+	return page, nil
 }
 
 // PlaylistMore continues a playlist track shelf.

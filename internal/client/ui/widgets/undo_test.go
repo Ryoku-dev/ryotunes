@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"image"
 	"io"
 	"net"
 	"os"
@@ -16,6 +17,7 @@ import (
 	"gioui.org/layout"
 	"gioui.org/op"
 
+	"github.com/ryoku-dev/ryoku/docs/lithic/library/go/kit"
 	"github.com/ryoku-dev/ryoku/docs/lithic/library/go/tokens"
 	"github.com/ryoku-dev/ryotunes/internal/client/conn"
 	"github.com/ryoku-dev/ryotunes/internal/client/state"
@@ -222,5 +224,84 @@ func TestRemovingASavedCollectionUndoesToTheSamePlace(t *testing.T) {
 	undo()
 	if again := store.Snapshot().Personal.Saved; len(again) != 3 {
 		t.Fatalf("a second Undo duplicated the collection: %v", again)
+	}
+}
+
+func TestLikingARowFillsItsHeartAtRestOnceTheDaemonConfirms(t *testing.T) {
+	socket, requests := recordingDaemon(t)
+	client := conn.NewPath(socket)
+	t.Cleanup(client.Close)
+	theme := hubTheme()
+	e := &env.Env{
+		Th: theme, Conn: client,
+		Go: func(fn func(context.Context)) { go fn(context.Background()) },
+	}
+	indifferent := model.RatingIndifferent
+	items := []model.Track{
+		{VideoID: "rowHeart001", Title: "Night drive", Artists: "Someone", Rating: &indifferent},
+		{VideoID: "rowHeart002", Title: "Other song", Artists: "Someone", Rating: &indifferent},
+	}
+	var table TrackTable
+	frame := newHubFrame(900, 400)
+	rows := func() {
+		frame.run(func(gtx layout.Context) layout.Dimensions {
+			act.PendingClipboard(gtx)
+			height := gtx.Dp(theme.RowHeight())
+			for index := range items {
+				offset := op.Offset(image.Pt(0, index*height)).Push(gtx.Ops)
+				table.Row(gtx, e, items, index, TrackTableOpts{})
+				offset.Pop()
+			}
+			return layout.Dimensions{}
+		})
+	}
+	rows()
+	var scratch op.Ops
+	gtx := frame.context()
+	gtx.Ops = &scratch
+	gtx.Constraints = layout.Constraints{Max: image.Pt(800, 100)}
+	titleWidth := kit.Label{Style: theme.T.Row, MaxLines: 1}.Layout(gtx, theme.Theme, items[0].Title).Size.X
+	heartX := float32(gtx.Dp(48) + titleWidth + gtx.Dp(8) + gtx.Dp(8))
+	heartY := float32(gtx.Dp(theme.RowHeight()) / 2)
+
+	// Hover the row: its outline heart appears, leaning 2 dp with the row.
+	hover := f32.Pt(heartX+float32(gtx.Dp(2)), heartY)
+	frame.router.Queue(pointer.Event{Kind: pointer.Move, Source: pointer.Mouse, PointerID: 1, Position: hover})
+	frame.advance(400 * time.Millisecond)
+	rows()
+	rows()
+	if trackLiked(e, items[0]) {
+		t.Fatal("the row reads liked before it was liked")
+	}
+	frame.router.Queue(
+		pointer.Event{Kind: pointer.Press, Source: pointer.Mouse, PointerID: 1, Buttons: pointer.ButtonPrimary, Position: hover},
+		pointer.Event{Kind: pointer.Release, Source: pointer.Mouse, PointerID: 1, Position: hover},
+	)
+	rows()
+	if rating := awaitRate(t, requests, rows); rating != model.RatingLike {
+		t.Fatalf("the heart sent %q, want %q", rating, model.RatingLike)
+	}
+	for deadline := time.Now().Add(5 * time.Second); !trackLiked(e, items[0]); time.Sleep(10 * time.Millisecond) {
+		rows()
+		if time.Now().After(deadline) {
+			t.Fatal("the daemon confirmed the like but the row still reads unliked")
+		}
+	}
+
+	// Leave the row and let it settle: a liked row keeps its filled heart at
+	// rest, so a press where the heart stands reaches it (an unliked row at
+	// rest has no heart there, and the press would only select the row).
+	frame.router.Queue(pointer.Event{Kind: pointer.Move, Source: pointer.Mouse, PointerID: 1, Position: f32.Pt(heartX, 350)})
+	frame.advance(time.Second)
+	rows()
+	rows()
+	rest := f32.Pt(heartX, heartY)
+	frame.router.Queue(
+		pointer.Event{Kind: pointer.Press, Source: pointer.Mouse, PointerID: 1, Buttons: pointer.ButtonPrimary, Position: rest},
+		pointer.Event{Kind: pointer.Release, Source: pointer.Mouse, PointerID: 1, Position: rest},
+	)
+	rows()
+	if rating := awaitRate(t, requests, rows); rating != model.RatingIndifferent {
+		t.Fatalf("the heart at rest sent %q, want %q (unlike)", rating, model.RatingIndifferent)
 	}
 }

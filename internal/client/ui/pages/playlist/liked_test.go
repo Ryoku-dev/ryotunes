@@ -12,7 +12,9 @@ import (
 	"testing"
 	"time"
 
+	"gioui.org/f32"
 	"gioui.org/io/input"
+	"gioui.org/io/pointer"
 	"gioui.org/layout"
 	"gioui.org/op"
 	"gioui.org/unit"
@@ -86,6 +88,13 @@ func serveLiked(t *testing.T, page func(call int32) json.RawMessage) (*conn.Clie
 				result = json.RawMessage("{}")
 			case protocol.MethodGetPlaylist:
 				result = page(playlistCalls.Add(1))
+				if result == nil {
+					// nil stands for YouTube refusing the ask, as at launch
+					if encoder.Encode(protocol.Response{ID: request.ID, Error: &protocol.Error{Code: protocol.ErrorFailed, Message: "youtube: 400 Bad Request"}}) != nil {
+						return
+					}
+					continue
+				}
 			case protocol.MethodGetPlaylistMore:
 				result = json.RawMessage(`{"items":[],"continuation":null}`)
 			}
@@ -203,4 +212,144 @@ func TestLikedSongsReloadsWhenTheSessionArrives(t *testing.T) {
 	if calls.Load() != 2 || p.Title() != "Liked songs" {
 		t.Fatalf("after the session: %d calls, title %q", calls.Load(), p.Title())
 	}
+}
+
+// pageHarness lays a Liked songs page out frame by frame through the real router.
+type pageHarness struct {
+	p      *Page
+	e      *env.Env
+	ops    op.Ops
+	router input.Router
+	now    time.Time
+}
+
+func newPageHarness(t *testing.T, client *conn.Client) *pageHarness {
+	t.Helper()
+	th := look.NewTheme(palette.Signature(true), libtheme.Comfortable)
+	return &pageHarness{
+		p: New(env.Route{Kind: env.RoutePlaylist, ID: "VLLM"}).(*Page),
+		e: &env.Env{
+			Th: th, Conn: client, Store: state.NewEmpty(), Overlays: new(look.Overlays), Nav: testNav{},
+			Go: func(run func(context.Context)) { go run(context.Background()) },
+		},
+		now: time.Unix(900, 0),
+	}
+}
+
+func (h *pageHarness) frame() {
+	h.ops.Reset()
+	gtx := layout.Context{Ops: &h.ops, Source: h.router.Source(), Now: h.now,
+		Metric: unit.Metric{PxPerDp: 1, PxPerSp: 1}, Constraints: layout.Exact(image.Pt(1000, 700))}
+	act.PendingClipboard(gtx)
+	h.p.Layout(gtx, h.e)
+	h.router.Frame(&h.ops)
+	h.now = h.now.Add(16 * time.Millisecond)
+}
+
+func (h *pageHarness) settle(t *testing.T, done func() bool, what string) {
+	t.Helper()
+	for deadline := time.Now().Add(5 * time.Second); !done(); time.Sleep(5 * time.Millisecond) {
+		h.frame()
+		if time.Now().After(deadline) {
+			t.Fatalf("%s (loading %v, error %q, items %d)", what, h.p.loading, h.p.errText, len(h.p.page.Items))
+		}
+	}
+	for range 3 {
+		h.frame()
+	}
+}
+
+// click presses plaque wherever the pointer finds it on the page.
+func (h *pageHarness) click(t *testing.T, hovered func() bool) {
+	t.Helper()
+	for y := float32(4); y < 700; y += 6 {
+		for x := float32(4); x < 1000; x += 12 {
+			point := f32.Pt(x, y)
+			h.router.Queue(pointer.Event{Kind: pointer.Move, Source: pointer.Mouse, PointerID: 1, Position: point})
+			h.frame()
+			if hovered() {
+				h.router.Queue(
+					pointer.Event{Kind: pointer.Press, Source: pointer.Mouse, PointerID: 1, Buttons: pointer.ButtonPrimary, Position: point},
+					pointer.Event{Kind: pointer.Release, Source: pointer.Mouse, PointerID: 1, Position: point},
+				)
+				h.frame()
+				return
+			}
+		}
+	}
+	t.Fatal("the pointer found no such control on the page")
+}
+
+// YouTube refusing the first ask (its 400 at launch) shows the error with Retry, never the
+// empty playlist, and Retry asks again and lists the songs.
+func TestLikedSongsRefusedFirstAskShowsRetryThatRecovers(t *testing.T) {
+	client, calls := serveLiked(t, func(call int32) json.RawMessage {
+		if call == 1 {
+			return nil
+		}
+		return likedPageJSON(20)
+	})
+	h := newPageHarness(t, client)
+	h.settle(t, func() bool { return calls.Load() == 1 && !h.p.loading }, "the first ask never came back")
+	if h.p.errText == "" || len(h.p.page.Items) != 0 || h.p.page.Title != nil {
+		t.Fatalf("after the refusal: error %q, %d songs", h.p.errText, len(h.p.page.Items))
+	}
+	h.click(t, func() bool { return h.p.retry.Clickable.Hovered() })
+	h.settle(t, func() bool { return calls.Load() == 2 && !h.p.loading && len(h.p.page.Items) == 20 }, "Retry did not bring the songs")
+	if h.p.errText != "" {
+		t.Fatalf("error still %q", h.p.errText)
+	}
+}
+
+// An answer with nothing in it (no title, songs, cover or continuation) offers Reload, and
+// opening the page again later asks again by itself.
+func TestLikedSongsEmptyAnswerAsksAgainOnTheNextVisit(t *testing.T) {
+	client, calls := serveLiked(t, func(call int32) json.RawMessage {
+		if call == 1 {
+			return json.RawMessage(`{"title":null,"subtitle":null,"thumbnail":null,"cover":null,"items":[],"continuation":null,"owned":false,"collaborative":false}`)
+		}
+		return likedPageJSON(20)
+	})
+	h := newPageHarness(t, client)
+	h.settle(t, func() bool { return calls.Load() == 1 && !h.p.loading }, "the first ask never came back")
+	if !h.p.unanswered() || calls.Load() != 1 {
+		t.Fatalf("an empty answer: unanswered %v, %d asks", h.p.unanswered(), calls.Load())
+	}
+	// the page stays shown: frames within the visit ask nothing more
+	for range 20 {
+		h.frame()
+	}
+	if calls.Load() != 1 {
+		t.Fatalf("the open page asked %d times", calls.Load())
+	}
+	// away from the page, then back
+	h.now = h.now.Add(revisitGap + time.Second)
+	h.settle(t, func() bool { return calls.Load() == 2 && !h.p.loading && len(h.p.page.Items) == 20 }, "the next visit did not ask again")
+
+	// a full page is not asked for again on a later visit
+	h.now = h.now.Add(revisitGap + time.Second)
+	for range 5 {
+		h.frame()
+	}
+	time.Sleep(50 * time.Millisecond)
+	for range 3 {
+		h.frame()
+	}
+	if calls.Load() != 2 {
+		t.Fatalf("a full page was asked for again (%d asks)", calls.Load())
+	}
+}
+
+// The empty answer's Reload asks again at once.
+func TestLikedSongsEmptyAnswerReloads(t *testing.T) {
+	client, calls := serveLiked(t, func(call int32) json.RawMessage {
+		if call == 1 {
+			return json.RawMessage(`{"title":null,"items":[],"continuation":null,"owned":false,"collaborative":false}`)
+		}
+		return likedPageJSON(20)
+	})
+	h := newPageHarness(t, client)
+	h.settle(t, func() bool { return calls.Load() == 1 && !h.p.loading }, "the first ask never came back")
+	h.click(t, func() bool { return h.p.reload.Clickable.Hovered() })
+	h.settle(t, func() bool { return calls.Load() == 2 && !h.p.loading && len(h.p.page.Items) == 20 }, "Reload did not bring the songs")
 }

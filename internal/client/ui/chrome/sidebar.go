@@ -97,6 +97,8 @@ func (sidebar *Sidebar) refresh(e *env.Env, snapshot state.State) {
 	sidebar.libraryRev = snapshot.LibraryRevision
 	sidebar.request++
 	sidebar.likedCountFromLibrary = false
+	// unknown until the provider says; a device's liked list is not the provider's
+	sidebar.likedCount = likedCountUnknown
 	if !signedIn {
 		// signed out there is no library to load, and Home already offers sign in
 		sidebar.playlists = sidebar.playlists[:0]
@@ -125,7 +127,7 @@ func (sidebar *Sidebar) refresh(e *env.Env, snapshot state.State) {
 		if err == nil {
 			sidebar.playlists = append(sidebar.playlists[:0], items...)
 			for _, item := range items {
-				if !widgets.IsLikedCollection(item, snapshot.Provider) {
+				if !widgets.IsLikedCollection(item, snapshot.Provider) || !sameLikedCollection(item.ID, likedID) {
 					continue
 				}
 				if count, ok := sidebarCollectionCount(item.Subtitle); ok {
@@ -146,10 +148,27 @@ func (sidebar *Sidebar) refresh(e *env.Env, snapshot state.State) {
 			return
 		}
 		if err == nil && !sidebar.likedCountFromLibrary {
-			sidebar.likedCount = len(page.Items)
+			// a first page with more to come is not the count: say none rather than a wrong one
+			sidebar.likedCount = likedCountUnknown
+			if page.Continuation == nil || strings.TrimSpace(*page.Continuation) == "" {
+				sidebar.likedCount = len(page.Items)
+			}
 		}
 		done(err)
 	})
+}
+
+// likedCountUnknown is a liked count the provider has not given: the leaf shows no count.
+const likedCountUnknown = -1
+
+// sameLikedCollection reports whether a library card is the provider's own liked list the
+// leaf opens (YouTube's VLLM is also LM), not the device's liked list beside it.
+func sameLikedCollection(id, likedID string) bool {
+	id = strings.TrimSpace(id)
+	if strings.EqualFold(id, likedID) {
+		return true
+	}
+	return likedID == "VLLM" && strings.EqualFold(id, "LM")
 }
 
 func sidebarCollectionKind(item model.BrowseItem) string {
@@ -314,6 +333,9 @@ func sidebarCaption(e *env.Env, item sidebarCollection, likedCount int, selected
 		ink = e.Th.R.Fg2
 	}
 	if item.liked {
+		if likedCount < 0 {
+			return func(layout.Context) layout.Dimensions { return layout.Dimensions{} }
+		}
 		if likedCount == 0 {
 			return kit.Text(e.Th.Theme, e.Th.T.Caption, ink, "No songs yet")
 		}

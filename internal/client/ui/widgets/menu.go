@@ -141,13 +141,33 @@ func undoableCall(e *env.Env, method string, params any, message string, undo fu
 // ToggleLike likes track, or, when liked, takes it out of the liked songs
 // and, once the daemon has done it, offers Undo ("Removed from liked
 // songs."), which likes it again. Every heart and Like/Unlike row uses it.
+// Each confirmed rating is kept for the window, so every row showing the
+// track fills or empties its heart at once.
 func ToggleLike(e *env.Env, track model.Track, liked bool) {
 	if !liked {
-		act.Rate(e, track, model.RatingLike)
+		rate(e, track, model.RatingLike, nil)
 		return
 	}
-	undoableCall(e, protocol.MethodRate, protocol.RateParams{VideoID: track.VideoID, Rating: model.RatingIndifferent},
-		"Removed from liked songs.", func() { act.Rate(e, track, model.RatingLike) })
+	rate(e, track, model.RatingIndifferent, func() {
+		offerUndo(e, "Removed from liked songs.", func() { rate(e, track, model.RatingLike, nil) })
+	})
+}
+
+// rate sends track's rating and, once the daemon confirms it, records it
+// and runs done; a refusal shows its error.
+func rate(e *env.Env, track model.Track, rating model.Rating, done func()) {
+	act.Call[protocol.Null](e, protocol.MethodRate, protocol.RateParams{VideoID: track.VideoID, Rating: rating}, func(_ protocol.Null, err error) {
+		if err != nil {
+			if e.Toast != nil {
+				e.Toast(err.Error(), env.ToastError)
+			}
+			return
+		}
+		noteRating(track.VideoID, rating)
+		if done != nil {
+			done()
+		}
+	})
 }
 
 func collectionTracks(e *env.Env, card model.BrowseItem, done func([]model.Track, error)) {
@@ -247,7 +267,7 @@ func trackEntries(m *ItemMenu, e *env.Env, target env.MenuTarget) []menuEntry {
 		}))
 	}
 	if trackRateable(track) {
-		if trackLiked(track) {
+		if trackLiked(e, track) {
 			entries = append(entries, menuItem(look.Icon.Heart, "Unlike", func() { ToggleLike(e, track, true) }))
 		} else {
 			entries = append(entries, menuItem(look.Icon.HeartOutline, "Like", func() { ToggleLike(e, track, false) }))

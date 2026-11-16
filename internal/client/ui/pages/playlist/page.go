@@ -7,6 +7,7 @@ import (
 	"image/color"
 	"strconv"
 	"strings"
+	"time"
 
 	"gioui.org/layout"
 	"gioui.org/op"
@@ -75,7 +76,14 @@ type Page struct {
 	reveal      sheet.Reveal
 	moreLine    pagesheet.More
 	session     playlistSession
+	lastFrame   time.Time
+	reload      kit.Plaque
 }
+
+// revisitGap is how long the page goes undrawn before a frame counts as a new visit: a page
+// whose last answer failed or came back empty asks the daemon again then, so an answer
+// caught mid-launch (YouTube still adopting the session) does not stick.
+const revisitGap = 2 * time.Second
 
 // playlistSession is who the providers say is signed in when the page was asked for. A page
 // asked for before the daemon adopted the browser's session (a route restored at launch)
@@ -96,6 +104,18 @@ func sessionOf(snapshot state.State) playlistSession {
 // New constructs a playlist detail page for r.ID.
 func New(r env.Route) env.Page {
 	return &Page{route: r, seenTokens: make(map[string]struct{}), trackIDs: make(map[string]struct{})}
+}
+
+// unanswered reports a page with nothing to show from its last ask: an error, or an answer
+// with no title, no songs, no cover and no continuation (what YouTube sends Liked music
+// while the session is still being adopted).
+func (p *Page) unanswered() bool {
+	if p.errText != "" {
+		return true
+	}
+	page := p.page
+	return p.loaded && page.Title == nil && len(page.Items) == 0 && value(page.Continuation) == "" &&
+		value(page.Thumbnail) == "" && value(page.Cover) == ""
 }
 
 // Title returns the loaded playlist title, the route's, or the liked songs' own name: the
@@ -168,7 +188,10 @@ func (p *Page) Layout(gtx layout.Context, e *env.Env) layout.Dimensions {
 		}
 	} else if !p.loading && sessionOf(stateSnapshot) != p.session {
 		p.Refresh(e)
+	} else if !p.loading && p.unanswered() && !p.lastFrame.IsZero() && gtx.Now.Sub(p.lastFrame) > revisitGap {
+		p.Refresh(e)
 	}
+	p.lastFrame = gtx.Now
 	p.handleActions(gtx, e)
 	if selected, ok := p.sortChoice.Changed(); ok && !p.sortPending && selected >= 0 && selected < len(sortValues) {
 		p.setSort(e, sortValues[selected])
@@ -193,6 +216,12 @@ func (p *Page) Layout(gtx layout.Context, e *env.Env) layout.Dimensions {
 				}
 				// Centred in the room under the hero, scrolling when there is none.
 				gtx.Constraints.Min.Y = max(0, viewport-p.heroHeight)
+				if p.unanswered() {
+					// the daemon answered with nothing at all: say so and offer to ask again
+					p.reload.Kind, p.reload.Icon, p.reload.Label = kit.PlaqueQuiet, look.Icon.Refresh, "Reload"
+					return widgets.EmptyState(e, look.Icon.Playlist, "No songs came back",
+						"The provider sent this playlist without its songs. Reload, or open it again later.", &p.reload)(gtx)
+				}
 				return widgets.EmptyState(e, look.Icon.Playlist, "No tracks in this playlist", "Add a song and it will appear here.")(gtx)
 			})
 		})
@@ -293,7 +322,7 @@ func (p *Page) layoutTableHeader(gtx layout.Context, e *env.Env, opts widgets.Tr
 }
 
 func (p *Page) handleActions(gtx layout.Context, e *env.Env) {
-	if p.retry.Clicked(gtx) {
+	if p.retry.Clicked(gtx) || p.reload.Clicked(gtx) {
 		p.Refresh(e)
 	}
 	if p.moreRetry.Clicked(gtx) {

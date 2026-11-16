@@ -45,14 +45,37 @@ func AccentFromSource(provider model.Provider, roles palette.Roles) Accent {
 	}
 }
 
-// AccentFromDesktop preserves the gold roles supplied by the loaded Ryoku palette.
+// AccentFromDesktop is the desktop's own accent, the one the Hub wears
+// (Tone.accent is Lithic.sel): sel as the face, onSel on it, and an ink of
+// sel that reads on every pane. On Ryoku's colours that is the signature
+// orange; on the wallpaper's it is the palette's primary, never its tertiary
+// (which the palette maps to gold).
 func AccentFromDesktop(roles palette.Roles) Accent {
-	return Accent{
-		Fill:  roles.Gold,
-		On:    roles.OnGold,
-		Ink:   roles.GoldInk,
-		Field: accentField(roles.Gold, roles),
+	fill := roles.Sel
+	fill.A = 0xff
+	ink := roles.GoldInk
+	if roles.Gold != roles.Sel {
+		// gold's ink is tuned for gold; sel needs its own on the panes
+		ink = contrastAccent(fill, leastContrastPane(fill, roles), roles.Dark)
 	}
+	return Accent{
+		Fill:  fill,
+		On:    roles.OnSel,
+		Ink:   ink,
+		Field: accentField(fill, roles),
+	}
+}
+
+// leastContrastPane is the plane a window lays out (ground, the stones, the
+// slab) that ink reads worst on, so an ink cleared against it reads on all.
+func leastContrastPane(ink color.NRGBA, roles palette.Roles) color.NRGBA {
+	worst, ratio := roles.Ground, palette.ContrastRatio(ink, roles.Ground)
+	for _, plane := range [...]color.NRGBA{roles.Stone1, roles.Stone2, roles.Stone3, roles.Slab} {
+		if r := palette.ContrastRatio(ink, plane); r < ratio {
+			worst, ratio = plane, r
+		}
+	}
+	return worst
 }
 
 func accentFromFill(fill color.NRGBA, roles palette.Roles) Accent {

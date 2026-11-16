@@ -6,6 +6,7 @@ import (
 	"math"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"gioui.org/f32"
@@ -160,8 +161,53 @@ func trackRateable(track model.Track) bool {
 	return provider != "" && provider != model.ProviderLocal && provider != model.ProviderRadio
 }
 
-func trackLiked(track model.Track) bool {
-	return track.Rating != nil && *track.Rating == model.RatingLike
+// ratings are the ratings this window has set and the daemon has confirmed,
+// by video id. A page's rows keep the rating they were fetched with, so
+// without these a heart pressed in a row, a menu or the player bar would not
+// fill (or empty) until the page was fetched again.
+var ratings struct {
+	sync.Mutex
+	byID map[string]model.Rating
+}
+
+// noteRating records a rating the daemon has confirmed for id.
+func noteRating(id string, rating model.Rating) {
+	if id == "" {
+		return
+	}
+	ratings.Lock()
+	if ratings.byID == nil {
+		ratings.byID = make(map[string]model.Rating)
+	}
+	ratings.byID[id] = rating
+	ratings.Unlock()
+}
+
+// trackRating is track's rating as it stands now: the playing track's from
+// the live playback state (the daemon's rating events keep it current),
+// else the last rating this window set for it, else the one it was fetched
+// with.
+func trackRating(e *env.Env, track model.Track) model.Rating {
+	if track.VideoID != "" && e != nil && e.Store != nil {
+		snapshot := e.Store.Snapshot()
+		if now := snapshot.Playback.Now; now != nil && now.VideoID == track.VideoID {
+			return snapshot.Rating
+		}
+	}
+	ratings.Lock()
+	rating, ok := ratings.byID[track.VideoID]
+	ratings.Unlock()
+	if ok {
+		return rating
+	}
+	if track.Rating != nil {
+		return *track.Rating
+	}
+	return ""
+}
+
+func trackLiked(e *env.Env, track model.Track) bool {
+	return trackRating(e, track) == model.RatingLike
 }
 
 func trackTime(track model.Track) string {
@@ -431,7 +477,7 @@ func (t *TrackTable) processRow(gtx layout.Context, e *env.Env, row *trackRow, i
 	}
 	track := items[index]
 	if row.like.Clicked(gtx) && trackRateable(track) {
-		ToggleLike(e, track, trackLiked(track))
+		ToggleLike(e, track, trackLiked(e, track))
 	}
 	if row.more.Clicked(gtx) {
 		row.openMenu(e, track, opts.Context, index)
@@ -540,7 +586,7 @@ func (t *TrackTable) titleCell(gtx layout.Context, e *env.Env, row *trackRow, tr
 	if playing {
 		ink = e.Th.Accent.Ink
 	}
-	liked := trackLiked(track)
+	liked := trackLiked(e, track)
 	likeAlpha := float32(0)
 	if liked || hot {
 		likeAlpha = 1
