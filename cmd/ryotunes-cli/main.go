@@ -28,7 +28,7 @@ Options:
   --help, -h     Show this help.
 
 Use "ryotunes-cli methods" to list available methods.`
-	skinNotice = "Ryotunes skins are now palette files. Open Settings > Appearance to choose one."
+	skinNotice = "Ryotunes no longer uses skins: its colours come from Ryoku Settings › Style."
 )
 
 type commandKind uint8

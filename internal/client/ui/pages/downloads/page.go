@@ -5,6 +5,8 @@ import (
 	"github.com/ryoku-dev/ryoku/docs/lithic/library/go/kit"
 	"github.com/ryoku-dev/ryotunes/internal/client/ui/env"
 	"github.com/ryoku-dev/ryotunes/internal/client/ui/look"
+	"github.com/ryoku-dev/ryotunes/internal/client/ui/pages/pagesheet"
+	"github.com/ryoku-dev/ryotunes/internal/client/ui/sheet"
 	"github.com/ryoku-dev/ryotunes/internal/client/ui/widgets"
 )
 
@@ -24,6 +26,9 @@ type Page struct {
 
 	usedRevision int64
 	usedBytes    int64
+
+	reveal sheet.Reveal
+	strip  pagesheet.Strip
 }
 
 // New constructs a downloads page backed entirely by the live client store.

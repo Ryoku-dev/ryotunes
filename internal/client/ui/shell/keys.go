@@ -6,8 +6,8 @@ import (
 	"gioui.org/io/key"
 	"gioui.org/layout"
 
+	"github.com/ryoku-dev/ryotunes/internal/client/ui/chrome"
 	"github.com/ryoku-dev/ryotunes/internal/client/ui/env"
-	"github.com/ryoku-dev/ryotunes/internal/model"
 	"github.com/ryoku-dev/ryotunes/internal/protocol"
 )
 
@@ -61,7 +61,7 @@ func (s *uiShell) handleKeys(gtx layout.Context, e *env.Env) {
 				page.FocusFilter(gtx)
 			}
 		case pressed.Name == "L" && pressed.Modifiers == key.ModShortcut:
-			s.toggleLike(e)
+			chrome.ToggleLikePlaying(e)
 		case pressed.Name == "R" && pressed.Modifiers == key.ModShortcut:
 			if page, ok := s.page(e.Nav.Current()).(env.Refresher); ok {
 				page.Refresh(e)
@@ -129,16 +129,4 @@ func (s *uiShell) toggleFullscreen() {
 	} else {
 		window.Option(gioapp.Fullscreen.Option())
 	}
-}
-
-func (s *uiShell) toggleLike(e *env.Env) {
-	snapshot := e.Store.Snapshot()
-	if snapshot.Playback.Now == nil {
-		return
-	}
-	rating := model.RatingLike
-	if snapshot.Playback.Now.Rating != nil && *snapshot.Playback.Now.Rating == model.RatingLike {
-		rating = model.RatingIndifferent
-	}
-	s.call(e, protocol.MethodRate, protocol.RateParams{VideoID: snapshot.Playback.Now.VideoID, Rating: rating})
 }

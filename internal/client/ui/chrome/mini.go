@@ -13,9 +13,9 @@ import (
 	"gioui.org/text"
 	"gioui.org/unit"
 
+	"github.com/ryoku-dev/ryoku/docs/lithic/library/go/anim"
 	"github.com/ryoku-dev/ryoku/docs/lithic/library/go/kit"
 	"github.com/ryoku-dev/ryotunes/internal/client/state"
-	"github.com/ryoku-dev/ryotunes/internal/client/ui/act"
 	"github.com/ryoku-dev/ryotunes/internal/client/ui/env"
 	"github.com/ryoku-dev/ryotunes/internal/client/ui/look"
 	"github.com/ryoku-dev/ryotunes/internal/client/ui/widgets"
@@ -48,14 +48,14 @@ type Mini struct {
 	landscapeWraps        map[string]bool
 	landscapeLyricWrapped bool
 
-	seek      widgets.Seek
-	transport widgets.Transport
-	like      kit.IconPlaque
-	likeFill  look.Fill
-	likeTip   look.Tip
-	lyricsAct kit.IconPlaque
-	lyricsTip look.Tip
-	volume    volumeControl
+	seek        widgets.Seek
+	transport   widgets.Transport
+	like        likePlaque
+	likeTip     look.Tip
+	lyricsAct   kit.IconPlaque
+	lyricsPress widgets.PressGlyph
+	lyricsTip   look.Tip
+	volume      volumeControl
 
 	pendingAction system.Action
 	hasAction     bool
@@ -80,14 +80,23 @@ type miniFit struct {
 func (mini *Mini) Layout(gtx layout.Context, e *env.Env) layout.Dimensions {
 	size := gtx.Constraints.Max
 	windowClip := clip.Rect(image.Rectangle{Max: size}).Push(gtx.Ops)
-	paint.FillShape(gtx.Ops, e.Th.R.Stone1, clip.Rect(image.Rectangle{Max: size}).Op())
+	// the mini wears the desktop's pane plane, set off by its hairline where
+	// the design draws one, under the blurred cover (owner ruling: clearly
+	// visible)
+	plane := e.Th.Planes()
+	paint.FillShape(gtx.Ops, plane.Pane, clip.Rect(image.Rectangle{Max: size}).Op())
+	mini.layoutSwap.Ease, mini.titleSwap.Ease, mini.artistSwap.Ease = anim.EaseOutCubic, anim.EaseOutCubic, anim.EaseOutCubic
+	mini.landscapeTitleSwap.Ease, mini.landscapeArtistSwap.Ease = anim.EaseOutCubic, anim.EaseOutCubic
 
 	snapshot := e.Store.Snapshot()
 	var cover string
 	if snapshot.Playback.Now != nil {
 		cover = optionalString(snapshot.Playback.Now.Thumbnail)
 	}
-	mini.backdrop.Paint(gtx, e.Th, e.Art, cover, e.Th.R.Stone1, image.Rectangle{Max: size}, [4]int{})
+	mini.backdrop.Paint(gtx, e.Th, e.Art, cover, plane.Pane, image.Rectangle{Max: size}, [4]int{})
+	if plane.PaneStroke.A > 0 {
+		kit.Stroke(gtx, e.Th.Theme, image.Rectangle{Max: size}, 0, max(1, gtx.Dp(1)), plane.PaneStroke)
+	}
 	mini.seek.Reconcile(gtx, e, snapshot, playbackTrackID(snapshot.Playback.Now))
 	layoutKey := "portrait"
 	if miniUsesLandscape(size.X, size.Y, gtx.Dp(251)) {
@@ -298,7 +307,7 @@ func (mini *Mini) layoutLandscapePrimary(gtx layout.Context, e *env.Env, key, ti
 		line := mini.lyrics.lyrics.Lines[index]
 		if e.Store.Snapshot().Client.WordByWordOn() && index < len(mini.lyrics.words) && len(mini.lyrics.words[index]) > 0 {
 			result := mini.lyrics.karaoke[index].Layout(gtx, e.Th, mini.lyrics.words[index], look.KaraokeStyle{
-				Key: mini.lyrics.trackID, Text: e.Th.T.Label, Base: e.Th.R.Fg2, Highlight: e.Th.Accent.Ink,
+				Key: mini.lyrics.trackID, Text: e.Th.T.Label, Base: karaokeRest(e.Th), Highlight: e.Th.Accent.Ink,
 				Align: text.Start, PreferredRows: 1, MaxRows: 2, MinScale: .8,
 				Lift: unit.Dp(2 * mini.lyrics.lineProgress(index)), PositionMS: mini.lyrics.positionMS(gtx, e),
 			})
@@ -475,31 +484,24 @@ func (mini *Mini) layoutLandscapeActions(gtx layout.Context, e *env.Env, snapsho
 }
 
 func (mini *Mini) layoutLike(gtx layout.Context, e *env.Env, snapshot state.State) layout.Dimensions {
-	mini.like.Small, mini.like.Kind, mini.like.Icon, mini.like.Description = true, kit.PlaqueQuiet, nil, "Like"
 	liked := snapshot.Rating == model.RatingLike
-	return mini.likeTip.Layout(gtx, e.Th, e.Overlays, "Like", func(gtx layout.Context) layout.Dimensions {
-		return layout.Stack{Alignment: layout.Center}.Layout(gtx,
-			layout.Stacked(func(gtx layout.Context) layout.Dimensions { return mini.like.Layout(gtx, e.Th.Theme) }),
-			layout.Expanded(func(gtx layout.Context) layout.Dimensions {
-				return layout.Center.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-					return mini.likeFill.Layout(gtx, e.Th, liked,
-						func(gtx layout.Context) layout.Dimensions { return look.Icon.HeartOutline.Layout(gtx, e.Th.R.Fg2) },
-						func(gtx layout.Context) layout.Dimensions { return look.Icon.Heart.Layout(gtx, e.Th.Accent.Ink) },
-					)
-				})
-			}),
-		)
+	tip := "Like"
+	if liked {
+		tip = "Remove like"
+	}
+	return mini.likeTip.Layout(gtx, e.Th, e.Overlays, tip, func(gtx layout.Context) layout.Dimensions {
+		return mini.like.Layout(gtx, e.Th, liked, true)
 	})
 }
 
 func (mini *Mini) layoutLyricsAction(gtx layout.Context, e *env.Env) layout.Dimensions {
-	mini.lyricsAct.Small, mini.lyricsAct.Icon, mini.lyricsAct.Description = true, look.Icon.Lyrics, "Lyrics"
+	mini.lyricsAct.Small, mini.lyricsAct.Description = true, "Lyrics"
 	mini.lyricsAct.Kind = kit.PlaqueQuiet
 	if mini.showLyrics {
 		mini.lyricsAct.Kind = kit.PlaqueOn
 	}
 	return mini.lyricsTip.Layout(gtx, e.Th, e.Overlays, "Lyrics", func(gtx layout.Context) layout.Dimensions {
-		return mini.lyricsAct.Layout(gtx, e.Th.Theme)
+		return mini.lyricsPress.Layout(gtx, e.Th, &mini.lyricsAct, look.Icon.Lyrics)
 	})
 }
 
@@ -507,11 +509,7 @@ func (mini *Mini) handleTrackActions(gtx layout.Context, e *env.Env, snapshot st
 	track := trackFromPlayback(snapshot.Playback.Now, e.Store.CurrentTrack())
 	provider := model.ProviderOf(track.VideoID)
 	if provider != model.ProviderLocal && provider != model.ProviderRadio && mini.like.Clicked(gtx) {
-		rating := model.RatingLike
-		if snapshot.Rating == model.RatingLike {
-			rating = model.RatingIndifferent
-		}
-		act.Rate(e, track, rating)
+		widgets.ToggleLike(e, track, snapshot.Rating == model.RatingLike)
 	}
 	if provider != model.ProviderRadio && mini.lyricsAct.Clicked(gtx) {
 		mini.showLyrics = !mini.showLyrics

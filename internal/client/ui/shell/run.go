@@ -27,7 +27,7 @@ func init() {
 	gioapp.ID = applicationID
 }
 
-// Options configures the initial windows, route, palette mode, demo daemon, and PNG capture.
+// Options configures the initial windows, route, forced mode, demo daemon, and PNG capture.
 type Options struct {
 	Demo          bool
 	DemoPlaying   bool
@@ -45,6 +45,13 @@ type Options struct {
 func Run(options Options) error {
 	if err := parseMode(options.Mode); err != nil {
 		return err
+	}
+	if options.Mode != "" {
+		// --mode forces the mode for demo renders and tests exactly as the
+		// Lithic override does, for the first reading and every later one
+		if err := os.Setenv("LITHIC_MODE", options.Mode); err != nil {
+			return err
+		}
 	}
 
 	runtime, err := startRuntime(options)
@@ -128,21 +135,23 @@ type clientRuntime struct {
 	hub      invalidationHub
 	themeMu  sync.Mutex
 	theme    *look.Theme
-	mode     string
 	tempDir  string
 	serveErr chan error
 	quit     chan struct{}
 	quitOnce sync.Once
 
-	paletteAppearance string
-	paletteFile       string
-	pendingRoles      *palette.Roles
+	// pendingDesktop is the newest desktop reading from the watcher, waiting
+	// for the window's goroutine to swap the theme
+	pendingDesktop *palette.Desktop
+	// desktopRetrying says a goroutine is asking for frames until the
+	// pending reading is taken (offerDesktop)
+	desktopRetrying bool
 }
 
 func startRuntime(options Options) (*clientRuntime, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 	runtime := &clientRuntime{
-		ctx: ctx, cancel: cancel, mode: options.Mode,
+		ctx: ctx, cancel: cancel,
 		serveErr: make(chan error, 1), quit: make(chan struct{}),
 	}
 
@@ -207,22 +216,12 @@ func startRuntime(options Options) (*clientRuntime, error) {
 		runtime.scope = spectrum.NewScope(runtime.hub.Invalidate)
 	}
 	snapshot := runtime.store.Snapshot()
-	preferences := snapshot.Client
-	appearance := runtime.modeValue(preferences)
-	density := clientDensity(preferences)
-	runtime.theme = look.NewTheme(look.Roles(appearance, preferences.PaletteFile), density, snapshot.Provider)
-	runtime.paletteAppearance, runtime.paletteFile = appearance, preferences.PaletteFile
+	density := clientDensity(snapshot.Client)
+	runtime.theme = look.NewThemeFor(palette.ReadDesktop(), density, snapshot.Provider)
 
-	go look.Watch(runtime.ctx, func() (string, string) {
-		preferences := runtime.store.Snapshot().Client
-		return runtime.modeValue(preferences), preferences.PaletteFile
-	}, func(roles palette.Roles) {
-		runtime.themeMu.Lock()
-		copied := roles
-		runtime.pendingRoles = &copied
-		runtime.themeMu.Unlock()
-		runtime.hub.Invalidate()
-	})
+	go func() {
+		_ = palette.WatchDesktop(runtime.ctx, runtime.offerDesktop)
+	}()
 	go runtime.drain()
 	return runtime, nil
 }

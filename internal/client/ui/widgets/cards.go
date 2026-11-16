@@ -11,7 +11,6 @@ import (
 	"gioui.org/op/paint"
 	"gioui.org/unit"
 
-	"github.com/ryoku-dev/ryoku/docs/lithic/library/go/anim"
 	"github.com/ryoku-dev/ryoku/docs/lithic/library/go/kit"
 	"github.com/ryoku-dev/ryoku/docs/lithic/library/go/palette"
 	"github.com/ryoku-dev/ryotunes/internal/client/ui/act"
@@ -26,7 +25,12 @@ func cardPlateGap(gtx layout.Context) layout.Dimensions {
 	return layout.Dimensions{Size: image.Pt(max(0, gtx.Dp(21)-2*gtx.Dp(cardPlateInset)), 0)}
 }
 
-// Card is one retained browse card.
+// Card is one retained browse card. At rest it is the art and its words on
+// the paper; under the pointer the design's card plane comes up behind it
+// (a vein-drawn slab in Lithic, a lifted tone in Material, Adwaita and
+// Fluent) with the Hub's row wash, in over 120 ms and out over 240 on
+// OutCubic, and the play plate rises 4 dp onto the art; a press deepens the
+// wash, grows the plate's cut by 4 and sets its glyph at .86.
 type Card struct {
 	Preview     kit.State
 	PlayPreview kit.State
@@ -34,11 +38,43 @@ type Card struct {
 	click      kit.Click
 	play       kit.Click
 	art        look.ArtView
-	reveal     anim.Tween
-	playHover  anim.Tween
+	wash       look.RowWash
+	playWash   look.RowWash
 	contextTag int
 	context    contextRelease
 	menu       ItemMenu
+}
+
+// cardPressCut is how much a pressed plate's cut grows (the Hub's plaque).
+const cardPressCut unit.Dp = 4
+
+// cardPlane paints the design's card plane in bounds at amount (0..1): its
+// fill where the design lifts cards, its stroke where it draws them, both
+// through the kit's painters so the corners follow the design.
+func cardPlane(gtx layout.Context, th *look.Theme, bounds image.Rectangle, corners [4]int, amount float32) {
+	if amount <= 0 {
+		return
+	}
+	planes := th.Theme.Planes()
+	if planes.Card.A != 0 && planes.Card != th.R.Slab {
+		kit.FillCorners(gtx, th.Theme, bounds, corners[0], corners[1], corners[2], corners[3], palette.WithAlpha(planes.Card, amount))
+	}
+	if planes.CardStroke.A != 0 {
+		kit.StrokeCorners(gtx, th.Theme, bounds, corners[0], corners[1], corners[2], corners[3], max(1, gtx.Dp(1)), palette.WithAlpha(planes.CardStroke, amount))
+	}
+}
+
+// playPlateLayout draws a play plate of side pixels: stone4 at rest turning
+// to gold as hover rises, its cut growing and its glyph pressing with press.
+func playPlateLayout(gtx layout.Context, th *look.Theme, pixels int, hover, press float32, glyph unit.Dp) layout.Dimensions {
+	bounds := image.Rect(0, 0, pixels, pixels)
+	cut := gtx.Dp(th.Cut.Small) + int(float32(gtx.Dp(cardPressCut))*press+.5)
+	kit.Fill(gtx, th.Theme, bounds, cut, palette.Mix(th.R.Stone4, th.R.Gold, hover))
+	ink := palette.Mix(th.R.Fg, th.R.OnGold, hover)
+	scale := float32(1 - .14*press)
+	return layout.Center.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+		return drawScaledIcon(gtx, look.Icon.Play, ink, glyph, scale)
+	})
 }
 
 func (c *Card) openMenu(e *env.Env, item model.BrowseItem) {
@@ -124,26 +160,13 @@ func (c *Card) playPlate(gtx layout.Context, e *env.Env, reveal float32) layout.
 	if reveal <= 0 {
 		return layout.Dimensions{}
 	}
-	c.playHover.Duration = e.Th.Motion.HoverIn
-	c.playHover.Ease = anim.EaseChisel
-	hot := c.play.Hovered() || c.PlayPreview == kit.StateHover
-	target := float32(0)
-	if hot {
-		target = 1
-	}
-	c.playHover.Set(gtx, target)
-	hover := c.playHover.Value(gtx)
+	hot := c.play.Hovered() || c.PlayPreview == kit.StateHover || c.PlayPreview == kit.StatePressed
+	hover, press := c.playWash.Update(gtx, e.Th, hot, c.play.Pressed() || c.PlayPreview == kit.StatePressed)
 	pixels := gtx.Dp(40)
 	gtx.Constraints = layout.Exact(image.Pt(pixels, pixels))
 	opacity := paint.PushOpacity(gtx.Ops, reveal)
 	dims := c.play.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-		bounds := image.Rect(0, 0, pixels, pixels)
-		ink := palette.Mix(e.Th.R.Stone4, e.Th.R.Gold, hover)
-		kit.FillCut(gtx.Ops, bounds, gtx.Dp(e.Th.Cut.Small), ink)
-		iconInk := palette.Mix(e.Th.R.Fg, e.Th.R.OnGold, hover)
-		return layout.Center.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-			return drawIcon(gtx, look.Icon.Play, iconInk, 20)
-		})
+		return playPlateLayout(gtx, e.Th, pixels, hover, press, 20)
 	})
 	opacity.Pop()
 	return dims
@@ -170,25 +193,16 @@ func (c *Card) Layout(gtx layout.Context, e *env.Env, item model.BrowseItem, wid
 	size := gtx.Constraints.Constrain(image.Pt(outerWidth, height))
 
 	hot := c.click.Hovered() || c.Preview == kit.StateHover || c.Preview == kit.StatePressed
-	c.reveal.Duration = e.Th.Motion.HoverOut
-	if hot {
-		c.reveal.Duration = e.Th.Motion.HoverIn
-	}
-	c.reveal.Ease = anim.EaseChisel
-	target := float32(0)
-	if hot {
-		target = 1
-	}
-	c.reveal.Set(gtx, target)
-	reveal := c.reveal.Value(gtx)
+	pressed := (c.click.Pressed() && !c.play.Pressed()) || c.Preview == kit.StatePressed
+	reveal, _ := c.wash.Update(gtx, e.Th, hot, pressed)
 
 	cardGTX := gtx
 	cardGTX.Constraints = layout.Exact(size)
 	dims := c.click.Layout(cardGTX, func(gtx layout.Context) layout.Dimensions {
 		bounds := image.Rectangle{Max: size}
-		if reveal > 0 {
-			kit.FillCut(gtx.Ops, bounds, gtx.Dp(e.Th.Cut.Mid), palette.WithAlpha(e.Th.R.Stone1, reveal))
-		}
+		cut := gtx.Dp(e.Th.Cut.Mid)
+		cardPlane(gtx, e.Th, bounds, [4]int{cut, cut, cut, cut}, reveal)
+		c.wash.Paint(gtx, e.Th, bounds, cut)
 		insetGTX := gtx
 		insetGTX.Constraints = layout.Exact(image.Pt(artSize, max(0, size.Y-2*padding)))
 		offset := op.Offset(image.Pt(padding, padding)).Push(gtx.Ops)
@@ -219,15 +233,21 @@ func (c *Card) Layout(gtx layout.Context, e *env.Env, item model.BrowseItem, wid
 	return dims
 }
 
-// Shelf is a titled horizontal strip of retained cards.
+// Shelf is a titled horizontal strip of retained cards under a ruled head.
+// Number and Of, when Of is set, mark the head with the shelf's place among
+// the page's shelves, "02 / 06".
 type Shelf struct {
-	scroll         look.HScroller
-	cards          map[string]*Card
-	more           kit.Plaque
-	prev           kit.IconPlaque
-	next           kit.IconPlaque
-	headerChildren [7]layout.FlexChild
-	itemChildren   [2]layout.FlexChild
+	Number, Of int
+
+	scroll       look.HScroller
+	cards        map[string]*Card
+	more         kit.Plaque
+	prev         kit.IconPlaque
+	next         kit.IconPlaque
+	headerSteps  [5]layout.FlexChild
+	itemChildren [2]layout.FlexChild
+	mark         string
+	markOf       [2]int
 }
 
 func (s *Shelf) card(item model.BrowseItem) *Card {
@@ -253,37 +273,47 @@ func (s *Shelf) header(gtx layout.Context, e *env.Env, title string, more *env.R
 	if s.next.Clicked(gtx) {
 		s.scroll.Page(gtx, 1)
 	}
-	children := s.headerChildren[:1]
-	children[0] = layout.Flexed(1, kit.Text(e.Th.Theme, e.Th.T.Section, e.Th.R.Fg, title))
-	if more != nil {
-		s.more.Kind = kit.PlaqueQuiet
-		s.more.Small = true
-		s.more.Label = "Show all"
-		children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			return s.more.Layout(gtx, e.Th.Theme)
-		}))
+	if s.Of <= 0 {
+		s.mark, s.markOf = "", [2]int{}
+	} else if s.markOf != [2]int{s.Number, s.Of} {
+		s.markOf = [2]int{s.Number, s.Of}
+		s.mark = kit.Ordinal(s.Number, s.Of)
 	}
-	if steps {
-		s.prev.Kind, s.prev.Small, s.prev.Icon, s.prev.Description = kit.PlaqueQuiet, true, look.Icon.Back, "Previous cards"
-		s.next.Kind, s.next.Small, s.next.Icon, s.next.Description = kit.PlaqueQuiet, true, look.Icon.Forward, "Next cards"
-		children = append(children,
-			layout.Rigid(layout.Spacer{Width: unit.Dp(4)}.Layout),
-			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-				if !s.scroll.CanPage(-1) {
-					gtx = gtx.Disabled()
-				}
-				return s.prev.Layout(gtx, e.Th.Theme)
-			}),
-			layout.Rigid(layout.Spacer{Width: unit.Dp(4)}.Layout),
-			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-				if !s.scroll.CanPage(1) {
-					gtx = gtx.Disabled()
-				}
-				return s.next.Layout(gtx, e.Th.Theme)
-			}),
-		)
+	if more == nil && !steps {
+		return RuledHead(gtx, e, title, s.mark, nil)
 	}
-	return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx, children...)
+	return RuledHead(gtx, e, title, s.mark, func(gtx layout.Context) layout.Dimensions {
+		children := s.headerSteps[:0]
+		if more != nil {
+			s.more.Kind = kit.PlaqueQuiet
+			s.more.Small = true
+			s.more.Label = "Show all"
+			children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				return s.more.Layout(gtx, e.Th.Theme)
+			}))
+		}
+		if steps {
+			s.prev.Kind, s.prev.Small, s.prev.Icon, s.prev.Description = kit.PlaqueQuiet, true, look.Icon.Back, "Previous cards"
+			s.next.Kind, s.next.Small, s.next.Icon, s.next.Description = kit.PlaqueQuiet, true, look.Icon.Forward, "Next cards"
+			children = append(children,
+				layout.Rigid(layout.Spacer{Width: unit.Dp(4)}.Layout),
+				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+					if !s.scroll.CanPage(-1) {
+						gtx = gtx.Disabled()
+					}
+					return s.prev.Layout(gtx, e.Th.Theme)
+				}),
+				layout.Rigid(layout.Spacer{Width: unit.Dp(4)}.Layout),
+				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+					if !s.scroll.CanPage(1) {
+						gtx = gtx.Disabled()
+					}
+					return s.next.Layout(gtx, e.Th.Theme)
+				}),
+			)
+		}
+		return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx, children...)
+	})
 }
 
 // Layout draws a titled shelf and optional route to its full list.
@@ -385,14 +415,18 @@ func (g *Grid) Row(gtx layout.Context, e *env.Env, items []model.BrowseItem, row
 	return dims
 }
 
-// QuickTile is a compact home shortcut with a trailing play action.
+// QuickTile is a compact home shortcut with a trailing play action: the
+// design's card plane with the Hub's row wash under the pointer and the
+// press wash under a press; its play plate fades in on hover and turns gold
+// under the pointer, pressing as the card's does.
 type QuickTile struct {
 	Preview kit.State
 
 	click      kit.Click
 	play       kit.Click
 	art        look.ArtView
-	hover      anim.Tween
+	wash       look.RowWash
+	playWash   look.RowWash
 	contextTag int
 	context    contextRelease
 	menu       ItemMenu
@@ -420,23 +454,18 @@ func (q *QuickTile) process(gtx layout.Context, e *env.Env, item model.BrowseIte
 func (q *QuickTile) Layout(gtx layout.Context, e *env.Env, item model.BrowseItem) layout.Dimensions {
 	q.process(gtx, e, item)
 	size := gtx.Constraints.Constrain(image.Pt(gtx.Constraints.Max.X, gtx.Dp(56)))
-	hot := q.click.Hovered() || q.Preview == kit.StateHover
-	q.hover.Duration = e.Th.Motion.HoverOut
-	if hot {
-		q.hover.Duration = e.Th.Motion.HoverIn
-	}
-	q.hover.Ease = anim.EaseChisel
-	target := float32(0)
-	if hot {
-		target = 1
-	}
-	q.hover.Set(gtx, target)
-	hover := q.hover.Value(gtx)
+	hot := q.click.Hovered() || q.Preview == kit.StateHover || q.Preview == kit.StatePressed
+	pressed := (q.click.Pressed() && !q.play.Pressed()) || q.Preview == kit.StatePressed
+	hover, _ := q.wash.Update(gtx, e.Th, hot, pressed)
 	childGTX := gtx
 	childGTX.Constraints = layout.Exact(size)
 	dims := q.click.Layout(childGTX, func(gtx layout.Context) layout.Dimensions {
-		plane := palette.Mix(e.Th.R.Stone1, e.Th.R.Stone3, hover)
-		kit.FillCutCorners(gtx.Ops, image.Rectangle{Max: size}, gtx.Dp(e.Th.Cut.Small), 0, 0, 0, plane)
+		bounds := image.Rectangle{Max: size}
+		cut := gtx.Dp(e.Th.Cut.Small)
+		cardPlane(gtx, e.Th, bounds, [4]int{cut, 0, 0, 0}, 1)
+		if hover > 0 {
+			kit.FillCorners(gtx, e.Th.Theme, bounds, cut, 0, 0, 0, q.wash.Ink(e.Th))
+		}
 		artSize := min(size.Y, size.X)
 		children := q.children[:3]
 		children[0] = layout.Rigid(func(gtx layout.Context) layout.Dimensions {
@@ -454,11 +483,11 @@ func (q *QuickTile) Layout(gtx layout.Context, e *env.Env, item model.BrowseItem
 				layout.Rigid(layout.Spacer{Width: unit.Dp(12)}.Layout),
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 					opacity := paint.PushOpacity(gtx.Ops, hover)
+					playHover, playPress := q.playWash.Update(gtx, e.Th, q.play.Hovered(), q.play.Pressed())
 					dims := q.play.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 						pixels := gtx.Dp(32)
 						gtx.Constraints = layout.Exact(image.Pt(pixels, pixels))
-						kit.FillCut(gtx.Ops, image.Rect(0, 0, pixels, pixels), gtx.Dp(e.Th.Cut.Small), e.Th.R.Stone4)
-						return layout.Center.Layout(gtx, func(gtx layout.Context) layout.Dimensions { return drawIcon(gtx, look.Icon.Play, e.Th.R.Fg, 18) })
+						return playPlateLayout(gtx, e.Th, pixels, playHover, playPress, 18)
 					})
 					opacity.Pop()
 					return dims

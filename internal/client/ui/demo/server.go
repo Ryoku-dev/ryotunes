@@ -222,6 +222,12 @@ func (s *demoServer) result(method string, params json.RawMessage) any {
 		return s.data.logs
 	case protocol.MethodListeningStats:
 		return s.data.stats
+	case protocol.MethodListeningDays:
+		var request protocol.ListeningDaysParams
+		_ = json.Unmarshal(params, &request)
+		days := s.data.days.Days
+		count := max(1, min(request.Days, len(days)))
+		return model.ListeningDays{Days: append([]model.DailyListening(nil), days[len(days)-count:]...)}
 	case protocol.MethodPlayCounts:
 		counts := make(model.PlayCounts, len(s.data.tracks))
 		for index, track := range s.data.tracks {

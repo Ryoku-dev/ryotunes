@@ -11,6 +11,7 @@ import (
 
 	"gioui.org/layout"
 
+	"github.com/ryoku-dev/ryoku/docs/lithic/library/go/palette"
 	"github.com/ryoku-dev/ryotunes/internal/client/art"
 	"github.com/ryoku-dev/ryotunes/internal/client/conn"
 	"github.com/ryoku-dev/ryotunes/internal/client/spectrum"
@@ -116,6 +117,10 @@ type Env struct {
 	Now   time.Time
 	// Toast shows a placard; the shell owns the stack.
 	Toast func(message string, kind ToastKind)
+	// Undoable shows a placard with an Undo action (the Hub's notices, 3.17):
+	// message is a sentence ending with a period, undo runs on the UI
+	// goroutine when the listener presses Undo before the placard leaves.
+	Undoable func(message string, undo func())
 	// Go runs fn off the UI goroutine and invalidates the window when it
 	// returns; pages use it for daemon calls so a frame never blocks.
 	Go func(fn func(ctx context.Context))
@@ -125,6 +130,15 @@ type Env struct {
 	// Menu opens an item menu for a track or card at the pointer position.
 	Menu func(target MenuTarget)
 }
+
+// Desktop is the look the Ryoku desktop asks for, live: design, colours,
+// light or dark, contrast, tint, reduced motion and the gloss. Ryotunes keeps
+// no copy of any of them; the theme already wears its roles and design.
+func (e *Env) Desktop() palette.Desktop { return e.Th.Desktop }
+
+// Gloss reports whether the kanji glosses show (shell.json
+// showJapaneseGloss, on when absent). Every gloss and the motto gate on it.
+func (e *Env) Gloss() bool { return e.Th.Desktop.Gloss }
 
 // MenuTarget is what an item menu acts on.
 type MenuTarget struct {

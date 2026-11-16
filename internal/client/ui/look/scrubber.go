@@ -59,6 +59,8 @@ type Scrubber struct {
 	wheelValue    float32
 	wheelFraction float32
 	wheelDeadline time.Time
+
+	shown float32
 }
 
 func clampFraction(value float32) float32 {
@@ -72,8 +74,10 @@ func scrubberFraction(x float32, width int) float32 {
 	return clampFraction(x / float32(width))
 }
 
+// scrubberTrackInk is fg a quarter of the way over the window's paper, so the
+// track reads on the one-paper frame in every design (1.5:1 or more).
 func scrubberTrackInk(roles palette.Roles) color.NRGBA {
-	return palette.Mix(roles.Stone3, roles.Fg, .22)
+	return palette.Mix(roles.Ground, roles.Fg, .25)
 }
 
 func scrubberWheel(value, delta, fraction, step, notch float32) (next, remainder float32) {
@@ -187,7 +191,10 @@ func (s *Scrubber) updateKeys(gtx layout.Context, value float32, style ScrubberS
 		step = .01
 	}
 	for {
+		// the focus filter makes the scrubber focusable: without it Gio drops
+		// the press's focus request and the arrows never arrive
 		raw, ok := gtx.Event(
+			key.FocusFilter{Target: &s.tag},
 			key.Filter{Focus: &s.tag, Name: key.NameLeftArrow},
 			key.Filter{Focus: &s.tag, Name: key.NameRightArrow},
 		)
@@ -244,12 +251,18 @@ func (s *Scrubber) Layout(gtx layout.Context, th *Theme, value float32, style Sc
 	s.updateKeys(gtx, value, style)
 
 	display := clampFraction(value)
+	if s.committedReady {
+		// a click, key or settled wheel committed this frame: show it now,
+		// not the caller's value until it has read the commit
+		display = s.committed
+	}
 	if s.wheelPending {
 		display = s.wheelValue
 	}
 	if s.active {
 		display = s.preview
 	}
+	s.shown = display
 	hover := s.hoverValue(gtx, th)
 	thickness := style.Thickness
 	if thickness <= 0 {
@@ -290,11 +303,7 @@ func (s *Scrubber) Layout(gtx layout.Context, th *Theme, value float32, style Sc
 	handleX := int(math.Round(float64(display*float32(width)))) - handleWidth/2
 	if handleAlpha > 0 {
 		handle := image.Rect(handleX, (size.Y-handleHeight)/2, handleX+handleWidth, (size.Y+handleHeight)/2)
-		if handleCut > 0 {
-			kit.FillCut(gtx.Ops, handle, handleCut, palette.WithAlpha(handleInk, handleAlpha))
-		} else {
-			paint.FillShape(gtx.Ops, palette.WithAlpha(handleInk, handleAlpha), clip.Rect(handle).Op())
-		}
+		kit.Fill(gtx, th.Theme, handle, handleCut, palette.WithAlpha(handleInk, handleAlpha))
 	}
 	semantic.Editor.Add(gtx.Ops)
 	semantic.EnabledOp(!style.Disabled).Add(gtx.Ops)
@@ -317,6 +326,9 @@ func (s *Scrubber) Layout(gtx layout.Context, th *Theme, value float32, style Sc
 func (s *Scrubber) Dragging() (f float32, ok bool) {
 	return s.preview, s.active
 }
+
+// Shown is the value the scrubber drew at its last Layout.
+func (s *Scrubber) Shown() float32 { return s.shown }
 
 // Committed reports and clears the latest release, click, key, or wheel value.
 func (s *Scrubber) Committed() (f float32, ok bool) {

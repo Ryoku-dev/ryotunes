@@ -18,34 +18,70 @@ import (
 	"github.com/ryoku-dev/ryotunes/internal/client/art"
 )
 
-// Shape selects cut artwork corners or a regular octagon.
+// Shape selects cut artwork corners or a regular octagon. In a round design
+// the cuts become rounded corners (artRadius) and the octagon, an artist's
+// portrait, a circle.
 type Shape struct {
 	Cut     unit.Dp
 	Octagon bool
 	Corners [4]bool
 }
 
-func artPath(gtx layout.Context, size image.Point, shape Shape) clip.PathSpec {
+// artRadiusShare caps a cover's radius at this share of its shorter side, so
+// a small cover stays a rounded square.
+const artRadiusShare = .25
+
+// artRadius is a cover's corner radius in a round design, in pixels:
+// Lithic.cornerRadius without its pill rule (the cut times the design's
+// scale, never past its maximum), capped at a quarter of the shorter side.
+// The pill rule is for controls; a cover is a picture and never turns into a
+// circle, whatever its size.
+func artRadius(gtx layout.Context, th *Theme, cut unit.Dp, size image.Point) int {
+	profile := th.Design.Profile()
+	if cut <= 0 {
+		return 0
+	}
+	radius := min(float32(cut)*profile.Scale, profile.Max)
+	least := float32(max(0, min(size.X, size.Y)))
+	return int(min(float32(gtx.Dp(unit.Dp(radius))), least*artRadiusShare) + .5)
+}
+
+func artPath(gtx layout.Context, th *Theme, size image.Point, shape Shape) clip.PathSpec {
 	bounds := image.Rectangle{Max: size}
-	cut := gtx.Dp(shape.Cut)
+	round := th.Design.Profile().Round
 	if shape.Octagon {
-		cut = int(math.Round(float64(min(size.X, size.Y)) * .293))
+		if round {
+			return clip.Ellipse(squareIn(bounds)).Path(gtx.Ops)
+		}
+		cut := int(math.Round(float64(min(size.X, size.Y)) * .293))
 		return kit.CutPath(gtx.Ops, bounds, cut, cut, cut, cut)
 	}
-	anyCorner := false
-	for _, enabled := range shape.Corners {
-		anyCorner = anyCorner || enabled
+	corners := shape.Corners
+	if corners == ([4]bool{}) {
+		corners = [4]bool{true, true, true, true}
 	}
-	if !anyCorner {
-		return kit.CutPath(gtx.Ops, bounds, cut, cut, cut, cut)
+	corner := gtx.Dp(shape.Cut)
+	if round {
+		corner = artRadius(gtx, th, shape.Cut, size)
 	}
-	cuts := [4]int{}
-	for index, enabled := range shape.Corners {
+	var at [4]int // northwest, northeast, southeast, southwest
+	for index, enabled := range corners {
 		if enabled {
-			cuts[index] = cut
+			at[index] = corner
 		}
 	}
-	return kit.CutPath(gtx.Ops, bounds, cuts[0], cuts[1], cuts[2], cuts[3])
+	if round {
+		return clip.RRect{Rect: bounds, NW: at[0], NE: at[1], SE: at[2], SW: at[3]}.Path(gtx.Ops)
+	}
+	return kit.CutPath(gtx.Ops, bounds, at[0], at[1], at[2], at[3])
+}
+
+// squareIn is the largest square centred in bounds.
+func squareIn(bounds image.Rectangle) image.Rectangle {
+	side := min(bounds.Dx(), bounds.Dy())
+	x := bounds.Min.X + (bounds.Dx()-side)/2
+	y := bounds.Min.Y + (bounds.Dy()-side)/2
+	return image.Rect(x, y, x+side, y+side)
 }
 
 func exactArtContext(gtx layout.Context, size image.Point) layout.Context {
@@ -55,7 +91,7 @@ func exactArtContext(gtx layout.Context, size image.Point) layout.Context {
 
 func drawArtPlaceholder(gtx layout.Context, th *Theme, size image.Point, shape Shape) layout.Dimensions {
 	bounds := image.Rectangle{Max: size}
-	path := artPath(gtx, size, shape)
+	path := artPath(gtx, th, size, shape)
 	mask := clip.Outline{Path: path}.Op().Push(gtx.Ops)
 	paint.FillShape(gtx.Ops, th.R.Stone3, clip.Rect(bounds).Op())
 	kit.Hatch(gtx.Ops, path, bounds, max(1, gtx.Dp(8)), max(1, gtx.Dp(1)), palette.WithAlpha(th.R.Fg3, .45))
@@ -67,7 +103,7 @@ func drawArtPlaceholder(gtx layout.Context, th *Theme, size image.Point, shape S
 func Art(gtx layout.Context, th *Theme, cache *art.Cache, url string, size image.Point, shape Shape) layout.Dimensions {
 	size.X = min(max(size.X, 0), max(gtx.Constraints.Max.X, 0))
 	size.Y = min(max(size.Y, 0), max(gtx.Constraints.Max.Y, 0))
-	path := artPath(gtx, size, shape)
+	path := artPath(gtx, th, size, shape)
 	mask := clip.Outline{Path: path}.Op().Push(gtx.Ops)
 	var source paint.ImageOp
 	loaded := false

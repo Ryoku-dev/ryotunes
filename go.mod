@@ -7,15 +7,13 @@ require (
 	github.com/devgianlu/go-librespot v0.10.5
 	github.com/dhowden/tag v0.0.0-20240417053706-3d75831295e8
 	github.com/dop251/goja v0.0.0-20261108153707-d8dfb4d8b999
-	github.com/fsnotify/fsnotify v1.10.1
 	github.com/gen2brain/go-mpv v0.4.0
 	github.com/godbus/dbus/v5 v5.2.4
 	github.com/gofrs/flock v0.13.2
 	github.com/gorilla/websocket v1.5.3
 	github.com/klauspost/compress v1.20.3
 	github.com/mozillazg/go-pinyin v0.21.0
-	github.com/ryoku-dev/ryoku/docs/lithic/library/go v0.0.0-20261110025519-59b1704838d8
-	golang.org/x/exp/shiny v0.0.0-20261106192419-47ce03d25ef0
+	github.com/ryoku-dev/ryoku/docs/lithic/library/go v0.0.0-20261116200446-ced944d1bcbf
 	golang.org/x/image v0.47.0
 	golang.org/x/net v0.48.0
 	golang.org/x/oauth2 v0.37.0
@@ -47,6 +45,7 @@ require (
 	go.yaml.in/yaml/v3 v3.0.5 // indirect
 	golang.org/x/crypto v0.46.0 // indirect
 	golang.org/x/exp v0.0.0-20251209150349-8475f28825e9 // indirect
+	golang.org/x/exp/shiny v0.0.0-20261106192419-47ce03d25ef0 // indirect
 	golang.org/x/sys v0.49.0 // indirect
 	modernc.org/libc v1.80.1 // indirect
 	modernc.org/mathutil v1.7.1 // indirect

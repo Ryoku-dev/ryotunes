@@ -14,23 +14,8 @@ func settingString(settings model.SettingsSnapshot, key model.SettingKey, fallba
 	return fallback
 }
 
-func settingBool(settings model.SettingsSnapshot, key model.SettingKey, fallback bool) bool {
-	value, ok := settings[string(key)]
-	if !ok {
-		return fallback
-	}
-	parsed, err := strconv.ParseBool(value)
-	if err != nil {
-		return fallback
-	}
-	return parsed
-}
-
-func settingInt(settings model.SettingsSnapshot, key model.SettingKey, fallback int) int {
-	value, ok := settings[string(key)]
-	if !ok {
-		return fallback
-	}
+// intOr is value read as an integer, fallback when it does not parse.
+func intOr(value string, fallback int) int {
 	parsed, err := strconv.Atoi(value)
 	if err != nil {
 		return fallback
@@ -38,9 +23,10 @@ func settingInt(settings model.SettingsSnapshot, key model.SettingKey, fallback 
 	return parsed
 }
 
-func settingSet(settings model.SettingsSnapshot, key model.SettingKey) map[string]bool {
+// listSet is a comma separated list as a set.
+func listSet(list string) map[string]bool {
 	set := make(map[string]bool)
-	for _, value := range strings.Split(settings[string(key)], ",") {
+	for _, value := range strings.Split(list, ",") {
 		value = strings.TrimSpace(value)
 		if value != "" {
 			set[value] = true

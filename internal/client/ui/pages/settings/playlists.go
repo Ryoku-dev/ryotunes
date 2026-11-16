@@ -20,7 +20,7 @@ func (p *page) layoutPlaylists(gtx layout.Context, e *env.Env, snapshot state.St
 		p.settingRow(e.Th, "Import a playlist", "Choose a Ryotunes playlist file; its tracks land in a new library playlist. Sign in first.", func(gtx layout.Context) layout.Dimensions {
 			p.playlists.importPath.field.Mono = true
 			p.playlists.importPath.field.Placeholder = "/home/you/Music/playlist.json"
-			p.playlists.importButton.Kind, p.playlists.importButton.Label, p.playlists.importButton.Busy = kit.PlaqueLine, "Import", p.playlists.busy
+			p.playlists.importButton.Kind, p.playlists.importButton.Small, p.playlists.importButton.Label, p.playlists.importButton.Busy = kit.PlaqueQuiet, true, "Import", p.playlists.busy
 			if p.playlists.importButton.Clicked(gtx) && !p.playlists.busy {
 				path := strings.TrimSpace(p.playlists.importPath.field.Text())
 				if path == "" {
@@ -34,7 +34,7 @@ func (p *page) layoutPlaylists(gtx layout.Context, e *env.Env, snapshot state.St
 		p.settingRow(e.Th, "Export the queue", "Write the tracks now in your queue to a portable JSON file.", func(gtx layout.Context) layout.Dimensions {
 			p.playlists.exportPath.field.Mono = true
 			p.playlists.exportPath.field.Placeholder = "ryotunes-queue.json"
-			p.playlists.exportButton.Kind, p.playlists.exportButton.Label, p.playlists.exportButton.Busy = kit.PlaqueLine, "Export", p.playlists.busy
+			p.playlists.exportButton.Kind, p.playlists.exportButton.Small, p.playlists.exportButton.Label, p.playlists.exportButton.Busy = kit.PlaqueQuiet, true, "Export", p.playlists.busy
 			if p.playlists.exportButton.Clicked(gtx) && !p.playlists.busy {
 				path := strings.TrimSpace(p.playlists.exportPath.field.Text())
 				if path == "" {
@@ -49,7 +49,7 @@ func (p *page) layoutPlaylists(gtx layout.Context, e *env.Env, snapshot state.St
 							toastError(e, err, "Could not export the queue")
 							return
 						}
-						e.Toast("Queue exported", env.ToastSuccess)
+						e.Toast("Queue exported.", env.ToastSuccess)
 					})
 				}
 			}
@@ -96,7 +96,7 @@ func (p *page) importPlaylist(e *env.Env, path string) {
 func (p *page) addImportedTracks(e *env.Env, playlistID string, tracks []model.Track, index int) {
 	if index >= len(tracks) {
 		p.playlists.busy = false
-		e.Toast("Imported "+pluralCount(len(tracks), "song"), env.ToastSuccess)
+		e.Toast("Imported "+pluralCount(len(tracks), "song")+".", env.ToastSuccess)
 		return
 	}
 	done := func(err error) {

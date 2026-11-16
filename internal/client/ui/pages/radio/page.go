@@ -3,16 +3,19 @@ package radio
 
 import (
 	"encoding/json"
+	"strings"
+	"time"
+
 	"github.com/ryoku-dev/ryoku/docs/lithic/library/go/kit"
 	"github.com/ryoku-dev/ryotunes/internal/client/state"
 	"github.com/ryoku-dev/ryotunes/internal/client/ui/act"
 	"github.com/ryoku-dev/ryotunes/internal/client/ui/env"
 	"github.com/ryoku-dev/ryotunes/internal/client/ui/look"
+	"github.com/ryoku-dev/ryotunes/internal/client/ui/pages/pagesheet"
+	"github.com/ryoku-dev/ryotunes/internal/client/ui/sheet"
 	"github.com/ryoku-dev/ryotunes/internal/client/ui/widgets"
 	"github.com/ryoku-dev/ryotunes/internal/model"
 	"github.com/ryoku-dev/ryotunes/internal/protocol"
-	"strings"
-	"time"
 )
 
 const pageSize = 36
@@ -38,6 +41,9 @@ type Page struct {
 	more     bool
 	hasMore  bool
 	request  uint64
+	reveal   sheet.Reveal
+	strip    pagesheet.Strip
+	moreLine pagesheet.More
 }
 
 // New constructs a retained radio page without fetching the directory.
@@ -139,20 +145,30 @@ func (p *Page) favourite(personal state.Personal, station model.RadioStation) bo
 }
 
 func (p *Page) toggleFavourite(e *env.Env, station model.RadioStation) {
-	id := stationPersonalID(station.StationUUID)
-	changed := e.Store.UpdatePersonal(func(personal *state.Personal) bool {
-		for index, item := range personal.Saved {
-			if item.Kind == "station" && item.ID == id {
-				personal.Saved = append(personal.Saved[:index], personal.Saved[index+1:]...)
-				return true
-			}
+	card := stationBrowse(station)
+	for _, item := range e.Store.Snapshot().Personal.Saved {
+		if item.Kind == card.Kind && item.ID == card.ID {
+			card = item
+			break
 		}
-		personal.Saved = append(personal.Saved, stationBrowse(station))
-		return true
-	})
-	if changed {
+	}
+	if !p.favourite(e.Store.Snapshot().Personal, station) {
+		widgets.SetPersonalSaved(e, card, true)
+		p.saver.queue(e)
+		return
+	}
+	at := widgets.SetPersonalSaved(e, card, false)
+	if at < 0 {
+		return
+	}
+	p.saver.queue(e)
+	message := "Removed " + station.Name + " from your favourites."
+	// Undo puts the station back where it stood, silently, as the item menu's Undo does
+	restore := func() {
+		widgets.RestorePersonalSaved(e, card, at)
 		p.saver.queue(e)
 	}
+	pagesheet.OfferUndo(e, message, restore)
 }
 
 func (p *Page) recordRecent(e *env.Env, station model.RadioStation) {

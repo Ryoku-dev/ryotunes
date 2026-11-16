@@ -24,6 +24,12 @@ type moduleInfo struct {
 	Replace *moduleInfo
 }
 
+// lithicFonts is the package that embeds Geologica and Martian Mono.
+const lithicFonts = "github.com/ryoku-dev/ryoku/docs/lithic/library/go/fonts"
+
+// lithicSymbols is the package that carries the Material Symbols Sharp icons.
+const lithicSymbols = "github.com/ryoku-dev/ryoku/docs/lithic/library/go/symbols"
+
 type packageInfo struct {
 	ImportPath string
 	Standard   bool
@@ -157,33 +163,60 @@ func moduleComponents(root string, packages []packageInfo) []component {
 }
 
 func assetComponents(root string, packages []packageInfo) []component {
-	fontPath := filepath.Join(root, "internal", "client", "ui", "look", "fonts", "OFL.txt")
-	fontText := mustRead(fontPath)
-	components := []component{{
-		name:   "Space Grotesk and Space Mono fonts",
-		spdx:   "OFL-1.1",
-		source: "internal/client/ui/look/fonts/OFL.txt",
-		text:   fontText,
-	}}
-
+	var components []component
+	// Lithic's two faces, embedded by its fonts package: the only fonts the
+	// binaries carry
 	for _, p := range packages {
-		if p.ImportPath != "golang.org/x/exp/shiny/materialdesign/icons" || p.Module == nil {
+		if p.ImportPath != lithicFonts || p.Module == nil {
 			continue
 		}
 		dir := p.Module.Dir
 		if p.Module.Replace != nil && p.Module.Replace.Dir != "" {
 			dir = p.Module.Replace.Dir
 		}
-		licensePath := filepath.Join(dir, "materialdesign", "icons", "LICENSE")
-		text := mustRead(licensePath)
-		components = append(components, component{
-			name:    "Material Design icons",
-			version: p.Module.Version,
-			spdx:    identifyLicense(text),
-			source:  p.Module.Path + "/materialdesign/icons/LICENSE",
-			text:    text,
-		})
+		for _, face := range []struct{ name, file string }{
+			{"Geologica font", "Geologica-OFL.txt"},
+			{"Martian Mono font", "MartianMono-OFL.txt"},
+		} {
+			components = append(components, component{
+				name:    face.name,
+				version: p.Module.Version,
+				spdx:    "OFL-1.1",
+				source:  p.Module.Path + "/fonts/" + face.file,
+				text:    mustRead(filepath.Join(dir, "fonts", face.file)),
+			})
+		}
 		break
+	}
+	if len(components) == 0 {
+		must(fmt.Errorf("%s is not linked: the Lithic fonts have no notice", lithicFonts))
+	}
+
+	// Material Symbols, the client's icons: Apache-2.0, so the notice ships the
+	// provenance NOTICE beside the license text (section 4(d))
+	found := false
+	for _, p := range packages {
+		if p.ImportPath != lithicSymbols || p.Module == nil {
+			continue
+		}
+		dir := p.Module.Dir
+		if p.Module.Replace != nil && p.Module.Replace.Dir != "" {
+			dir = p.Module.Replace.Dir
+		}
+		license := mustRead(filepath.Join(dir, "symbols", "LICENSE"))
+		notice := mustRead(filepath.Join(dir, "symbols", "NOTICE"))
+		components = append(components, component{
+			name:    "Material Symbols",
+			version: p.Module.Version,
+			spdx:    identifyLicense(license),
+			source:  p.Module.Path + "/symbols/NOTICE, /symbols/LICENSE",
+			text:    append(append(bytes.TrimSpace(notice), "\n\n"...), license...),
+		})
+		found = true
+		break
+	}
+	if !found {
+		must(fmt.Errorf("%s is not linked: the Material Symbols have no notice", lithicSymbols))
 	}
 	return components
 }

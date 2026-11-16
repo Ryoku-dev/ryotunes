@@ -10,6 +10,8 @@ import (
 	"github.com/ryoku-dev/ryotunes/internal/client/ui/act"
 	"github.com/ryoku-dev/ryotunes/internal/client/ui/env"
 	"github.com/ryoku-dev/ryotunes/internal/client/ui/look"
+	"github.com/ryoku-dev/ryotunes/internal/client/ui/pages/pagesheet"
+	"github.com/ryoku-dev/ryotunes/internal/client/ui/sheet"
 	"github.com/ryoku-dev/ryotunes/internal/client/ui/widgets"
 	"github.com/ryoku-dev/ryotunes/internal/model"
 	"github.com/ryoku-dev/ryotunes/internal/protocol"
@@ -27,6 +29,8 @@ type page struct {
 	loaded  bool
 	error   string
 	request uint64
+	reveal  sheet.Reveal
+	strip   pagesheet.Strip
 }
 
 // New returns a retained generic browse-grid page.
@@ -41,6 +45,12 @@ func (p *page) Title() string {
 
 func (p *page) Refresh(e *env.Env) { p.fetch(e) }
 
+// Masthead leaves the part to the route (the frame reads "Browse") and says how far the list
+// is read.
+func (p *page) Masthead() (part, partGloss string, progress float32) {
+	return "", "", p.scroll.Progress()
+}
+
 func (p *page) Layout(gtx layout.Context, e *env.Env) layout.Dimensions {
 	if p.retry.Clicked(gtx) {
 		p.fetch(e)
@@ -51,6 +61,9 @@ func (p *page) Layout(gtx layout.Context, e *env.Env) layout.Dimensions {
 	inset := look.ContentInset(e.Th.Class)
 	width := int(gtx.Metric.PxToDp(gtx.Constraints.Max.X - 2*gtx.Dp(inset)))
 	children := []layout.Widget{func(gtx layout.Context) layout.Dimensions {
+		p.header.Place = sheet.Library
+		p.strip.Set(0, "Items", len(p.items), false)
+		p.header.Specs = p.strip.Specs(p.loaded)
 		return p.header.Layout(gtx, e, p.Title(), "", nil)
 	}}
 	stateIndex := -1
@@ -62,7 +75,7 @@ func (p *page) Layout(gtx layout.Context, e *env.Env) layout.Dimensions {
 		children = append(children, widgets.Failed(e, p.error, &p.retry))
 	case len(p.items) == 0:
 		stateIndex = len(children)
-		children = append(children, widgets.EmptyState(e, look.Icon.Library, "Nothing here.", "This collection has no items."))
+		children = append(children, widgets.EmptyState(e, look.Icon.Library, "Nothing here yet", "This collection is empty. Go back and open another."))
 	default:
 		rows := p.grid.Rows(max(1, width), len(p.items))
 		for row := range rows {
@@ -73,17 +86,19 @@ func (p *page) Layout(gtx layout.Context, e *env.Env) layout.Dimensions {
 		}
 	}
 	return p.scroll.Layout(gtx, e.Th, len(children), func(gtx layout.Context, index int) layout.Dimensions {
-		if index == stateIndex {
-			return children[index](gtx)
-		}
-		bottom := unit.Dp(21)
-		if index+1 == stateIndex {
-			bottom = 0
-		}
-		if index == 0 {
-			return layout.Inset{Bottom: bottom}.Layout(gtx, children[index])
-		}
-		return layout.Inset{Right: inset, Bottom: bottom, Left: inset}.Layout(gtx, children[index])
+		return p.reveal.Group(gtx, e.Th, index, func(gtx layout.Context) layout.Dimensions {
+			if index == stateIndex {
+				return children[index](gtx)
+			}
+			bottom := unit.Dp(21)
+			if index+1 == stateIndex {
+				bottom = 0
+			}
+			if index == 0 {
+				return layout.Inset{Top: e.Th.Sp.S2, Bottom: bottom}.Layout(gtx, children[index])
+			}
+			return layout.Inset{Right: inset, Bottom: bottom, Left: inset}.Layout(gtx, children[index])
+		})
 	})
 }
 

@@ -19,6 +19,7 @@ import (
 	"github.com/ryoku-dev/ryotunes/internal/client/ui/chrome"
 	"github.com/ryoku-dev/ryotunes/internal/client/ui/env"
 	"github.com/ryoku-dev/ryotunes/internal/client/ui/look"
+	"github.com/ryoku-dev/ryotunes/internal/client/ui/sheet"
 	"github.com/ryoku-dev/ryotunes/internal/client/ui/widgets"
 )
 
@@ -72,26 +73,24 @@ type uiShell struct {
 	nowPlaying   chrome.NowPlaying
 	mini         chrome.Mini
 
-	overlays            look.Overlays
-	placards            kit.Placard
-	confirm             kit.Confirm
-	confirmReq          *confirmRequest
-	itemMenu            widgets.ItemMenu
-	soundTag            struct{}
-	sheetOutside        struct{}
-	panelMotion         anim.Tween
-	sheetMotion         anim.Tween
-	sheetReady          bool
-	playerMotion        anim.Tween
-	playerMotionReady   bool
-	overlayBottom       int
-	sidebarMotion       anim.Tween
-	sidebarMotionReady  bool
-	sidebarSheetMotion  anim.Tween
-	sidebarSheetReady   bool
-	sidebarSheetOutside struct{}
-	contentSwap         look.Swap
-	transitionWidgets   map[string]layout.Widget
+	overlays           look.Overlays
+	placards           kit.Placard
+	notices            noticeLog
+	confirm            kit.Confirm
+	confirmReq         *confirmRequest
+	itemMenu           widgets.ItemMenu
+	soundTag           struct{}
+	panelMotion        anim.Tween
+	panelDrawer        look.Drawer
+	sidebarDrawer      look.Drawer
+	playerMotion       anim.Tween
+	playerMotionReady  bool
+	overlayBottom      int
+	sidebarMotion      anim.Tween
+	sidebarMotionReady bool
+	pageRise           look.PageRise
+	masthead           sheet.Masthead
+	colophon           sheet.Colophon
 
 	classReady      bool
 	lastClass       look.Class
@@ -232,7 +231,17 @@ func (s *uiShell) runWindow(window *gioapp.Window, mini bool, plan windowModePla
 		raw := window.Event()
 		switch event := raw.(type) {
 		case gioapp.ConfigEvent:
+			focusChanged := s.config.Focused != event.Config.Focused
 			s.config = event.Config
+			// the sheet's ambient life (the masthead's seconds) runs only while the main
+			// window, which carries the masthead, is focused; one frame on a change starts
+			// or stops the clock at once
+			if !mini {
+				kit.SetFocused(event.Config.Focused)
+				if focusChanged {
+					window.Invalidate()
+				}
+			}
 			if !creationReissued {
 				creationReissued = true
 				window.Option(plan.creationOptions()...)
@@ -288,6 +297,7 @@ func (s *uiShell) frameMain(frame gioapp.FrameEvent, operations *op.Ops) {
 	s.layout(gtx, e, windowWidthDP)
 	s.handleKeys(gtx, e)
 	s.layoutOverlays(gtx, e)
+	s.runtime.themeFrameEnd(gtx)
 }
 
 func (s *uiShell) frameMini(frame gioapp.FrameEvent, operations *op.Ops) {
@@ -298,13 +308,14 @@ func (s *uiShell) frameMini(frame gioapp.FrameEvent, operations *op.Ops) {
 	e := s.environment(gtx.Now, theme)
 	act.PendingClipboard(gtx)
 	s.reconcileProvider(gtx, e)
-	paint.Fill(gtx.Ops, theme.R.Ground)
+	paint.Fill(gtx.Ops, theme.Planes().Side)
 	s.mini.Layout(gtx, e)
 	if action, ok := s.mini.WindowAction(); ok {
 		s.performWindowAction(action)
 	}
 	s.handleKeys(gtx, e)
 	s.layoutOverlays(gtx, e)
+	s.runtime.themeFrameEnd(gtx)
 }
 
 func clientScale(preferences state.ClientPreferences) float32 {

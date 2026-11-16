@@ -24,21 +24,34 @@ func (p *page) layoutIntegrations(gtx layout.Context, e *env.Env, snapshot state
 		p.discordTitleRow(e),
 		p.lastfmRow(e, snapshot),
 		p.mprisRow(e),
-		p.listenTogetherRow(e))
+		func(gtx layout.Context) layout.Dimensions {
+			return p.integrations.more.layout(gtx, e.Th, "More options", func(gtx layout.Context) layout.Dimensions {
+				return stackRows(gtx, []layout.Widget{p.listenTogetherRow(e)})
+			})
+		})
 }
 
+// discordRow is the Discord Rich Presence toggle (owner ruling R5): the
+// connection's claim beside it, and the whole row toggles it.
 func (p *page) discordRow(e *env.Env, snapshot state.State) layout.Widget {
-	enabled := settingBool(snapshot.Settings, model.SettingDiscordRPC, false)
+	enabled := p.valueBool(snapshot.Settings, model.SettingDiscordRPC)
 	tone, claim := discordClaim(p.discord, enabled)
-	return p.settingRow(e.Th, "Discord rich presence", discordDetail(p.discord, enabled), func(gtx layout.Context) layout.Dimensions {
-		p.integrations.discord.Value = enabled
-		return accountControl(gtx, e, tone, claim, func(gtx layout.Context) layout.Dimensions {
-			dims := p.integrations.discord.Layout(gtx, e.Th.Theme)
-			if p.integrations.discord.Changed() {
-				setSetting(e, model.SettingDiscordRPC, boolString(p.integrations.discord.Value), "", nil)
-			}
-			return dims
-		})
+	set := func(on bool) { p.write(e, model.SettingDiscordRPC, boolString(on), "", nil) }
+	return p.row(e.Th, rowSpec{
+		title: "Discord rich presence", detail: "Show what you are listening to on your Discord profile",
+		changed:  p.settingChanged(snapshot.Settings, model.SettingDiscordRPC),
+		reset:    func() { set(false) },
+		activate: func() { set(!enabled) },
+		control: func(gtx layout.Context) layout.Dimensions {
+			p.integrations.discord.Value = enabled
+			return accountControl(gtx, e, tone, claim, func(gtx layout.Context) layout.Dimensions {
+				dims := p.integrations.discord.Layout(gtx, e.Th.Theme)
+				if p.integrations.discord.Changed() {
+					set(p.integrations.discord.Value)
+				}
+				return dims
+			})
+		},
 	})
 }
 
@@ -46,13 +59,13 @@ func (p *page) discordTitleRow(e *env.Env) layout.Widget {
 	return p.settingRow(e.Th, "Discord presence title", "The text Discord renders as “Listening to …”.", func(gtx layout.Context) layout.Dimensions {
 		p.integrations.presence.field.Placeholder = "Ryotunes"
 		p.integrations.presence.field.Help = "Listening to " + p.integrations.presence.field.Text()
-		p.integrations.savePresence.Kind, p.integrations.savePresence.Label = kit.PlaqueLine, "Save"
+		p.integrations.savePresence.Kind, p.integrations.savePresence.Small, p.integrations.savePresence.Label = kit.PlaqueQuiet, true, "Save"
 		if p.integrations.savePresence.Clicked(gtx) {
 			name := strings.TrimSpace(p.integrations.presence.field.Text())
 			if len(name) < 2 || len(name) > 128 {
 				e.Toast("Discord presence title must be between 2 and 128 characters", env.ToastError)
 			} else {
-				setSetting(e, model.SettingDiscordPresenceName, name, "Discord now shows “Listening to "+name+"”", nil)
+				p.write(e, model.SettingDiscordPresenceName, name, "Discord now shows “Listening to "+name+"”.", nil)
 			}
 		}
 		return layout.Flex{Axis: layout.Vertical, Alignment: layout.End}.Layout(gtx,
@@ -83,15 +96,17 @@ func (p *page) lastfmRow(e *env.Env, snapshot state.State) layout.Widget {
 	return p.settingRow(e.Th, "Last.fm", detail, func(gtx layout.Context) layout.Dimensions {
 		return accountControl(gtx, e, tone, claim, func(gtx layout.Context) layout.Dimensions {
 			if connected {
-				return providerButton(gtx, e, &p.integrations.lastfmDisconnect, kit.PlaqueDangerLine, "Disconnect", func() {
-					callNull(e, protocol.MethodLastfmDisconnect, protocol.Null{}, "Could not disconnect Last.fm", nil)
+				return providerButton(gtx, e, &p.integrations.lastfmDisconnect, kit.PlaqueQuiet, "Disconnect", func() {
+					confirm(e, "Disconnect Last.fm?", "Ryotunes stops scrobbling what you play until you connect again.", "Disconnect", func() {
+						callNull(e, protocol.MethodLastfmDisconnect, protocol.Null{}, "Could not disconnect Last.fm", nil)
+					})
 				})
 			}
 			buttonGTX := gtx
 			if !configured {
 				buttonGTX = buttonGTX.Disabled()
 			}
-			return providerButton(buttonGTX, e, &p.integrations.lastfmConnect, kit.PlaqueLine, "Connect", func() {
+			return providerButton(buttonGTX, e, &p.integrations.lastfmConnect, kit.PlaqueQuiet, "Connect", func() {
 				if configured {
 					callNull(e, protocol.MethodLastfmConnect, protocol.Null{}, "Could not connect Last.fm", nil)
 				}
@@ -114,10 +129,10 @@ func (p *page) listenTogetherRow(e *env.Env) layout.Widget {
 	return p.settingRow(e.Th, "Listen Together server", "The ws:// or wss:// relay used to host and join synchronized rooms.", func(gtx layout.Context) layout.Dimensions {
 		p.integrations.listenURL.field.Mono = true
 		p.integrations.listenURL.field.Placeholder = "wss://sync.example"
-		p.integrations.saveListenURL.Kind, p.integrations.saveListenURL.Label = kit.PlaqueLine, "Save server"
+		p.integrations.saveListenURL.Kind, p.integrations.saveListenURL.Small, p.integrations.saveListenURL.Label = kit.PlaqueQuiet, true, "Save server"
 		if p.integrations.saveListenURL.Clicked(gtx) {
 			callNull(e, protocol.MethodLTSetServerURL, protocol.LTServerURLParams{URL: strings.TrimSpace(p.integrations.listenURL.field.Text())}, "Could not save Listen Together server", func() {
-				e.Toast("Listen Together server saved", env.ToastSuccess)
+				e.Toast("Listen Together server saved.", env.ToastSuccess)
 			})
 		}
 		return layout.Flex{Axis: layout.Vertical, Alignment: layout.End}.Layout(gtx,
@@ -144,9 +159,4 @@ func discordClaim(status model.DiscordStatus, enabled bool) (palette.Tone, strin
 	default:
 		return palette.Attention, "Discord is not running"
 	}
-}
-
-func discordDetail(status model.DiscordStatus, enabled bool) string {
-	_, claim := discordClaim(status, enabled)
-	return claim
 }

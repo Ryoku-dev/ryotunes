@@ -189,7 +189,7 @@ func TestHScrollerHorizontalScrollDoesNotEditValueDrags(t *testing.T) {
 		}
 		strip.Layout(gtx, theme, cellCount, func(gtx layout.Context, index int) layout.Dimensions {
 			gtx.Constraints = layout.Exact(image.Pt(cellWidth, height))
-			return drags[index].Layout(gtx, 1, .1, 10, func(gtx layout.Context) layout.Dimensions {
+			return drags[index].Layout(gtx, theme, 1, .1, 10, func(gtx layout.Context) layout.Dimensions {
 				return layout.Dimensions{Size: gtx.Constraints.Max}
 			})
 		})

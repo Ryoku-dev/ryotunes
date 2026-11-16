@@ -11,6 +11,8 @@ import (
 	"github.com/ryoku-dev/ryotunes/internal/client/ui/act"
 	"github.com/ryoku-dev/ryotunes/internal/client/ui/env"
 	"github.com/ryoku-dev/ryotunes/internal/client/ui/look"
+	"github.com/ryoku-dev/ryotunes/internal/client/ui/pages/pagesheet"
+	"github.com/ryoku-dev/ryotunes/internal/client/ui/sheet"
 	"github.com/ryoku-dev/ryotunes/internal/client/ui/widgets"
 	"github.com/ryoku-dev/ryotunes/internal/model"
 	"github.com/ryoku-dev/ryotunes/internal/protocol"
@@ -45,6 +47,12 @@ type Page struct {
 	openLogs kit.Plaque
 	copyAll  kit.Plaque
 	retry    kit.Plaque
+
+	reveal      sheet.Reveal
+	strip       pagesheet.Strip
+	totalsKey   totalsKey
+	totalsText  string
+	levelCounts [3]int
 }
 
 // New constructs a lazy diagnostics page.

@@ -15,6 +15,7 @@ import (
 
 	"github.com/ryoku-dev/ryoku/docs/lithic/library/go/anim"
 	"github.com/ryoku-dev/ryoku/docs/lithic/library/go/kit"
+	"github.com/ryoku-dev/ryoku/docs/lithic/library/go/palette"
 	"github.com/ryoku-dev/ryoku/docs/lithic/library/go/tokens"
 )
 
@@ -47,6 +48,9 @@ type Placement struct {
 	MinWidth unit.Dp
 	Passive  bool
 	Return   any
+	// Scrim lays the window's scrim (Roles.Scrim) under the overlay, fading
+	// with it, for a sheet that takes the window's attention.
+	Scrim bool
 }
 
 type overlayEntry struct {
@@ -360,6 +364,9 @@ func (overlays *Overlays) layoutEntry(gtx layout.Context, theme *Theme, entry *o
 		direction = 1
 	}
 	position.Y += int(direction * travel * (1 - progress))
+	if entry.placement.Scrim {
+		paint.FillShape(gtx.Ops, palette.WithAlpha(theme.R.Scrim, progress), clip.Rect(image.Rectangle{Max: overlays.window}).Op())
+	}
 
 	offset := op.Offset(position).Push(gtx.Ops)
 	opacity := paint.PushOpacity(gtx.Ops, progress)
@@ -369,8 +376,8 @@ func (overlays *Overlays) layoutEntry(gtx layout.Context, theme *Theme, entry *o
 	if entry.tip {
 		cut = theme.Cut.Tooltip
 	}
-	kit.FillCut(gtx.Ops, bounds, gtx.Dp(cut), theme.R.Stone4)
-	kit.StrokeCut(gtx.Ops, bounds, gtx.Dp(cut), max(1, gtx.Dp(tokens.SizeHairline)), theme.R.Vein)
+	kit.Fill(gtx, theme.Theme, bounds, gtx.Dp(cut), theme.R.Stone4)
+	kit.Stroke(gtx, theme.Theme, bounds, gtx.Dp(cut), max(1, gtx.Dp(tokens.SizeHairline)), theme.R.Vein)
 	call.Add(gtx.Ops)
 	opacity.Pop()
 	offset.Pop()

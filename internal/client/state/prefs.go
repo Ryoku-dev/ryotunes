@@ -7,17 +7,16 @@ import (
 	"path/filepath"
 )
 
-// ClientPreferences is the client-only window, panel, appearance, and zoom state.
+// ClientPreferences is the client-only window, panel, density, and zoom state.
+// The look itself (design, colours, light or dark, contrast, tint, reduced
+// motion and the gloss) belongs to the desktop and is never stored here.
 type ClientPreferences struct {
 	WindowWidth  int    `json:"windowWidth"`
 	WindowHeight int    `json:"windowHeight"`
 	PanelOpen    bool   `json:"panelOpen"`
 	PanelTab     string `json:"panelTab"`
 	ZoomPercent  int    `json:"zoomPercent"`
-	Appearance   string `json:"appearance"`
 	Density      string `json:"density"`
-	ReduceMotion bool   `json:"reduceMotion"`
-	PaletteFile  string `json:"paletteFile,omitempty"`
 	Decorations  bool   `json:"decorations"`
 	Route        string `json:"route,omitempty"`
 	MiniOpen     bool   `json:"miniOpen"`
@@ -27,9 +26,8 @@ type ClientPreferences struct {
 	SidebarCollapsed bool   `json:"sidebarCollapsed,omitempty"`
 	Accent           string `json:"accent,omitempty"`
 	VisualizerStyle  string `json:"visualizerStyle,omitempty"`
-	Corners          string `json:"corners,omitempty"`
-	CornerDp         int    `json:"cornerDp,omitempty"`
-	// CoverTint tints every surface with the playing cover; missing means on.
+	// CoverTint tints the window with the playing cover over the desktop's
+	// planes; missing means off, so the window wears the system's planes.
 	CoverTint *bool `json:"coverTint,omitempty"`
 	// WordByWord highlights lyrics word by word as they are sung; missing means on.
 	WordByWord *bool `json:"wordByWord,omitempty"`
@@ -47,9 +45,9 @@ func (p ClientPreferences) WaveOn() bool {
 	return p.WaveProgress == nil || *p.WaveProgress
 }
 
-// CoverTintOn reports the stored window tint preference; missing means on.
+// CoverTintOn reports the stored tint with the cover preference; missing means off.
 func (p ClientPreferences) CoverTintOn() bool {
-	return p.CoverTint == nil || *p.CoverTint
+	return p.CoverTint != nil && *p.CoverTint
 }
 
 // WordByWordOn reports the stored karaoke preference; missing means on.
@@ -105,51 +103,11 @@ func (p ClientPreferences) Style() VisualizerStyle {
 	return VisualizerBars
 }
 
-// The pane corner presets. CornersDesktop follows the Ryoku window corners;
-// CornersCustom uses CornerDp.
-const (
-	CornersSquare  = "square"
-	CornersFine    = "fine"
-	CornersChisel  = "chisel"
-	CornersDeep    = "deep"
-	CornersDesktop = "desktop"
-	CornersCustom  = "custom"
-)
-
-// CornerMaxDp is the deepest pane cut a listener can choose.
-const CornerMaxDp = 32
-
-// CornerPresetDp returns a fixed preset's cut in dp.
-func CornerPresetDp(preset string) (int, bool) {
-	switch preset {
-	case CornersSquare:
-		return 0, true
-	case CornersFine:
-		return 8, true
-	case CornersChisel:
-		return 16, true
-	case CornersDeep:
-		return 24, true
-	default:
-		return 0, false
-	}
-}
-
-// CornerPreset returns the stored corner preset; missing or unknown means chisel.
-func (p ClientPreferences) CornerPreset() string {
-	switch p.Corners {
-	case CornersSquare, CornersFine, CornersDeep, CornersDesktop, CornersCustom:
-		return p.Corners
-	default:
-		return CornersChisel
-	}
-}
-
 // DefaultClientPreferences returns safe defaults for malformed or absent state.
 func DefaultClientPreferences() ClientPreferences {
 	return ClientPreferences{
 		WindowWidth: 1280, WindowHeight: 800, PanelTab: "queue", ZoomPercent: 100,
-		Appearance: "follow", Density: "comfortable", Decorations: true,
+		Density: "comfortable", Decorations: true,
 	}
 }
 
@@ -189,19 +147,11 @@ func LoadClientPreferences() (ClientPreferences, error) {
 	if preferences.PanelTab != "queue" && preferences.PanelTab != "lyrics" && preferences.PanelTab != "listen-together" {
 		preferences.PanelTab = defaults.PanelTab
 	}
-	switch preferences.Appearance {
-	case "desktop":
-		preferences.Appearance = "follow"
-	case "follow", "dark", "light":
-	default:
-		preferences.Appearance = defaults.Appearance
-	}
 	switch preferences.Density {
 	case "comfortable", "compact":
 	default:
 		preferences.Density = defaults.Density
 	}
-	preferences.CornerDp = min(max(preferences.CornerDp, 0), CornerMaxDp)
 	return preferences, nil
 }
 

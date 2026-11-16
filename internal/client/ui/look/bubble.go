@@ -33,7 +33,7 @@ func Bubble(gtx layout.Context, th *Theme, at image.Point, value string, alpha f
 	overlay := op.Record(gtx.Ops)
 	opacity := paint.PushOpacity(gtx.Ops, alpha)
 	move := op.Offset(image.Pt(x, y)).Push(gtx.Ops)
-	kit.FillCut(gtx.Ops, image.Rectangle{Max: dimensions.Size}, gtx.Dp(4), th.R.Stone4)
+	kit.Fill(gtx, th.Theme, image.Rectangle{Max: dimensions.Size}, gtx.Dp(th.Cut.Tooltip), th.R.Stone4)
 	content.Add(gtx.Ops)
 	move.Pop()
 	opacity.Pop()

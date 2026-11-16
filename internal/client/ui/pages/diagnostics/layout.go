@@ -13,10 +13,16 @@ import (
 	"github.com/ryoku-dev/ryotunes/internal/client/ui/act"
 	"github.com/ryoku-dev/ryotunes/internal/client/ui/env"
 	"github.com/ryoku-dev/ryotunes/internal/client/ui/look"
+	"github.com/ryoku-dev/ryotunes/internal/client/ui/sheet"
 	"github.com/ryoku-dev/ryotunes/internal/client/ui/widgets"
 	"github.com/ryoku-dev/ryotunes/internal/model"
 	"github.com/ryoku-dev/ryotunes/internal/protocol"
 	"github.com/ryoku-dev/ryotunes/internal/version"
+)
+
+var (
+	levelLabels  = []string{"All", "Warnings", "Errors"}
+	sourceLabels = []string{"All", "Daemon", "Client"}
 )
 
 // Layout renders filtered diagnostic evidence and runtime facts.
@@ -62,64 +68,97 @@ func (p *Page) Layout(gtx layout.Context, e *env.Env) layout.Dimensions {
 		return widgets.Loading(e, widgets.LoadingTable)(gtx)
 	}
 	if p.error != "" {
-		p.retry.Kind, p.retry.Label = kit.PlaqueLine, "Retry"
-		return widgets.Failed(e, "Could not load diagnostics: "+p.error, &p.retry)(gtx)
+		return widgets.Failed(e, "The daemon did not send its logs ("+p.error+"). Retry once it is running.", &p.retry)(gtx)
 	}
 	inset := look.ContentInset(e.Th.Class)
 	count := 4 + max(1, len(p.logs.Entries))
 	return p.scroll.Layout(gtx, e.Th, count, func(gtx layout.Context, index int) layout.Dimensions {
-		if index == 0 {
-			return p.header.Layout(gtx, e, "Diagnostics", "Recent daemon and client evidence.", p.headerActions(e))
-		}
-		if index == 4 && len(p.logs.Entries) == 0 {
-			return widgets.EmptyState(e, look.Icon.Search, "No log entries", "Try a broader level, source, or search filter.")(gtx)
-		}
-		var body layout.Widget
-		switch index {
-		case 1:
-			body = func(gtx layout.Context) layout.Dimensions {
-				return layout.Inset{Top: unit.Dp(21)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-					return kit.Section(e.Th.Theme, "Runtime", func(gtx layout.Context) layout.Dimensions {
-						return kit.SlabContent(gtx, e.Th.Theme, kit.Facts(e.Th.Theme, p.runtimeFacts(e)))
-					})(gtx)
-				})
-			}
-		case 2:
-			body = func(gtx layout.Context) layout.Dimensions { return p.filterLayout(gtx, e) }
-		case 3:
-			gap := unit.Dp(8)
-			if len(p.logs.Entries) == 0 {
-				gap = 0
-			}
-			body = func(gtx layout.Context) layout.Dimensions {
-				return layout.Inset{Top: unit.Dp(13), Bottom: gap}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-					return layout.Flex{Axis: layout.Vertical, Alignment: layout.Start}.Layout(gtx,
-						layout.Rigid(kit.GroupHeader(e.Th.Theme, "Log entries", p.logs.Total)),
-						layout.Rigid(layout.Spacer{Height: unit.Dp(4)}.Layout),
-						layout.Rigid(kit.Text(e.Th.Theme, e.Th.T.MonoSm, e.Th.R.Fg3, totalsLine(p.logs))),
-					)
-				})
-			}
-		default:
-			entry := p.logs.Entries[index-4]
-			key := logRowKey(entry)
-			row := p.rows[key]
-			if row == nil {
-				row = new(logRow)
-				p.rows[key] = row
-			}
-			body = func(gtx layout.Context) layout.Dimensions {
-				return layout.Inset{Bottom: unit.Dp(4)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-					return row.layout(gtx, e, entry)
-				})
-			}
-		}
-		bottom := unit.Dp(0)
-		if index+1 == count {
-			bottom = inset
-		}
-		return layout.Inset{Right: inset, Bottom: bottom, Left: inset}.Layout(gtx, body)
+		return p.reveal.Group(gtx, e.Th, index, func(gtx layout.Context) layout.Dimensions {
+			return p.layoutElement(gtx, e, index, count, inset)
+		})
 	})
+}
+
+// Masthead names Diagnostics on the frame's masthead and says how far the log is read.
+func (p *Page) Masthead() (part, partGloss string, progress float32) {
+	return "", "", p.scroll.Progress()
+}
+
+// layoutHeader is the page head with the log's counts as its spec strip, errors lit while
+// there are any.
+func (p *Page) layoutHeader(gtx layout.Context, e *env.Env) layout.Dimensions {
+	p.header.Place = sheet.Diagnostics
+	p.strip.Set(0, "Entries", p.logs.Total, false)
+	p.strip.Set(1, "Errors", p.logs.Errors, p.logs.Errors > 0)
+	p.strip.Set(2, "Warnings", p.logs.Warnings, false)
+	p.header.Specs = p.strip.Specs(p.loaded)
+	return p.header.Layout(gtx, e, "Diagnostics", "Recent daemon and client evidence.", p.headerActions(e))
+}
+
+func (p *Page) layoutElement(gtx layout.Context, e *env.Env, index, count int, inset unit.Dp) layout.Dimensions {
+	if index == 0 {
+		return layout.Inset{Top: e.Th.Sp.S2}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+			return p.layoutHeader(gtx, e)
+		})
+	}
+	if index == 4 && len(p.logs.Entries) == 0 {
+		return widgets.EmptyState(e, look.Icon.Search, "No log entries", "Try a broader level, source, or search filter.")(gtx)
+	}
+	var body layout.Widget
+	switch index {
+	case 1:
+		body = func(gtx layout.Context) layout.Dimensions {
+			return layout.Inset{Top: unit.Dp(21)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+				return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+						return widgets.RuledHead(gtx, e, "Runtime", kit.Ordinal(1, 2), nil)
+					}),
+					layout.Rigid(layout.Spacer{Height: e.Th.Sp.S3}.Layout),
+					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+						return kit.SlabContent(gtx, e.Th.Theme, kit.Facts(e.Th.Theme, p.runtimeFacts(e)))
+					}),
+				)
+			})
+		}
+	case 2:
+		body = func(gtx layout.Context) layout.Dimensions { return p.filterLayout(gtx, e) }
+	case 3:
+		gap := unit.Dp(8)
+		if len(p.logs.Entries) == 0 {
+			gap = 0
+		}
+		body = func(gtx layout.Context) layout.Dimensions {
+			return layout.Inset{Top: unit.Dp(13), Bottom: gap}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+				return layout.Flex{Axis: layout.Vertical, Alignment: layout.Start}.Layout(gtx,
+					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+						return widgets.RuledHead(gtx, e, "Log entries", kit.Ordinal(2, 2), nil)
+					}),
+					layout.Rigid(layout.Spacer{Height: unit.Dp(4)}.Layout),
+					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+						return kit.LayoutSpacedCaps(gtx, e.Th.Theme, e.Th.T.MonoSm, e.Th.R.Fg3, 1.2, p.totals())
+					}),
+				)
+			})
+		}
+	default:
+		entry := p.logs.Entries[index-4]
+		key := logRowKey(entry)
+		row := p.rows[key]
+		if row == nil {
+			row = new(logRow)
+			p.rows[key] = row
+		}
+		body = func(gtx layout.Context) layout.Dimensions {
+			return layout.Inset{Bottom: unit.Dp(4)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+				return row.layout(gtx, e, entry)
+			})
+		}
+	}
+	bottom := unit.Dp(0)
+	if index+1 == count {
+		bottom = inset
+	}
+	return layout.Inset{Right: inset, Bottom: bottom, Left: inset}.Layout(gtx, body)
 }
 
 func (p *Page) headerActions(e *env.Env) layout.Widget {
@@ -139,8 +178,9 @@ func (p *Page) headerActions(e *env.Env) layout.Widget {
 
 func (p *Page) filterLayout(gtx layout.Context, e *env.Env) layout.Dimensions {
 	p.search.Placeholder, p.search.Hint = "Search messages or targets", "Enter"
-	p.levelFilters.Labels, p.levelFilters.Counts, p.levelFilters.Selected = []string{"All", "Warnings", "Errors"}, []int{p.logs.Total, p.logs.Warnings, p.logs.Errors}, p.levelIndex
-	p.sourceFilters.Labels, p.sourceFilters.Selected = []string{"All", "Daemon", "Client"}, p.sourceIndex
+	p.levelCounts = [3]int{p.logs.Total, p.logs.Warnings, p.logs.Errors}
+	p.levelFilters.Labels, p.levelFilters.Counts, p.levelFilters.Selected = levelLabels, p.levelCounts[:], p.levelIndex
+	p.sourceFilters.Labels, p.sourceFilters.Selected = sourceLabels, p.sourceIndex
 	return layout.Inset{Top: unit.Dp(13), Bottom: unit.Dp(13)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 		return layout.Flex{Axis: layout.Vertical, Alignment: layout.Start}.Layout(gtx,
 			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
@@ -182,13 +222,8 @@ func (p *Page) runtimeFacts(e *env.Env) []kit.Fact {
 	if p.dataDir != "" {
 		facts = append(facts, kit.Fact{Label: "Data directory", Value: p.dataDir, Mono: true})
 	}
-	preferences := e.Store.Snapshot().Client
-	paletteSource := preferences.Appearance
-	if preferences.PaletteFile != "" {
-		paletteSource = preferences.PaletteFile
-	}
-	if paletteSource != "" {
-		facts = append(facts, kit.Fact{Label: "Palette source", Value: paletteSource, Mono: preferences.PaletteFile != ""})
+	if source := e.Th.Desktop.Palette.Source; source != "" {
+		facts = append(facts, kit.Fact{Label: "Palette source", Value: source})
 	}
 	facts = append(facts,
 		kit.Fact{Label: "Renderer", Value: p.renderer, Mono: true},
@@ -197,8 +232,23 @@ func (p *Page) runtimeFacts(e *env.Env) []kit.Fact {
 	return facts
 }
 
+// totals is the line under the log's head: what the filters show and the file's size, kept
+// until the log changes.
+func (p *Page) totals() string {
+	key := totalsKey{shown: len(p.logs.Entries), total: p.logs.Total, bytes: p.logs.FileBytes}
+	if key != p.totalsKey || p.totalsText == "" {
+		p.totalsKey, p.totalsText = key, totalsLine(p.logs)
+	}
+	return p.totalsText
+}
+
+type totalsKey struct {
+	shown, total int
+	bytes        int64
+}
+
 func totalsLine(logs model.LogsResult) string {
-	return fmt.Sprintf("%d entries · %d errors · %d warnings · %s", logs.Total, logs.Errors, logs.Warnings, formatBytes(logs.FileBytes))
+	return fmt.Sprintf("Showing %s of %s · log %s", kit.Pad2(len(logs.Entries)), kit.Pad2(logs.Total), formatBytes(logs.FileBytes))
 }
 
 func formatBytes(bytes int64) string {

@@ -11,6 +11,12 @@ import (
 )
 
 // HScroller virtualises a horizontal shelf without consuming vertical scroll.
+//
+// It keeps R8's cue to the caller (step plaques at the shelf's ends and the
+// last item cut off at its edge) and pages with the Hub's travel: Page glides
+// one shelf width over 240 ms (th.Motion.Move) on OutCubic, through the list
+// so every item it passes is laid out at its real size (R9), and real input
+// stops the glide where it stands. Under reduced motion a page jumps.
 type HScroller struct {
 	layout.List
 
@@ -36,7 +42,7 @@ func (s *HScroller) stopPage() {
 		return
 	}
 	current := float32(s.Position.Offset)
-	s.page = anim.Tween{Duration: s.duration, Ease: anim.EaseChisel}
+	s.page = anim.Tween{Duration: s.duration, Ease: anim.EaseOutCubic}
 	s.page.Set(layout.Context{}, current)
 	s.pageTarget = current
 	s.pageApplied = current
@@ -95,7 +101,7 @@ func (s *HScroller) advancePage(gtx layout.Context) int {
 // Layout renders a horizontal virtual list with immediate physical scrolling.
 func (s *HScroller) Layout(gtx layout.Context, th *Theme, count int, el layout.ListElement) layout.Dimensions {
 	s.Axis = layout.Horizontal
-	s.duration = th.Motion.Wheel
+	s.duration = th.Motion.Move
 	before := s.Position
 	applied := s.probeInput(gtx)
 	applied += s.advancePage(gtx)
@@ -130,16 +136,17 @@ func (s *HScroller) Page(gtx layout.Context, dir int) {
 		dir = 1
 	}
 	if !s.pageReady {
-		s.page = anim.Tween{Duration: s.duration, Ease: anim.EaseChisel}
+		s.page = anim.Tween{Duration: s.duration, Ease: anim.EaseOutCubic}
 		s.page.Set(gtx, 0)
 		s.pageApplied = 0
 		s.pageTarget = 0
 		s.pageReady = true
 	}
-	current := s.page.Value(gtx)
-	s.pageTarget = current + float32(dir*s.viewport)
+	// a press while a page still glides adds a page to where it is going,
+	// so two quick presses travel two shelf widths
+	s.pageTarget += float32(dir * s.viewport)
 	s.page.Duration = s.duration
-	s.page.Ease = anim.EaseChisel
+	s.page.Ease = anim.EaseOutCubic
 	s.page.Set(gtx, s.pageTarget)
 }
 

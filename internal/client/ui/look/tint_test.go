@@ -41,9 +41,16 @@ func TestCoverTintPreservesContrastAndStateRoles(t *testing.T) {
 			tinted.Jasper != base.Jasper || tinted.Scrim != base.Scrim || tinted.OnSel != base.OnSel || tinted.OnSel2 != base.OnSel2 {
 			t.Fatalf("dark=%v state roles changed", dark)
 		}
+		// the selection is the desktop's accent: the cover never re-hues it
+		if tinted.Sel != base.Sel || tinted.Container != base.Container {
+			t.Fatalf("dark=%v sel %#v changed to %#v", dark, base.Sel, tinted.Sel)
+		}
+		if dark && (tinted.Stone3 == base.Stone3 || tinted.Field == base.Field || tinted.Edge == base.Edge) {
+			t.Fatal("stone3, field or edge kept the desktop's hue under a coloured cover")
+		}
 		for _, value := range []color.NRGBA{
 			tinted.Ground, tinted.Stone1, tinted.Stone2, tinted.Stone3, tinted.Stone4,
-			tinted.Vein, tinted.Fg, tinted.Fg2, tinted.Fg3, tinted.Sel,
+			tinted.Slab, tinted.Field, tinted.Vein, tinted.Edge, tinted.Fg, tinted.Fg2, tinted.Fg3,
 		} {
 			if _, inGamut := oklchLinearRGB(colorToOKLCH(value)); !inGamut {
 				t.Fatalf("dark=%v output %#v is outside sRGB", dark, value)
@@ -66,7 +73,11 @@ func TestGreyCoverTurnsTheWindowAndAccentNeutral(t *testing.T) {
 	pairs := map[string][2]color.NRGBA{
 		"ground": {navy.Ground, got.Ground}, "stone1": {navy.Stone1, got.Stone1}, "stone2": {navy.Stone2, got.Stone2},
 		"stone3": {navy.Stone3, got.Stone3}, "stone4": {navy.Stone4, got.Stone4}, "vein": {navy.Vein, got.Vein},
-		"fg": {navy.Fg, got.Fg}, "fg2": {navy.Fg2, got.Fg2}, "fg3": {navy.Fg3, got.Fg3}, "sel": {navy.Sel, got.Sel},
+		"fg": {navy.Fg, got.Fg}, "fg2": {navy.Fg2, got.Fg2}, "fg3": {navy.Fg3, got.Fg3},
+		"slab": {navy.Slab, got.Slab}, "field": {navy.Field, got.Field}, "edge": {navy.Edge, got.Edge},
+	}
+	if got.Sel != navy.Sel {
+		t.Errorf("sel %#v changed to %#v: the selection stays the desktop's", navy.Sel, got.Sel)
 	}
 	for name, pair := range pairs {
 		before, after := colorToOKLCH(pair[0]), colorToOKLCH(pair[1])

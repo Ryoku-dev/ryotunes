@@ -15,6 +15,7 @@ import (
 	"gioui.org/op/paint"
 	"gioui.org/unit"
 
+	"github.com/ryoku-dev/ryoku/docs/lithic/library/go/anim"
 	"github.com/ryoku-dev/ryotunes/internal/client/ui/act"
 	"github.com/ryoku-dev/ryotunes/internal/client/ui/env"
 	"github.com/ryoku-dev/ryotunes/internal/client/ui/look"
@@ -69,9 +70,6 @@ func (r *clientRuntime) renderPNG(options Options) error {
 		quietSince = time.Time{}
 		operations.Reset()
 		preferences = r.store.Snapshot().Client
-		if !options.DemoPlaying {
-			preferences.ReduceMotion = true
-		}
 		scale := float32(preferences.ZoomPercent) / 100
 		if scale <= 0 {
 			scale = 1
@@ -84,6 +82,11 @@ func (r *clientRuntime) renderPNG(options Options) error {
 			Constraints: layout.Exact(image.Pt(options.Width, options.Height)),
 		}
 		theme := r.applyClientTheme(preferences)
+		if !options.DemoPlaying {
+			// a still demo render shows every surface settled, whatever the
+			// desktop's motion; set after the theme, which carries the desktop's
+			anim.SetReduce(true)
+		}
 		e := shell.environment(gtx.Now, theme)
 		act.PendingClipboard(gtx)
 		paint.Fill(gtx.Ops, theme.R.Ground)

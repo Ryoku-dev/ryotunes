@@ -38,6 +38,7 @@ type Sound struct {
 	width     kit.Slider
 	reset     kit.Plaque
 	equalizer kit.Click
+	eqWash    look.RowWash
 
 	initialized bool
 	target      model.AudioFx
@@ -138,13 +139,15 @@ func (sound *Sound) Layout(gtx layout.Context, e *env.Env) layout.Dimensions {
 	return dimensions
 }
 
+// layoutEqualizer draws the row that opens the equalizer, with the Hub's row
+// wash and lean on hover and press.
 func (sound *Sound) layoutEqualizer(gtx layout.Context, e *env.Env, equalizer model.Equalizer) layout.Dimensions {
+	sound.eqWash.Update(gtx, e.Th, sound.equalizer.Hovered(), sound.equalizer.Pressed())
 	return sound.equalizer.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 		size := image.Pt(gtx.Constraints.Max.X, gtx.Dp(64))
 		size = gtx.Constraints.Constrain(size)
-		if sound.equalizer.Hovered() {
-			kit.FillCut(gtx.Ops, image.Rectangle{Max: size}, gtx.Dp(6), e.Th.R.Stone3)
-		}
+		sound.eqWash.Paint(gtx, e.Th, image.Rectangle{Max: size}, gtx.Dp(6))
+		defer op.Offset(image.Pt(sound.eqWash.Lean(gtx), 0)).Push(gtx.Ops).Pop()
 		return layout.Inset{Top: unit.Dp(8), Right: unit.Dp(8), Bottom: unit.Dp(8), Left: unit.Dp(8)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 			return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
 				layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {

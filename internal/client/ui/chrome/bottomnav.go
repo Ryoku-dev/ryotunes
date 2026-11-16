@@ -6,41 +6,40 @@ import (
 	"gioui.org/layout"
 	"gioui.org/op"
 	"gioui.org/op/clip"
-	"gioui.org/op/paint"
 	"gioui.org/text"
 	"gioui.org/widget"
 
-	"github.com/ryoku-dev/ryoku/docs/lithic/library/go/anim"
 	"github.com/ryoku-dev/ryoku/docs/lithic/library/go/kit"
-	"github.com/ryoku-dev/ryoku/docs/lithic/library/go/palette"
 	"github.com/ryoku-dev/ryotunes/internal/client/ui/env"
 	"github.com/ryoku-dev/ryotunes/internal/client/ui/look"
+	"github.com/ryoku-dev/ryotunes/internal/client/ui/sheet"
 )
 
 type bottomNavItem struct {
-	label string
+	place sheet.Place
 	kind  env.RouteKind
 	icon  *widget.Icon
-	click kit.Click
-	hover look.Hover
+	row   treeRow
 }
 
-// BottomNav owns the five compact navigation destinations.
+// BottomNav is the compact class's five places on the window's paper under a hairline:
+// the open one wears the travelling selection wash and its filled glyph, each answers the
+// pointer with the Hub's row wash.
 type BottomNav struct {
-	items     [5]bottomNavItem
-	selection anim.Tween
+	items [5]bottomNavItem
+	wash  look.SelectWash
 }
 
 func (nav *BottomNav) initialize() {
-	if nav.items[0].label != "" {
+	if nav.items[0].icon != nil {
 		return
 	}
 	nav.items = [5]bottomNavItem{
-		{label: "Home", kind: env.RouteHome, icon: look.Icon.Home},
-		{label: "Library", kind: env.RouteLibrary, icon: look.Icon.Library},
-		{label: "Radio", kind: env.RouteRadio, icon: look.Icon.Radio},
-		{label: "Downloads", kind: env.RouteDownloads, icon: look.Icon.Downloads},
-		{label: "Settings", kind: env.RouteSettings, icon: look.Icon.Settings},
+		{place: sheet.Home, kind: env.RouteHome, icon: look.Icon.Home},
+		{place: sheet.Library, kind: env.RouteLibrary, icon: look.Icon.Library},
+		{place: sheet.Radio, kind: env.RouteRadio, icon: look.Icon.Radio},
+		{place: sheet.Downloads, kind: env.RouteDownloads, icon: look.Icon.Downloads},
+		{place: sheet.Settings, kind: env.RouteSettings, icon: look.Icon.Settings},
 	}
 }
 
@@ -62,34 +61,25 @@ func bottomNavIndex(route env.Route) int {
 }
 
 func (nav *BottomNav) layoutItem(gtx layout.Context, e *env.Env, item *bottomNavItem, selected bool, size image.Point) layout.Dimensions {
+	th := e.Th
 	gtx.Constraints = layout.Exact(size)
-	return item.click.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-		record := op.Record(gtx.Ops)
-		dimensions, hover := item.hover.Layout(gtx, e.Th, func(gtx layout.Context) layout.Dimensions {
-			ink := e.Th.R.Fg3
-			if item.click.Hovered() {
-				ink = e.Th.R.Fg2
-			}
-			if selected {
-				ink = e.Th.R.OnSel
-			}
-			return layout.Center.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-				return layout.Flex{Axis: layout.Vertical, Alignment: layout.Middle}.Layout(gtx,
-					layout.Rigid(func(gtx layout.Context) layout.Dimensions { return sidebarIcon(gtx, item.icon, ink, 18) }),
-					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-						return kit.Label{Style: e.Th.T.Caption, Color: ink, MaxLines: 1, Align: text.Middle}.Layout(gtx, e.Th.Theme, item.label)
-					}),
-				)
-			})
-		})
-		content := record.Stop()
-		area := clip.Rect(image.Rectangle{Max: dimensions.Size}).Push(gtx.Ops)
-		if hover > 0 && !selected {
-			kit.FillCut(gtx.Ops, image.Rectangle{Max: dimensions.Size}, gtx.Dp(6), palette.WithAlpha(e.Th.R.Stone3, hover))
+	return item.row.click.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+		item.row.update(gtx, th, selected)
+		item.row.wash.Paint(gtx, th, image.Rectangle{Max: size}, gtx.Dp(treeRowCut))
+		icon := item.icon
+		if selected {
+			icon = look.Filled(icon)
 		}
-		content.Add(gtx.Ops)
-		area.Pop()
-		return dimensions
+		ink := mixInk(th.R.Fg3, th.R.Fg, th.R.Fg, item.row.hover, item.row.sel)
+		glyphInk := mixInk(th.R.Fg3, th.R.Fg, th.R.Sel, item.row.hover, item.row.sel)
+		iconSize := gtx.Dp(20)
+		glyph(gtx, icon, glyphInk, iconSize, size.X/2, size.Y/2-gtx.Dp(8), 0, item.row.wash.GlyphScale())
+		label := record(gtx, func(gtx layout.Context) layout.Dimensions {
+			gtx.Constraints.Max.X = size.X
+			return kit.Label{Style: th.T.Caption, Color: ink, MaxLines: 1, Align: text.Middle}.Layout(gtx, th.Theme, item.place.Name)
+		})
+		label.at(gtx, (size.X-label.size.X)/2, size.Y/2+gtx.Dp(12))
+		return layout.Dimensions{Size: size}
 	})
 }
 
@@ -100,31 +90,29 @@ func (nav *BottomNav) Layout(gtx layout.Context, e *env.Env) layout.Dimensions {
 	}
 	nav.initialize()
 	for index := range nav.items {
-		if nav.items[index].click.Clicked(gtx) {
-			sidebarNavigate(e, env.Route{Kind: nav.items[index].kind, Title: nav.items[index].label})
+		if nav.items[index].row.click.Clicked(gtx) {
+			sidebarNavigate(e, env.Route{Kind: nav.items[index].kind, Title: nav.items[index].place.Name})
 		}
 	}
 	width, height := gtx.Constraints.Max.X, gtx.Dp(look.BottomNav)
 	size := image.Pt(width, height)
 	gtx.Constraints = layout.Exact(size)
 	area := clip.Rect(image.Rectangle{Max: size}).Push(gtx.Ops)
-	paint.Fill(gtx.Ops, e.Th.R.Stone1)
+	// one paper: the bar is the window's own, drawn off the page by a hairline
+	hline(gtx, 0, width, 0, e.Th.R.Vein)
 	selected := bottomNavIndex(e.Nav.Current())
-	nav.selection.Duration = e.Th.Motion.Select
-	nav.selection.Ease = anim.EaseChisel
-	nav.selection.Set(gtx, float32(selected))
-	at := nav.selection.Value(gtx)
 	column := width / len(nav.items)
-	x := int(at*float32(column)) + gtx.Dp(4)
-	kit.FillCut(gtx.Ops, image.Rect(x, gtx.Dp(4), x+max(0, column-gtx.Dp(8)), gtx.Dp(52)), gtx.Dp(6), e.Th.R.Sel)
+	inset := gtx.Dp(4)
+	target := image.Rect(selected*column+inset, inset, (selected+1)*column-inset, height-inset)
+	nav.wash.Layout(gtx, e.Th, target, 0, gtx.Dp(treeRowCut))
 	for index := range nav.items {
 		left := index * column
 		right := left + column
 		if index == len(nav.items)-1 {
 			right = width
 		}
-		offset := op.Offset(image.Pt(left+gtx.Dp(4), gtx.Dp(4))).Push(gtx.Ops)
-		nav.layoutItem(gtx, e, &nav.items[index], index == selected, image.Pt(max(0, right-left-gtx.Dp(8)), gtx.Dp(48)))
+		offset := op.Offset(image.Pt(left+inset, inset)).Push(gtx.Ops)
+		nav.layoutItem(gtx, e, &nav.items[index], index == selected, image.Pt(max(0, right-left-2*inset), height-2*inset))
 		offset.Pop()
 	}
 	area.Pop()

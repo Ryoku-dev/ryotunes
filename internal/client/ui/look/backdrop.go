@@ -29,7 +29,21 @@ const (
 	// how far the plane may drift, as it does while a tint tweens, before the
 	// cover is toned again
 	backdropRetone = .02
+	// backdropFloorDark is the least lightness a dark band centres on: the
+	// Lithic ladder lays its dark planes on black, where a band around the
+	// plane's own lightness would press the cover into black and hide it.
+	// It is the old stone2's lightness, where the band showed the cover.
+	backdropFloorDark = .22
 )
+
+// backdropCentre is the lightness the band forms around for a plane of
+// lightness l: the plane's own, or the floor on a dark plane darker than it.
+func backdropCentre(l float64, dark bool) float64 {
+	if dark {
+		return max(l, backdropFloorDark)
+	}
+	return l
+}
 
 // Backdrop draws a cover's blur over a plane and fades between covers.
 type Backdrop struct {
@@ -76,7 +90,7 @@ func (b *Backdrop) paintSource(gtx layout.Context, theme *Theme, source *image.R
 	if leaving <= 0 && shown <= 0 {
 		return
 	}
-	mask := clip.Outline{Path: kit.CutPath(gtx.Ops, bounds, cuts[0], cuts[1], cuts[2], cuts[3])}.Op().Push(gtx.Ops)
+	mask := clip.Outline{Path: kit.Shape(gtx, theme.Theme, bounds, cuts[0], cuts[1], cuts[2], cuts[3])}.Op().Push(gtx.Ops)
 	b.leaving.paint(gtx, bounds, backdropOpacity*leaving)
 	b.shown.paint(gtx, bounds, backdropOpacity*shown)
 	mask.Pop()
@@ -112,7 +126,7 @@ func (layer *backdropLayer) tone(field color.NRGBA, dark bool) {
 	if layer.source == nil {
 		return
 	}
-	lightness := colorToOKLCH(field).L
+	lightness := backdropCentre(colorToOKLCH(field).L, dark)
 	if layer.toned && layer.dark == dark && math.Abs(layer.lightness-lightness) < backdropRetone {
 		return
 	}
@@ -164,7 +178,7 @@ func FieldBackdrop(gtx layout.Context, theme *Theme, accent Accent, cuts [4]int,
 	call := record.Stop()
 	bounds := image.Rectangle{Max: dimensions.Size}
 	area := clip.Rect(bounds).Push(gtx.Ops)
-	kit.FillCutCorners(gtx.Ops, bounds, cuts[0], cuts[1], cuts[2], cuts[3], accent.Field)
+	kit.FillCorners(gtx, theme.Theme, bounds, cuts[0], cuts[1], cuts[2], cuts[3], accent.Field)
 	if backdrop != nil {
 		backdrop.Paint(gtx, theme, cache, cover, accent.Field, bounds, cuts)
 	}

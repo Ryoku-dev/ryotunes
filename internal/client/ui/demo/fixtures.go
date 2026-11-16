@@ -48,6 +48,7 @@ type fixtures struct {
 	radio            []model.RadioStation
 	logs             model.LogsResult
 	stats            model.ListeningStats
+	days             model.ListeningDays
 	downloadSettings model.DownloadSettings
 	equalizerPresets []model.EQPreset
 }
@@ -276,6 +277,7 @@ func makeFixtures(directory string, playing, empty bool) (fixtures, error) {
 		TopArtists: []model.ArtistPlayCount{{Name: "Kite Assembly", Plays: 14}},
 		TopTracks:  []model.TrackPlayCount{{Title: tracks[0].Title, Artists: tracks[0].Artists, Plays: 6}},
 	}
+	days := demoListeningDays(time.Now(), false)
 
 	manual := true
 	personalState := state.EmptyPersonal()
@@ -336,6 +338,7 @@ func makeFixtures(directory string, playing, empty bool) (fixtures, error) {
 		logs.Entries = nil
 		logs.Total, logs.Errors, logs.Warnings = 0, 0, 0
 		stats = model.ListeningStats{Period: model.ListeningWeek}
+		days = demoListeningDays(time.Now(), true)
 		personal, err = state.MarshalPersonal(state.EmptyPersonal())
 		if err != nil {
 			return fixtures{}, err
@@ -352,7 +355,7 @@ func makeFixtures(directory string, playing, empty bool) (fixtures, error) {
 	}
 	return fixtures{
 		snapshot: snapshot, tracks: tracks, cards: cards, library: library, feed: feed, focusFeed: focusFeed,
-		playlist: playlist, album: album, artist: artist, lyrics: lyrics, radio: radio, logs: logs, stats: stats,
+		playlist: playlist, album: album, artist: artist, lyrics: lyrics, radio: radio, logs: logs, stats: stats, days: days,
 		equalizerPresets: equalizerPresets, downloadSettings: downloadSettings,
 	}, nil
 }
@@ -397,4 +400,25 @@ func writeArtwork(directory string) ([]string, error) {
 		urls[index] = "file://" + path
 	}
 	return urls, nil
+}
+
+// demoListeningDays is the demo's 30-day listening series, ending today. Its last seven days
+// add up to the demo's weekly stats (42 plays, 9820 s); empty is every day at zero.
+func demoListeningDays(now time.Time, empty bool) model.ListeningDays {
+	// the last seven, 4 7 3 9 6 8 5, are the week of the demo's stats
+	plays := [30]int{2, 0, 3, 5, 1, 4, 6, 2, 0, 3, 7, 5, 2, 4, 3, 6, 8, 1, 0, 5, 4, 3, 4, 4, 7, 3, 9, 6, 8, 5}
+	out := model.ListeningDays{Days: make([]model.DailyListening, len(plays))}
+	for index := range plays {
+		day := &out.Days[index]
+		day.Date = time.Date(now.Year(), now.Month(), now.Day()-(len(plays)-1-index), 0, 0, 0, 0, now.Location()).Format(time.DateOnly)
+		if empty {
+			continue
+		}
+		day.Plays = plays[index]
+		day.KnownDurationSeconds = int64(plays[index]) * 234
+	}
+	if !empty {
+		out.Days[len(plays)-1].KnownDurationSeconds -= 8
+	}
+	return out
 }

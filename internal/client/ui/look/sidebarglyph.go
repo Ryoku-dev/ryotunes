@@ -2,8 +2,10 @@ package look
 
 import (
 	"image"
+	"image/color"
 	"math"
 
+	"gioui.org/f32"
 	"gioui.org/io/semantic"
 	"gioui.org/layout"
 	"gioui.org/op"
@@ -17,14 +19,18 @@ import (
 	"github.com/ryoku-dev/ryoku/docs/lithic/library/go/tokens"
 )
 
-// SidebarPlaque is app-owned because the library icon plaque cannot draw a morphing glyph.
+// SidebarPlaque is the top bar's sidebar toggle. It is app-owned because the library's
+// icon plaque cannot draw a morphing glyph: the pane frame's left column fills as the
+// sidebar opens (th.Motion.Notch, chisel). It answers the pointer with the Hub's row wash
+// (120 in, 240 out on OutCubic), the plaque's press cut and sink, and its corners follow
+// the desktop's design.
 type SidebarPlaque struct {
 	kit.Click
 	Description string
 	Open        bool
 
+	wash  RowWash
 	press anim.Tween
-	hover anim.Tween
 	focus anim.Tween
 	morph anim.Tween
 }
@@ -44,15 +50,13 @@ func (plaque *SidebarPlaque) Layout(gtx layout.Context, th *Theme) layout.Dimens
 		semantic.DescriptionOp(plaque.Description).Add(gtx.Ops)
 		semantic.EnabledOp(gtx.Source.Enabled()).Add(gtx.Ops)
 
+		enabled := gtx.Source.Enabled()
+		plaque.wash.Update(original, th, enabled && plaque.Hovered(), enabled && plaque.Pressed())
 		pressed := controlTransition(original, &plaque.press, plaque.Pressed(), th.Motion.Press, th.Motion.Press)
-		hovered := controlTransition(original, &plaque.hover, plaque.Hovered(), th.Motion.HoverIn, th.Motion.HoverOut)
 		cut = gtx.Dp(th.Cut.Small) + int(float32(gtx.Dp(unit.Dp(tokens.SizeControlPressCutGrow)))*pressed+.5)
 		sink := int(float32(gtx.Dp(unit.Dp(tokens.SizeControlPressSink)))*pressed + .5)
 		bounds := image.Rectangle{Max: gtx.Constraints.Constrain(image.Pt(size, size))}
-		if hovered > 0 {
-			kit.FillCut(gtx.Ops, bounds, cut, palette.WithAlpha(th.R.Fg2, tokens.AlphaHoverFill*hovered))
-		}
-		kit.StrokeCut(gtx.Ops, bounds, cut, max(1, gtx.Dp(unit.Dp(tokens.SizeHairline))), th.R.Vein)
+		plaque.wash.Paint(gtx, th, bounds, cut)
 
 		plaque.morph.Duration = th.Motion.Notch
 		plaque.morph.Ease = anim.EaseChisel
@@ -64,7 +68,10 @@ func (plaque *SidebarPlaque) Layout(gtx layout.Context, th *Theme) layout.Dimens
 		open := plaque.morph.Value(original)
 		glyphSize := min(gtx.Dp(unit.Dp(tokens.SizeIconPlaqueIconSmall)), min(bounds.Dx(), bounds.Dy()))
 		move := op.Offset(image.Pt((bounds.Dx()-glyphSize)/2, (bounds.Dy()-glyphSize)/2+sink)).Push(gtx.Ops)
-		SidebarGlyph(layout.Exact(image.Pt(glyphSize, glyphSize)), gtx.Ops, th, open)
+		ink := palette.Mix(th.R.Fg2, th.R.Fg, plaque.wash.hovered)
+		glyphGtx := gtx
+		glyphGtx.Constraints = layout.Exact(image.Pt(glyphSize, glyphSize))
+		SidebarGlyph(glyphGtx, th, ink, open, plaque.wash.GlyphScale())
 		move.Pop()
 		return layout.Dimensions{Size: bounds.Size()}
 	})
@@ -73,11 +80,16 @@ func (plaque *SidebarPlaque) Layout(gtx layout.Context, th *Theme) layout.Dimens
 	return dimensions
 }
 
-// SidebarGlyph draws a cut pane frame whose left column fills while the sidebar is open.
-func SidebarGlyph(constraints layout.Constraints, ops *op.Ops, th *Theme, open float32) layout.Dimensions {
-	size := constraints.Constrain(constraints.Max)
+// SidebarGlyph draws a pane frame whose left column fills while the sidebar is open
+// (open, 0..1), in ink, scaled about its centre, with the design's corners.
+func SidebarGlyph(gtx layout.Context, th *Theme, ink color.NRGBA, open, scale float32) layout.Dimensions {
+	size := gtx.Constraints.Max
 	if size.X <= 0 || size.Y <= 0 {
 		return layout.Dimensions{}
+	}
+	if scale != 1 {
+		centre := f32.Pt(float32(size.X)/2, float32(size.Y)/2)
+		defer op.Affine(f32.AffineId().Scale(centre, f32.Pt(scale, scale))).Push(gtx.Ops).Pop()
 	}
 	inset := max(1, int(math.Round(float64(min(size.X, size.Y))/9)))
 	bounds := image.Rect(inset, inset, size.X-inset, size.Y-inset)
@@ -85,9 +97,16 @@ func SidebarGlyph(constraints layout.Constraints, ops *op.Ops, th *Theme, open f
 	cut := max(stroke, int(math.Round(float64(min(size.X, size.Y))/6)))
 	column := max(stroke*2, int(math.Round(float64(bounds.Dx())*.34)))
 	columnBounds := image.Rect(bounds.Min.X, bounds.Min.Y, min(bounds.Max.X, bounds.Min.X+column), bounds.Max.Y)
-	kit.FillCutCorners(ops, columnBounds, cut, 0, 0, cut, palette.WithAlpha(th.R.Fg2, min(max(open, 0), 1)))
+	kit.FillCorners(gtx, th.Theme, columnBounds, cut, 0, 0, cut, palette.WithAlpha(ink, min(max(open, 0), 1)))
 	dividerX := columnBounds.Max.X
-	paint.FillShape(ops, th.R.Fg2, clip.Rect(image.Rect(dividerX, bounds.Min.Y+stroke, dividerX+stroke, bounds.Max.Y-stroke)).Op())
-	kit.StrokeCut(ops, bounds, cut, stroke, th.R.Fg2)
+	paint.FillShape(gtx.Ops, ink, clip.Rect(image.Rect(dividerX, bounds.Min.Y+stroke, dividerX+stroke, bounds.Max.Y-stroke)).Op())
+	kit.Stroke(gtx, th.Theme, bounds, cut, stroke, ink)
 	return layout.Dimensions{Size: size}
+}
+
+// FillArt fills a tile size pixels across with ink in a cover's shape, by Art's rule: cut
+// in Lithic, a rounded square in the round designs, never a pill. The sidebar's Liked
+// songs tile stands among covers and wears their shape.
+func FillArt(gtx layout.Context, th *Theme, size image.Point, shape Shape, ink color.NRGBA) {
+	paint.FillShape(gtx.Ops, ink, clip.Outline{Path: artPath(gtx, th, size, shape)}.Op())
 }

@@ -68,7 +68,9 @@ func (p *Page) openPresetMenu(gtx layout.Context, e *env.Env) {
 					p.deleteDialog.Open(p.presets[index].Name)
 				}
 			case command >= 0 && command < len(p.presets):
-				p.animateTo(menuGTX, e, presetEqualizer(p.presets[command], p.working.Enabled))
+				before, target := p.settledEqualizer(), presetEqualizer(p.presets[command], p.working.Enabled)
+				p.animateTo(menuGTX, e, target)
+				p.offerUndo(e, "Switched to "+p.presets[command].Name+".", equalizerChange{before: before, after: target, removed: -1})
 			}
 			menuGTX.Execute(op.InvalidateCmd{})
 		}

@@ -7,9 +7,11 @@ import (
 	"github.com/ryoku-dev/ryotunes/internal/client/art"
 )
 
-// CoverTint re-hues the neutral roles toward a cover while preserving each
-// role's OKLCH lightness and every state mineral. A cover without colour
-// turns them grey.
+// CoverTint re-hues the neutral roles (the planes, hairlines and ink) toward a
+// cover while preserving each role's OKLCH lightness. The selection, gold and
+// every state mineral keep the desktop's colour: sel is the desktop's accent
+// and the Ryoku orange must not turn grey or take the cover's hue. A cover
+// without colour turns the neutrals grey.
 func CoverTint(base palette.Roles, cover art.Palette) (palette.Roles, bool) {
 	hue, strength, ok := coverTintSource(cover)
 	if !ok {
@@ -32,11 +34,13 @@ func CoverTint(base palette.Roles, cover art.Palette) (palette.Roles, bool) {
 	result.Stone2 = tint(.030, base.Stone2)
 	result.Stone3 = tint(.034, base.Stone3)
 	result.Stone4 = tint(.036, base.Stone4)
+	result.Slab = tint(.030, base.Slab)
+	result.Field = tint(.034, base.Field)
 	result.Vein = tint(.030, base.Vein)
+	result.Edge = tint(.030, base.Edge)
 	result.Fg = tint(.010, base.Fg)
 	result.Fg2 = tint(.014, base.Fg2)
 	result.Fg3 = tint(.018, base.Fg3)
-	result.Sel = tint(.018, base.Sel)
 	return result, true
 }
 

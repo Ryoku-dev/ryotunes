@@ -5,10 +5,11 @@ import (
 	"strings"
 	"time"
 
+	"gioui.org/f32"
 	"gioui.org/layout"
 	"gioui.org/op"
-	"gioui.org/op/clip"
 
+	"github.com/ryoku-dev/ryoku/docs/lithic/library/go/anim"
 	"github.com/ryoku-dev/ryoku/docs/lithic/library/go/kit"
 	"github.com/ryoku-dev/ryoku/docs/lithic/library/go/palette"
 	"github.com/ryoku-dev/ryotunes/internal/client/ui/act"
@@ -20,8 +21,10 @@ import (
 
 type discordToggle struct {
 	click kit.Click
-	hover look.Hover
+	wash  look.RowWash
 	tip   look.Tip
+	on    anim.Tween
+	onSet bool
 
 	status     model.DiscordStatus
 	loaded     bool
@@ -115,33 +118,50 @@ func (discord *discordToggle) layout(gtx layout.Context, e *env.Env) layout.Dime
 	dimensions := discord.tip.Layout(gtx, e.Th, e.Overlays, "Discord status: "+word, func(gtx layout.Context) layout.Dimensions {
 		gtx.Constraints = layout.Exact(size)
 		return discord.click.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-			record := op.Record(gtx.Ops)
-			dimensions, hover := discord.hover.Layout(gtx, e.Th, func(gtx layout.Context) layout.Dimensions {
-				ink := e.Th.R.Fg2
-				if discord.click.Hovered() {
-					ink = e.Th.R.Fg
-				}
-				if enabled {
-					ink = e.Th.R.OnSel
-				}
-				return layout.Center.Layout(gtx, look.DiscordGlyph(18, ink))
-			})
-			content := record.Stop()
-			area := clip.Rect(image.Rectangle{Max: dimensions.Size}).Push(gtx.Ops)
+			th := e.Th
+			bounds := image.Rectangle{Max: size}
+			cut := gtx.Dp(6)
+			usable := gtx.Source.Enabled()
+			hover, _ := discord.wash.Update(gtx, th, usable && discord.click.Hovered(), usable && discord.click.Pressed())
+			// on: the selection's wash and the accent glyph; off: a hairline. The two
+			// cross over th.Motion.Quick.
+			discord.on.Duration, discord.on.Ease = th.Motion.Quick, anim.EaseOutCubic
+			target := float32(0)
 			if enabled {
-				kit.FillCut(gtx.Ops, image.Rectangle{Max: dimensions.Size}, gtx.Dp(6), e.Th.R.Sel)
+				target = 1
+			}
+			if !discord.onSet {
+				discord.onSet = true
+				discord.on.Set(gtx, target)
+			}
+			discord.on.Set(gtx, target)
+			on := discord.on.Value(gtx)
+			if on < 1 {
+				kit.Stroke(gtx, th.Theme, bounds, cut, max(1, gtx.Dp(1)), palette.WithAlpha(th.R.Vein, 1-on))
+			}
+			if on > 0 {
+				kit.Fill(gtx, th.Theme, bounds, cut, palette.WithAlpha(th.R.Select(), on))
+			}
+			discord.wash.Paint(gtx, th, bounds, cut)
+			ink := palette.Mix(palette.Mix(th.R.Fg2, th.R.Fg, hover), th.R.Sel, on)
+			glyphSize := gtx.Dp(18)
+			scale := discord.wash.GlyphScale()
+			at := op.Offset(image.Pt((size.X-glyphSize)/2, (size.Y-glyphSize)/2)).Push(gtx.Ops)
+			glyphGtx := gtx
+			glyphGtx.Constraints = layout.Exact(image.Pt(glyphSize, glyphSize))
+			if scale != 1 {
+				centre := f32.Pt(float32(glyphSize)/2, float32(glyphSize)/2)
+				stack := op.Affine(f32.AffineId().Scale(centre, f32.Pt(scale, scale))).Push(gtx.Ops)
+				look.DiscordGlyph(18, ink)(glyphGtx)
+				stack.Pop()
 			} else {
-				kit.StrokeCut(gtx.Ops, image.Rectangle{Max: dimensions.Size}, gtx.Dp(6), max(1, gtx.Dp(1)), e.Th.R.Vein)
-				if hover > 0 {
-					kit.FillCut(gtx.Ops, image.Rectangle{Max: dimensions.Size}, gtx.Dp(6), palette.WithAlpha(e.Th.R.Stone3, hover))
-				}
+				look.DiscordGlyph(18, ink)(glyphGtx)
 			}
-			content.Add(gtx.Ops)
-			area.Pop()
+			at.Pop()
 			if gtx.Focused(&discord.click.Clickable) {
-				kit.FocusRing(gtx, e.Th.Theme, image.Rectangle{Max: dimensions.Size}, gtx.Dp(6))
+				kit.FocusRing(gtx, th.Theme, bounds, cut)
 			}
-			return dimensions
+			return layout.Dimensions{Size: size}
 		})
 	})
 	if discord.click.Clicked(gtx) {

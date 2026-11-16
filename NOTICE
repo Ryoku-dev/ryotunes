@@ -7,7 +7,7 @@ distributed app assets except where a component is listed under another
 license. The `ryotunes` client and `ryotunesd` daemon binaries include
 GPL-3.0-only code and are distributed under GPLv3 only, as detailed below. The
 full project license is in LICENSE. The licenses and copyright notices for
-linked Go modules, the embedded fonts and the Material Design icons are in
+linked Go modules, the embedded fonts and the Material Symbols icons are in
 THIRD_PARTY_NOTICES.
 
 Trademark term
@@ -51,8 +51,10 @@ Third-party components
 
 The four Go binaries use the modules listed in THIRD_PARTY_NOTICES. Only the
 `ryotunesd` daemon links go-librespot, which is GPL-3.0-only, so that binary is
-distributed under GPLv3 only. The Space Grotesk and Space Mono fonts are
-OFL-1.1. Material Design icons are Apache-2.0.
+distributed under GPLv3 only. The Geologica and Martian Mono fonts, embedded
+through the Lithic library, are OFL-1.1. The icons are Material Symbols Sharp
+by Google, carried by the Lithic library's symbols package, under Apache-2.0;
+their license and provenance notice are in THIRD_PARTY_NOTICES.
 
 The pinned xlab/vorbis-go revision predates that repository's LICENSE file. The
 copyright holder now publishes vorbis-go under MIT. A verbatim copy of that

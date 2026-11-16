@@ -1,6 +1,7 @@
 package home
 
 import (
+	"image"
 	"strings"
 
 	"gioui.org/layout"
@@ -12,6 +13,7 @@ import (
 	"github.com/ryoku-dev/ryotunes/internal/client/ui/act"
 	"github.com/ryoku-dev/ryotunes/internal/client/ui/env"
 	"github.com/ryoku-dev/ryotunes/internal/client/ui/look"
+	"github.com/ryoku-dev/ryotunes/internal/client/ui/sheet"
 	"github.com/ryoku-dev/ryotunes/internal/client/ui/widgets"
 	"github.com/ryoku-dev/ryotunes/internal/model"
 )
@@ -44,6 +46,7 @@ type page struct {
 	feedRevision    uint64
 	shelfRevision   uint64
 	shelfChildren   []layout.Widget
+	shelfViews      []*widgets.Shelf
 	projectionKey   homeProjectionKey
 	quickWidget     layout.Widget
 	recentWidget    layout.Widget
@@ -61,6 +64,8 @@ type page struct {
 	picked        widgets.Shelf
 	shelves       map[string]*widgets.Shelf
 	insights      insightsView
+	reveal        sheet.Reveal
+	motto         kit.TickRuler
 }
 
 // New returns a retained Home page for the route.
@@ -68,14 +73,49 @@ func New(r env.Route) env.Page {
 	p := &page{
 		initialParams: strings.TrimSpace(r.Params),
 		pendingChip:   -1,
-		header:        widgets.Header{Sentence: true, NoLane: true},
+		header:        widgets.Header{Sentence: true, NoLane: true, Place: sheet.Home},
 		tiles:         make(map[string]*widgets.QuickTile),
 		shelves:       make(map[string]*widgets.Shelf),
+		motto:         kit.TickRuler{Style: kit.RulerMotto},
 	}
 	p.header.Below = func(gtx layout.Context) layout.Dimensions {
-		return p.nowPlaying.Layout(gtx, p.nowPlayingEnv)
+		return p.cover(gtx, p.nowPlayingEnv)
 	}
 	return p
+}
+
+// cover is what stands under the greeting, as on the Hub's Home: the motto in kanji while
+// glosses are on, the motto's tick ruler with its first segment in the accent, then what
+// plays now.
+func (p *page) cover(gtx layout.Context, e *env.Env) layout.Dimensions {
+	if e == nil || e.Th == nil {
+		return layout.Dimensions{}
+	}
+	th := e.Th
+	gtx.Constraints.Min = image.Point{}
+	y := gtx.Dp(th.Sp.S2)
+	if th.Desktop.Gloss {
+		offset := op.Offset(image.Pt(0, y)).Push(gtx.Ops)
+		motto := kit.Label{Style: th.T.Caption, Color: th.R.Fg3, MaxLines: 1}.Layout(gtx, th.Theme, sheet.Motto)
+		offset.Pop()
+		y += motto.Size.Y + gtx.Dp(th.Sp.S2)
+	}
+	p.motto.Lead = th.R.Sel
+	offset := op.Offset(image.Pt(0, y)).Push(gtx.Ops)
+	ruler := p.motto.Layout(gtx, th.Theme, -1)
+	offset.Pop()
+	y += ruler.Size.Y
+	card := gtx
+	card.Constraints.Max.Y = max(0, gtx.Constraints.Max.Y-y)
+	offset = op.Offset(image.Pt(0, y)).Push(gtx.Ops)
+	dimensions := p.nowPlaying.Layout(card, e)
+	offset.Pop()
+	return layout.Dimensions{Size: image.Pt(gtx.Constraints.Max.X, y+dimensions.Size.Y)}
+}
+
+// Masthead names Home on the frame's masthead and says how far it is read.
+func (p *page) Masthead() (part, partGloss string, progress float32) {
+	return "", "", p.scroll.Progress()
 }
 
 func (p *page) Title() string { return "Home" }
@@ -110,19 +150,21 @@ func (p *page) Layout(gtx layout.Context, e *env.Env) layout.Dimensions {
 		if index >= len(children)-2 {
 			p.loadMore(e)
 		}
-		if index == stateIndex {
-			return children[index](gtx)
-		}
-		bottom := unit.Dp(34)
-		if index == len(children)-1 {
-			bottom = 21
-		} else if index+1 == stateIndex {
-			bottom = 0
-		}
-		if index == 0 {
-			return layout.Inset{Bottom: bottom}.Layout(gtx, children[index])
-		}
-		return layout.Inset{Right: inset, Bottom: bottom, Left: inset}.Layout(gtx, children[index])
+		return p.reveal.Group(gtx, e.Th, index, func(gtx layout.Context) layout.Dimensions {
+			if index == stateIndex {
+				return children[index](gtx)
+			}
+			bottom := unit.Dp(34)
+			if index == len(children)-1 {
+				bottom = 21
+			} else if index+1 == stateIndex {
+				bottom = 0
+			}
+			if index == 0 {
+				return layout.Inset{Top: e.Th.Sp.S2, Bottom: bottom}.Layout(gtx, children[index])
+			}
+			return layout.Inset{Right: inset, Bottom: bottom, Left: inset}.Layout(gtx, children[index])
+		})
 	})
 }
 

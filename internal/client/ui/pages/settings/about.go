@@ -40,7 +40,7 @@ func (p *page) layoutAbout(gtx layout.Context, e *env.Env) layout.Dimensions {
 		engine = "Unavailable"
 	}
 	rows := []layout.Widget{
-		p.settingRow(e.Th, "Ryotunes", "A focused Ryoku desktop music instrument: your library, local media, queue, lyrics and playback engine in one Lithic surface.", func(gtx layout.Context) layout.Dimensions {
+		p.settingRow(e.Th, "Ryotunes", "A focused Ryoku desktop music instrument: your library, local media, queue, lyrics and playback engine in one surface that wears the desktop's look.", func(gtx layout.Context) layout.Dimensions {
 			return look.RyokuMark(unit.Dp(40), e.Th.R.Fg)(gtx)
 		}),
 		p.versionRow(e, "App", version.Version),
@@ -51,21 +51,34 @@ func (p *page) layoutAbout(gtx layout.Context, e *env.Env) layout.Dimensions {
 		p.updateRow(e),
 	}
 	for i, link := range aboutLinks {
-		i, link := i, link
-		rows = append(rows, p.settingRow(e.Th, link.label, link.url, func(gtx layout.Context) layout.Dimensions {
-			p.about.links[i].Kind, p.about.links[i].Label = kit.PlaqueLine, "Open"
-			if p.about.links[i].Clicked(gtx) {
-				openExternal(e, link.url)
-			}
-			return p.about.links[i].Layout(gtx, e.Th.Theme)
+		button := &p.about.links[i]
+		rows = append(rows, p.row(e.Th, rowSpec{
+			title: link.label, detail: link.url,
+			activate: func() { openExternal(e, link.url) },
+			control: func(gtx layout.Context) layout.Dimensions {
+				button.Kind, button.Small, button.Icon, button.Label = kit.PlaqueQuiet, true, look.Icon.OpenInNew, "Open"
+				if button.Clicked(gtx) {
+					openExternal(e, link.url)
+				}
+				return button.Layout(gtx, e.Th.Theme)
+			},
 		}))
+	}
+	if p.update != nil && p.update.Notes != "" {
+		rows = append(rows, func(gtx layout.Context) layout.Dimensions {
+			return p.about.notes.layout(gtx, e.Th, "Release notes", func(gtx layout.Context) layout.Dimensions {
+				return layout.Inset{Top: e.Th.Sp.S2, Bottom: e.Th.Sp.S2}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+					return kit.Label{Style: e.Th.T.Detail, Color: e.Th.R.Fg2}.Layout(gtx, e.Th.Theme, p.update.Notes)
+				})
+			})
+		})
 	}
 	return p.settingRows(gtx, rows...)
 }
 
 func (p *page) licenseRow(e *env.Env) layout.Widget {
 	return p.settingRow(e.Th, "License", copyrightLine, func(gtx layout.Context) layout.Dimensions {
-		p.about.licenses.Kind, p.about.licenses.Label = kit.PlaqueLine, "Licenses"
+		p.about.licenses.Kind, p.about.licenses.Small, p.about.licenses.Label = kit.PlaqueQuiet, true, "Licenses"
 		if p.about.licenses.Clicked(gtx) {
 			act.OpenURL(e, licensesURL())
 		}
@@ -121,21 +134,15 @@ func (p *page) updateRow(e *env.Env) layout.Widget {
 		detail = "Downloading and verifying the update, then asking for administrator approval. Keep Ryotunes open until it finishes."
 	}
 	return p.settingRow(e.Th, "Updates", detail, func(gtx layout.Context) layout.Dimensions {
-		p.about.check.Kind, p.about.check.Busy, p.about.check.Label = kit.PlaqueLine, p.checking, "Check"
+		p.about.check.Kind, p.about.check.Small, p.about.check.Busy, p.about.check.Label = kit.PlaqueQuiet, true, p.checking, "Check"
 		if p.checking {
 			p.about.check.Label = "Checking…"
 		}
-		p.about.install.Kind, p.about.install.Busy, p.about.install.Label = kit.PlaqueLine, p.installing, "Install"
+		p.about.install.Kind, p.about.install.Small, p.about.install.Busy, p.about.install.Label = kit.PlaqueQuiet, true, p.installing, "Install"
 		if p.installing {
 			p.about.install.Label = "Installing…"
 		}
-		p.about.changelog.Kind, p.about.changelog.Label = kit.PlaqueLine, "View changelog"
-		p.about.notes.Kind = kit.PlaqueQuiet
-		if p.about.showNotes {
-			p.about.notes.Label = "Hide release notes"
-		} else {
-			p.about.notes.Label = "Show release notes"
-		}
+		p.about.changelog.Kind, p.about.changelog.Small, p.about.changelog.Icon, p.about.changelog.Label = kit.PlaqueQuiet, true, look.Icon.OpenInNew, "View changelog"
 		if p.about.check.Clicked(gtx) && !p.checking {
 			p.checking = true
 			e.Toast("Checking for a new version…", env.ToastInfo)
@@ -160,14 +167,11 @@ func (p *page) updateRow(e *env.Env) layout.Widget {
 				updated := *p.update
 				updated.Available, updated.CurrentVersion, updated.RestartPending = false, result.Version, result.RestartRequired
 				p.update = &updated
-				e.Toast("Ryotunes "+result.Version+" installed, restart Ryotunes to finish", env.ToastSuccess)
+				e.Toast("Ryotunes "+result.Version+" is installed. Restart Ryotunes to finish.", env.ToastSuccess)
 			})
 		}
 		if p.about.changelog.Clicked(gtx) {
 			openExternal(e, "https://github.com/ryoku-dev/ryotunes/blob/gio/CHANGELOG.md")
-		}
-		if p.about.notes.Clicked(gtx) && p.update != nil && p.update.Notes != "" {
-			p.about.showNotes = !p.about.showNotes
 		}
 		children := []layout.FlexChild{
 			layout.Rigid(func(gtx layout.Context) layout.Dimensions { return p.about.check.Layout(gtx, e.Th.Theme) }),
@@ -180,20 +184,6 @@ func (p *page) updateRow(e *env.Env) layout.Widget {
 			)
 		}
 		children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions { return p.about.changelog.Layout(gtx, e.Th.Theme) }))
-		if p.update != nil && p.update.Notes != "" {
-			children = append(children,
-				layout.Rigid(layout.Spacer{Height: unit.Dp(8)}.Layout),
-				layout.Rigid(func(gtx layout.Context) layout.Dimensions { return p.about.notes.Layout(gtx, e.Th.Theme) }),
-			)
-		}
-		if p.about.showNotes && p.update != nil && p.update.Notes != "" {
-			children = append(children,
-				layout.Rigid(layout.Spacer{Height: unit.Dp(8)}.Layout),
-				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					return kit.Label{Style: e.Th.T.Caption, Color: e.Th.R.Fg2, MaxLines: 12}.Layout(gtx, e.Th.Theme, p.update.Notes)
-				}),
-			)
-		}
 		return layout.Flex{Axis: layout.Vertical, Alignment: layout.End}.Layout(gtx, children...)
 	})
 }

@@ -27,8 +27,6 @@ github.com/dustin/go-humanize v1.1.0 h1:dbKTrvD0klcbBV/h4AWJdMuZogJACoMlvWIWZ5b2
 github.com/dustin/go-humanize v1.1.0/go.mod h1:hc1CvRkJMsgxqjmjMQF3QNRAZBwY8AXBAzKYoSX9sFI=
 github.com/ebitengine/purego v0.10.1 h1:dewVBCBT2GaMu1SrNTYxQhgQBethzfhiwvZiLGP/qyY=
 github.com/ebitengine/purego v0.10.1/go.mod h1:iIjxzd6CiRiOG0UyXP+V1+jWqUXVjPKLAI0mRfJZTmQ=
-github.com/fsnotify/fsnotify v1.10.1 h1:b0/UzAf9yR5rhf3RPm9gf3ehBPpf0oZKIjtpKrx59Ho=
-github.com/fsnotify/fsnotify v1.10.1/go.mod h1:TLheqan6HD6GBK6PrDWyDPBaEV8LspOxvPSjC+bVfgo=
 github.com/gen2brain/go-mpv v0.4.0 h1:sJkgo/C1NONwlN1MrSz8pArJL0s8i87+1grQwsBRDDM=
 github.com/gen2brain/go-mpv v0.4.0/go.mod h1:J7DM6g0sSZSgPN4v7Z5DD7l49eRgxhNYcxr+2KOApEE=
 github.com/go-sourcemap/sourcemap v2.1.3+incompatible h1:W1iEw64niKVGogNgBN3ePyLFfuisuzeidWPMPWmECqU=
@@ -66,8 +64,12 @@ github.com/ncruces/go-strftime v1.1.0/go.mod h1:yVaq7iwCN09vHRrKBrrflXT0M9tTMG2K
 github.com/pmezard/go-difflib v1.0.0/go.mod h1:iKH77koFhYxTK1pcRnkKkqfTogsbg7gZNVY4sRDYZ/4=
 github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec h1:W09IVJc94icq4NjY3clb7Lk8O1qJ8BdBEF8z0ibU0rE=
 github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec/go.mod h1:qqbHyh8v60DhA7CoWK5oRCqLrMHRGoxYCSS9EjAz6Eo=
-github.com/ryoku-dev/ryoku/docs/lithic/library/go v0.0.0-20261110025519-59b1704838d8 h1:UiRhwgqDokUGg47S8Zgjw5RVSnhgz0jpGvOLjqASSPY=
-github.com/ryoku-dev/ryoku/docs/lithic/library/go v0.0.0-20261110025519-59b1704838d8/go.mod h1:zb86GSIEWmbFOjZsz94LN9nOQpiHKRIyWl79wAdB+Tk=
+github.com/ryoku-dev/ryoku/docs/lithic/library/go v0.0.0-20261116191400-64e30bdbb6e5 h1:BtymoZ2bMIHuwPXnjIOreALvzrhsEAlyn0YLpdNhVKA=
+github.com/ryoku-dev/ryoku/docs/lithic/library/go v0.0.0-20261116191400-64e30bdbb6e5/go.mod h1:KaOAgjp5MJ9+PMhWHUA9C1tFFKyQatvdyypk9vjlriY=
+github.com/ryoku-dev/ryoku/docs/lithic/library/go v0.0.0-20261116195054-96ae6fe8318b h1:ZNr1gtZ+xm3Xbi0Oc+FRZQGSto1O0wWZjMOZcGPRjfA=
+github.com/ryoku-dev/ryoku/docs/lithic/library/go v0.0.0-20261116195054-96ae6fe8318b/go.mod h1:KaOAgjp5MJ9+PMhWHUA9C1tFFKyQatvdyypk9vjlriY=
+github.com/ryoku-dev/ryoku/docs/lithic/library/go v0.0.0-20261116200446-ced944d1bcbf h1:KEFZi8J+PDfjn+7cVog5alFGyvcVA0GtTj0Tc0kJqk8=
+github.com/ryoku-dev/ryoku/docs/lithic/library/go v0.0.0-20261116200446-ced944d1bcbf/go.mod h1:KaOAgjp5MJ9+PMhWHUA9C1tFFKyQatvdyypk9vjlriY=
 github.com/sirupsen/logrus v1.9.3 h1:dueUQJ1C2q9oE3F7wvmSGAaVtTmUizReu6fjN8uqzbQ=
 github.com/sirupsen/logrus v1.9.3/go.mod h1:naHLuLoDiP4jHNo9R0sCBMtWGeIprob74mVsIT4qYEQ=
 github.com/stretchr/objx v0.1.0/go.mod h1:HFkY916IF+rwdDfMAkV7OtwuqBVzrE8GR6GFx+wExME=

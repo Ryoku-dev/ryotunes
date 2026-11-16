@@ -55,7 +55,7 @@ func (d *newPlaylistDialog) Layout(gtx layout.Context, e *env.Env, p *Page) layo
 	}
 	d.name.Label, d.name.Placeholder, d.name.Error = "Playlist name", "New playlist", d.err
 	d.cancel.Kind, d.cancel.Label = kit.PlaqueQuiet, "Cancel"
-	d.create.Kind, d.create.Icon, d.create.Label, d.create.Busy = kit.PlaqueLine, look.Icon.Add, "Create", d.busy
+	d.create.Kind, d.create.Icon, d.create.Label, d.create.Busy = kit.PlaqueGold, look.Icon.Add, "Create", d.busy
 	d.dialog.Width = 520
 	return d.dialog.Layout(gtx, e.Th.Theme, "New playlist",
 		func(gtx layout.Context) layout.Dimensions { return d.name.Layout(gtx, e.Th.Theme) },
@@ -115,8 +115,8 @@ func (d *importPlaylistDialog) Layout(gtx layout.Context, e *env.Env, p *Page) l
 	d.path.Error = d.err
 	d.path.Mono = true
 	d.cancel.Kind, d.cancel.Label = kit.PlaqueQuiet, "Cancel"
-	d.importButton.Kind, d.importButton.Icon, d.importButton.Label, d.importButton.Busy = kit.PlaqueLine, look.Icon.OpenInNew, "Import", d.busy
-	d.dialog.Width = 620
+	d.importButton.Kind, d.importButton.Icon, d.importButton.Label, d.importButton.Busy = kit.PlaqueGold, look.Icon.OpenInNew, "Import", d.busy
+	d.dialog.Width = 520
 	return d.dialog.Layout(gtx, e.Th.Theme, "Import playlist",
 		func(gtx layout.Context) layout.Dimensions {
 			return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
@@ -211,8 +211,8 @@ func (d *folderDialog) Layout(gtx layout.Context, e *env.Env, p *Page) layout.Di
 	d.path.Error = d.err
 	d.path.Mono = true
 	d.cancel.Kind, d.cancel.Label = kit.PlaqueQuiet, "Cancel"
-	d.add.Kind, d.add.Icon, d.add.Label, d.add.Busy = kit.PlaqueLine, look.Icon.Add, "Add folder", d.busy
-	d.dialog.Width = 620
+	d.add.Kind, d.add.Icon, d.add.Label, d.add.Busy = kit.PlaqueGold, look.Icon.Add, "Add folder", d.busy
+	d.dialog.Width = 520
 	return d.dialog.Layout(gtx, e.Th.Theme, "Add local music",
 		func(gtx layout.Context) layout.Dimensions { return d.path.Layout(gtx, e.Th.Theme) },
 		func(gtx layout.Context) layout.Dimensions { return d.cancel.Layout(gtx, e.Th.Theme) },

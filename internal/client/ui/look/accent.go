@@ -41,7 +41,7 @@ func AccentFromSource(provider model.Provider, roles palette.Roles) Accent {
 		Fill:  fill,
 		On:    palette.InkOn(fill),
 		Ink:   BrandInk(provider, roles),
-		Field: palette.Mix(roles.Stone2, fill, tokens.AlphaMineral),
+		Field: accentField(fill, roles),
 	}
 }
 
@@ -51,7 +51,7 @@ func AccentFromDesktop(roles palette.Roles) Accent {
 		Fill:  roles.Gold,
 		On:    roles.OnGold,
 		Ink:   roles.GoldInk,
-		Field: palette.Mix(roles.Stone2, roles.Gold, tokens.AlphaMineral),
+		Field: accentField(roles.Gold, roles),
 	}
 }
 
@@ -61,8 +61,24 @@ func accentFromFill(fill color.NRGBA, roles palette.Roles) Accent {
 		Fill:  fill,
 		On:    palette.InkOn(fill),
 		Ink:   contrastAccent(fill, roles.Stone2, roles.Dark),
-		Field: palette.Mix(roles.Stone2, fill, tokens.AlphaMineral),
+		Field: accentField(fill, roles),
 	}
+}
+
+// accentFieldChroma is the field's colour at most: a mineral field's chroma
+// (tokens.DyeMineral), so the accent's field sits among jade's and amber's.
+var accentFieldChroma = tokens.DyeMineral["amber"]
+
+// accentField is the accent's mineral field, as palette.Roles.MineralField
+// builds jade's or amber's: the ladder's mineral-field lightness, a mineral's
+// chroma, and the accent's hue. A colourless accent gives a grey field.
+func accentField(fill color.NRGBA, roles palette.Roles) color.NRGBA {
+	field := colorToOKLCH(roles.MineralField(palette.Attention))
+	accent := colorToOKLCH(fill)
+	field.H = accent.H
+	field.C = min(accentFieldChroma, accent.C)
+	field.A = 0xff
+	return oklchToColor(field)
 }
 
 func contrastAccent(ink, background color.NRGBA, lighter bool) color.NRGBA {

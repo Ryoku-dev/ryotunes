@@ -74,6 +74,7 @@ func (p *page) content(e *env.Env, snapshot state.State) []layout.Widget {
 	if p.activeChip > 0 {
 		shelves := p.feedShelves(e)
 		children = append(children, shelves...)
+		p.numberShelves(nil, nil)
 		if len(shelves) == 0 {
 			p.stateIndex = len(children)
 			children = append(children, widgets.EmptyState(e, look.Icon.Sparkle, "Nothing here yet", ""))
@@ -93,6 +94,14 @@ func (p *page) content(e *env.Env, snapshot state.State) []layout.Widget {
 		children = append(children, p.pickedWidget)
 	}
 	children = append(children, p.feedShelves(e)...)
+	var recent, picked *widgets.Shelf
+	if p.recentWidget != nil {
+		recent = &p.recent
+	}
+	if p.pickedWidget != nil {
+		picked = &p.picked
+	}
+	p.numberShelves(recent, picked)
 	if facts := p.insights.layout(e); facts != nil {
 		children = append(children, facts)
 	}
@@ -105,6 +114,7 @@ func (p *page) feedShelves(e *env.Env) []layout.Widget {
 		return p.shelfChildren
 	}
 	children := make([]layout.Widget, 0, len(p.feed.Sections))
+	p.shelfViews = p.shelfViews[:0]
 	for index := range p.feed.Sections {
 		shelf := p.feed.Sections[index]
 		if len(shelf.Items) == 0 {
@@ -124,6 +134,7 @@ func (p *page) feedShelves(e *env.Env) []layout.Widget {
 			}
 			more = &route
 		}
+		p.shelfViews = append(p.shelfViews, view)
 		title, items, route := shelf.Title, shelf.Items, more
 		children = append(children, func(gtx layout.Context) layout.Dimensions {
 			return view.Layout(gtx, e, title, items, route)
@@ -132,6 +143,29 @@ func (p *page) feedShelves(e *env.Env) []layout.Widget {
 	p.shelfRevision = p.feedRevision
 	p.shelfChildren = children
 	return p.shelfChildren
+}
+
+// numberShelves numbers the page's shelves as the Hub numbers a sheet's sections, "02 / 07":
+// Jump back in and Picked for you (when shown) first, then the feed's.
+func (p *page) numberShelves(recent, picked *widgets.Shelf) {
+	of := len(p.shelfViews)
+	if recent != nil {
+		of++
+	}
+	if picked != nil {
+		of++
+	}
+	number := 0
+	for _, shelf := range [2]*widgets.Shelf{recent, picked} {
+		if shelf != nil {
+			number++
+			shelf.Number, shelf.Of = number, of
+		}
+	}
+	for _, shelf := range p.shelfViews {
+		number++
+		shelf.Number, shelf.Of = number, of
+	}
 }
 
 func (p *page) prepareProjections(e *env.Env, snapshot state.State) {

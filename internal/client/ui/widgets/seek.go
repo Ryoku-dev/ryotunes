@@ -1,6 +1,7 @@
 package widgets
 
 import (
+	"image"
 	"math"
 	"strconv"
 	"strings"
@@ -34,6 +35,17 @@ type Seek struct {
 	target   float64
 	origin   float64
 	until    time.Time
+
+	// the time boxes' width, measured once per digit count and type size
+	timeWidth int
+	timeKey   seekTimeKey
+}
+
+// seekTimeKey is what the time boxes' width depends on.
+type seekTimeKey struct {
+	runes int
+	size  unit.Sp
+	scale float32
 }
 
 // Layout draws the row for the loaded track; radio shows the Live claim.
@@ -50,14 +62,16 @@ func (s *Seek) Layout(gtx layout.Context, e *env.Env, snapshot state.State, trac
 		end = Duration(duration)
 		value = float32(min(max(position/duration, 0), 1))
 	}
+	elapsed := Duration(position)
+	width := s.timeBox(gtx, e, max(len(elapsed), len(end)))
 	return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
-		layout.Rigid(seekTime(e, Duration(position), text.End)),
+		layout.Rigid(seekTime(e, elapsed, text.End, width)),
 		layout.Rigid(layout.Spacer{Width: 8}.Layout),
 		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
 			return s.layoutScrubber(gtx, e, snapshot, value, duration, known)
 		}),
 		layout.Rigid(layout.Spacer{Width: 8}.Layout),
-		layout.Rigid(seekTime(e, end, text.Start)),
+		layout.Rigid(seekTime(e, end, text.Start, width)),
 	)
 }
 
@@ -179,9 +193,50 @@ func PlaybackDuration(reported float64, value *string) float64 {
 	return float64(seconds)
 }
 
-func seekTime(e *env.Env, value string, align text.Alignment) layout.Widget {
+// timeBox is the width both time boxes take: what the mono type needs for
+// runes characters ("0:00", "00:00", "0:00:00"; Martian Mono sets every
+// figure on one advance), so the scrubber never moves as the seconds turn
+// and a long track's time is never clipped. It is measured again only when
+// the digit count, the type size or the display scale changes.
+func (s *Seek) timeBox(gtx layout.Context, e *env.Env, runes int) int {
+	runes = max(runes, len("0:00"))
+	key := seekTimeKey{runes: runes, size: e.Th.T.Mono.Size, scale: gtx.Metric.PxPerSp}
+	if key != s.timeKey || s.timeWidth == 0 {
+		s.timeKey = key
+		s.timeWidth = measureMono(gtx, e, seekTimeTemplate(runes))
+	}
+	return s.timeWidth
+}
+
+// seekTimeTemplate is a time of runes characters with every figure a zero.
+func seekTimeTemplate(runes int) string {
+	switch {
+	case runes <= 4:
+		return "0:00"
+	case runes == 5:
+		return "00:00"
+	case runes == 6:
+		return "000:00"
+	case runes == 7:
+		return "0:00:00"
+	default:
+		return strings.Repeat("0", runes-6) + ":00:00"
+	}
+}
+
+// measureMono is the width value takes in the mono type, without painting.
+func measureMono(gtx layout.Context, e *env.Env, value string) int {
+	measure := gtx
+	measure.Constraints = layout.Constraints{Max: image.Pt(1<<20, 1<<20)}
+	record := op.Record(gtx.Ops)
+	dims := kit.Label{Style: e.Th.T.Mono, Color: e.Th.R.Fg3, MaxLines: 1}.Layout(measure, e.Th.Theme, value)
+	record.Stop()
+	return dims.Size.X
+}
+
+func seekTime(e *env.Env, value string, align text.Alignment, width int) layout.Widget {
 	return func(gtx layout.Context) layout.Dimensions {
-		width := min(gtx.Dp(unit.Dp(44)), max(0, gtx.Constraints.Max.X))
+		width := min(width, max(0, gtx.Constraints.Max.X))
 		gtx.Constraints.Min.X, gtx.Constraints.Max.X = width, width
 		return kit.Label{Style: e.Th.T.Mono, Color: e.Th.R.Fg3, MaxLines: 1, Align: align}.Layout(gtx, e.Th.Theme, value)
 	}

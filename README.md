@@ -1,6 +1,6 @@
 # Ryotunes
 
-Ryotunes is Ryoku's music player for YouTube Music, Spotify, SoundCloud, Tidal, internet radio and local files. Playback is audio only. The interface is drawn in [Lithic](https://github.com/ryoku-dev/ryoku/tree/main/docs/lithic) and coloured by the live Ryoku palette.
+Ryotunes is Ryoku's music player for YouTube Music, Spotify, SoundCloud, Tidal, internet radio and local files. Playback is audio only. The interface is drawn in [Lithic](https://github.com/ryoku-dev/ryoku/tree/main/docs/lithic) in the Ryoku Settings language and follows the Style page of Ryoku Settings, so its design, colours, light or dark, contrast and motion change with the rest of the desktop.
 
 Ryotunes 2.0 is a rewrite in Go of the 1.x Rust and Quickshell app; settings, library data and sign-ins carry over.
 
@@ -8,7 +8,7 @@ Ryotunes 2.0 is a rewrite in Go of the 1.x Rust and Quickshell app; settings, li
 
 | Surface | What it provides |
 |---|---|
-| Home | Continue listening, recent music, shortcuts and provider shelves |
+| Home | Continue listening, recent music, shortcuts, provider shelves and your last two weeks of listening |
 | Search | Songs, albums, artists and playlists across the selected provider |
 | Library | Liked music, account playlists, device playlists and local music |
 | Radio | Searchable internet radio stations with live audio playback |

@@ -7,17 +7,17 @@ import (
 	"gioui.org/op"
 	"gioui.org/unit"
 
-	"golang.org/x/exp/shiny/materialdesign/icons"
-
 	"github.com/ryoku-dev/ryoku/docs/lithic/library/go/kit"
+	"github.com/ryoku-dev/ryoku/docs/lithic/library/go/symbols"
 	"github.com/ryoku-dev/ryoku/docs/lithic/library/go/tokens"
 )
 
-var choiceChevron = kit.Icon(icons.NavigationExpandMore)
+var choiceChevron = kit.Icon(symbols.ExpandMore)
 
 // Choice is a window-coordinate menu selector.
 type Choice struct {
 	click kit.Click
+	wash  RowWash
 	menu  kit.Menu
 	size  image.Point
 	value int
@@ -77,7 +77,10 @@ func (choice *Choice) Layout(gtx layout.Context, theme *Theme, overlays *Overlay
 	record := op.Record(gtx.Ops)
 	dimensions := choice.click.Layout(gtx, body)
 	call := record.Stop()
-	kit.FillCut(gtx.Ops, image.Rectangle{Max: dimensions.Size}, gtx.Dp(theme.Cut.Small), theme.R.Stone3)
+	bounds, cut := image.Rectangle{Max: dimensions.Size}, gtx.Dp(theme.Cut.Small)
+	kit.Fill(gtx, theme.Theme, bounds, cut, theme.R.Stone3)
+	choice.wash.Update(gtx, theme, choice.click.Hovered(), choice.click.Pressed())
+	choice.wash.Paint(gtx, theme, bounds, cut)
 	call.Add(gtx.Ops)
 	choice.size = dimensions.Size
 	return dimensions

@@ -86,13 +86,36 @@ func headerVisualizerLane(gtx layout.Context, e *env.Env, v *look.Visualizer, di
 }
 
 func headerField(gtx layout.Context, e *env.Env, v *look.Visualizer, cuts [4]int, body layout.Widget) layout.Dimensions {
-	return look.Field(gtx, e.Th, cuts, func(gtx layout.Context) layout.Dimensions {
-		record := op.Record(gtx.Ops)
-		dimensions := body(gtx)
-		content := record.Stop()
-		_, laneHeight := headerLaneMetrics(e.Th.Class)
-		headerVisualizerLane(gtx, e, v, dimensions, laneHeight)
-		content.Add(gtx.Ops)
-		return dimensions
+	return InsidePaneStroke(gtx, e.Th, func(gtx layout.Context) layout.Dimensions {
+		return look.Field(gtx, e.Th, cuts, func(gtx layout.Context) layout.Dimensions {
+			record := op.Record(gtx.Ops)
+			dimensions := body(gtx)
+			content := record.Stop()
+			_, laneHeight := headerLaneMetrics(e.Th.Class)
+			headerVisualizerLane(gtx, e, v, dimensions, laneHeight)
+			content.Add(gtx.Ops)
+			return dimensions
+		})
 	})
+}
+
+// InsidePaneStroke lays a page band (a header or hero field) out within the
+// pane's hairline: where the design draws the pane with a stroke
+// (th.Planes().PaneStroke: Lithic and Fluent) the band stands one stroke in
+// from the pane's sides, so the frame's hairlines run unbroken past it. It
+// still reports the full width it was given.
+func InsidePaneStroke(gtx layout.Context, th *look.Theme, band layout.Widget) layout.Dimensions {
+	if th.Planes().PaneStroke.A == 0 {
+		return band(gtx)
+	}
+	inset := max(1, gtx.Dp(1))
+	width := gtx.Constraints.Max.X
+	child := gtx
+	child.Constraints.Max.X = max(0, width-2*inset)
+	child.Constraints.Min.X = min(child.Constraints.Min.X, child.Constraints.Max.X)
+	offset := op.Offset(image.Pt(inset, 0)).Push(gtx.Ops)
+	dimensions := band(child)
+	offset.Pop()
+	dimensions.Size.X = min(width, dimensions.Size.X+2*inset)
+	return dimensions
 }

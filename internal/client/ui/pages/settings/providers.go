@@ -22,7 +22,11 @@ func (p *page) layoutAccount(gtx layout.Context, e *env.Env, snapshot state.Stat
 		p.spotifyRow(e, snapshot),
 		p.soundCloudRow(e, snapshot),
 		p.tidalRow(e, snapshot),
-		p.tidalCredentialsRow(e))
+		func(gtx layout.Context) layout.Dimensions {
+			return p.accounts.more.layout(gtx, e.Th, "More options", func(gtx layout.Context) layout.Dimensions {
+				return stackRows(gtx, []layout.Widget{p.tidalCredentialsRow(e)})
+			})
+		})
 }
 
 func (p *page) youtubeRow(e *env.Env, snapshot state.State) layout.Widget {
@@ -43,16 +47,18 @@ func (p *page) youtubeRow(e *env.Env, snapshot state.State) layout.Widget {
 	return p.settingRow(e.Th, "YouTube Music", detail, func(gtx layout.Context) layout.Dimensions {
 		return accountControl(gtx, e, tone, claim, func(gtx layout.Context) layout.Dimensions {
 			if snapshot.Auth.SignedIn {
-				p.accounts.youtubeSignOut.Kind, p.accounts.youtubeSignOut.Label = kit.PlaqueDangerLine, "Sign out"
+				p.accounts.youtubeSignOut.Kind, p.accounts.youtubeSignOut.Small, p.accounts.youtubeSignOut.Label = kit.PlaqueQuiet, true, "Sign out"
 				if p.accounts.youtubeSignOut.Clicked(gtx) {
-					callNull(e, protocol.MethodSignOut, protocol.Null{}, "Could not sign out", nil)
+					confirmSignOut(e, "YouTube Music", func() {
+						callNull(e, protocol.MethodSignOut, protocol.Null{}, "Could not sign out", nil)
+					})
 				}
 				return p.accounts.youtubeSignOut.Layout(gtx, e.Th.Theme)
 			}
 			if flow.Waiting || flow.URL != "" {
 				return p.layoutAuthFlow(gtx, e, model.ProviderYouTube, flow, &p.accounts.youtubeFlow)
 			}
-			return providerButton(gtx, e, &p.accounts.youtubeSignIn, kit.PlaqueLine, "Sign in with Google", func() {
+			return providerButton(gtx, e, &p.accounts.youtubeSignIn, kit.PlaqueQuiet, "Sign in with Google", func() {
 				act.SignIn(e, model.ProviderYouTube)
 			})
 		})
@@ -116,14 +122,14 @@ func (p *page) spotifyRow(e *env.Env, snapshot state.State) layout.Widget {
 	return p.settingRow(e.Th, "Spotify", detail, func(gtx layout.Context) layout.Dimensions {
 		return accountControl(gtx, e, tone, claim, func(gtx layout.Context) layout.Dimensions {
 			if snapshot.Spotify.SignedIn {
-				return providerButton(gtx, e, &p.accounts.spotifySignOut, kit.PlaqueDangerLine, "Sign out", func() {
-					callProviderSignOut(e, protocol.MethodSpotifySignOut)
+				return providerButton(gtx, e, &p.accounts.spotifySignOut, kit.PlaqueQuiet, "Sign out", func() {
+					confirmSignOut(e, "Spotify", func() { callProviderSignOut(e, protocol.MethodSpotifySignOut) })
 				})
 			}
 			if flow.Waiting || flow.URL != "" {
 				return p.layoutAuthFlow(gtx, e, model.ProviderSpotify, flow, &p.accounts.spotifyFlow)
 			}
-			return providerButton(gtx, e, &p.accounts.spotifySignIn, kit.PlaqueLine, "Sign in", func() {
+			return providerButton(gtx, e, &p.accounts.spotifySignIn, kit.PlaqueQuiet, "Sign in", func() {
 				act.SignIn(e, model.ProviderSpotify)
 			})
 		})
@@ -149,14 +155,14 @@ func (p *page) soundCloudRow(e *env.Env, snapshot state.State) layout.Widget {
 	return p.settingRow(e.Th, "SoundCloud", detail, func(gtx layout.Context) layout.Dimensions {
 		return accountControl(gtx, e, tone, claim, func(gtx layout.Context) layout.Dimensions {
 			if snapshot.SoundCloud.SignedIn {
-				return providerButton(gtx, e, &p.accounts.soundCloudSignOut, kit.PlaqueDangerLine, "Sign out", func() {
-					callProviderSignOut(e, protocol.MethodSoundCloudSignOut)
+				return providerButton(gtx, e, &p.accounts.soundCloudSignOut, kit.PlaqueQuiet, "Sign out", func() {
+					confirmSignOut(e, "SoundCloud", func() { callProviderSignOut(e, protocol.MethodSoundCloudSignOut) })
 				})
 			}
 			if flow.Waiting || flow.URL != "" {
 				return p.layoutAuthFlow(gtx, e, model.ProviderSoundCloud, flow, &p.accounts.soundCloudFlow)
 			}
-			return providerButton(gtx, e, &p.accounts.soundCloudSignIn, kit.PlaqueLine, "Sign in", func() {
+			return providerButton(gtx, e, &p.accounts.soundCloudSignIn, kit.PlaqueQuiet, "Sign in", func() {
 				act.SignIn(e, model.ProviderSoundCloud)
 			})
 		})
@@ -184,14 +190,14 @@ func (p *page) tidalRow(e *env.Env, snapshot state.State) layout.Widget {
 	return p.settingRow(e.Th, "TIDAL", detail, func(gtx layout.Context) layout.Dimensions {
 		return accountControl(gtx, e, tone, claim, func(gtx layout.Context) layout.Dimensions {
 			if snapshot.Tidal.SignedIn {
-				return providerButton(gtx, e, &p.accounts.tidalSignOut, kit.PlaqueDangerLine, "Sign out", func() {
-					callProviderSignOut(e, protocol.MethodTidalSignOut)
+				return providerButton(gtx, e, &p.accounts.tidalSignOut, kit.PlaqueQuiet, "Sign out", func() {
+					confirmSignOut(e, "TIDAL", func() { callProviderSignOut(e, protocol.MethodTidalSignOut) })
 				})
 			}
 			if flow.Waiting || flow.URL != "" {
 				return p.layoutAuthFlow(gtx, e, model.ProviderTidal, flow, &p.accounts.tidalFlow)
 			}
-			return providerButton(gtx, e, &p.accounts.tidalSignIn, kit.PlaqueLine, "Sign in", func() {
+			return providerButton(gtx, e, &p.accounts.tidalSignIn, kit.PlaqueQuiet, "Sign in", func() {
 				act.SignIn(e, model.ProviderTidal)
 			})
 		})
@@ -204,7 +210,7 @@ func (p *page) tidalCredentialsRow(e *env.Env) layout.Widget {
 		p.accounts.tidalDeviceSecret.field.Label, p.accounts.tidalDeviceSecret.field.Placeholder = "Device secret", "Device secret"
 		p.accounts.tidalDeviceSecret.field.Secret = true
 		p.accounts.tidalPKCEID.field.Label, p.accounts.tidalPKCEID.field.Placeholder = "PKCE ID", "PKCE ID"
-		p.accounts.tidalSave.Kind, p.accounts.tidalSave.Label = kit.PlaqueLine, "Save credentials"
+		p.accounts.tidalSave.Kind, p.accounts.tidalSave.Small, p.accounts.tidalSave.Label = kit.PlaqueQuiet, true, "Save credentials"
 		if p.accounts.tidalSave.Clicked(gtx) {
 			params := protocol.TidalCredentialsParams{
 				DeviceID: new(strings.TrimSpace(p.accounts.tidalDeviceID.field.Text())), DeviceSecret: new(strings.TrimSpace(p.accounts.tidalDeviceSecret.field.Text())),
@@ -234,7 +240,13 @@ func (p *page) tidalCredentialsRow(e *env.Env) layout.Widget {
 	})
 }
 
+// confirmSignOut asks before signing out of a service.
+func confirmSignOut(e *env.Env, service string, signOut func()) {
+	confirm(e, "Sign out of "+service+"?", "Ryotunes forgets this session until you sign in again.", "Sign out", signOut)
+}
+
 func providerButton(gtx layout.Context, e *env.Env, button *kit.Plaque, kind kit.PlaqueKind, label string, action func()) layout.Dimensions {
+	button.Small = true
 	button.Kind, button.Label = kind, label
 	if button.Clicked(gtx) {
 		action()
@@ -253,7 +265,7 @@ func accountControl(gtx layout.Context, e *env.Env, tone palette.Tone, claim str
 func (p *page) layoutAuthFlow(gtx layout.Context, e *env.Env, provider model.Provider, flow state.AuthFlow, controls *authFlowControls) layout.Dimensions {
 	controls.open.Kind, controls.open.Label, controls.open.Small = kit.PlaqueQuiet, "Open again", true
 	controls.copy.Kind, controls.copy.Label, controls.copy.Small = kit.PlaqueQuiet, "Copy link", true
-	controls.cancel.Kind, controls.cancel.Label, controls.cancel.Small = kit.PlaqueLine, "Cancel", true
+	controls.cancel.Kind, controls.cancel.Label, controls.cancel.Small = kit.PlaqueQuiet, "Cancel", true
 	if flow.URL != "" && controls.open.Clicked(gtx) {
 		act.OpenURL(e, flow.URL)
 	}

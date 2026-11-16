@@ -3,16 +3,21 @@ package library
 
 import (
 	"fmt"
+	"image"
 	"path/filepath"
 	"strings"
 
 	"gioui.org/layout"
+	"gioui.org/op/clip"
+	"gioui.org/op/paint"
 	"gioui.org/unit"
 
 	"github.com/ryoku-dev/ryoku/docs/lithic/library/go/kit"
 	"github.com/ryoku-dev/ryotunes/internal/client/ui/act"
 	"github.com/ryoku-dev/ryotunes/internal/client/ui/env"
 	"github.com/ryoku-dev/ryotunes/internal/client/ui/look"
+	"github.com/ryoku-dev/ryotunes/internal/client/ui/pages/pagesheet"
+	"github.com/ryoku-dev/ryotunes/internal/client/ui/sheet"
 	"github.com/ryoku-dev/ryotunes/internal/client/ui/widgets"
 	"github.com/ryoku-dev/ryotunes/internal/model"
 	"github.com/ryoku-dev/ryotunes/internal/protocol"
@@ -20,9 +25,16 @@ import (
 
 var libraryTabs = []string{"Playlists", "Songs", "Albums", "Artists", "Local"}
 
+// libraryTabGlosses are the tabs' kanji for the masthead and the tategaki ([INFERENCE]
+// proposals, as sheet's numbering): song collections, songs, records, performers, at hand.
+var libraryTabGlosses = []string{"曲集", "曲", "盤", "演者", "手元"}
+
 type folderActions struct {
 	rescan kit.Plaque
 	remove kit.Plaque
+
+	count      int
+	countLabel string
 }
 
 // Page is the retained Library surface.
@@ -39,6 +51,8 @@ type Page struct {
 	artistsGrid   widgets.Grid
 	tracks        widgets.TrackTable
 	localTracks   widgets.TrackTable
+	reveal        sheet.Reveal
+	strip         pagesheet.Strip
 
 	filterButton kit.IconPlaque
 	newButton    kit.Plaque
@@ -97,6 +111,11 @@ func New(r env.Route) env.Page {
 
 // Title returns the page title.
 func (p *Page) Title() string { return "Library" }
+
+// Masthead names the tab shown on the frame's masthead and says how far the page is read.
+func (p *Page) Masthead() (part, partGloss string, progress float32) {
+	return libraryTabs[p.selected], libraryTabGlosses[p.selected], p.scroll.Progress()
+}
 
 // FocusFilter opens and focuses the current-tab filter for Ctrl F.
 func (p *Page) FocusFilter(gtx layout.Context) {
@@ -327,9 +346,24 @@ func (p *Page) handleActions(gtx layout.Context, e *env.Env) {
 				p.local = local
 				p.syncFolderButtons()
 				p.invalidateFilter()
+				pagesheet.OfferUndo(e, "Stopped watching "+filepath.Base(path)+".", func() { p.watchFolder(e, path) })
 			})
 		}
 	}
+}
+
+// watchFolder adds path back to the watched folders (an Undo of Remove).
+func (p *Page) watchFolder(e *env.Env, path string) {
+	act.Call[model.LocalLibrary](e, protocol.MethodAddLocalFolder, protocol.PathParams{Path: path}, func(local model.LocalLibrary, err error) {
+		if err != nil {
+			e.Toast(err.Error(), env.ToastError)
+			return
+		}
+		p.local = local
+		p.localLoaded = true
+		p.syncFolderButtons()
+		p.invalidateFilter()
+	})
 }
 
 func (p *Page) layoutPage(gtx layout.Context, e *env.Env) layout.Dimensions {
@@ -340,15 +374,45 @@ func (p *Page) layoutPage(gtx layout.Context, e *env.Env) layout.Dimensions {
 	}
 	count := p.elementCount(gtx, e)
 	return p.scroll.Layout(gtx, e.Th, count, func(gtx layout.Context, index int) layout.Dimensions {
-		switch index {
-		case 0:
-			return p.header.Layout(gtx, e, "Library", "", nil)
-		case 1:
-			return p.layoutTabs(gtx, e)
-		default:
-			return p.layoutTabElement(gtx, e, index-2)
-		}
+		return p.reveal.Group(gtx, e.Th, index, func(gtx layout.Context) layout.Dimensions {
+			switch index {
+			case 0:
+				return layout.Inset{Top: e.Th.Sp.S2}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+					return p.layoutHeader(gtx, e)
+				})
+			case 1:
+				return p.layoutTabs(gtx, e)
+			default:
+				return p.layoutTabElement(gtx, e, index-2)
+			}
+		})
 	})
+}
+
+// layoutHeader is the Library's page head: the title, a lead naming the provider, and the
+// library's spec strip, counted up the first time it arrives.
+func (p *Page) layoutHeader(gtx layout.Context, e *env.Env) layout.Dimensions {
+	p.header.Place = sheet.Library
+	p.header.Part, p.header.PartGloss = libraryTabs[p.selected], libraryTabGlosses[p.selected]
+	p.strip.Set(0, "Playlists", len(p.playlistItems), false)
+	p.strip.Set(1, "Songs", len(p.liked), false)
+	p.strip.Set(2, "Albums", len(p.albums), false)
+	p.strip.Set(3, "Artists", len(p.artists), false)
+	strip := 4
+	if p.localLoaded && !p.localLoading {
+		p.strip.Set(4, "Folders", len(p.local.Folders), false)
+		strip = 5
+	}
+	p.strip.Len(strip)
+	p.header.Specs = p.strip.Specs(!p.loading || len(p.playlistItems)+len(p.liked)+len(p.albums)+len(p.artists) > 0)
+	return p.header.Layout(gtx, e, "Library", p.lead(), nil)
+}
+
+func (p *Page) lead() string {
+	if p.provider == model.ProviderLocal {
+		return "The music in your folders and the playlists you keep on this computer."
+	}
+	return "What you saved on " + look.ProviderName(p.provider) + ", and the music in your folders."
 }
 
 func (p *Page) layoutTabs(gtx layout.Context, e *env.Env) layout.Dimensions {
@@ -558,12 +622,11 @@ func (p *Page) layoutLocalElement(gtx layout.Context, e *env.Env, index int) lay
 		return widgets.Failed(e, p.localError, &p.retry)(gtx)
 	}
 	if index == 0 {
-		p.addFolder.Kind, p.addFolder.Icon, p.addFolder.Label = kit.PlaqueLine, look.Icon.Add, "Add folder"
+		p.addFolder.Kind, p.addFolder.Icon, p.addFolder.Label, p.addFolder.Small = kit.PlaqueQuiet, look.Icon.Add, "Add folder", true
 		return p.inset(e, 13, 13, func(gtx layout.Context) layout.Dimensions {
-			return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
-				layout.Flexed(1, kit.Text(e.Th.Theme, e.Th.T.Section, e.Th.R.Fg, "Watched folders")),
-				layout.Rigid(func(gtx layout.Context) layout.Dimensions { return p.addFolder.Layout(gtx, e.Th.Theme) }),
-			)
+			return widgets.RuledHead(gtx, e, "Watched folders", kit.Pad2(len(p.local.Folders)), func(gtx layout.Context) layout.Dimensions {
+				return p.addFolder.Layout(gtx, e.Th.Theme)
+			})
 		})(gtx)
 	}
 	index--
@@ -582,11 +645,11 @@ func (p *Page) layoutLocalElement(gtx layout.Context, e *env.Env, index int) lay
 			}
 			return p.inset(e, 0, bottom, kit.Text(e.Th.Theme, e.Th.T.Body, e.Th.R.Fg2, "No folders yet. Add the one your music sits in."))(gtx)
 		}
-		bottom := unit.Dp(4)
-		if stateNext {
-			bottom = 0
+		bottom := unit.Dp(0)
+		if index+1 == folderRows && !stateNext {
+			bottom = 21
 		}
-		return p.layoutFolder(gtx, e, folders[index], bottom)
+		return p.layoutFolder(gtx, e, folders[index], index == 0, index+1 == folderRows, bottom)
 	}
 	index -= folderRows
 	if len(p.filteredTracks) == 0 {
@@ -595,27 +658,54 @@ func (p *Page) layoutLocalElement(gtx layout.Context, e *env.Env, index int) lay
 	return p.layoutTrackElement(gtx, e, p.filteredTracks, p.filteredIndices, "local", "Local files", &p.localTracks, index)
 }
 
-func (p *Page) layoutFolder(gtx layout.Context, e *env.Env, folder string, bottom unit.Dp) layout.Dimensions {
+// layoutFolder is one watched folder as a setting row: hairlines between the rows (and
+// closing the list), the path in mono, its song count in the small mono, padded, and the
+// row's quiet actions, as the Hub lays its resource rows.
+func (p *Page) layoutFolder(gtx layout.Context, e *env.Env, folder string, first, last bool, bottom unit.Dp) layout.Dimensions {
 	actions := p.folders[folder]
-	actions.rescan.Kind, actions.rescan.Icon, actions.rescan.Label = kit.PlaqueQuiet, look.Icon.Refresh, "Rescan"
+	actions.rescan.Kind, actions.rescan.Icon, actions.rescan.Label, actions.rescan.Small = kit.PlaqueQuiet, look.Icon.Refresh, "Rescan", true
 	actions.rescan.Busy = p.localLoading
-	actions.remove.Kind, actions.remove.Icon, actions.remove.Label = kit.PlaqueDangerLine, look.Icon.Remove, "Remove"
-	count := folderTrackCount(folder, p.local.Songs)
+	actions.remove.Kind, actions.remove.Icon, actions.remove.Label, actions.remove.Small = kit.PlaqueQuiet, look.Icon.Remove, "Remove", true
+	if count := folderTrackCount(folder, p.local.Songs); actions.countLabel == "" || count != actions.count {
+		actions.count, actions.countLabel = count, folderSongs(count)
+	}
 	return p.inset(e, 0, bottom, func(gtx layout.Context) layout.Dimensions {
-		return kit.SlabContent(gtx, e.Th.Theme, func(gtx layout.Context) layout.Dimensions {
+		th := e.Th
+		hair := max(1, gtx.Dp(1))
+		dimensions := layout.Inset{Top: th.Sp.S2, Bottom: th.Sp.S2}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 			return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
 				layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-					return kit.Label{Style: e.Th.T.Mono, Color: e.Th.R.Fg, MaxLines: 1}.Layout(gtx, e.Th.Theme, folder)
+					return kit.Label{Style: th.T.Mono, Color: th.R.Fg, MaxLines: 1}.Layout(gtx, th.Theme, folder)
 				}),
-				layout.Rigid(layout.Spacer{Width: unit.Dp(13)}.Layout),
-				layout.Rigid(kit.Text(e.Th.Theme, e.Th.T.Mono, e.Th.R.Fg3, pluralSongs(count))),
-				layout.Rigid(layout.Spacer{Width: unit.Dp(13)}.Layout),
-				layout.Rigid(func(gtx layout.Context) layout.Dimensions { return actions.rescan.Layout(gtx, e.Th.Theme) }),
-				layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
-				layout.Rigid(func(gtx layout.Context) layout.Dimensions { return actions.remove.Layout(gtx, e.Th.Theme) }),
+				layout.Rigid(layout.Spacer{Width: th.Sp.S3}.Layout),
+				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+					return kit.LayoutSpacedCaps(gtx, th.Theme, th.T.MonoSm, th.R.Fg3, 1.2, actions.countLabel)
+				}),
+				layout.Rigid(layout.Spacer{Width: th.Sp.S3}.Layout),
+				layout.Rigid(func(gtx layout.Context) layout.Dimensions { return actions.rescan.Layout(gtx, th.Theme) }),
+				layout.Rigid(layout.Spacer{Width: th.Sp.S1}.Layout),
+				layout.Rigid(func(gtx layout.Context) layout.Dimensions { return actions.remove.Layout(gtx, th.Theme) }),
 			)
 		})
+		width := dimensions.Size.X
+		if first {
+			paint.FillShape(gtx.Ops, th.R.Vein, clip.Rect(image.Rect(0, 0, width, hair)).Op())
+		}
+		if last {
+			paint.FillShape(gtx.Ops, th.R.Vein, clip.Rect(image.Rect(0, dimensions.Size.Y-hair, width, dimensions.Size.Y)).Op())
+		} else {
+			paint.FillShape(gtx.Ops, th.R.Line(), clip.Rect(image.Rect(0, dimensions.Size.Y-hair, width, dimensions.Size.Y)).Op())
+		}
+		return dimensions
 	})(gtx)
+}
+
+// folderSongs is a folder's count for its row, "03 songs".
+func folderSongs(n int) string {
+	if n == 1 {
+		return "01 song"
+	}
+	return kit.Pad2(n) + " songs"
 }
 
 func (p *Page) visibleFolders() []string {

@@ -56,6 +56,17 @@ type Scroller struct {
 	spring        anim.Spring
 	springActive  bool
 	springApplied float32
+
+	glide         anim.Tween
+	glideActive   bool
+	glidePending  bool
+	glideApplied  float32
+	glideDistance float32
+	glideTarget   int
+	glideDuration time.Duration
+
+	// viewport is the list's height at the last Layout, for Progress
+	viewport int
 }
 
 func mapScrollDelta(delta, pixelsPerDP float32, x11 bool) float32 {
@@ -157,11 +168,16 @@ func (s *Scroller) setThumb(gtx layout.Context, th *Theme, shown bool) float32 {
 }
 
 func (s *Scroller) stopSpring() {
+	s.stopGlide()
 	if !s.springActive {
 		return
 	}
 	s.spring.Snap(s.springApplied)
 	s.springActive = false
+}
+
+func (s *Scroller) stopGlide() {
+	s.glideActive, s.glidePending = false, false
 }
 
 func (s *Scroller) updateHover(gtx layout.Context) {
@@ -241,6 +257,50 @@ func (s *Scroller) UpdateInput(gtx layout.Context) {
 	s.updateHover(gtx)
 	s.inputApplied = s.probeInput(gtx)
 	s.inputApplied += s.advanceSpring(gtx)
+	s.inputApplied += s.advanceGlide(gtx)
+}
+
+// startGlide measures the way from the current position to the target's
+// start with the rows' real sizes (an average for rows not laid out yet) and
+// starts the glide over it.
+func (s *Scroller) startGlide(gtx layout.Context) {
+	s.glidePending = false
+	target := max(s.glideTarget, 0)
+	if s.itemCount > 0 {
+		target = min(target, s.itemCount-1)
+	}
+	fallback := max(1, s.Position.Length/max(s.itemCount, 1))
+	distance := listPositionDelta(s.Position, layout.Position{First: target}, s.itemSizes, fallback, s.Gap, layout.Vertical)
+	if anim.Reduced() || s.glideDuration <= 0 || distance == 0 || !s.cacheReady {
+		s.anchor(target, 0)
+		return
+	}
+	s.glideTarget = target
+	s.glide = anim.Tween{Duration: s.glideDuration, Ease: anim.EaseOutCubic}
+	s.glide.Set(gtx, 0)
+	s.glide.Set(gtx, float32(distance))
+	s.glideApplied, s.glideDistance = 0, float32(distance)
+	s.glideActive = true
+}
+
+func (s *Scroller) advanceGlide(gtx layout.Context) int {
+	if s.glidePending {
+		s.startGlide(gtx)
+	}
+	if !s.glideActive {
+		return 0
+	}
+	value := s.glide.Value(gtx)
+	delta := value - s.glideApplied
+	s.glideApplied = value
+	s.programmatic = true
+	if value == s.glideDistance {
+		// land exactly, whatever the estimate of rows not yet laid out
+		s.glideActive = false
+		s.anchor(s.glideTarget, 0)
+		return 1
+	}
+	return addListOffset(&s.Position, &s.fraction, delta)
 }
 
 func (s *Scroller) advanceSpring(gtx layout.Context) int {
@@ -261,6 +321,10 @@ func (s *Scroller) advanceSpring(gtx layout.Context) int {
 func (s *Scroller) Layout(gtx layout.Context, th *Theme, count int, el layout.ListElement) layout.Dimensions {
 	s.Axis = layout.Vertical
 	s.UpdateInput(gtx)
+	if s.glidePending {
+		// a GlideTo asked for after this frame's input still starts this frame
+		s.inputApplied += s.advanceGlide(gtx)
+	}
 	s.listConstraints = gtx.Constraints
 	pass := pointer.PassOp{}.Push(gtx.Ops)
 	area := clip.Rect(image.Rectangle{Max: gtx.Constraints.Max}).Push(gtx.Ops)
@@ -279,6 +343,7 @@ func (s *Scroller) Layout(gtx layout.Context, th *Theme, count int, el layout.Li
 		return dimensions
 	})
 	s.cacheReady = true
+	s.viewport = dimensions.Size.Y
 	dragging := s.List.Dragging()
 	movedByList := !sameListPosition(beforeList, s.Position)
 	if !s.programmatic && movedByList && (dragging || s.listGesture) {
@@ -313,13 +378,18 @@ func (s *Scroller) Layout(gtx layout.Context, th *Theme, count int, el layout.Li
 	if x < 0 {
 		x = 0
 	}
-	kit.FillCut(gtx.Ops, image.Rect(x, top, x+width, top+height), min(width/2, height/2), palette.WithAlpha(th.R.Fg3, alpha))
+	kit.Fill(gtx, th.Theme, image.Rect(x, top, x+width, top+height), min(width/2, height/2), palette.WithAlpha(th.R.Fg3, alpha))
 	return dimensions
 }
 
 // AnchorTo places index at offsetPx from the viewport top.
 func (s *Scroller) AnchorTo(index, offsetPx int) {
 	s.stopSpring()
+	s.anchor(index, offsetPx)
+}
+
+// anchor places index at offsetPx without stopping a glide in progress.
+func (s *Scroller) anchor(index, offsetPx int) {
 	s.Position.First = max(index, 0)
 	s.Position.Offset = -offsetPx
 	s.Position.BeforeEnd = true
@@ -331,6 +401,22 @@ func (s *Scroller) AnchorTo(index, offsetPx int) {
 func (s *Scroller) ScrollTo(index int) {
 	s.AnchorTo(index, 0)
 }
+
+// GlideTo moves index to the top of the viewport over duration on OutCubic
+// (the Hub moves a jump over th.Motion.Move), through the list itself: each
+// frame moves the offset by the eased step, so the list lays out every row it
+// passes at its real size and skips none, and the last frame anchors index
+// exactly. Under reduced motion, or with no duration, it anchors at once.
+// Real input stops it where it stands. Ask before the scroller's Layout in a
+// frame (a kit click already asks for the frame that paints it).
+func (s *Scroller) GlideTo(index int, duration time.Duration) {
+	s.stopSpring()
+	s.glideTarget, s.glideDuration, s.glidePending = index, duration, true
+	s.programmatic = true
+}
+
+// Gliding reports whether a GlideTo is under way.
+func (s *Scroller) Gliding() bool { return s.glideActive || s.glidePending }
 
 // SpringBy glides content by deltaPx; positive values move content up.
 func (s *Scroller) SpringBy(deltaPx int) {
@@ -346,6 +432,34 @@ func (s *Scroller) SpringBy(deltaPx int) {
 // SpringTo glides the current first item's pixel offset to px.
 func (s *Scroller) SpringTo(px int) {
 	s.SpringBy(px - s.Position.Offset)
+}
+
+// Progress is how far the list is read, 0 at the top to 1 at the end, for
+// the masthead's ruler marker, measured with the rows' real sizes (an
+// average for rows not laid out yet). It is -1 while the content fits the
+// viewport and there is nothing to scroll. It allocates nothing.
+func (s *Scroller) Progress() float32 {
+	if !s.cacheReady || s.itemCount <= 0 || s.viewport <= 0 {
+		return -1
+	}
+	if s.Position.First == 0 && s.Position.Offset <= 0 && !s.Position.BeforeEnd {
+		return -1
+	}
+	if !s.Position.BeforeEnd {
+		return 1
+	}
+	fallback := max(1, s.Position.Length/max(s.itemCount, 1))
+	total := 0
+	for index := range s.itemCount {
+		total += itemExtent(s.itemSizes, index, fallback, layout.Vertical)
+	}
+	total += s.Gap * max(0, s.itemCount-1)
+	scrollable := total - s.viewport
+	if scrollable <= 0 {
+		return -1
+	}
+	read := listPositionDelta(layout.Position{}, s.Position, s.itemSizes, fallback, s.Gap, layout.Vertical)
+	return min(max(float32(read)/float32(scrollable), 0), 1)
 }
 
 // UserScrolled reports and clears whether real input moved the list.

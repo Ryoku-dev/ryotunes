@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"image"
 
+	"gioui.org/f32"
 	"gioui.org/layout"
 	"gioui.org/op"
 	"gioui.org/op/clip"
@@ -29,7 +30,7 @@ var topProviders = [...]model.Provider{
 
 type providerCell struct {
 	click kit.Click
-	hover look.Hover
+	wash  look.RowWash
 	tip   look.Tip
 }
 
@@ -131,31 +132,38 @@ func (switcher *providerSwitcher) choose(gtx layout.Context, e *env.Env, snapsho
 	})
 }
 
+// providerGlyphCell draws one provider's mark: the provider's own ink while chosen, the
+// Hub's row wash under the pointer, the glyph at .86 while pressed.
 func providerGlyphCell(gtx layout.Context, e *env.Env, cell *providerCell, provider model.Provider, active bool, size image.Point) layout.Dimensions {
 	gtx.Constraints = layout.Exact(size)
 	return cell.click.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-		record := op.Record(gtx.Ops)
-		dimensions, hover := cell.hover.Layout(gtx, e.Th, func(gtx layout.Context) layout.Dimensions {
-			ink := e.Th.R.Fg3
-			if cell.click.Hovered() {
-				ink = e.Th.R.Fg2
-			}
-			if active {
-				ink = e.Th.Src.Ink
-			}
-			return layout.Center.Layout(gtx, look.ProviderGlyph(provider, 20, ink))
-		})
-		content := record.Stop()
-		area := clip.Rect(image.Rectangle{Max: dimensions.Size}).Push(gtx.Ops)
-		if hover > 0 && !active {
-			kit.FillCut(gtx.Ops, image.Rectangle{Max: dimensions.Size}, gtx.Dp(e.Th.Cut.Small), palette.WithAlpha(e.Th.R.Stone3, hover))
+		enabled := gtx.Source.Enabled()
+		hover, _ := cell.wash.Update(gtx, e.Th, enabled && cell.click.Hovered() && !active, enabled && cell.click.Pressed())
+		bounds := image.Rectangle{Max: size}
+		cut := gtx.Dp(e.Th.Cut.Small)
+		cell.wash.Paint(gtx, e.Th, bounds, cut)
+		ink := palette.Mix(e.Th.R.Fg3, e.Th.R.Fg2, hover)
+		if active {
+			ink = e.Th.Src.Ink
 		}
-		content.Add(gtx.Ops)
-		area.Pop()
+		glyphSize := gtx.Dp(20)
+		scale := cell.wash.GlyphScale()
+		at := op.Offset(image.Pt((size.X-glyphSize)/2, (size.Y-glyphSize)/2)).Push(gtx.Ops)
+		glyphGtx := gtx
+		glyphGtx.Constraints = layout.Exact(image.Pt(glyphSize, glyphSize))
+		if scale != 1 {
+			centre := f32.Pt(float32(glyphSize)/2, float32(glyphSize)/2)
+			stack := op.Affine(f32.AffineId().Scale(centre, f32.Pt(scale, scale))).Push(gtx.Ops)
+			look.ProviderGlyph(provider, 20, ink)(glyphGtx)
+			stack.Pop()
+		} else {
+			look.ProviderGlyph(provider, 20, ink)(glyphGtx)
+		}
+		at.Pop()
 		if gtx.Focused(&cell.click.Clickable) {
-			kit.FocusRing(gtx, e.Th.Theme, image.Rectangle{Max: dimensions.Size}, gtx.Dp(e.Th.Cut.Small))
+			kit.FocusRing(gtx, e.Th.Theme, bounds, cut)
 		}
-		return dimensions
+		return layout.Dimensions{Size: size}
 	})
 }
 
@@ -176,19 +184,20 @@ func (switcher *providerSwitcher) layoutExpanded(gtx layout.Context, e *env.Env)
 	size := image.Pt(width, height)
 	gtx.Constraints = layout.Exact(size)
 	area := clip.Rect(image.Rectangle{Max: size}).Push(gtx.Ops)
-	kit.FillCut(gtx.Ops, image.Rectangle{Max: size}, gtx.Dp(6), e.Th.R.Stone1)
+	// one paper: the switcher is drawn by its hairline, the chosen provider by its plate
+	kit.Stroke(gtx, e.Th.Theme, image.Rectangle{Max: size}, gtx.Dp(6), max(1, gtx.Dp(1)), e.Th.R.Vein)
 
 	cellWidth, cellHeight, gap := gtx.Dp(40), gtx.Dp(32), gtx.Dp(4)
 	activeIndex := providerIndex(active)
 	if activeIndex >= 0 {
-		switcher.plate.Duration = e.Th.Motion.Select
-		switcher.plate.Ease = anim.EaseChisel
+		switcher.plate.Duration = e.Th.Motion.Move
+		switcher.plate.Ease = anim.EaseOutCubic
 		switcher.plate.Set(gtx, float32(activeIndex))
 		plateAt := switcher.plate.Value(gtx)
-		plateX := gtx.Dp(4) + int(plateAt*float32(cellWidth+gap))
+		plateX := gtx.Dp(4) + int(plateAt*float32(cellWidth+gap)+.5)
 		plateRect := image.Rect(plateX, gtx.Dp(4), plateX+cellWidth, gtx.Dp(4)+cellHeight)
-		kit.FillCut(gtx.Ops, plateRect, gtx.Dp(6), palette.Mix(e.Th.R.Stone3, e.Th.Src.Fill, .22))
-		kit.StrokeCut(gtx.Ops, plateRect, gtx.Dp(6), max(1, gtx.Dp(1)), palette.WithAlpha(e.Th.Src.Ink, .55))
+		kit.Fill(gtx, e.Th.Theme, plateRect, gtx.Dp(e.Th.Cut.Small), palette.Mix(e.Th.Planes().Side, e.Th.Src.Fill, .22))
+		kit.Stroke(gtx, e.Th.Theme, plateRect, gtx.Dp(e.Th.Cut.Small), max(1, gtx.Dp(1)), palette.WithAlpha(e.Th.Src.Ink, .55))
 	}
 
 	for index, provider := range topProviders {
@@ -234,13 +243,9 @@ func (switcher *providerSwitcher) layoutCompact(gtx layout.Context, e *env.Env, 
 	size := image.Pt(gtx.Dp(40), gtx.Dp(40))
 	dimensions := switcher.compact.tip.Layout(gtx, e.Th, e.Overlays, providerTip(snapshot, active), func(gtx layout.Context) layout.Dimensions {
 		gtx.Constraints = layout.Exact(size)
-		record := op.Record(gtx.Ops)
-		dimensions := providerGlyphCell(gtx, e, &switcher.compact, active, true, size)
-		content := record.Stop()
-		kit.FillCut(gtx.Ops, image.Rectangle{Max: dimensions.Size}, gtx.Dp(6), e.Th.R.Stone1)
-		kit.StrokeCut(gtx.Ops, image.Rectangle{Max: dimensions.Size}, gtx.Dp(6), max(1, gtx.Dp(1)), e.Th.R.Vein)
-		content.Add(gtx.Ops)
-		return dimensions
+		bounds := image.Rectangle{Max: size}
+		kit.Stroke(gtx, e.Th.Theme, bounds, gtx.Dp(6), max(1, gtx.Dp(1)), e.Th.R.Vein)
+		return providerGlyphCell(gtx, e, &switcher.compact, active, true, size)
 	})
 	if switcher.compact.click.Clicked(gtx) && e.Overlays != nil {
 		if e.Overlays.IsOpen(&switcher.menuTag) {

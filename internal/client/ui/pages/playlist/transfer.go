@@ -66,9 +66,9 @@ func (d *exportDialog) Layout(gtx layout.Context, e *env.Env, p *Page) layout.Di
 	d.path.Error = d.err
 	d.path.Mono = true
 	d.cancel.Kind, d.cancel.Label = kit.PlaqueQuiet, "Cancel"
-	d.export.Kind, d.export.Icon, d.export.Label = kit.PlaqueLine, look.Icon.Download, "Export"
+	d.export.Kind, d.export.Icon, d.export.Label = kit.PlaqueGold, look.Icon.Download, "Export"
 	d.export.Busy = d.busy
-	d.dialog.Width = 560
+	d.dialog.Width = 520
 	dims := d.dialog.Layout(gtx, e.Th.Theme, "Export playlist",
 		func(gtx layout.Context) layout.Dimensions { return d.path.Layout(gtx, e.Th.Theme) },
 		func(gtx layout.Context) layout.Dimensions { return d.cancel.Layout(gtx, e.Th.Theme) },

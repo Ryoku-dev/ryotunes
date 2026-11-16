@@ -12,9 +12,12 @@ import (
 	"github.com/ryoku-dev/ryoku/docs/lithic/library/go/kit"
 	"github.com/ryoku-dev/ryotunes/internal/client/ui/env"
 	"github.com/ryoku-dev/ryotunes/internal/client/ui/look"
+	"github.com/ryoku-dev/ryotunes/internal/client/ui/sheet"
 	"github.com/ryoku-dev/ryotunes/internal/client/ui/widgets"
 	"github.com/ryoku-dev/ryotunes/internal/model"
 )
+
+var downloadFilterLabels = []string{"All", "Active", "Saved", "Failed"}
 
 const (
 	downloadFilterAll = iota
@@ -28,7 +31,7 @@ func (p *Page) Layout(gtx layout.Context, e *env.Env) layout.Dimensions {
 	snapshot := e.Store.Snapshot().Downloads
 	p.updateUsedSpace(snapshot.Jobs)
 	counts := downloadFilterCounts(snapshot.Jobs)
-	p.filter.Labels = []string{"All", "Active", "Saved", "Failed"}
+	p.filter.Labels = downloadFilterLabels
 	p.filter.Counts = counts
 	p.filter.Selected = p.filterIndex
 	if selected, ok := p.filter.Changed(); ok {
@@ -40,26 +43,39 @@ func (p *Page) Layout(gtx layout.Context, e *env.Env) layout.Dimensions {
 	inset := look.ContentInset(e.Th.Class)
 	count := 2 + max(1, len(items))
 	return p.scroll.Layout(gtx, e.Th, count, func(gtx layout.Context, index int) layout.Dimensions {
-		if index == 0 {
-			return p.layoutHeader(gtx, e, counts[downloadFilterActive], counts[downloadFilterSaved])
-		}
-		if index == 2 && len(items) == 0 {
-			return p.layoutDownloadSlot(gtx, e, snapshot.Jobs, items, 0)
-		}
-		return layout.Inset{Right: inset, Left: inset}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-			if index == 1 {
-				return p.layoutControls(gtx, e, len(items) == 0)
+		return p.reveal.Group(gtx, e.Th, index, func(gtx layout.Context) layout.Dimensions {
+			if index == 0 {
+				return layout.Inset{Top: e.Th.Sp.S2}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+					return p.layoutHeader(gtx, e, counts)
+				})
 			}
-			rowIndex := index - 2
-			slot := func(gtx layout.Context) layout.Dimensions {
-				return p.layoutDownloadSlot(gtx, e, snapshot.Jobs, items, rowIndex)
+			if index == 2 && len(items) == 0 {
+				return p.layoutDownloadSlot(gtx, e, snapshot.Jobs, items, 0)
 			}
-			if index+1 == count {
-				return layout.Inset{Bottom: inset}.Layout(gtx, slot)
-			}
-			return slot(gtx)
+			return layout.Inset{Right: inset, Left: inset}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+				if index == 1 {
+					return p.layoutControls(gtx, e, len(items) == 0)
+				}
+				rowIndex := index - 2
+				slot := func(gtx layout.Context) layout.Dimensions {
+					return p.layoutDownloadSlot(gtx, e, snapshot.Jobs, items, rowIndex)
+				}
+				if index+1 == count {
+					return layout.Inset{Bottom: inset}.Layout(gtx, slot)
+				}
+				return slot(gtx)
+			})
 		})
 	})
+}
+
+// Masthead names the filter shown on the frame's masthead and says how far the list is
+// read.
+func (p *Page) Masthead() (part, partGloss string, progress float32) {
+	if p.filterIndex > 0 {
+		part = downloadFilterLabels[p.filterIndex]
+	}
+	return part, "", p.scroll.Progress()
 }
 
 func (p *Page) handleActions(gtx layout.Context, e *env.Env, jobs []model.DownloadEntry) {
@@ -74,9 +90,19 @@ func (p *Page) handleActions(gtx layout.Context, e *env.Env, jobs []model.Downlo
 	}
 }
 
-func (p *Page) layoutHeader(gtx layout.Context, e *env.Env, active, saved int) layout.Dimensions {
-	sentence := fmt.Sprintf("%d downloading, %d saved", active, saved)
-	return p.header.Layout(gtx, e, "Downloads", sentence, nil)
+// layoutHeader is the page head: the lead, and the queue as the spec strip, ACTIVE, SAVED
+// and FAILED, the failures lit while there are any.
+func (p *Page) layoutHeader(gtx layout.Context, e *env.Env, counts []int) layout.Dimensions {
+	p.header.Place = sheet.Downloads
+	p.header.Part = ""
+	if p.filterIndex > 0 {
+		p.header.Part = downloadFilterLabels[p.filterIndex]
+	}
+	p.strip.Set(0, "Active", counts[downloadFilterActive], counts[downloadFilterActive] > 0)
+	p.strip.Set(1, "Saved", counts[downloadFilterSaved], false)
+	p.strip.Set(2, "Failed", counts[downloadFilterFailed], counts[downloadFilterFailed] > 0)
+	p.header.Specs = p.strip.Specs(true)
+	return p.header.Layout(gtx, e, "Downloads", "Saved songs play from their files, even offline.", nil)
 }
 
 func (p *Page) layoutControls(gtx layout.Context, e *env.Env, empty bool) layout.Dimensions {
@@ -148,22 +174,40 @@ func (p *Page) layoutDownloadSlot(gtx layout.Context, e *env.Env, jobs []model.D
 	if !wide || index > 0 {
 		return rowWidget(gtx)
 	}
+	rowHeight := 0
 	factsInset := layout.Inset{}
 	if empty {
 		factsInset = layout.Inset{Top: look.ContentInset(e.Th.Class), Right: look.ContentInset(e.Th.Class)}
 	}
-	return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Start}.Layout(gtx,
-		layout.Rigid(rowWidget),
+	dimensions := layout.Flex{Axis: layout.Horizontal, Alignment: layout.Start}.Layout(gtx,
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			rowDimensions := rowWidget(gtx)
+			rowHeight = rowDimensions.Size.Y
+			return rowDimensions
+		}),
 		layout.Rigid(layout.Spacer{Width: unit.Dp(34)}.Layout),
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			return factsInset.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 				gtx.Constraints.Min.X, gtx.Constraints.Max.X = factsWidth, factsWidth
-				return kit.Section(e.Th.Theme, "Storage", func(gtx layout.Context) layout.Dimensions {
-					return kit.SlabContent(gtx, e.Th.Theme, kit.Facts(e.Th.Theme, downloadFacts(jobs, p.usedBytes)))
-				})(gtx)
+				return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+						return widgets.RuledHead(gtx, e, "Storage", "", nil)
+					}),
+					layout.Rigid(layout.Spacer{Height: e.Th.Sp.S3}.Layout),
+					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+						return kit.SlabContent(gtx, e.Th.Theme, kit.Facts(e.Th.Theme, downloadFacts(jobs, p.usedBytes)))
+					}),
+				)
 			})
 		}),
 	)
+	if empty {
+		return dimensions
+	}
+	// the Storage facts hang beside the rows that follow (their column is kept free), so
+	// the first row keeps its own height instead of the facts'
+	dimensions.Size.Y = rowHeight
+	return dimensions
 }
 
 func (p *Page) layoutItem(gtx layout.Context, e *env.Env, item downloadItem, items []downloadItem, jobs []model.DownloadEntry) layout.Dimensions {

@@ -19,8 +19,12 @@ import (
 	"github.com/ryoku-dev/ryoku/docs/lithic/library/go/anim"
 )
 
-// Hover reports pointer presence as a zero-to-one transition without taking input.
+// Hover reports pointer presence as a zero-to-one transition without taking
+// input. By default it moves at the library's hover (th.Motion.HoverIn,
+// HoverOut, chisel), as plaques do; Hub moves it at the Hub's row wash:
+// 120 ms in, 240 out, OutCubic.
 type Hover struct {
+	Hub     bool
 	tag     struct{}
 	hovered bool
 	ready   bool
@@ -54,23 +58,31 @@ func (h *Hover) Layout(gtx layout.Context, th *Theme, w layout.Widget) (layout.D
 	pass.Pop()
 
 	target := float32(0)
-	duration := th.Motion.HoverOut
+	in, out, ease := th.Motion.HoverIn, th.Motion.HoverOut, anim.EaseChisel
+	if h.Hub {
+		in, out, ease = th.Motion.Quick, th.Motion.Move, anim.EaseOutCubic
+	}
+	duration := out
 	if h.hovered {
 		target = 1
-		duration = th.Motion.HoverIn
+		duration = in
 	}
-	h.tween.Duration = duration
-	h.tween.Ease = anim.EaseChisel
+	h.tween.Ease = ease
 	if !h.ready {
 		h.tween.Set(gtx, 0)
 		h.ready = true
 	}
+	// set before the duration changes, so a reversal starts where the run
+	// in progress stands
 	h.tween.Set(gtx, target)
+	h.tween.Duration = duration
 	return dimensions, h.tween.Value(gtx)
 }
 
-// Swap crossfades keyed content with a short vertical exchange.
+// Swap crossfades keyed content with a short vertical exchange. Ease is its
+// curve; nil means the chisel curve, anim.EaseOutCubic the Hub's.
 type Swap struct {
+	Ease     func(float32) float32
 	current  string
 	previous string
 	ready    bool
@@ -106,7 +118,11 @@ func (s *Swap) Layout(gtx layout.Context, _ *Theme, key string, rise unit.Dp, du
 	if key != s.current {
 		s.previous = s.current
 		s.current = key
-		s.tween = anim.Tween{Duration: duration, Ease: anim.EaseChisel}
+		ease := s.Ease
+		if ease == nil {
+			ease = anim.EaseChisel
+		}
+		s.tween = anim.Tween{Duration: duration, Ease: ease}
 		s.tween.Set(gtx, 0)
 		s.tween.Set(gtx, 1)
 		s.moving = duration > 0 && !anim.Reduced()

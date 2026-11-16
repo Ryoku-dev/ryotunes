@@ -23,20 +23,36 @@ func toastError(e *env.Env, err error, fallback string) {
 	}
 }
 
-func setSetting(e *env.Env, key model.SettingKey, value, success string, done func()) {
+// setSettingThen writes one daemon setting; finished hears whether it was
+// saved (the store then holds it).
+func setSettingThen(e *env.Env, key model.SettingKey, value, success string, finished func(ok bool)) {
 	act.Call[protocol.Null](e, protocol.MethodSetSetting, protocol.SetSettingParams{Key: string(key), Value: value}, func(_ protocol.Null, err error) {
 		if err != nil {
 			toastError(e, err, "Could not save setting")
+			if finished != nil {
+				finished(false)
+			}
 			return
 		}
 		e.Store.SetSetting(string(key), value)
 		if success != "" && e.Toast != nil {
 			e.Toast(success, env.ToastSuccess)
 		}
-		if done != nil {
-			done()
+		if finished != nil {
+			finished(true)
 		}
 	})
+}
+
+// confirm asks before an act that takes something away, through the
+// shell's dialog, whose act is the one danger plaque (the Hub keeps danger
+// for the confirmation); with no dialog to ask in, it acts.
+func confirm(e *env.Env, title, body, action string, onConfirm func()) {
+	if e.Confirm == nil {
+		onConfirm()
+		return
+	}
+	e.Confirm(title, body, action, "", onConfirm)
 }
 
 func saveClientPreferences(e *env.Env, preferences state.ClientPreferences) {

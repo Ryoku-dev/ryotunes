@@ -14,10 +14,14 @@ import (
 	"github.com/ryoku-dev/ryoku/docs/lithic/library/go/theme"
 	"github.com/ryoku-dev/ryotunes/internal/client/ui/env"
 	"github.com/ryoku-dev/ryotunes/internal/client/ui/look"
+	"github.com/ryoku-dev/ryotunes/internal/client/ui/sheet"
 	"github.com/ryoku-dev/ryotunes/internal/model"
 )
 
 // HeroContent describes one album, artist, playlist, or top-result header.
+// Kind is the kind line ("Album"), set in spaced capitals. Place and
+// PartGloss, both optional, set the page's kanji vertically beside the art
+// while glosses are on: PartGloss large over Place's gloss small.
 type HeroContent struct {
 	Art              string
 	Octagon, Collage bool
@@ -25,13 +29,19 @@ type HeroContent struct {
 	Meta             []kit.Span
 	MetaAction       func()
 	Acts             layout.Widget
+	Place            sheet.Place
+	PartGloss        string
 }
+
+// heroKindTracking is the kind line's tracking (the Hub's group caps).
+const heroKindTracking = 1.2
 
 // Hero is a retained cover-tinted page header.
 type Hero struct {
 	art        look.ArtView
 	meta       kit.Click
 	visualizer look.Visualizer
+	tategaki   sheet.Tategaki
 	facts      []heroFact
 	factCalls  []op.CallOp
 
@@ -244,27 +254,29 @@ func (h *Hero) advanceTint(gtx layout.Context) look.Accent {
 }
 
 func (h *Hero) field(gtx layout.Context, e *env.Env, tint look.Accent, artURL string, cuts [4]int, body layout.Widget) layout.Dimensions {
-	return look.FieldBackdrop(gtx, e.Th, tint, cuts, &h.backdrop, e.Art, artURL, func(gtx layout.Context) layout.Dimensions {
-		record := op.Record(gtx.Ops)
-		dimensions := body(gtx)
-		content := record.Stop()
-		_, laneHeight := headerLaneMetrics(e.Th.Class)
-		height := min(gtx.Dp(laneHeight), dimensions.Size.Y)
-		if dimensions.Size.X > 0 && height > 0 {
-			stack := op.Offset(image.Pt(0, dimensions.Size.Y-height)).Push(gtx.Ops)
-			laneGTX := gtx
-			laneGTX.Constraints = layout.Exact(image.Pt(dimensions.Size.X, height))
-			alpha := float32(.55)
-			if e.Th.R.Dark {
-				alpha = .70
+	return InsidePaneStroke(gtx, e.Th, func(gtx layout.Context) layout.Dimensions {
+		return look.FieldBackdrop(gtx, e.Th, tint, cuts, &h.backdrop, e.Art, artURL, func(gtx layout.Context) layout.Dimensions {
+			record := op.Record(gtx.Ops)
+			dimensions := body(gtx)
+			content := record.Stop()
+			_, laneHeight := headerLaneMetrics(e.Th.Class)
+			height := min(gtx.Dp(laneHeight), dimensions.Size.Y)
+			if dimensions.Size.X > 0 && height > 0 {
+				stack := op.Offset(image.Pt(0, dimensions.Size.Y-height)).Push(gtx.Ops)
+				laneGTX := gtx
+				laneGTX.Constraints = layout.Exact(image.Pt(dimensions.Size.X, height))
+				alpha := float32(.55)
+				if e.Th.R.Dark {
+					alpha = .70
+				}
+				Visualizer(laneGTX, e, &h.visualizer, look.VisualizerStyle{
+					Ink: palette.WithAlpha(tint.Ink, alpha), Bar: 6, Gap: 3, Floor: 2, HeaderLane: true,
+				})
+				stack.Pop()
 			}
-			Visualizer(laneGTX, e, &h.visualizer, look.VisualizerStyle{
-				Ink: palette.WithAlpha(tint.Ink, alpha), Bar: 6, Gap: 3, Floor: 2, HeaderLane: true,
-			})
-			stack.Pop()
-		}
-		content.Add(gtx.Ops)
-		return dimensions
+			content.Add(gtx.Ops)
+			return dimensions
+		})
 	})
 }
 
@@ -278,7 +290,7 @@ func (h *Hero) copy(gtx layout.Context, e *env.Env, content HeroContent) layout.
 	if strings.TrimSpace(content.Kind) != "" {
 		children = append(children,
 			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-				return kit.Label{Style: e.Th.T.Group, Color: e.Th.R.Fg2, MaxLines: 1}.Layout(gtx, e.Th.Theme, content.Kind)
+				return kit.LayoutSpacedCaps(gtx, e.Th.Theme, e.Th.T.Group, e.Th.R.Fg2, heroKindTracking, content.Kind)
 			}),
 			layout.Rigid(layout.Spacer{Height: unit.Dp(4)}.Layout),
 		)
@@ -319,9 +331,25 @@ func (h *Hero) Layout(gtx layout.Context, e *env.Env, content HeroContent) layou
 	return h.field(gtx, e, tint, artURL, [4]int{cut, cut, 0, 0}, func(gtx layout.Context) layout.Dimensions {
 		return layout.Inset{Top: inset, Right: inset, Bottom: bottom, Left: inset}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 			shape := look.Shape{Cut: 7, Octagon: content.Octagon}
+			gloss, category := content.PartGloss, content.Place.Gloss
+			if gloss == "" {
+				gloss = category
+			}
+			glossed := e.Th.Desktop.Gloss && gloss != ""
 			return layout.Flex{Axis: layout.Horizontal, Alignment: layout.End}.Layout(gtx,
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 					return h.art.Layout(gtx, e.Th, e.Art, artURL, image.Pt(artPixels, artPixels), shape, e.Th.Motion.Field)
+				}),
+				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+					if !glossed {
+						return layout.Dimensions{}
+					}
+					// The tategaki stands beside the art, top-aligned with it,
+					// 12 from it as the Hub's stands beside its preview.
+					offset := op.Offset(image.Pt(gtx.Dp(12), 0)).Push(gtx.Ops)
+					h.tategaki.Layout(gtx, e.Th, gloss, category)
+					offset.Pop()
+					return layout.Dimensions{Size: image.Pt(gtx.Dp(sheet.TategakiRoom), artPixels)}
 				}),
 				layout.Rigid(layout.Spacer{Width: unit.Dp(21)}.Layout),
 				layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
@@ -414,18 +442,116 @@ func (actions *HeroActions) Layout(gtx layout.Context, widgets []layout.Widget) 
 	return layout.Dimensions{Size: gtx.Constraints.Constrain(image.Pt(width, maxHeight))}
 }
 
-// Header is a retained source-field page title with optional proof and actions.
-// Below lays out under the title row inside the field; NoLane drops the
-// visualizer lane along the field's bottom edge.
+// Page head geometry (PageHeader.qml), in dp.
+const (
+	headTitleSize     = 32
+	headTitleLine     = 40
+	headLeadMax       = 720
+	headLeadMargin    = 44
+	headLeadAbove     = 4
+	headStateAbove    = 6
+	headActionsGap    = 12
+	headSideGap       = 28
+	headPreviewWidth  = 264
+	headPreviewHeight = 128
+	headPreviewTop    = 44
+	headPreviewMin    = 660
+	headGlossTop      = 4
+)
+
+// Header is a retained page head over the source field, as the Hub's
+// PageHeader: the title (sentence 32/40, or the greeting's 34/40 when
+// Sentence), the actions on the title's line, the lead (Layout's sentence,
+// body fg2 up to 720), a state line (detail fg), the spec strip 16 below the
+// words, and at the right, while glosses are on, the page's kanji set
+// vertically (sheet.Tategaki) beside an optional preview. The masthead and
+// colophon belong to the frame: a page hands Part and PartGloss to it.
+//
+// Below lays out under the words inside the field; NoLane drops the
+// visualizer lane along the field's bottom edge. Every new field is optional:
+// a zero Header draws the title, lead and actions as before.
 type Header struct {
-	Sentence   bool
-	NoLane     bool
-	Below      layout.Widget
+	Sentence bool
+	NoLane   bool
+	Below    layout.Widget
+
+	// Place is the page's place on the sheet; its gloss heads the tategaki.
+	// The zero Place shows no tategaki.
+	Place sheet.Place
+	// Part is the part of the place shown ("Songs" in the Library), sentence
+	// case, and PartGloss its kanji ("曲"); with PartGloss set the tategaki
+	// sets the part's kanji large and the place's small beneath. A page's
+	// Masthead method returns them to the frame.
+	Part, PartGloss string
+	// State is the state line under the lead: what the page says about the
+	// library now, in detail fg.
+	State string
+	// Specs is the page's spec strip ("SONGS 1204"), 16 under the words; a
+	// value that changes rolls to its new figure.
+	Specs []sheet.Spec
+	// Preview is a live illustration at the head's right (264x128, 44 down),
+	// shown when the head is at least 660 wide.
+	Preview layout.Widget
+
 	visualizer look.Visualizer
-	copy       [3]layout.FlexChild
-	children   [3]layout.FlexChild
+	tategaki   sheet.Tategaki
+	rolls      []look.CountRoll
 }
 
+// Spec strip geometry (PageHeader.qml:115-139, as sheet.SpecStrip), in dp.
+const (
+	headSpecGap      = 18
+	headSpecLabelGap = 6
+	headSpecTracking = 1.2
+)
+
+// specStrip lays the page's figures out as sheet.SpecStrip does, each label
+// in small mono spaced capitals fg3 and its value in small mono fg (sel when
+// lit), but each value rolls when it changes (look.CountRoll), as the Hub's
+// counts do.
+func (h *Header) specStrip(gtx layout.Context, th *look.Theme) layout.Dimensions {
+	for len(h.rolls) < len(h.Specs) {
+		h.rolls = append(h.rolls, look.CountRoll{})
+	}
+	gtx.Constraints.Min = image.Point{}
+	x, height := 0, 0
+	for index, spec := range h.Specs {
+		if index > 0 {
+			x += gtx.Dp(headSpecGap)
+		}
+		offset := op.Offset(image.Pt(x, 0)).Push(gtx.Ops)
+		label := kit.LayoutSpacedCaps(gtx, th.Theme, th.T.MonoSm, th.R.Fg3, headSpecTracking, spec.Label)
+		offset.Pop()
+		x += label.Size.X + gtx.Dp(headSpecLabelGap)
+		ink := th.R.Fg
+		if spec.Lit {
+			ink = th.R.Sel
+		}
+		offset = op.Offset(image.Pt(x, 0)).Push(gtx.Ops)
+		value := h.rolls[index].Layout(gtx, th, th.T.MonoSm, ink, spec.Value)
+		offset.Pop()
+		x += value.Size.X
+		height = max(height, label.Size.Y, value.Size.Y)
+	}
+	return layout.Dimensions{Size: image.Pt(x, height)}
+}
+
+// Gloss is the tategaki's page kanji and its category's: the part's gloss
+// over the place's, or the place's alone.
+func (h *Header) Gloss() (page, category string) {
+	if h.PartGloss != "" {
+		return h.PartGloss, h.Place.Gloss
+	}
+	return h.Place.Gloss, h.Place.Gloss
+}
+
+// Masthead returns the part the frame's masthead names, with its gloss.
+func (h *Header) Masthead() (part, partGloss string) {
+	return h.Part, h.PartGloss
+}
+
+// Layout draws the head. sentence is the lead and trailing the page's
+// actions, which stand at the end of the title's line.
 func (h *Header) Layout(gtx layout.Context, e *env.Env, title, sentence string, trailing layout.Widget) layout.Dimensions {
 	if e == nil || e.Th == nil {
 		return layout.Dimensions{}
@@ -439,45 +565,131 @@ func (h *Header) Layout(gtx layout.Context, e *env.Env, title, sentence string, 
 	}
 	return headerField(gtx, e, lane, [4]int{cut, cut, 0, 0}, func(gtx layout.Context) layout.Dimensions {
 		return layout.Inset{Top: inset, Right: inset, Bottom: bottom, Left: inset}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-			if h.Below == nil {
-				return h.titleRow(gtx, e, title, sentence, trailing)
-			}
-			return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
-				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					return h.titleRow(gtx, e, title, sentence, trailing)
-				}),
-				layout.Rigid(h.Below),
-			)
+			return h.head(gtx, e, title, sentence, trailing)
 		})
 	})
 }
 
-func (h *Header) titleRow(gtx layout.Context, e *env.Env, title, sentence string, trailing layout.Widget) layout.Dimensions {
-	style := e.Th.T.Section
-	if h.Sentence {
-		style = e.Th.T.Sentence
+// headTitleStyle is the page title's type: the Hub's sentence at 32/40, or
+// the greeting's own 34/40.
+func headTitleStyle(th *look.Theme, greeting bool) theme.TextStyle {
+	style := th.T.Sentence
+	if !greeting {
+		style.Size, style.Line = headTitleSize, headTitleLine
 	}
-	copy := h.copy[:1]
-	copy[0] = layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-		return kit.Label{Style: style, Color: e.Th.R.Fg, MaxLines: 2}.Layout(gtx, e.Th.Theme, title)
-	})
-	if strings.TrimSpace(sentence) != "" {
-		copy = append(copy,
-			layout.Rigid(layout.Spacer{Height: unit.Dp(4)}.Layout),
-			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-				return kit.Label{Style: e.Th.T.Proof, Color: e.Th.R.Fg2, MaxLines: 2}.Layout(gtx, e.Th.Theme, sentence)
-			}),
-		)
+	return style
+}
+
+func (h *Header) head(gtx layout.Context, e *env.Env, title, sentence string, trailing layout.Widget) layout.Dimensions {
+	gtx.Constraints.Min.Y = 0
+	width := gtx.Constraints.Max.X
+	previewed := h.Preview != nil && gtx.Metric.PxToDp(width) >= headPreviewMin
+	gloss, category := h.Gloss()
+	glossed := e.Th.Desktop.Gloss && gloss != ""
+	side := 0
+	if previewed {
+		side += gtx.Dp(headPreviewWidth)
 	}
-	children := h.children[:1]
-	children[0] = layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-		return layout.Flex{Axis: layout.Vertical, Alignment: layout.Start}.Layout(gtx, copy...)
-	})
+	if glossed {
+		side += gtx.Dp(sheet.TategakiRoom)
+	}
+	wordsWidth := width
+	if side > 0 {
+		wordsWidth = max(0, width-side-gtx.Dp(headSideGap))
+	}
+	words := gtx
+	words.Constraints = layout.Constraints{Max: image.Pt(wordsWidth, gtx.Constraints.Max.Y)}
+	height := h.words(words, e, title, sentence, trailing, side > 0)
+	if previewed {
+		slot := gtx
+		size := image.Pt(gtx.Dp(headPreviewWidth), gtx.Dp(headPreviewHeight))
+		slot.Constraints = layout.Exact(size)
+		top := gtx.Dp(headPreviewTop)
+		offset := op.Offset(image.Pt(width-size.X, top)).Push(gtx.Ops)
+		h.Preview(slot)
+		offset.Pop()
+		height = max(height, top+size.Y)
+	}
+	if glossed {
+		top := gtx.Dp(headGlossTop)
+		offset := op.Offset(image.Pt(width-side+gtx.Dp(2), top)).Push(gtx.Ops)
+		column := h.tategaki.Layout(gtx, e.Th, gloss, category)
+		offset.Pop()
+		height = max(height, top+column.Size.Y)
+	}
+	if h.Below != nil {
+		below := gtx
+		below.Constraints = layout.Constraints{Max: image.Pt(width, max(0, gtx.Constraints.Max.Y-height))}
+		offset := op.Offset(image.Pt(0, height)).Push(gtx.Ops)
+		dimensions := h.Below(below)
+		offset.Pop()
+		height += dimensions.Size.Y
+	}
+	return layout.Dimensions{Size: image.Pt(width, height)}
+}
+
+// words lays out the title line, lead, state and spec strip down the words
+// column and returns their height.
+func (h *Header) words(gtx layout.Context, e *env.Env, title, sentence string, trailing layout.Widget, sided bool) int {
+	th := e.Th
+	width := gtx.Constraints.Max.X
+	actionsWidth, actionsHeight := 0, 0
+	var actions op.CallOp
 	if trailing != nil {
-		children = append(children,
-			layout.Rigid(layout.Spacer{Width: unit.Dp(21)}.Layout),
-			layout.Rigid(trailing),
-		)
+		record := op.Record(gtx.Ops)
+		child := gtx
+		child.Constraints.Min = image.Point{}
+		dimensions := trailing(child)
+		actions = record.Stop()
+		actionsWidth, actionsHeight = dimensions.Size.X, dimensions.Size.Y
 	}
-	return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx, children...)
+	titleGTX := gtx
+	titleWidth := width
+	if actionsWidth > 0 {
+		titleWidth = max(0, width-actionsWidth-gtx.Dp(headActionsGap))
+	}
+	titleGTX.Constraints = layout.Constraints{Max: image.Pt(titleWidth, gtx.Constraints.Max.Y)}
+	record := op.Record(gtx.Ops)
+	titleDims := kit.Label{Style: headTitleStyle(th, h.Sentence), Color: th.R.Fg, MaxLines: 2}.Layout(titleGTX, th.Theme, title)
+	titleCall := record.Stop()
+	line := max(titleDims.Size.Y, actionsHeight)
+	offset := op.Offset(image.Pt(0, (line-titleDims.Size.Y)/2)).Push(gtx.Ops)
+	titleCall.Add(gtx.Ops)
+	offset.Pop()
+	if actionsWidth > 0 {
+		offset := op.Offset(image.Pt(width-actionsWidth, (line-actionsHeight)/2)).Push(gtx.Ops)
+		actions.Add(gtx.Ops)
+		offset.Pop()
+	}
+	y := line
+	proseWidth := width
+	if !sided {
+		proseWidth = min(max(0, width-gtx.Dp(headLeadMargin)), gtx.Dp(headLeadMax))
+	}
+	prose := gtx
+	prose.Constraints = layout.Constraints{Max: image.Pt(proseWidth, gtx.Constraints.Max.Y)}
+	if strings.TrimSpace(sentence) != "" {
+		y += gtx.Dp(headLeadAbove)
+		offset := op.Offset(image.Pt(0, y)).Push(gtx.Ops)
+		dimensions := kit.Label{Style: th.T.Body, Color: th.R.Fg2, MaxLines: 3}.Layout(prose, th.Theme, sentence)
+		offset.Pop()
+		y += dimensions.Size.Y
+	}
+	if strings.TrimSpace(h.State) != "" {
+		y += gtx.Dp(headStateAbove)
+		offset := op.Offset(image.Pt(0, y)).Push(gtx.Ops)
+		dimensions := kit.Label{Style: th.T.Detail, Color: th.R.Fg, MaxLines: 2}.Layout(prose, th.Theme, h.State)
+		offset.Pop()
+		y += dimensions.Size.Y
+	}
+	if len(h.Specs) > 0 {
+		y += gtx.Dp(sheet.SpecStripAbove)
+		strip := gtx
+		strip.Constraints = layout.Constraints{Max: image.Pt(width, gtx.Constraints.Max.Y)}
+		offset := op.Offset(image.Pt(0, y)).Push(gtx.Ops)
+		dimensions := h.specStrip(strip, th)
+		offset.Pop()
+		y += dimensions.Size.Y
+	}
+	return y
 }

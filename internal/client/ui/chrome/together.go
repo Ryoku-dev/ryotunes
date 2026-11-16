@@ -125,7 +125,7 @@ func (together *Together) layoutCreate(gtx layout.Context, e *env.Env, lt model.
 			layout.Rigid(kit.Text(e.Th.Theme, e.Th.T.Section, e.Th.R.Fg, "Create a room")),
 			layout.Rigid(layout.Spacer{Height: 8}.Layout),
 			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-				return (kit.Label{Style: e.Th.T.Caption, Color: e.Th.R.Fg2, MaxLines: 3}).Layout(gtx, e.Th.Theme, "Host playback and approve who joins.")
+				return (kit.Label{Style: e.Th.T.Body, Color: e.Th.R.Fg2, MaxLines: 3}).Layout(gtx, e.Th.Theme, "Host playback and approve who joins.")
 			}),
 			layout.Rigid(layout.Spacer{Height: 13}.Layout),
 			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
@@ -225,7 +225,7 @@ func (together *Together) roomHeader(e *env.Env, lt model.LTState) layout.Widget
 			return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
 				layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
 					return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
-						layout.Rigid(kit.Text(e.Th.Theme, e.Th.T.Caption, e.Th.R.Fg3, "Room code")),
+						layout.Rigid(kit.SpacedCaps(e.Th.Theme, e.Th.T.MonoSm, e.Th.R.Fg3, factTracking, "Room code")),
 						layout.Rigid(layout.Spacer{Height: 4}.Layout),
 						layout.Rigid(kit.Text(e.Th.Theme, e.Th.T.Mono, e.Th.R.Fg, code)),
 					)
@@ -246,14 +246,16 @@ func (together *Together) roomHeader(e *env.Env, lt model.LTState) layout.Widget
 	}
 }
 
+// togetherSection is a ruled group head with its count, as the queue's.
 func togetherSection(e *env.Env, title string, count int) layout.Widget {
-	return kit.GroupHeader(e.Th.Theme, title, count)
+	return func(gtx layout.Context) layout.Dimensions {
+		return ruledHead(gtx, e.Th, title, "", count, nil)
+	}
 }
 
+// togetherSlab lays body out on the Hub's hairline slab, 13 in.
 func togetherSlab(gtx layout.Context, e *env.Env, body layout.Widget) layout.Dimensions {
-	return kit.Slab(gtx, e.Th.R.Stone2, e.Th.Cut.Mid, func(gtx layout.Context) layout.Dimensions {
-		return layout.UniformInset(13).Layout(gtx, body)
-	})
+	return hairlineSlab(gtx, e.Th, 13, body)
 }
 
 func (together *Together) memberRow(e *env.Env, lt model.LTState, user model.LTUser) layout.Widget {
@@ -349,7 +351,7 @@ func togetherDecision(gtx layout.Context, e *env.Env, title, detail string, acti
 				return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
 					layout.Rigid(kit.Text(e.Th.Theme, e.Th.T.Row, e.Th.R.Fg, title)),
 					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-						return (kit.Label{Style: e.Th.T.Caption, Color: e.Th.R.Fg3, MaxLines: 2}).Layout(gtx, e.Th.Theme, detail)
+						return (kit.Label{Style: e.Th.T.Body, Color: e.Th.R.Fg3, MaxLines: 2}).Layout(gtx, e.Th.Theme, detail)
 					}),
 				)
 			}),
@@ -384,7 +386,7 @@ func (together *Together) layoutGuest(gtx layout.Context, e *env.Env, snapshot s
 		case 0:
 			return togetherSlab(gtx, e, func(gtx layout.Context) layout.Dimensions {
 				return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
-					layout.Rigid(kit.Text(e.Th.Theme, e.Th.T.Caption, e.Th.R.Fg3, "Host")),
+					layout.Rigid(kit.SpacedCaps(e.Th.Theme, e.Th.T.MonoSm, e.Th.R.Fg3, factTracking, "Host")),
 					layout.Rigid(layout.Spacer{Height: 4}.Layout),
 					layout.Rigid(kit.Text(e.Th.Theme, e.Th.T.Section, e.Th.R.Fg, host)),
 				)

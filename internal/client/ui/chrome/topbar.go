@@ -7,25 +7,25 @@ import (
 	"gioui.org/layout"
 	"gioui.org/op"
 	"gioui.org/op/clip"
-	"gioui.org/op/paint"
-	"gioui.org/text"
 
 	"github.com/ryoku-dev/ryoku/docs/lithic/library/go/kit"
 	"github.com/ryoku-dev/ryotunes/internal/client/ui/env"
 	"github.com/ryoku-dev/ryotunes/internal/client/ui/look"
 )
 
-// TopBar owns the persistent title, navigation, search, provider, and window controls.
+// TopBar is the strip over the page pane on the window's paper: the sidebar toggle, back
+// and forward, the one search field, the Discord toggle, the provider switcher with its
+// brand colours, and the window controls (the close glyph turns as the Hub's does). In the
+// compact class it also carries the Ryoku mark, which the sidebar's head carries otherwise.
 type TopBar struct {
-	move       kit.Click
-	sidebar    look.SidebarPlaque
-	sidebarTip look.Tip
-	back       kit.IconPlaque
-	forward    kit.IconPlaque
-	searchOpen kit.IconPlaque
-	maximize   kit.IconPlaque
-	close      kit.IconPlaque
-
+	move          kit.Click
+	sidebar       look.SidebarPlaque
+	sidebarTip    look.Tip
+	back          kit.IconPlaque
+	forward       kit.IconPlaque
+	searchOpen    kit.IconPlaque
+	maximize      look.WindowControl
+	close         look.WindowControl
 	search        topSearch
 	providers     providerSwitcher
 	discord       discordToggle
@@ -134,39 +134,15 @@ func (top *TopBar) handle(gtx layout.Context, e *env.Env, frame Frame) {
 	}
 }
 
+// layoutBrand draws the Ryoku mark in the compact class; wider, the sidebar's head carries
+// it.
 func (top *TopBar) layoutBrand(gtx layout.Context, e *env.Env, frame Frame, height int) {
-	markSize := gtx.Dp(24)
-	switch frame.Class {
-	case look.Expanded:
-		progress := min(max(frame.SidebarProgress, 0), 1)
-		paneWidth := max(0, frame.Sidebar-gtx.Dp(8))
-		railX := gtx.Dp(8) + max(0, (paneWidth-markSize)/2)
-		expandedX := gtx.Dp(21)
-		x := expandedX + int(float32(railX-expandedX)*progress+.5)
-		topBarAt(gtx, image.Rect(x, gtx.Dp(16), x+markSize, gtx.Dp(16)+markSize), look.RyokuMark(24, e.Th.R.Fg))
-		titleX := x + markSize + gtx.Dp(8)
-		right := frame.Sidebar
-		alpha := max(0, 1-2*progress)
-		if alpha > 0 && right > titleX {
-			bounds := image.Rect(titleX, gtx.Dp(16), right, gtx.Dp(40))
-			crop := clip.Rect(bounds).Push(gtx.Ops)
-			opacity := paint.PushOpacity(gtx.Ops, alpha)
-			topBarAt(gtx, bounds, func(gtx layout.Context) layout.Dimensions {
-				return kit.Label{Style: e.Th.T.Title, Color: e.Th.R.Fg, MaxLines: 1, Align: text.Start}.Layout(gtx, e.Th.Theme, "Ryotunes")
-			})
-			opacity.Pop()
-			crop.Pop()
-		}
-	case look.Medium:
-		column := frame.Sidebar
-		if column <= 0 {
-			column = gtx.Dp(80)
-		}
-		x := gtx.Dp(8) + max(0, (column-gtx.Dp(8)-markSize)/2)
-		topBarAt(gtx, image.Rect(x, gtx.Dp(16), x+markSize, gtx.Dp(16)+markSize), look.RyokuMark(24, e.Th.R.Fg))
-	default:
-		topBarAt(gtx, image.Rect(gtx.Dp(13), gtx.Dp(16), gtx.Dp(13)+markSize, gtx.Dp(16)+markSize), look.RyokuMark(24, e.Th.R.Fg))
+	if frame.Class != look.Compact {
+		return
 	}
+	markSize := gtx.Dp(24)
+	y := (height - markSize) / 2
+	topBarAt(gtx, image.Rect(gtx.Dp(13), y, gtx.Dp(13)+markSize, y+markSize), look.RyokuMark(24, e.Th.R.Fg))
 }
 
 func (top *TopBar) layoutNavigation(gtx layout.Context, e *env.Env, frame Frame, start int) int {
@@ -227,13 +203,13 @@ func (top *TopBar) layoutWindowControls(gtx layout.Context, e *env.Env, frame Fr
 	if frame.Maximized {
 		maximizeIcon, maximizeDescription = look.Icon.Restore, "Restore"
 	}
-	top.maximize.Kind, top.maximize.Icon, top.maximize.Description, top.maximize.Small = kit.PlaqueQuiet, maximizeIcon, maximizeDescription, true
-	top.close.Kind, top.close.Icon, top.close.Description, top.close.Small = kit.PlaqueQuiet, look.Icon.Close, "Close", true
-	buttons := []*kit.IconPlaque{&top.maximize, &top.close}
+	top.maximize.Icon, top.maximize.Description, top.maximize.Size = maximizeIcon, maximizeDescription, 32
+	top.close.Icon, top.close.Description, top.close.Size, top.close.Close = look.Icon.Close, "Close", 32, true
+	buttons := []*look.WindowControl{&top.maximize, &top.close}
 	for index, button := range buttons {
 		x := start + index*(size+gap)
 		topBarAt(gtx, image.Rect(x, y, x+size, y+size), func(gtx layout.Context) layout.Dimensions {
-			return button.Layout(gtx, e.Th.Theme)
+			return button.Layout(gtx, e.Th)
 		})
 	}
 }

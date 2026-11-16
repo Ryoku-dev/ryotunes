@@ -1,8 +1,8 @@
-// Package chrome implements the persistent playback surfaces shared by Ryotunes windows.
 package chrome
 
 import (
 	"image"
+	"image/color"
 	"math"
 	"strings"
 	"time"
@@ -89,6 +89,9 @@ type Lyrics struct {
 	clockMS     int64
 	clockSpeed  float64
 	clockReady  bool
+	// sourceLine is "Lyrics from <source>", built when the source changes
+	sourceOf   string
+	sourceLine string
 }
 
 // Refresh reloads the current document and rejects stale replies.
@@ -371,15 +374,20 @@ func (lyrics *Lyrics) layoutDocument(gtx layout.Context, e *env.Env, size Lyrics
 	if source == "" {
 		return lyrics.layoutLines(gtx, e, size)
 	}
+	if source != lyrics.sourceOf {
+		lyrics.sourceOf, lyrics.sourceLine = source, "Lyrics from "+source
+	}
 	return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
 		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
 			return lyrics.layoutLines(gtx, e, size)
 		}),
 		layout.Rigid(layout.Spacer{Height: 13}.Layout),
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			// the source, as the Hub sets a sheet's small print: the
+			// smallest mono in spaced capitals, fg3
 			height := gtx.Dp(18)
 			gtx.Constraints.Min.Y, gtx.Constraints.Max.Y = height, height
-			return layout.Center.Layout(gtx, kit.Text(e.Th.Theme, e.Th.T.Caption, e.Th.R.Fg3, "Lyrics from "+source))
+			return layout.Center.Layout(gtx, kit.SpacedCaps(e.Th.Theme, e.Th.T.MonoSm, e.Th.R.Fg3, factTracking, lyrics.sourceLine))
 		}),
 	)
 }
@@ -536,7 +544,7 @@ func (lyrics *Lyrics) layoutLine(gtx layout.Context, e *env.Env, line model.Lyri
 	wordByWord := synced && e.Store.Snapshot().Client.WordByWordOn()
 	targetInk := e.Th.R.Fg
 	if wordByWord {
-		targetInk = e.Th.R.Fg2
+		targetInk = karaokeRest(e.Th)
 	}
 	ink := palette.Mix(e.Th.R.Fg3, targetInk, progress)
 	highlight := palette.Mix(e.Th.R.Fg3, e.Th.Accent.Ink, progress)
@@ -632,6 +640,39 @@ func (lyrics *Lyrics) layoutLine(gtx layout.Context, e *env.Env, line model.Lyri
 	move.Pop()
 	mask.Pop()
 	return layout.Dimensions{Size: slot}
+}
+
+// karaokeSeparation is the least luminance contrast between a colourless
+// accent's ink (the sung words) and the words still to sing; colourGrey is
+// the channel spread under which an ink has no hue to tell it apart.
+const (
+	karaokeSeparation = 2
+	colourGrey        = 24
+)
+
+// karaokeRest is the ink of the words still to sing in a word-by-word line:
+// fg2, which a coloured accent stands apart from by its hue. A colourless
+// accent (a grey cover's ink is fg itself, about 1.3:1 over fg2 in dark
+// mode) has only lightness to differ by: the rest starts from fg3 and leans
+// toward the pane until it stands karaokeSeparation from the sung words,
+// never fainter than 3:1 on the pane. Only the drawing changes; the follow
+// is the same.
+func karaokeRest(th *look.Theme) color.NRGBA {
+	ink := th.Accent.Ink
+	spread := max(ink.R, ink.G, ink.B) - min(ink.R, ink.G, ink.B)
+	if spread >= colourGrey || palette.ContrastRatio(ink, th.R.Fg2) >= karaokeSeparation {
+		return th.R.Fg2
+	}
+	pane := th.Planes().Pane
+	rest := th.R.Fg3
+	for step := 1; step <= 8 && palette.ContrastRatio(ink, rest) < karaokeSeparation; step++ {
+		next := palette.Mix(th.R.Fg3, pane, float32(step)*.05)
+		if palette.ContrastRatio(next, pane) < 3 {
+			break
+		}
+		rest = next
+	}
+	return rest
 }
 
 func lyricStyles(e *env.Env, size LyricsSize) (active, resting libtheme.TextStyle) {

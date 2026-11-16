@@ -47,18 +47,6 @@ func TestVisualizerPreferenceDetailDistinguishesMissingAndStopped(t *testing.T) 
 	}
 }
 
-func TestCornerDpForCustom(t *testing.T) {
-	if got := cornerDpForCustom(state.CornersChisel, 0, 23); got != 16 {
-		t.Fatalf("chisel seed = %d, want 16", got)
-	}
-	if got := cornerDpForCustom(state.CornersDesktop, 0, 23); got != 23 {
-		t.Fatalf("desktop seed = %d, want 23", got)
-	}
-	if got := cornerDpForCustom(state.CornersFine, 11, 23); got != 11 {
-		t.Fatalf("stored custom value = %d, want 11", got)
-	}
-}
-
 func TestFloatingWindowDetailDefersModeChanges(t *testing.T) {
 	for _, test := range []struct {
 		name              string

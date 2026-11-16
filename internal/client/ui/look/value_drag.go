@@ -11,10 +11,18 @@ import (
 	"gioui.org/op/clip"
 )
 
+// valueDragCut is the cut of a value drag's wash, a small control's (the
+// Hub's segment cut).
+const valueDragCut = 5
+
 // ValueDrag adds direct vertical drag and accumulated wheel input to a label.
+// Under the pointer it wears the Hub's row wash (RowWash: 120 in, 240 out on
+// OutCubic), deepening to the press wash while it is held; at rest it paints
+// nothing and asks for no frame.
 type ValueDrag struct {
 	tag       struct{}
 	active    bool
+	hovered   bool
 	pointerID pointer.ID
 	startY    float32
 	start     float64
@@ -22,14 +30,15 @@ type ValueDrag struct {
 	committed float64
 	ready     bool
 	wheel     float32
+	wash      RowWash
 }
 
 // Layout draws child and attaches logarithmic Q-style input to it.
-func (drag *ValueDrag) Layout(gtx layout.Context, value, minValue, maxValue float64, child layout.Widget) layout.Dimensions {
+func (drag *ValueDrag) Layout(gtx layout.Context, th *Theme, value, minValue, maxValue float64, child layout.Widget) layout.Dimensions {
 	for {
 		raw, ok := gtx.Event(pointer.Filter{
 			Target:  &drag.tag,
-			Kinds:   pointer.Press | pointer.Drag | pointer.Release | pointer.Cancel | pointer.Scroll,
+			Kinds:   pointer.Enter | pointer.Leave | pointer.Press | pointer.Drag | pointer.Release | pointer.Cancel | pointer.Scroll,
 			ScrollY: pointer.ScrollRange{Min: -100000, Max: 100000},
 		})
 		if !ok {
@@ -37,6 +46,10 @@ func (drag *ValueDrag) Layout(gtx layout.Context, value, minValue, maxValue floa
 		}
 		e := raw.(pointer.Event)
 		switch e.Kind {
+		case pointer.Enter:
+			drag.hovered = true
+		case pointer.Leave:
+			drag.hovered = false
 		case pointer.Press:
 			if !e.Buttons.Contain(pointer.ButtonPrimary) {
 				continue
@@ -74,9 +87,15 @@ func (drag *ValueDrag) Layout(gtx layout.Context, value, minValue, maxValue floa
 			}
 		}
 	}
+	drag.wash.Update(gtx, th, drag.hovered || drag.active, drag.active)
+	record := op.Record(gtx.Ops)
 	dimensions := child(gtx)
+	call := record.Stop()
+	bounds := image.Rectangle{Max: dimensions.Size}
+	drag.wash.Paint(gtx, th, bounds, gtx.Dp(valueDragCut))
+	call.Add(gtx.Ops)
 	pass := pointer.PassOp{}.Push(gtx.Ops)
-	area := clip.Rect(image.Rectangle{Max: dimensions.Size}).Push(gtx.Ops)
+	area := clip.Rect(bounds).Push(gtx.Ops)
 	event.Op(gtx.Ops, &drag.tag)
 	pointer.CursorRowResize.Add(gtx.Ops)
 	area.Pop()
@@ -86,6 +105,9 @@ func (drag *ValueDrag) Layout(gtx layout.Context, value, minValue, maxValue floa
 
 // Dragging reports a live value during a vertical drag.
 func (drag *ValueDrag) Dragging() (float64, bool) { return drag.preview, drag.active }
+
+// Held reports whether the pointer holds the value.
+func (drag *ValueDrag) Held() bool { return drag.active }
 
 // Committed reports and clears a release or wheel value.
 func (drag *ValueDrag) Committed() (float64, bool) {

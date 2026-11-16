@@ -15,6 +15,8 @@ import (
 	"github.com/ryoku-dev/ryotunes/internal/client/ui/act"
 	"github.com/ryoku-dev/ryotunes/internal/client/ui/env"
 	"github.com/ryoku-dev/ryotunes/internal/client/ui/look"
+	"github.com/ryoku-dev/ryotunes/internal/client/ui/pages/pagesheet"
+	"github.com/ryoku-dev/ryotunes/internal/client/ui/sheet"
 	"github.com/ryoku-dev/ryotunes/internal/client/ui/widgets"
 	"github.com/ryoku-dev/ryotunes/internal/model"
 	"github.com/ryoku-dev/ryotunes/internal/protocol"
@@ -59,6 +61,8 @@ type Page struct {
 	request       uint64
 	libraryRev    uint64
 	meta          []kit.Span
+	reveal        sheet.Reveal
+	parts         int
 }
 
 // New constructs an artist detail page for r.ID.
@@ -75,6 +79,12 @@ func (p *Page) Title() string {
 		return p.route.Title
 	}
 	return "Artist"
+}
+
+// Masthead leaves the part to the route (the frame reads "Artist") and says how far the
+// page is read.
+func (p *Page) Masthead() (part, partGloss string, progress float32) {
+	return "", "", p.scroll.Progress()
 }
 
 // Refresh reloads the artist and its ordered sections.
@@ -144,34 +154,48 @@ func (p *Page) Layout(gtx layout.Context, e *env.Env) layout.Dimensions {
 		base += popular + 2
 	}
 	count := base + len(sections)
+	// the page's parts are numbered as the Hub numbers a sheet's sections: Popular, then each
+	// shelf
+	p.parts = len(sections)
+	if popular > 0 {
+		p.parts++
+	}
 	return p.scroll.Layout(gtx, e.Th, count, func(gtx layout.Context, index int) layout.Dimensions {
-		if index == 0 {
-			return p.layoutHero(gtx, e)
-		}
-		index--
-		if popular > 0 {
-			if index == 0 {
-				return p.layoutPopularHeader(gtx, e)
-			}
-			if index == 1 {
-				opts := p.popularOpts(p.page.TopSongs[:popular])
-				return p.inset(e, 0, 0, func(gtx layout.Context) layout.Dimensions { return p.tracks.Header(gtx, e, opts) })(gtx)
-			}
-			if index < popular+2 {
-				row := index - 2
-				opts := p.popularOpts(p.page.TopSongs[:popular])
-				return p.inset(e, 0, 0, func(gtx layout.Context) layout.Dimensions {
-					return p.tracks.Row(gtx, e, p.page.TopSongs[:popular], row, opts)
-				})(gtx)
-			}
-			index -= popular + 2
-		}
-		if index < 0 || index >= len(sections) {
-			return layout.Dimensions{}
-		}
-		section := sections[index]
-		return p.layoutShelf(gtx, e, section, index+1 == len(sections))
+		return p.reveal.Group(gtx, e.Th, index, func(gtx layout.Context) layout.Dimensions {
+			return p.layoutElement(gtx, e, index, popular, sections)
+		})
 	})
+}
+
+func (p *Page) layoutElement(gtx layout.Context, e *env.Env, index, popular int, sections []model.ArtistSection) layout.Dimensions {
+	if index == 0 {
+		return p.layoutHero(gtx, e)
+	}
+	index--
+	if popular > 0 {
+		if index == 0 {
+			return p.layoutPopularHeader(gtx, e)
+		}
+		if index == 1 {
+			opts := p.popularOpts(p.page.TopSongs[:popular])
+			return p.inset(e, 0, 0, func(gtx layout.Context) layout.Dimensions { return p.tracks.Header(gtx, e, opts) })(gtx)
+		}
+		if index < popular+2 {
+			row := index - 2
+			opts := p.popularOpts(p.page.TopSongs[:popular])
+			return p.inset(e, 0, 0, func(gtx layout.Context) layout.Dimensions {
+				return p.tracks.Row(gtx, e, p.page.TopSongs[:popular], row, opts)
+			})(gtx)
+		}
+		index -= popular + 2
+	}
+	if index < 0 || index >= len(sections) {
+		return layout.Dimensions{}
+	}
+	section := sections[index]
+	shelf := p.shelves[sectionKey(section)]
+	shelf.Number, shelf.Of = p.parts-len(sections)+index+1, p.parts
+	return p.layoutShelf(gtx, e, section, index+1 == len(sections))
 }
 
 func (p *Page) inset(e *env.Env, top, bottom unit.Dp, body layout.Widget) layout.Widget {
@@ -182,13 +206,24 @@ func (p *Page) inset(e *env.Env, top, bottom unit.Dp, body layout.Widget) layout
 }
 
 func (p *Page) layoutHero(gtx layout.Context, e *env.Env) layout.Dimensions {
+	gtx.Constraints.Min.Y = 0
+	return layout.Inset{Top: e.Th.Sp.S2}.Layout(gtx, p.layoutHeroField(e))
+}
+
+func (p *Page) layoutHeroField(e *env.Env) layout.Widget {
+	return func(gtx layout.Context) layout.Dimensions { return p.layoutHeroContent(gtx, e) }
+}
+
+func (p *Page) layoutHeroContent(gtx layout.Context, e *env.Env) layout.Dimensions {
 	return p.hero.Layout(gtx, e, widgets.HeroContent{
-		Art:     value(p.page.Thumbnail),
-		Octagon: true,
-		Kind:    "Artist",
-		Title:   p.Title(),
-		Meta:    p.meta,
-		Acts:    p.layoutActs(e),
+		Art:       value(p.page.Thumbnail),
+		Place:     sheet.Library,
+		PartGloss: "演者",
+		Octagon:   true,
+		Kind:      "Artist",
+		Title:     p.Title(),
+		Meta:      p.meta,
+		Acts:      p.layoutActs(e),
 	})
 }
 
@@ -208,16 +243,13 @@ func (p *Page) layoutPopularHeader(gtx layout.Context, e *env.Env) layout.Dimens
 	if p.showAllSongs && p.page.TopSongsID == nil {
 		p.showAll.Label = "Show fewer"
 	}
+	p.showAll.Small = true
+	var trailing layout.Widget
+	if p.page.TopSongsID != nil || len(p.page.TopSongs) > 5 {
+		trailing = func(gtx layout.Context) layout.Dimensions { return p.showAll.Layout(gtx, e.Th.Theme) }
+	}
 	return p.inset(e, 34, 13, func(gtx layout.Context) layout.Dimensions {
-		return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
-			layout.Flexed(1, kit.Text(e.Th.Theme, e.Th.T.Section, e.Th.R.Fg, "Popular")),
-			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-				if p.page.TopSongsID == nil && len(p.page.TopSongs) <= 5 {
-					return layout.Dimensions{}
-				}
-				return p.showAll.Layout(gtx, e.Th.Theme)
-			}),
-		)
+		return widgets.RuledHead(gtx, e, "Popular", kit.Ordinal(1, p.parts), trailing)
 	})(gtx)
 }
 
@@ -249,7 +281,7 @@ func (p *Page) handleActions(gtx layout.Context, e *env.Env) {
 		act.PlayCollection(e, p.page.TopSongs, 0, value(p.page.TopSongsID), p.Title(), true, nil)
 	}
 	if p.follow.Clicked(gtx) && !p.followPending {
-		p.toggleFollow(e)
+		p.toggleFollow(e, false)
 	}
 	if p.radio.Clicked(gtx) {
 		act.StartRadio(e, "artist", p.route.ID, p.Title())
@@ -267,7 +299,9 @@ func (p *Page) handleActions(gtx layout.Context, e *env.Env) {
 	}
 }
 
-func (p *Page) toggleFollow(e *env.Env) {
+// toggleFollow subscribes or unsubscribes; undoing marks the Undo of an unsubscribe, which
+// puts the subscription back without a notice of its own (as the item menu's Undo).
+func (p *Page) toggleFollow(e *env.Env, undoing bool) {
 	if !e.Store.Snapshot().Auth.SignedIn {
 		e.Toast("Sign in to subscribe", env.ToastInfo)
 		return
@@ -293,9 +327,15 @@ func (p *Page) toggleFollow(e *env.Env) {
 		p.following = result.Subscribed
 		p.page.Subscribed = result.Subscribed
 		if result.Subscribed {
-			e.Toast("Subscribed to "+p.Title(), env.ToastSuccess)
+			if !undoing {
+				e.Toast("Subscribed to "+p.Title(), env.ToastSuccess)
+			}
 		} else {
-			e.Toast("Unsubscribed", env.ToastSuccess)
+			pagesheet.OfferUndo(e, "Unsubscribed from "+p.Title()+".", func() {
+				if !p.followPending && !p.following {
+					p.toggleFollow(e, true)
+				}
+			})
 		}
 	})
 }
@@ -357,7 +397,7 @@ func (p *Page) layoutMore(e *env.Env) layout.Widget {
 				}
 			case artistMoreFollow:
 				if !p.followPending {
-					p.toggleFollow(e)
+					p.toggleFollow(e, false)
 				}
 			case artistMoreRadio:
 				act.StartRadio(e, "artist", p.route.ID, p.Title())

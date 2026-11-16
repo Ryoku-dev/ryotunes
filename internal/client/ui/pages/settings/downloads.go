@@ -65,7 +65,7 @@ func (p *page) layoutDownloads(gtx layout.Context, e *env.Env) layout.Dimensions
 			return dims
 		}),
 		p.settingRow(e.Th, "Download settings", "Changes apply to downloads queued after they are saved.", func(gtx layout.Context) layout.Dimensions {
-			p.download.save.Kind, p.download.save.Label = kit.PlaqueLine, "Save"
+			p.download.save.Kind, p.download.save.Small, p.download.save.Label = kit.PlaqueQuiet, true, "Save"
 			if p.download.save.Clicked(gtx) {
 				settings := p.downloads
 				settings.Path = strings.TrimSpace(p.download.path.field.Text())
@@ -76,7 +76,7 @@ func (p *page) layoutDownloads(gtx layout.Context, e *env.Env) layout.Dimensions
 					}
 					p.downloads = saved
 					p.download.path.initialized = false
-					e.Toast("Download settings saved", env.ToastSuccess)
+					e.Toast("Download settings saved.", env.ToastSuccess)
 				})
 			}
 			return p.download.save.Layout(gtx, e.Th.Theme)

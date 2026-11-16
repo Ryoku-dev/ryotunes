@@ -11,7 +11,9 @@ import (
 	"gioui.org/f32"
 	"gioui.org/layout"
 	"gioui.org/op"
+	"gioui.org/unit"
 
+	"github.com/ryoku-dev/ryoku/docs/lithic/library/go/design"
 	"github.com/ryoku-dev/ryoku/docs/lithic/library/go/palette"
 	libtheme "github.com/ryoku-dev/ryoku/docs/lithic/library/go/theme"
 	clientart "github.com/ryoku-dev/ryotunes/internal/client/art"
@@ -115,5 +117,25 @@ func TestArtViewPreservesOutgoingCoverAcrossRapidPendingChanges(t *testing.T) {
 	view.Layout(gtx, theme, cache, server.URL+"/d", image.Pt(64, 64), Shape{}, theme.Motion.Field)
 	if view.previous != "loaded-cover" {
 		t.Fatalf("rapid pending change retained %q, want loaded-cover", view.previous)
+	}
+}
+
+func TestCoversAreRoundedSquaresNeverPillsInRoundDesigns(t *testing.T) {
+	theme := NewTheme(palette.Signature(true), libtheme.Comfortable)
+	gtx := layout.Context{Metric: unit.Metric{PxPerDp: 1.5, PxPerSp: 1.5}}
+	for _, style := range []design.Style{design.Material, design.Adwaita, design.Fluent} {
+		theme.Design = style
+		profile := style.Profile()
+		for _, side := range []int{gtx.Dp(32), gtx.Dp(44), gtx.Dp(48), gtx.Dp(56)} {
+			radius := artRadius(gtx, theme, 6, image.Pt(side, side))
+			if radius <= 0 || 2*radius >= side || float32(radius) > float32(side)*artRadiusShare+.5 {
+				t.Fatalf("%v: a %d px cover rounds at %d px, want a rounded square (at most a quarter of the side)", style, side, radius)
+			}
+		}
+		// a large cover takes the design's own radius: the cut times its scale, within its maximum
+		want := gtx.Dp(unit.Dp(min(7*profile.Scale, profile.Max)))
+		if got := artRadius(gtx, theme, 7, image.Pt(gtx.Dp(200), gtx.Dp(200))); got != want {
+			t.Fatalf("%v: a 200 dp cover rounds at %d px, want %d", style, got, want)
+		}
 	}
 }

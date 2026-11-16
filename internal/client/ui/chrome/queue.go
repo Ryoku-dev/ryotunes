@@ -10,8 +10,10 @@ import (
 	"gioui.org/io/pointer"
 	"gioui.org/io/semantic"
 	"gioui.org/layout"
+	"gioui.org/op"
 	"gioui.org/op/clip"
 	"gioui.org/op/paint"
+	"gioui.org/unit"
 
 	"github.com/ryoku-dev/ryoku/docs/lithic/library/go/anim"
 	"github.com/ryoku-dev/ryoku/docs/lithic/library/go/kit"
@@ -24,6 +26,14 @@ import (
 	"github.com/ryoku-dev/ryotunes/internal/client/ui/widgets"
 	"github.com/ryoku-dev/ryotunes/internal/model"
 	"github.com/ryoku-dev/ryotunes/internal/protocol"
+)
+
+// Queue row geometry, in dp: the row, its leading column (the numeral, the
+// grip on hover, the playing glyph) and the Hub's row cut.
+const (
+	queueRowTall unit.Dp = 56
+	queueLead    unit.Dp = 24
+	queueRowCut  unit.Dp = 6
 )
 
 type queueEntryKind uint8
@@ -44,22 +54,27 @@ type queueEntry struct {
 	count int
 	row   state.QueueRow
 	key   queueEntryKey
+	// ordinal is the row's place in its group, from 1; last marks the
+	// group's last row, which carries no rule under it
+	ordinal int
+	last    bool
 }
 
 type queueRowState struct {
-	click      kit.Click
-	remove     kit.IconPlaque
-	hover      look.Hover
-	hoverValue float32
-	drag       queueDrag
-	context    queueContextArea
-	arrival    anim.Tween
-	arrivalSet bool
-	removal    anim.Tween
-	removing   bool
-	removeSent bool
-	lastSeen   uint64
-	children   [5]layout.FlexChild
+	click       kit.Click
+	remove      kit.IconPlaque
+	removeGlyph widgets.PressGlyph
+	wash        look.RowWash
+	selected    look.SelectWash
+	drag        queueDrag
+	context     queueContextArea
+	arrival     anim.Tween
+	arrivalSet  bool
+	removal     anim.Tween
+	removing    bool
+	removeSent  bool
+	lastSeen    uint64
+	children    [7]layout.FlexChild
 }
 
 type queueDrag struct {
@@ -72,11 +87,15 @@ type queueDrag struct {
 
 type queueContextArea struct{ tag struct{} }
 
-// Queue renders the editable grouped playback queue.
+// Queue renders the editable grouped playback queue as the Hub's ruled
+// list: ruled group heads ("UP NEXT ---- 06"), rows numbered in the
+// smallest mono with a vein rule between them, the Hub's row wash and lean
+// on hover and press, and the selection wash on the row that plays.
 type Queue struct {
 	scroll      look.Scroller
 	clear       kit.Plaque
 	more        kit.IconPlaque
+	moreGlyph   widgets.PressGlyph
 	menu        kit.Menu
 	items       map[queueEntryKey]*queueRowState
 	seen        map[string]int
@@ -123,7 +142,7 @@ func (queue *Queue) buildEntries(gtx layout.Context, notch time.Duration, groups
 			return
 		}
 		queue.entries = append(queue.entries, queueEntry{kind: queueSection, title: title, count: len(rows)})
-		for _, row := range rows {
+		for at, row := range rows {
 			videoID := row.Item.VideoID
 			occurrence := queue.seen[videoID]
 			queue.seen[videoID] = occurrence + 1
@@ -132,7 +151,7 @@ func (queue *Queue) buildEntries(gtx layout.Context, notch time.Duration, groups
 			if item == nil {
 				item = new(queueRowState)
 				item.arrival.Duration = notch
-				item.arrival.Ease = anim.EaseChisel
+				item.arrival.Ease = anim.EaseOutCubic
 				if queue.initialized {
 					item.arrival.Set(gtx, 0)
 					item.arrival.Set(gtx, 1)
@@ -143,7 +162,9 @@ func (queue *Queue) buildEntries(gtx layout.Context, notch time.Duration, groups
 				queue.items[key] = item
 			}
 			item.lastSeen = queue.build
-			queue.entries = append(queue.entries, queueEntry{kind: queueTrack, row: row, key: key})
+			queue.entries = append(queue.entries, queueEntry{
+				kind: queueTrack, row: row, key: key, ordinal: at + 1, last: at == len(rows)-1,
+			})
 		}
 	}
 	if groups.NowPlaying != nil {
@@ -160,15 +181,19 @@ func (queue *Queue) buildEntries(gtx layout.Context, notch time.Duration, groups
 }
 
 func (queue *Queue) layoutSection(gtx layout.Context, e *env.Env, entry queueEntry) layout.Dimensions {
-	trailing := layout.Widget(nil)
+	var trailing layout.Widget
+	lead, count := "", entry.count
 	switch entry.title {
 	case "Now playing":
+		count = -1
+		if name := e.Store.Snapshot().Queue.SourceName; name != nil && strings.TrimSpace(*name) != "" {
+			lead = "From " + strings.TrimSpace(*name)
+		}
 		trailing = func(gtx layout.Context) layout.Dimensions {
 			queue.more.Kind = kit.PlaqueQuiet
-			queue.more.Icon = look.Icon.More
 			queue.more.Description = "Queue actions"
 			queue.more.Small = true
-			dims := queue.more.Layout(gtx, e.Th.Theme)
+			dims := queue.moreGlyph.Layout(gtx, e.Th, &queue.more, look.Icon.More)
 			if queue.more.Clicked(gtx) && e.Overlays != nil {
 				anchor := e.Overlays.AnchorOf(&queue.more.Clickable, dims.Size)
 				e.Overlays.Open(&queue.menuTag, anchor, look.Placement{Prefer: look.Below, Align: look.End, Width: 240}, func(gtx layout.Context) layout.Dimensions {
@@ -189,43 +214,7 @@ func (queue *Queue) layoutSection(gtx layout.Context, e *env.Env, entry queueEnt
 			return dims
 		}
 	}
-	header := kit.GroupHeader(e.Th.Theme, entry.title, entry.count)
-	if entry.title == "Now playing" {
-		header = queueNowPlayingHeader(e)
-	}
-	return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
-		layout.Flexed(1, header),
-		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			if trailing == nil {
-				return layout.Dimensions{}
-			}
-			return trailing(gtx)
-		}),
-	)
-}
-
-func queueNowPlayingHeader(e *env.Env) layout.Widget {
-	return func(gtx layout.Context) layout.Dimensions {
-		source := ""
-		if name := e.Store.Snapshot().Queue.SourceName; name != nil {
-			source = strings.TrimSpace(*name)
-		}
-		return layout.Inset{
-			Top: tokens.SizeGroupHeaderTop, Right: tokens.SizeGroupHeaderRight,
-			Bottom: tokens.SizeGroupHeaderBottom, Left: tokens.SizeGroupHeaderLeft,
-		}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-			children := []layout.FlexChild{
-				layout.Rigid(kit.Text(e.Th.Theme, e.Th.T.Group, e.Th.R.Fg3, "Now playing")),
-			}
-			if source != "" {
-				children = append(children,
-					layout.Rigid(layout.Spacer{Width: 4}.Layout),
-					layout.Rigid(kit.Text(e.Th.Theme, e.Th.T.Group, e.Th.R.Fg2, "· From "+source)),
-				)
-			}
-			return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx, children...)
-		})
-	}
+	return ruledHead(gtx, e.Th, entry.title, lead, count, trailing)
 }
 
 func (queue *Queue) layoutMenu(gtx layout.Context, e *env.Env) layout.Dimensions {
@@ -262,13 +251,14 @@ func (queue *Queue) layoutRow(gtx layout.Context, e *env.Env, entry queueEntry) 
 		return layout.Dimensions{}
 	}
 	row := entry.row
-	queueSnapshot := e.Store.Snapshot().Queue
+	snapshot := e.Store.Snapshot()
+	queueSnapshot := snapshot.Queue
 	playing := row.Index == queueSnapshot.CurrentIndex
 	if item.context.Pressed(gtx) && e.Menu != nil {
 		track := row.Item
 		e.Menu(env.MenuTarget{Track: &track, Context: "queue", QueueIndex: row.Index})
 	}
-	rowHeight := gtx.Dp(56)
+	rowHeight := gtx.Dp(queueRowTall)
 	if item.removing {
 		progress := item.removal.Value(gtx)
 		if progress <= 0.001 && !item.removeSent {
@@ -279,89 +269,133 @@ func (queue *Queue) layoutRow(gtx layout.Context, e *env.Env, entry queueEntry) 
 		if rowHeight <= 0 {
 			return layout.Dimensions{}
 		}
-		gtx.Constraints.Min.Y = rowHeight
-		gtx.Constraints.Max.Y = rowHeight
+	}
+	width := gtx.Constraints.Max.X
+	gtx.Constraints = layout.Exact(image.Pt(width, rowHeight))
+	bounds := image.Rect(0, 0, width, rowHeight)
+	rowClip := clip.Rect(bounds).Push(gtx.Ops)
+
+	// where you are, then the hover and press washes over it
+	cut := gtx.Dp(queueRowCut)
+	if playing {
+		item.selected.Layout(gtx, e.Th, bounds, 0, cut)
+	} else {
+		item.selected.Layout(gtx, e.Th, image.Rectangle{}, 0, cut)
+	}
+	hover, _ := item.wash.Update(gtx, e.Th, item.click.Hovered() || item.drag.active, item.click.Pressed() || item.drag.active)
+	item.wash.Paint(gtx, e.Th, bounds, cut)
+
+	// the vein rule under the row, from the art to the end, still while the
+	// row leans
+	if !entry.last && !item.removing {
+		hair := max(1, gtx.Dp(unit.Dp(tokens.SizeHairline)))
+		start := gtx.Dp(8 + queueLead + 8)
+		paint.FillShape(gtx.Ops, e.Th.R.Line(), clip.Rect(image.Rect(start, rowHeight-hair, width-gtx.Dp(8), rowHeight)).Op())
 	}
 
-	rowClip := clip.Rect(image.Rect(0, 0, gtx.Constraints.Max.X, rowHeight)).Push(gtx.Ops)
-	hoverValue := item.hoverValue
-	dims, nextHover := item.hover.Layout(gtx, e.Th, func(gtx layout.Context) layout.Dimensions {
-		gtx.Constraints.Min.Y = rowHeight
-		gtx.Constraints.Max.Y = rowHeight
-		bounds := image.Rect(0, 0, gtx.Constraints.Max.X, rowHeight)
-		if hoverInk := palette.WithAlpha(e.Th.R.Stone3, hoverValue); hoverInk.A > 0 {
-			paint.FillShape(gtx.Ops, hoverInk, clip.Rect(bounds).Op())
-		}
-		return item.click.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-			return layout.Inset{Top: 8, Right: 8, Bottom: 8, Left: 8}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-				item.children[0] = layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					size := image.Pt(gtx.Dp(40), gtx.Dp(40))
-					return look.Art(gtx, e.Th, e.Art, optionalString(row.Item.Thumbnail), size, look.Shape{Cut: 3})
-				})
-				item.children[1] = layout.Rigid(layout.Spacer{Width: 13}.Layout)
-				item.children[2] = layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-					titleInk := e.Th.R.Fg
-					if playing {
-						titleInk = e.Th.Accent.Ink
-					} else if row.Item.Autoplay {
-						titleInk = e.Th.R.Fg2
-					}
-					return layout.Flex{Axis: layout.Vertical, Alignment: layout.Start}.Layout(gtx,
-						layout.Rigid(kit.Text(e.Th.Theme, e.Th.T.Row, titleInk, queueTrackTitle(row.Item))),
-						layout.Rigid(kit.Text(e.Th.Theme, e.Th.T.Caption, e.Th.R.Fg2, strings.TrimSpace(row.Item.Artists))),
-					)
-				})
-				item.children[3] = layout.Rigid(layout.Spacer{Width: 8}.Layout)
-				item.children[4] = layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					if !playing && hoverValue > .05 {
-						item.remove.Kind = kit.PlaqueQuiet
-						item.remove.Icon = look.Icon.Remove
-						item.remove.Description = "Remove from queue"
-						item.remove.Small = true
-						return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
-							layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-								target, moved, dims := item.drag.Layout(gtx, e.Th, hoverValue, row.Index, queueSnapshot.CurrentIndex+1, len(queueSnapshot.Items)-1)
-								if moved && target != row.Index {
-									if target > row.Index {
-										target--
-									}
-									callVoid(e, protocol.MethodMoveInQueue, protocol.MoveInQueueParams{From: row.Index, To: target})
-								}
-								return dims
-							}),
-							layout.Rigid(layout.Spacer{Width: 4}.Layout),
-							layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-								dims := item.remove.Layout(gtx, e.Th.Theme)
-								if item.remove.Clicked(gtx) && !item.removing {
-									item.removing = true
-									item.removal.Duration = e.Th.Motion.Unfold
-									item.removal.Ease = anim.EaseChisel
-									item.removal.Set(gtx, 1)
-									item.removal.Set(gtx, 0)
-								}
-								return dims
-							}),
-						)
-					}
-					return kit.Text(e.Th.Theme, e.Th.T.Mono, e.Th.R.Fg3, optionalString(row.Item.Duration))(gtx)
-				})
-				return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx, item.children[:]...)
+	lean := item.wash.Lean(gtx)
+	leanOffset := op.Offset(image.Pt(lean, 0)).Push(gtx.Ops)
+	dims := item.click.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+		return layout.Inset{Top: 8, Right: 8, Bottom: 8, Left: 8}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+			item.children[0] = layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				return queue.layoutLead(gtx, e, item, entry, playing, snapshot.Playback.Paused, hover, queueSnapshot)
 			})
+			item.children[1] = layout.Rigid(layout.Spacer{Width: 8}.Layout)
+			item.children[2] = layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				size := image.Pt(gtx.Dp(40), gtx.Dp(40))
+				return look.Art(gtx, e.Th, e.Art, optionalString(row.Item.Thumbnail), size, look.Shape{Cut: 3})
+			})
+			item.children[3] = layout.Rigid(layout.Spacer{Width: 13}.Layout)
+			item.children[4] = layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+				titleInk := e.Th.R.Fg
+				if row.Item.Autoplay && !playing {
+					titleInk = e.Th.R.Fg2
+				}
+				return layout.Flex{Axis: layout.Vertical, Alignment: layout.Start}.Layout(gtx,
+					layout.Rigid(kit.Text(e.Th.Theme, e.Th.T.Row, titleInk, queueTrackTitle(row.Item))),
+					layout.Rigid(kit.Text(e.Th.Theme, e.Th.T.Caption, e.Th.R.Fg2, strings.TrimSpace(row.Item.Artists))),
+				)
+			})
+			item.children[5] = layout.Rigid(layout.Spacer{Width: 8}.Layout)
+			item.children[6] = layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				if !playing && hover > .05 {
+					item.remove.Kind = kit.PlaqueQuiet
+					item.remove.Description = "Remove from queue"
+					item.remove.Small = true
+					dims := item.removeGlyph.Layout(gtx, e.Th, &item.remove, look.Icon.Remove)
+					if item.remove.Clicked(gtx) && !item.removing {
+						item.removing = true
+						item.removal.Duration = e.Th.Motion.HubUnfold
+						item.removal.Ease = anim.EaseOutCubic
+						item.removal.Set(gtx, 1)
+						item.removal.Set(gtx, 0)
+					}
+					return dims
+				}
+				return kit.Text(e.Th.Theme, e.Th.T.Mono, e.Th.R.Fg3, optionalString(row.Item.Duration))(gtx)
+			})
+			return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx, item.children[:]...)
 		})
 	})
+	leanOffset.Pop()
 	rowClip.Pop()
-	item.hoverValue = nextHover
 	if item.click.Clicked(gtx) {
 		callVoid(e, protocol.MethodPlayIndex, protocol.IndexParams{Index: row.Index})
 	}
-	item.context.Layout(gtx, dims.Size)
+	item.context.Layout(gtx, bounds.Size())
 	if item.arrivalSet {
 		arrival := item.arrival.Value(gtx)
 		if arrival < 1 {
 			kit.Notch(gtx.Ops, image.Point{}, gtx.Dp(e.Th.Cut.Notch), palette.WithAlpha(e.Th.Accent.Ink, 1-arrival))
 		}
 	}
+	dims.Size = bounds.Size()
 	return dims
+}
+
+// layoutLead draws the row's leading column: the playing glyph in the
+// accent on the row that plays, else the row's numeral in the smallest
+// mono, fading into the reorder grip as the row is hovered.
+func (queue *Queue) layoutLead(gtx layout.Context, e *env.Env, item *queueRowState, entry queueEntry, playing, paused bool, hover float32, snapshot model.QueueSnapshot) layout.Dimensions {
+	size := image.Pt(gtx.Dp(queueLead), gtx.Dp(40))
+	gtx.Constraints = layout.Exact(size)
+	if playing {
+		ink := e.Th.Accent.Ink
+		if paused {
+			ink = e.Th.R.Fg3
+		}
+		side := gtx.Dp(16)
+		offset := op.Offset(image.Pt((size.X-side)/2, (size.Y-side)/2)).Push(gtx.Ops)
+		look.DrawGlyph(gtx, look.Icon.Play, ink, side, 0, 1)
+		offset.Pop()
+		return layout.Dimensions{Size: size}
+	}
+	grip := hover
+	if item.drag.active {
+		grip = 1
+	}
+	if grip < 1 {
+		alpha := paint.PushOpacity(gtx.Ops, 1-grip)
+		numeral := gtx
+		numeral.Constraints.Min = image.Point{}
+		record := op.Record(gtx.Ops)
+		dims := kit.LayoutSpacedCaps(numeral, e.Th.Theme, e.Th.T.MonoSm, e.Th.R.Fg3, 0, kit.Pad2(entry.ordinal))
+		call := record.Stop()
+		offset := op.Offset(image.Pt((size.X-dims.Size.X)/2, (size.Y-dims.Size.Y)/2)).Push(gtx.Ops)
+		call.Add(gtx.Ops)
+		offset.Pop()
+		alpha.Pop()
+	}
+	if grip > .05 {
+		target, moved, _ := item.drag.Layout(gtx, e.Th, grip, entry.row.Index, snapshot.CurrentIndex+1, len(snapshot.Items)-1)
+		if moved && target != entry.row.Index {
+			if target > entry.row.Index {
+				target--
+			}
+			callVoid(e, protocol.MethodMoveInQueue, protocol.MoveInQueueParams{From: entry.row.Index, To: target})
+		}
+	}
+	return layout.Dimensions{Size: size}
 }
 
 func queueTrackTitle(track model.Track) string {
@@ -395,6 +429,9 @@ func (area *queueContextArea) Layout(gtx layout.Context, size image.Point) {
 	pass.Pop()
 }
 
+// Layout draws the reorder grip at alpha and runs its drag. While dragged
+// the row takes the press wash (the row draws it) and the grip stands in
+// fg; nothing turns solid.
 func (drag *queueDrag) Layout(gtx layout.Context, th *look.Theme, alpha float32, index, first, last int) (int, bool, layout.Dimensions) {
 	moved := false
 	for {
@@ -418,7 +455,7 @@ func (drag *queueDrag) Layout(gtx layout.Context, th *look.Theme, alpha float32,
 			gtx.Execute(pointer.GrabCmd{Tag: &drag.tag, ID: pointerEvent.PointerID})
 		case pointer.Drag:
 			if drag.active && pointerEvent.PointerID == drag.pointerID {
-				delta := int(math.Round(float64((pointerEvent.Position.Y - drag.startY) / float32(max(1, gtx.Dp(56))))))
+				delta := int(math.Round(float64((pointerEvent.Position.Y - drag.startY) / float32(max(1, gtx.Dp(queueRowTall))))))
 				drag.target = max(first, min(last, index+delta))
 			}
 		case pointer.Release:
@@ -430,21 +467,20 @@ func (drag *queueDrag) Layout(gtx layout.Context, th *look.Theme, alpha float32,
 			drag.active = false
 		}
 	}
-	size := image.Pt(gtx.Dp(24), gtx.Dp(40))
-	gtx.Constraints = layout.Exact(size)
+	size := gtx.Constraints.Min
 	region := clip.Rect(image.Rectangle{Max: size}).Push(gtx.Ops)
 	semantic.Button.Add(gtx.Ops)
 	semantic.DescriptionOp("Reorder track").Add(gtx.Ops)
 	event.Op(gtx.Ops, &drag.tag)
+	pointer.CursorGrab.Add(gtx.Ops)
 	ink := palette.WithAlpha(th.R.Fg2, alpha)
 	if drag.active {
-		ink = th.R.OnSel
-		paint.FillShape(gtx.Ops, th.R.Sel, clip.Rect(image.Rectangle{Max: size}).Op())
+		ink = th.R.Fg
 	}
-	iconGTX := gtx
-	iconSize := gtx.Dp(18)
-	iconGTX.Constraints = layout.Exact(image.Pt(iconSize, iconSize))
-	layout.Center.Layout(gtx, func(layout.Context) layout.Dimensions { return look.Icon.Drag.Layout(iconGTX, ink) })
+	side := gtx.Dp(18)
+	offset := op.Offset(image.Pt((size.X-side)/2, (size.Y-side)/2)).Push(gtx.Ops)
+	look.DrawGlyph(gtx, look.Icon.Drag, ink, side, 0, 1)
+	offset.Pop()
 	region.Pop()
 	return drag.target, moved, layout.Dimensions{Size: size}
 }

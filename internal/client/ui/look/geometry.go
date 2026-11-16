@@ -21,7 +21,7 @@ const (
 const (
 	TopBar              unit.Dp = 56
 	Gap                 unit.Dp = 8
-	SidebarExpanded     unit.Dp = 240
+	SidebarExpanded     unit.Dp = 272 // the Hub's sidebar width
 	SidebarMedium       unit.Dp = 72
 	Panel               unit.Dp = 340
 	PlayerBar           unit.Dp = 88

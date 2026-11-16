@@ -2,13 +2,16 @@ package look
 
 import (
 	"image/color"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
 	"gioui.org/layout"
 	"gioui.org/op"
-	"gioui.org/unit"
 
+	"github.com/ryoku-dev/ryoku/docs/lithic/library/go/anim"
+	"github.com/ryoku-dev/ryoku/docs/lithic/library/go/design"
 	"github.com/ryoku-dev/ryoku/docs/lithic/library/go/palette"
 	libtheme "github.com/ryoku-dev/ryoku/docs/lithic/library/go/theme"
 	"github.com/ryoku-dev/ryotunes/internal/client/art"
@@ -82,29 +85,63 @@ func TestThemeAccentSnapsThenTweens(t *testing.T) {
 	}
 }
 
-func TestThemeCornerSnapsThenTweens(t *testing.T) {
-	theme := NewTheme(palette.Signature(true), libtheme.Comfortable)
-	var operations op.Ops
-	start := time.Unix(2000, 0)
-	gtx := layout.Context{Ops: &operations, Now: start}
+func TestMixRolesKeepsEveryRole(t *testing.T) {
+	from := palette.Signature(true)
+	to := palette.FromPalette(palette.Palette{Dark: true, Source: "wallpaper", Roles: map[string]color.NRGBA{
+		"surface": {R: 20, G: 30, B: 60, A: 0xff}, "onSurface": {R: 220, G: 225, B: 240, A: 0xff},
+		"primary": {R: 120, G: 180, B: 250, A: 0xff},
+	}}, palette.Look{Contrast: palette.High, Tint: palette.TintMedium})
+	if got := mixRoles(from, to, 1); got != to {
+		t.Fatalf("landed tween = %#v, want the target roles", got)
+	}
+	if got := mixRoles(from, to, 0); got.Slab != from.Slab || got.Field != from.Field || got.Edge != from.Edge || got.Container != from.Container {
+		t.Fatal("start of tween lost the from roles' slab, field, edge or container")
+	}
+	half := mixRoles(from, to, .5)
+	for name, pair := range map[string][3]color.NRGBA{
+		"slab": {from.Slab, to.Slab, half.Slab}, "field": {from.Field, to.Field, half.Field},
+		"edge": {from.Edge, to.Edge, half.Edge}, "container": {from.Container, to.Container, half.Container},
+	} {
+		if pair[0] != pair[1] && (pair[2] == pair[0] || pair[2] == pair[1]) {
+			t.Errorf("%s did not mix: from %v to %v half %v", name, pair[0], pair[1], pair[2])
+		}
+	}
+	if half.MineralField(palette.Alive) != to.MineralField(palette.Alive) {
+		t.Fatal("mixed roles lost the target ladder's mineral field lightness")
+	}
+}
 
-	theme.SetCorner(gtx, unit.Dp(8))
-	if theme.Cut.Large != 8 {
-		t.Fatalf("first corner = %v, want 8", theme.Cut.Large)
+func TestSetDesktopSwapsDesignRolesAndMotion(t *testing.T) {
+	defer anim.SetReduce(false)
+	config := t.TempDir()
+	writeDesktopFile(t, filepath.Join(config, "ryoku", "shell.json"), `{"theme":{"design":"fluent","contrast":"high","motion":{"reduce":true}},"showJapaneseGloss":false}`)
+	writeDesktopFile(t, filepath.Join(config, "ryoku", "matugen.json"), `{"mode":"light"}`)
+	desktop := palette.ReadDesktop(palette.WithEnv(false), palette.WithDirs(config, t.TempDir(), filepath.Join(config, "os-release")))
+
+	theme := NewTheme(palette.Signature(true), libtheme.Compact)
+	shaper := theme.Shaper
+	theme.SetDesktop(desktop)
+	if theme.Design != design.Fluent || theme.Desktop.Gloss || theme.R.Dark {
+		t.Fatalf("design %v gloss %v dark %v, want fluent, no gloss, light", theme.Design, theme.Desktop.Gloss, theme.R.Dark)
 	}
-	theme.SetCorner(gtx, unit.Dp(28))
-	if theme.Cut.Large != 8 {
-		t.Fatalf("corner change snapped to %v, want tween start 8", theme.Cut.Large)
+	if theme.LoadedRoles() != desktop.Roles || theme.R.Stone3 != desktop.Roles.Stone3 {
+		t.Fatal("theme does not wear the desktop's roles")
 	}
-	gtx.Now = start.Add(theme.Motion.Select / 2)
-	theme.SetCorner(gtx, unit.Dp(28))
-	if theme.Cut.Large <= 8 || theme.Cut.Large >= 28 {
-		t.Fatalf("halfway corner = %v, want between 8 and 28", theme.Cut.Large)
+	if !anim.Reduced() {
+		t.Fatal("desktop reduced motion did not reach anim")
 	}
-	gtx.Now = start.Add(theme.Motion.Select)
-	theme.SetCorner(gtx, unit.Dp(28))
-	if theme.Cut.Large != 28 {
-		t.Fatalf("finished corner = %v, want 28", theme.Cut.Large)
+	if theme.Shaper != shaper || theme.Density != libtheme.Compact {
+		t.Fatal("swapping the desktop dropped the shaper or the density")
+	}
+}
+
+func writeDesktopFile(t *testing.T, path, content string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -156,15 +193,16 @@ func TestThemeTweensTintAccentAndSourceTogether(t *testing.T) {
 	}
 	gtx.Now = start.Add(theme.Motion.Field / 2)
 	theme.Animate(gtx)
-	if theme.R.Stone2 == base.Stone2 || theme.R.Stone2 == targetRoles.Stone2 {
-		t.Fatalf("halfway stone2 = %#v, want an intermediate tint", theme.R.Stone2)
+	// stone3: the dark signature's lower stones are black, which no tint moves
+	if theme.R.Stone3 == base.Stone3 || theme.R.Stone3 == targetRoles.Stone3 {
+		t.Fatalf("halfway stone3 = %#v, want an intermediate tint", theme.R.Stone3)
 	}
 	if theme.Accent == AccentFromDesktop(base) || theme.Accent == targetAccent {
 		t.Fatalf("halfway accent = %#v, want an intermediate accent", theme.Accent)
 	}
 	gtx.Now = start.Add(theme.Motion.Field)
 	theme.Animate(gtx)
-	if theme.R.Stone2 != targetRoles.Stone2 || theme.Accent != targetAccent || theme.Src != targetSource {
+	if theme.R.Stone3 != targetRoles.Stone3 || theme.Accent != targetAccent || theme.Src != targetSource {
 		t.Fatal("tint, accent, and source field did not finish together")
 	}
 	if ratio := palette.ContrastRatio(theme.Src.Ink, theme.R.Stone2); ratio < 4.5 {

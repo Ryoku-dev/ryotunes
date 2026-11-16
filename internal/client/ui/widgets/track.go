@@ -6,7 +6,9 @@ import (
 	"math"
 	"strconv"
 	"strings"
+	"time"
 
+	"gioui.org/f32"
 	"gioui.org/io/event"
 	"gioui.org/io/key"
 	"gioui.org/io/pointer"
@@ -55,12 +57,21 @@ type TrackTableOpts struct {
 	DisplayItems []model.Track
 }
 
-// TrackTable draws a retained table one virtualised row at a time.
+// TrackTable draws a retained table one virtualised row at a time, as the
+// Hub's ruled list: a ruled head in small mono capitals, ordinals padded to
+// the list's digits, the row wash (in 120 / out 240 OutCubic, a 2 dp lean,
+// a press wash with the glyph at .86) and one selection wash that travels
+// between rows over 240 OutCubic and lands, fading in as it widens from .6,
+// where nothing was selected.
 type TrackTable struct {
 	rows             map[string]*trackRow
 	selected         int
 	selectionReady   bool
 	selection        anim.Tween
+	selectionFade    anim.Tween
+	selectionWidth   anim.Tween
+	selectionTarget  int
+	selectionStarted bool
 	cachedFirst      *model.Track
 	cachedLength     int
 	cachedMixed      bool
@@ -75,15 +86,46 @@ type trackRow struct {
 	like              kit.Click
 	more              kit.IconPlaque
 	fill              look.Fill
-	hover             look.Hover
+	wash              look.RowWash
 	contextTag        int
 	context           contextRelease
 	menu              ItemMenu
+	ordinal           string
+	ordinalOf         [2]int
 	titleChildren     [3]layout.FlexChild
 	titleLineChildren [3]layout.FlexChild
 	inlineChildren    [5]layout.FlexChild
 	titleCopyChildren [2]layout.FlexChild
 	rowChildren       [8]layout.FlexChild
+}
+
+// ordinalDigits is how many digits a list of n rows numbers with: two at
+// least, as the Hub pads its ordinals ("01" .. "128").
+func ordinalDigits(n int) int {
+	digits := 2
+	for limit := 100; n >= limit && digits < 18; limit *= 10 {
+		digits++
+	}
+	return digits
+}
+
+// padOrdinal is n zero-padded to digits.
+func padOrdinal(n, digits int) string {
+	value := strconv.Itoa(n)
+	if len(value) >= digits {
+		return value
+	}
+	return strings.Repeat("0", digits-len(value)) + value
+}
+
+// ordinalText is the row's ordinal, built only when its place or the list's
+// digits change.
+func (r *trackRow) ordinalText(index, digits int) string {
+	if r.ordinal == "" || r.ordinalOf != [2]int{index, digits} {
+		r.ordinalOf = [2]int{index, digits}
+		r.ordinal = padOrdinal(index+1, digits)
+	}
+	return r.ordinal
 }
 
 type trackSpec struct {
@@ -253,54 +295,64 @@ func tableSpec(gtx layout.Context, e *env.Env, opts TrackTableOpts) trackSpec {
 	return spec
 }
 
-func headerCell(gtx layout.Context, e *env.Env, width int, value string, align text.Alignment) layout.Dimensions {
-	gtx.Constraints = layout.Exact(image.Pt(max(0, width), gtx.Dp(32)))
-	return layout.Inset{Left: unit.Dp(8), Right: unit.Dp(8)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-		return layout.Center.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-			gtx.Constraints.Min.X = gtx.Constraints.Max.X
-			return kit.Label{Style: e.Th.T.Group, Color: e.Th.R.Fg3, MaxLines: 1, Align: align}.Layout(gtx, e.Th.Theme, value)
-		})
-	})
+// trackHeadTracking is the table head's tracking (the Hub's spec labels).
+const trackHeadTracking = 1.2
+
+// headerCell sets one column's name in the smallest mono, spaced capitals,
+// fg3, inset 8 within width and aligned as its column's values.
+func headerCell(gtx layout.Context, e *env.Env, x, width, height int, value string, align text.Alignment) {
+	inset := gtx.Dp(8)
+	room := max(0, width-2*inset)
+	cell := gtx
+	cell.Constraints = layout.Constraints{Max: image.Pt(room, height)}
+	record := op.Record(gtx.Ops)
+	dimensions := kit.LayoutSpacedCaps(cell, e.Th.Theme, e.Th.T.MonoSm, e.Th.R.Fg3, trackHeadTracking, value)
+	call := record.Stop()
+	left := x + inset
+	switch align {
+	case text.Middle:
+		left += (room - dimensions.Size.X) / 2
+	case text.End:
+		left += room - dimensions.Size.X
+	}
+	offset := op.Offset(image.Pt(left, (height-dimensions.Size.Y)/2)).Push(gtx.Ops)
+	call.Add(gtx.Ops)
+	offset.Pop()
 }
 
-// Header draws the 32 dp table heading and its vein rule.
+// Header draws the table's ruled head: 32 dp of column names in small mono
+// capitals over a vein hairline.
 func (t *TrackTable) Header(gtx layout.Context, e *env.Env, opts TrackTableOpts) layout.Dimensions {
 	spec := tableSpec(gtx, e, opts)
 	height := gtx.Dp(32)
 	size := gtx.Constraints.Constrain(image.Pt(spec.width, height))
-	body := op.Record(gtx.Ops)
-	children := []layout.FlexChild{
-		layout.Rigid(func(gtx layout.Context) layout.Dimensions { return headerCell(gtx, e, spec.index, "#", text.Middle) }),
-		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-			return headerCell(gtx, e, gtx.Constraints.Max.X, "Title", text.Start)
-		}),
+	fixed := spec.index + spec.artist + spec.album + spec.plays + spec.added + spec.length + gtx.Dp(40)
+	headerCell(gtx, e, 0, spec.index, height, "#", text.Middle)
+	x := spec.index
+	title := max(0, size.X-fixed)
+	headerCell(gtx, e, x, title, height, "Title", text.Start)
+	x += title
+	columns := [...]struct {
+		show  bool
+		width int
+		name  string
+		align text.Alignment
+	}{
+		{spec.showArtist, spec.artist, "Artist", text.Start},
+		{spec.showAlbum, spec.album, "Album", text.Start},
+		{spec.showPlays, spec.plays, "Plays", text.End},
+		{spec.showAdded, spec.added, "Added", text.Start},
+		{spec.showLength, spec.length, "Length", text.End},
 	}
-	if spec.showArtist {
-		children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			return headerCell(gtx, e, spec.artist, "Artist", text.Start)
-		}))
+	for _, column := range columns {
+		if !column.show {
+			continue
+		}
+		headerCell(gtx, e, x, column.width, height, column.name, column.align)
+		x += column.width
 	}
-	if spec.showAlbum {
-		children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions { return headerCell(gtx, e, spec.album, "Album", text.Start) }))
-	}
-	if spec.showPlays {
-		children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions { return headerCell(gtx, e, spec.plays, "Plays", text.End) }))
-	}
-	if spec.showAdded {
-		children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions { return headerCell(gtx, e, spec.added, "Added", text.Start) }))
-	}
-	if spec.showLength {
-		children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			return headerCell(gtx, e, spec.length, "Length", text.End)
-		}))
-	}
-	children = append(children, layout.Rigid(layout.Spacer{Width: unit.Dp(40)}.Layout))
-	rowGTX := gtx
-	rowGTX.Constraints = layout.Exact(size)
-	layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(rowGTX, children...)
-	call := body.Stop()
-	call.Add(gtx.Ops)
-	paint.FillShape(gtx.Ops, e.Th.R.Vein, clip.Rect(image.Rect(0, max(0, size.Y-1), size.X, size.Y)).Op())
+	hair := max(1, gtx.Dp(1))
+	paint.FillShape(gtx.Ops, e.Th.R.Vein, clip.Rect(image.Rect(0, max(0, size.Y-hair), size.X, size.Y)).Op())
 	return layout.Dimensions{Size: size}
 }
 
@@ -379,11 +431,7 @@ func (t *TrackTable) processRow(gtx layout.Context, e *env.Env, row *trackRow, i
 	}
 	track := items[index]
 	if row.like.Clicked(gtx) && trackRateable(track) {
-		rating := model.RatingLike
-		if trackLiked(track) {
-			rating = model.RatingIndifferent
-		}
-		act.Rate(e, track, rating)
+		ToggleLike(e, track, trackLiked(track))
 	}
 	if row.more.Clicked(gtx) {
 		row.openMenu(e, track, opts.Context, index)
@@ -443,27 +491,43 @@ func drawIcon(gtx layout.Context, icon *widget.Icon, ink paletteColor, size unit
 	return icon.Layout(gtx, ink)
 }
 
-func (t *TrackTable) indexCell(gtx layout.Context, e *env.Env, row *trackRow, index int, selected, playing, hot bool) layout.Dimensions {
+// drawScaledIcon draws icon at size, scaled about its centre (a pressed
+// row's glyph stands at .86).
+func drawScaledIcon(gtx layout.Context, icon *widget.Icon, ink paletteColor, size unit.Dp, scale float32) layout.Dimensions {
+	if scale >= 1 {
+		return drawIcon(gtx, icon, ink, size)
+	}
+	pixels := gtx.Dp(size)
+	centre := f32.Pt(float32(pixels)/2, float32(pixels)/2)
+	stack := op.Affine(f32.Affine2D{}.Scale(centre, f32.Pt(scale, scale))).Push(gtx.Ops)
+	dimensions := drawIcon(gtx, icon, ink, size)
+	stack.Pop()
+	return dimensions
+}
+
+// indexCell is the row's ordinal, padded to the list's digits in mono: fg3
+// at rest, the accent (sel) on the selected row. The playing row shows the
+// sounding glyph in the music's accent; a hot row offers play (pause while
+// playing), its glyph pressing to .86.
+func (t *TrackTable) indexCell(gtx layout.Context, e *env.Env, row *trackRow, index, digits int, selected, playing, hot bool) layout.Dimensions {
 	gtx.Constraints = layout.Exact(image.Pt(gtx.Dp(48), gtx.Constraints.Max.Y))
 	quiet, active := e.Th.R.Fg3, e.Th.Accent.Ink
 	if selected {
-		quiet, active = e.Th.R.OnSel2, e.Th.R.OnSel
+		quiet = e.Th.R.Sel
 	}
+	scale := row.wash.GlyphScale()
 	return layout.Center.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 		if hot {
 			icon, ink := look.Icon.Play, e.Th.R.Fg
-			if selected {
-				ink = e.Th.R.OnSel
-			}
 			if playing {
 				icon, ink = look.Icon.Pause, active
 			}
-			return row.play.Layout(gtx, func(gtx layout.Context) layout.Dimensions { return drawIcon(gtx, icon, ink, 18) })
+			return row.play.Layout(gtx, func(gtx layout.Context) layout.Dimensions { return drawScaledIcon(gtx, icon, ink, 18, scale) })
 		}
 		if playing {
 			return drawIcon(gtx, look.Icon.VolumeUp, active, 18)
 		}
-		return kit.Label{Style: e.Th.T.Mono, Color: quiet, MaxLines: 1, Align: text.Middle}.Layout(gtx, e.Th.Theme, Count(index+1))
+		return kit.Label{Style: e.Th.T.Mono, Color: quiet, MaxLines: 1, Align: text.Middle}.Layout(gtx, e.Th.Theme, row.ordinalText(index, digits))
 	})
 }
 
@@ -471,9 +535,9 @@ func (t *TrackTable) titleCell(gtx layout.Context, e *env.Env, row *trackRow, tr
 	ink := e.Th.R.Fg
 	quiet := e.Th.R.Fg3
 	if selected {
-		ink, quiet = e.Th.R.OnSel, e.Th.R.OnSel2
+		quiet = e.Th.R.Fg2
 	}
-	if playing && !selected {
+	if playing {
 		ink = e.Th.Accent.Ink
 	}
 	liked := trackLiked(track)
@@ -545,9 +609,6 @@ func (t *TrackTable) titleCell(gtx layout.Context, e *env.Env, row *trackRow, tr
 						opacity := paint.PushOpacity(gtx.Ops, likeAlpha)
 						dims := row.like.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 							likedInk := e.Th.Accent.Ink
-							if selected {
-								likedInk = e.Th.R.OnSel
-							}
 							return row.fill.Layout(gtx, e.Th, liked,
 								iconWidget(look.Icon.HeartOutline, quiet, 16),
 								iconWidget(look.Icon.Heart, likedInk, 16),
@@ -586,15 +647,15 @@ func fixedText(gtx layout.Context, e *env.Env, width int, style theme.TextStyle,
 	})
 }
 
-func (t *TrackTable) rowContent(gtx layout.Context, e *env.Env, row *trackRow, items []model.Track, index int, spec trackSpec, selected, playing, hot, mixed bool) layout.Dimensions {
+func (t *TrackTable) rowContent(gtx layout.Context, e *env.Env, row *trackRow, items []model.Track, index, digits int, spec trackSpec, selected, playing, hot, mixed bool) layout.Dimensions {
 	track := items[index]
 	quiet := e.Th.R.Fg3
 	if selected {
-		quiet = e.Th.R.OnSel2
+		quiet = e.Th.R.Fg2
 	}
 	children := row.rowChildren[:2]
 	children[0] = layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-		return t.indexCell(gtx, e, row, index, selected, playing, hot)
+		return t.indexCell(gtx, e, row, index, digits, selected, playing, hot)
 	})
 	children[1] = layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
 		return t.titleCell(gtx, e, row, track, selected, playing, hot, mixed, spec.compact, spec.art)
@@ -635,16 +696,54 @@ func (t *TrackTable) rowContent(gtx layout.Context, e *env.Env, row *trackRow, i
 			row.more.Icon = look.Icon.More
 			row.more.Description = "More actions"
 			return layout.Center.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-				if selected {
-					return row.more.Click.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-						return drawIcon(gtx, look.Icon.More, e.Th.R.OnSel, 18)
-					})
-				}
 				return row.more.Layout(gtx, e.Th.Theme)
 			})
 		}),
 	)
 	return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx, children...)
+}
+
+// Selection landing (TreeView.qml): a selection arriving where none was
+// widens from .6 of the row to all of it over 320 ms while it fades in.
+const (
+	selectionLandFrom  = .6
+	selectionLandWidth = 320 * time.Millisecond
+)
+
+// snapTween stands an OutCubic tween of duration d at v; its next Set moves.
+func snapTween(gtx layout.Context, tween *anim.Tween, d time.Duration, v float32) {
+	*tween = anim.Tween{Duration: d, Ease: anim.EaseOutCubic}
+	tween.Set(gtx, v)
+}
+
+// stepSelection moves the selection wash toward the selected row and
+// returns where it stands (in rows), its opacity and its width share. From
+// row to row it travels over th.Motion.Move on OutCubic; arriving where
+// nothing was selected (the table's first selection too) it lands: it
+// stands at the row and fades in over Move while it widens from .6 over
+// 320 ms. Calling it again within a frame changes nothing.
+func (t *TrackTable) stepSelection(gtx layout.Context, th *look.Theme) (at, opacity, width float32) {
+	target := t.selected
+	move := th.Motion.Move
+	if !t.selectionStarted || target != t.selectionTarget {
+		switch {
+		case target < 0:
+			snapTween(gtx, &t.selectionFade, move, 0)
+		case !t.selectionStarted || t.selectionTarget < 0:
+			snapTween(gtx, &t.selection, move, float32(target))
+			snapTween(gtx, &t.selectionFade, move, 0)
+			snapTween(gtx, &t.selectionWidth, selectionLandWidth, selectionLandFrom)
+			t.selectionFade.Set(gtx, 1)
+			t.selectionWidth.Set(gtx, 1)
+		default:
+			t.selection.Set(gtx, float32(target))
+		}
+		t.selectionStarted, t.selectionTarget = true, target
+	}
+	if target < 0 {
+		return 0, 0, 1
+	}
+	return t.selection.Value(gtx), t.selectionFade.Value(gtx), t.selectionWidth.Value(gtx)
 }
 
 // Row draws one row. Pages call it from look.Scroller so only visible rows are laid out.
@@ -670,39 +769,39 @@ func (t *TrackTable) Row(gtx layout.Context, e *env.Env, items []model.Track, in
 	selected := index == t.selected
 	playing := rowPlaying(e, items[index])
 	mixed := t.listHasMixedProviders(items)
-	t.selection.Duration = e.Th.Motion.Select
-	t.selection.Ease = anim.EaseChisel
-	t.selection.Set(gtx, float32(t.selected))
-	selectionAt := t.selection.Value(gtx)
+	digits := ordinalDigits(len(items))
+	selectionAt, selectionOpacity, selectionWidth := t.stepSelection(gtx, e.Th)
+	preview := kit.State(0)
+	if t.PreviewRow == index {
+		preview = t.PreviewRowState
+	}
+	hot := row.click.Hovered() || gtx.Focused(&row.click.Clickable) || preview == kit.StateHover || preview == kit.StatePressed
+	pressed := row.click.Pressed() || preview == kit.StatePressed
+	row.wash.Update(gtx, e.Th, hot, pressed)
+	cut := gtx.Dp(e.Th.Cut.Small)
 
 	rowGTX := gtx
 	rowGTX.Constraints = layout.Exact(size)
 	dims := row.click.Layout(rowGTX, func(gtx layout.Context) layout.Dimensions {
-		record := op.Record(gtx.Ops)
-		contentDims, hoverAlpha := row.hover.Layout(gtx, e.Th, func(gtx layout.Context) layout.Dimensions {
-			hot := row.click.Hovered() || gtx.Focused(&row.click.Clickable)
-			if t.PreviewRow == index && t.PreviewRowState == kit.StateHover {
-				hot = true
-			}
-			return t.rowContent(gtx, e, row, items, index, spec, selected, playing, hot, mixed)
-		})
-		content := record.Stop()
-		if t.PreviewRow == index && t.PreviewRowState == kit.StateHover {
-			hoverAlpha = 1
+		bounds := image.Rectangle{Max: size}
+		clipStack := clip.Rect(bounds).Push(gtx.Ops)
+		if selectionOpacity > 0 {
+			// The one selection wash, in table space: each row paints its own
+			// slice of it, so it travels across the rows as one.
+			y := int(math.Round(float64((selectionAt - float32(index)) * float32(height))))
+			w := int(float32(size.X)*selectionWidth + .5)
+			x := (size.X - w) / 2
+			kit.Fill(gtx, e.Th.Theme, image.Rect(x, y, x+w, y+height), cut, palette.WithAlpha(e.Th.R.Select(), selectionOpacity))
 		}
-		clipStack := clip.Rect(image.Rectangle{Max: contentDims.Size}).Push(gtx.Ops)
-		slabY := int(math.Round(float64((selectionAt - float32(index)) * float32(height))))
-		kit.FillCut(gtx.Ops, image.Rect(0, slabY, contentDims.Size.X, slabY+height), gtx.Dp(e.Th.Cut.Small), e.Th.R.Sel)
-		if hoverAlpha > 0 {
-			hoverInk := palette.WithAlpha(e.Th.R.Stone3, hoverAlpha)
-			kit.FillCut(gtx.Ops, image.Rectangle{Max: contentDims.Size}, gtx.Dp(e.Th.Cut.Small), hoverInk)
-		}
-		content.Add(gtx.Ops)
+		row.wash.Paint(gtx, e.Th, bounds, cut)
+		lean := op.Offset(image.Pt(row.wash.Lean(gtx), 0)).Push(gtx.Ops)
+		t.rowContent(gtx, e, row, items, index, digits, spec, selected, playing, hot, mixed)
+		lean.Pop()
 		clipStack.Pop()
-		return contentDims
+		return layout.Dimensions{Size: size}
 	})
 	if gtx.Focused(&row.click.Clickable) {
-		kit.FocusRing(gtx, e.Th.Theme, image.Rectangle{Max: dims.Size}, gtx.Dp(e.Th.Cut.Small))
+		kit.FocusRing(gtx, e.Th.Theme, image.Rectangle{Max: dims.Size}, cut)
 	}
 	pass := pointer.PassOp{}.Push(gtx.Ops)
 	area := clip.Rect(image.Rectangle{Max: dims.Size}).Push(gtx.Ops)

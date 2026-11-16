@@ -3,6 +3,7 @@ package look
 import (
 	"fmt"
 	"image"
+	"image/color"
 	"math"
 	"time"
 
@@ -14,16 +15,33 @@ import (
 	"gioui.org/layout"
 	"gioui.org/op"
 	"gioui.org/op/clip"
+	"gioui.org/op/paint"
 	"gioui.org/unit"
 
 	"github.com/ryoku-dev/ryoku/docs/lithic/library/go/anim"
 	"github.com/ryoku-dev/ryoku/docs/lithic/library/go/kit"
 	"github.com/ryoku-dev/ryoku/docs/lithic/library/go/palette"
+	"github.com/ryoku-dev/ryoku/docs/lithic/library/go/tokens"
 	"github.com/ryoku-dev/ryotunes/internal/eq"
 	"github.com/ryoku-dev/ryotunes/internal/model"
 )
 
 const graphDoubleClick = 400 * time.Millisecond
+
+// Node geometry, in dp: a resting node's half-diagonal, how much a hovered or
+// held node grows, and how far the selection's register mark stands off it.
+const (
+	nodeRadius     unit.Dp = 6
+	nodeGrow               = .3
+	nodeRing       unit.Dp = 4
+	nodeRingLandAt         = .6
+	nodeRim        unit.Dp = 1.5
+	graphLine      unit.Dp = 2
+)
+
+// chaseEpsilon is the plot fraction (about a fifth of a pixel across a wide
+// plot) at which a node's chase counts as landed.
+const nodeChaseEpsilon = .0002
 
 // EQGraphResult reports edits that need transport or a context menu.
 type EQGraphResult struct {
@@ -33,7 +51,45 @@ type EQGraphResult struct {
 	DeleteBand                  int
 }
 
+// curveCache keeps one equalizer's response and peak until its bands change.
+type curveCache struct {
+	input model.Equalizer
+	bands []model.EQBand
+	curve []float64
+	peak  float64
+	valid bool
+}
+
+func (cache *curveCache) get(equalizer model.Equalizer) ([]float64, float64) {
+	if cache.valid && curveInputEqual(cache.input, equalizer) {
+		return cache.curve, cache.peak
+	}
+	cache.curve = eq.Curve(equalizer.Preamp, equalizer.Bands, equalizerFrequencies, cache.curve)
+	cache.peak = math.Inf(-1)
+	for _, value := range cache.curve {
+		cache.peak = max(cache.peak, value)
+	}
+	if math.IsInf(cache.peak, -1) {
+		cache.peak = equalizer.Preamp
+	}
+	cache.bands = append(cache.bands[:0], equalizer.Bands...)
+	cache.input = equalizer
+	cache.input.Bands = cache.bands
+	cache.valid = true
+	return cache.curve, cache.peak
+}
+
 // EqualizerGraph owns graph focus, selection, precise pointer input and motion.
+//
+// It is drawn as the Hub draws its charts: an instrument card (EQCard) with a
+// faint engraved grid, the 0 dB line a vein hairline, the response a sel line
+// over a 45 degree hatch between it and 0 dB. Its nodes are sharp diamonds:
+// hovering one grows it and draws its guides to the scales over 120 ms on
+// OutCubic (240 out); the selected one is filled sel and carries a register
+// mark that lands (fades in while it closes from wide) over 240 ms. A node the
+// pointer holds stands exactly under it (R2); one the keys step glides to its
+// value through anim.Chase, the curve with it, never overshooting. At rest it
+// asks for no frame; only the spectrum, while music plays, moves it.
 type EqualizerGraph struct {
 	tag struct{}
 
@@ -48,15 +104,38 @@ type EqualizerGraph struct {
 	wheelFraction float32
 	keyEditing    bool
 
-	bypass     anim.Tween
-	ready      bool
-	grows      []anim.Tween
-	known      int
-	points     []f32.Point
-	curveInput model.Equalizer
-	curve      []float64
-	curvePeak  float64
-	curveValid bool
+	bypass anim.Tween
+	ready  bool
+	grows  []anim.Tween
+	hovers []anim.Tween
+	known  int
+	points []f32.Point
+
+	land         anim.Tween
+	landSelected int
+
+	chaseX, chaseY anim.Chase
+	chaseBand      int
+	chaseCount     int
+	chaseReady     bool
+	following      bool
+	chasing        bool
+	display        model.Equalizer
+	displayBands   []model.EQBand
+
+	peakCurve  curveCache
+	drawnCurve curveCache
+
+	hatchOps   op.Ops
+	hatchCall  op.CallOp
+	hatchKey   hatchKey
+	hatchReady bool
+}
+
+type hatchKey struct {
+	bounds         image.Rectangle
+	spacing, width int
+	ink            color.NRGBA
 }
 
 // Selected returns the selected band index, or -1.
@@ -65,9 +144,12 @@ func (graph *EqualizerGraph) Selected() int { return graph.selected }
 // Select changes the graph and strip selection.
 func (graph *EqualizerGraph) Select(index int) { graph.selected = index }
 
+// Holding reports whether the pointer holds a node: the one Selected returns.
+func (graph *EqualizerGraph) Holding() bool { return graph.active }
+
 func (graph *EqualizerGraph) plotBounds(gtx layout.Context, size image.Point) image.Rectangle {
 	left, right := gtx.Dp(38), gtx.Dp(13)
-	top, bottom := gtx.Dp(16), gtx.Dp(26)
+	top, bottom := gtx.Dp(16), gtx.Dp(30)
 	return image.Rect(left, top, max(left+1, size.X-right), max(top+1, size.Y-bottom))
 }
 
@@ -197,11 +279,13 @@ func (graph *EqualizerGraph) updatePointer(gtx layout.Context, equalizer *model.
 			if graph.active && value.PointerID == graph.pointerID {
 				graph.applyPointerBand(equalizer, bounds, value.Position)
 				graph.active = false
+				graph.hovered = hit
 				result.Changed, result.Released = true, true
 			}
 		case pointer.Cancel:
 			if graph.active && value.PointerID == graph.pointerID {
 				graph.active = false
+				graph.hovered = -1
 				result.Released = true
 			}
 		case pointer.Scroll:
@@ -323,26 +407,17 @@ func curveInputEqual(first, second model.Equalizer) bool {
 
 // Curve returns the cached response and peak for the current local equalizer.
 func (graph *EqualizerGraph) Curve(equalizer model.Equalizer) ([]float64, float64) {
-	if graph.curveValid && curveInputEqual(graph.curveInput, equalizer) {
-		return graph.curve, graph.curvePeak
-	}
-	graph.curve = eq.Curve(equalizer.Preamp, equalizer.Bands, equalizerFrequencies, graph.curve)
-	graph.curvePeak = math.Inf(-1)
-	for _, value := range graph.curve {
-		graph.curvePeak = max(graph.curvePeak, value)
-	}
-	if math.IsInf(graph.curvePeak, -1) {
-		graph.curvePeak = equalizer.Preamp
-	}
-	graph.curveInput = equalizer
-	graph.curveInput.Bands = append([]model.EQBand(nil), equalizer.Bands...)
-	graph.curveValid = true
-	return graph.curve, graph.curvePeak
+	return graph.peakCurve.get(equalizer)
 }
 
-func (graph *EqualizerGraph) syncGrowth(gtx layout.Context, count int, duration time.Duration) {
+// syncNodes keeps one grow and one hover tween per band: a band that arrives
+// after the first frame grows in from nothing over the notch time.
+func (graph *EqualizerGraph) syncNodes(gtx layout.Context, count int, duration time.Duration) {
 	if len(graph.grows) < count {
 		graph.grows = append(graph.grows, make([]anim.Tween, count-len(graph.grows))...)
+	}
+	if len(graph.hovers) < count {
+		graph.hovers = append(graph.hovers, make([]anim.Tween, count-len(graph.hovers))...)
 	}
 	if !graph.ready {
 		for index := range count {
@@ -353,44 +428,174 @@ func (graph *EqualizerGraph) syncGrowth(gtx layout.Context, count int, duration 
 	}
 	if count > graph.known {
 		for index := graph.known; index < count; index++ {
-			graph.grows[index].Duration = duration
-			graph.grows[index].Ease = anim.EaseChisel
+			graph.grows[index] = anim.Tween{Duration: duration, Ease: anim.EaseOutCubic}
 			graph.grows[index].Set(gtx, 0)
 			graph.grows[index].Set(gtx, 1)
+			graph.hovers[index] = anim.Tween{}
 		}
 	}
 	graph.known = count
 }
 
+// nodeHover moves band index's hover toward on: in over th.Motion.Quick, out
+// over th.Motion.Move, on OutCubic, as the Hub's rows. The tween takes its
+// new target under the duration it was running with, so a hover reversed
+// mid-way carries on from where it stands.
+func (graph *EqualizerGraph) nodeHover(gtx layout.Context, th *Theme, index int, on bool) float32 {
+	tween := &graph.hovers[index]
+	tween.Ease = anim.EaseOutCubic
+	tween.Set(gtx, boolValue(on))
+	tween.Duration = th.Motion.Move
+	if on {
+		tween.Duration = th.Motion.Quick
+	}
+	return tween.Value(gtx)
+}
+
+// displayed is the equalizer as the graph shows it this frame: the selected
+// band where its chase stands, the others where they are. A node the keys
+// step glides to its value through anim.Chase and keeps gliding after the key
+// is let go until it lands; a node the pointer holds stands exactly under it
+// (R2), and any other change (a preset, a fader, an import) stands at once.
+// It returns the equalizer itself when nothing chases, so a graph at rest
+// copies nothing.
+func (graph *EqualizerGraph) displayed(gtx layout.Context, equalizer model.Equalizer) model.Equalizer {
+	graph.chasing = false
+	selected := graph.selected
+	if selected < 0 || selected >= len(equalizer.Bands) {
+		graph.chaseReady, graph.following = false, false
+		return equalizer
+	}
+	band := equalizer.Bands[selected]
+	x, y := frequencyFraction(band.Frequency), gainY(band.Gain, 1)
+	graph.chaseX.Epsilon, graph.chaseY.Epsilon = nodeChaseEpsilon, nodeChaseEpsilon
+	if graph.keyEditing {
+		graph.following = true
+	}
+	if !graph.chaseReady || !graph.following || graph.active || graph.chaseBand != selected || graph.chaseCount != len(equalizer.Bands) {
+		// another node, bands that came and went, a node the pointer holds,
+		// or a change no key made: the node stands where its value is
+		graph.chaseX.Snap(x)
+		graph.chaseY.Snap(y)
+		graph.chaseReady, graph.chaseBand, graph.chaseCount = true, selected, len(equalizer.Bands)
+		graph.following = graph.keyEditing && !graph.active
+		return equalizer
+	}
+	graph.chaseX.Set(x)
+	graph.chaseY.Set(y)
+	shownX, shownY := graph.chaseX.Value(gtx), graph.chaseY.Value(gtx)
+	if shownX == x && shownY == y {
+		graph.following = graph.keyEditing
+		return equalizer
+	}
+	graph.displayBands = append(graph.displayBands[:0], equalizer.Bands...)
+	graph.display = equalizer
+	graph.display.Bands = graph.displayBands
+	shown := &graph.display.Bands[selected]
+	shown.Frequency = fractionFrequency(float64(shownX))
+	if shown.HasGain() {
+		shown.Gain = yGain(shownY, 1)
+	}
+	graph.chasing = true
+	return graph.display
+}
+
+// hatch engraves the response area with the Hub chart's 45 degree hatch. The
+// lines depend only on the plot and the ink, so they are recorded once into
+// the graph's own ops and replayed under the area's clip every frame.
+func (graph *EqualizerGraph) hatch(gtx layout.Context, area clip.PathSpec, bounds image.Rectangle, ink color.NRGBA) {
+	if ink.A == 0 || bounds.Empty() {
+		return
+	}
+	k := hatchKey{bounds: bounds, spacing: max(1, gtx.Dp(unit.Dp(tokens.SizeChartHatchGap))), width: max(1, gtx.Dp(unit.Dp(tokens.SizeChartHatchLine))), ink: ink}
+	if !graph.hatchReady || k != graph.hatchKey {
+		graph.hatchOps.Reset()
+		record := op.Record(&graph.hatchOps)
+		var path clip.Path
+		path.Begin(&graph.hatchOps)
+		height := bounds.Dy()
+		for x := bounds.Min.X - height; x <= bounds.Max.X; x += k.spacing {
+			path.MoveTo(f32.Pt(float32(x), float32(bounds.Max.Y)))
+			path.LineTo(f32.Pt(float32(x+height), float32(bounds.Min.Y)))
+		}
+		paint.FillShape(&graph.hatchOps, ink, clip.Stroke{Path: path.End(), Width: float32(k.width)}.Op())
+		graph.hatchCall = record.Stop()
+		graph.hatchKey, graph.hatchReady = k, true
+	}
+	stack := clip.Outline{Path: area}.Op().Push(gtx.Ops)
+	graph.hatchCall.Add(gtx.Ops)
+	stack.Pop()
+}
+
 func (graph *EqualizerGraph) draw(gtx layout.Context, th *Theme, equalizer model.Equalizer, bounds image.Rectangle, spectrum []float32, playing bool) {
+	plane := eqCardPlane(th)
 	if playing {
 		drawSpectrum(gtx, th, bounds, spectrum)
 	}
 	drawGraphGrid(gtx, th, bounds)
-	curve, _ := graph.Curve(equalizer)
+	shown := graph.displayed(gtx, equalizer)
+	curve, _ := graph.drawnCurve.get(shown)
 	graph.points = responsePoints(curve, bounds.Dx(), bounds.Dy(), graph.points)
 	for index := range graph.points {
 		graph.points[index].X += float32(bounds.Min.X)
 		graph.points[index].Y += float32(bounds.Min.Y)
 	}
 	active := graph.bypass.Value(gtx)
-	lineInk := palette.Mix(palette.WithAlpha(th.R.Fg3, .6), th.Accent.Ink, active)
 	zero := float32(bounds.Min.Y) + gainY(0, bounds.Dy())
-	fillResponse(gtx.Ops, graph.points, zero, palette.WithAlpha(th.Accent.Ink, .18*active))
-	strokePolyline(gtx.Ops, graph.points, float32(max(1, gtx.Dp(2))), lineInk)
+	if len(graph.points) >= 2 {
+		// the hatch stays while bypassed, greyed, so the shape still reads
+		hatchInk := palette.SRGBAlpha(th.R.Fg, plane, tokens.AlphaHatch*(.45+.55*active))
+		graph.hatch(gtx, responseArea(gtx.Ops, graph.points, zero), bounds, hatchInk)
+	}
+	lineInk := palette.Mix(palette.WithAlpha(th.R.Fg3, .7), th.R.Sel, active)
+	strokePolyline(gtx.Ops, graph.points, float32(max(1, gtx.Dp(graphLine))), lineInk)
 
-	graph.syncGrowth(gtx, len(equalizer.Bands), th.Motion.Notch)
-	for index, band := range equalizer.Bands {
-		point := graphNodePoint(&equalizer, index, bounds)
-		scale := graph.grows[index].Value(gtx)
-		radius := float32(gtx.Dp(6)) * scale
-		fill, rim, hollow := th.Accent.Fill, th.R.Stone1, !band.Enabled
-		if index == graph.selected {
-			fill, rim, hollow = th.R.Sel, th.R.OnSel, false
-		} else if hollow {
-			fill, rim = th.R.Stone1, th.R.Fg3
+	graph.syncNodes(gtx, len(shown.Bands), th.Motion.Notch)
+	if graph.selected != graph.landSelected {
+		graph.landSelected = graph.selected
+		graph.land = anim.Tween{Duration: th.Motion.Move, Ease: anim.EaseOutCubic}
+		graph.land.Set(gtx, 0)
+		graph.land.Set(gtx, 1)
+	}
+	land := graph.land.Value(gtx)
+	hair := max(1, gtx.Dp(unit.Dp(tokens.SizeHairline)))
+	rim := float32(gtx.Dp(nodeRim))
+	if rim <= 0 {
+		rim = 1
+	}
+	// the guides of the node under the pointer (or held) run to both scales
+	for index := range shown.Bands {
+		on := index == graph.hovered || (graph.active && index == graph.selected)
+		hover := graph.nodeHover(gtx, th, index, on)
+		if hover <= 0 {
+			continue
 		}
-		drawDiamond(gtx.Ops, point, radius, fill, rim, hollow)
+		point := graphNodePoint(&shown, index, bounds)
+		guide := palette.WithAlpha(th.R.GuideLit(), hover)
+		x, y := int(point.X+.5), int(point.Y+.5)
+		paint.FillShape(gtx.Ops, guide, clip.Rect(image.Rect(x, y, x+hair, bounds.Max.Y)).Op())
+		paint.FillShape(gtx.Ops, guide, clip.Rect(image.Rect(bounds.Min.X, y, x, y+hair)).Op())
+	}
+	for index, band := range shown.Bands {
+		point := graphNodePoint(&shown, index, bounds)
+		grow := graph.grows[index].Value(gtx)
+		hover := graph.hovers[index].Value(gtx)
+		radius := float32(gtx.Dp(nodeRadius)) * grow * (1 + nodeGrow*hover)
+		selected := index == graph.selected
+		switch {
+		case selected:
+			// the handle: filled sel, set off from the curve by the plane, and
+			// its register mark landing around it
+			ring := radius + float32(gtx.Dp(nodeRing))*(1+(1-nodeRingLandAt)*(1-land)*2.5)
+			drawDiamond(gtx.Ops, point, ring, color.NRGBA{}, palette.WithAlpha(th.R.GuideLit(), land*grow), float32(hair), true)
+			drawDiamond(gtx.Ops, point, radius+rim, plane, color.NRGBA{}, 0, false)
+			drawDiamond(gtx.Ops, point, radius, palette.Mix(th.R.Sel, th.R.Fg, tokens.AlphaHoverFill*hover), color.NRGBA{}, 0, false)
+		case band.Enabled:
+			fill := palette.Mix(plane, th.R.Sel, .35*hover)
+			drawDiamond(gtx.Ops, point, radius, fill, lineInk, rim, false)
+		default:
+			drawDiamond(gtx.Ops, point, radius, plane, th.R.Fg3, rim, false)
+		}
 	}
 	if !equalizer.Enabled {
 		labelGTX := gtx
@@ -418,41 +623,42 @@ func (graph *EqualizerGraph) Layout(gtx layout.Context, th *Theme, equalizer *mo
 		if len(equalizer.Bands) > 0 {
 			graph.selected = 0
 		}
-		graph.bypass.Duration, graph.bypass.Ease = th.Motion.Field, anim.EaseChisel
-		if equalizer.Enabled {
-			graph.bypass.Set(gtx, 1)
-		} else {
-			graph.bypass.Set(gtx, 0)
-		}
+		graph.landSelected = graph.selected
+		graph.land.Set(gtx, 1)
+		graph.bypass.Duration, graph.bypass.Ease = th.Motion.Field, anim.EaseOutCubic
+		graph.bypass.Set(gtx, boolValue(equalizer.Enabled))
 	}
-	if equalizer.Enabled {
-		graph.bypass.Set(gtx, 1)
-	} else {
-		graph.bypass.Set(gtx, 0)
-	}
+	graph.bypass.Duration, graph.bypass.Ease = th.Motion.Field, anim.EaseOutCubic
+	graph.bypass.Set(gtx, boolValue(equalizer.Enabled))
 	if graph.selected >= len(equalizer.Bands) {
 		graph.selected = len(equalizer.Bands) - 1
+	}
+	if graph.hovered >= len(equalizer.Bands) {
+		graph.hovered = -1
 	}
 	result := EQGraphResult{ContextBand: -1, DeleteBand: -1}
 	graph.updatePointer(gtx, equalizer, bounds, &result)
 	graph.updateKeys(gtx, equalizer, &result)
 
 	outer := image.Rectangle{Max: size}
+	cut := gtx.Dp(th.Cut.Mid)
 	area := clip.Rect(outer).Push(gtx.Ops)
-	kit.FillCut(gtx.Ops, outer, gtx.Dp(6), th.R.Stone1)
+	EQCard(gtx, th, outer, cut)
 	graph.draw(gtx, th, *equalizer, bounds, spectrum, playing)
 	semantic.Editor.Add(gtx.Ops)
 	semantic.DescriptionOp("Equalizer response graph").Add(gtx.Ops)
 	event.Op(gtx.Ops, &graph.tag)
 	if graph.active {
 		pointer.CursorGrabbing.Add(gtx.Ops)
+	} else if graph.hovered >= 0 {
+		pointer.CursorGrab.Add(gtx.Ops)
 	} else {
 		pointer.CursorCrosshair.Add(gtx.Ops)
 	}
 	area.Pop()
 	drawGraphLabels(gtx, th, bounds)
 	if gtx.Focused(&graph.tag) {
-		kit.FocusRing(gtx, th.Theme, outer, gtx.Dp(6))
+		kit.FocusRing(gtx, th.Theme, outer, cut)
 	}
 	if graph.hovered >= 0 && graph.hovered < len(equalizer.Bands) {
 		band := equalizer.Bands[graph.hovered]
@@ -461,7 +667,14 @@ func (graph *EqualizerGraph) Layout(gtx layout.Context, th *Theme, equalizer *mo
 			frequency = fmt.Sprintf("%g kHz", math.Round(band.Frequency/100)/10)
 		}
 		value := fmt.Sprintf("%s · %s dB · Q %.2f", frequency, FormatGain(band.Gain), band.Q)
-		Bubble(gtx, th, graph.pointer, value, 1)
+		// the bubble rides the node, chasing with it while it is held
+		shown := equalizer
+		if graph.chasing && graph.hovered == graph.selected {
+			shown = &graph.display
+		}
+		point := graphNodePoint(shown, graph.hovered, bounds)
+		at := image.Pt(int(point.X+.5), int(point.Y+.5)-gtx.Dp(nodeRadius))
+		Bubble(gtx, th, at, value, graph.hovers[graph.hovered].Value(gtx))
 	}
 	return layout.Dimensions{Size: size}, result
 }

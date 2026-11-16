@@ -8,19 +8,30 @@ import (
 	"gioui.org/layout"
 	"gioui.org/op"
 
+	"github.com/ryoku-dev/ryoku/docs/lithic/library/go/anim"
 	"github.com/ryoku-dev/ryoku/docs/lithic/library/go/kit"
 	"github.com/ryoku-dev/ryotunes/internal/client/ui/env"
 	"github.com/ryoku-dev/ryotunes/internal/client/ui/look"
+	"github.com/ryoku-dev/ryotunes/internal/client/ui/widgets"
 	"github.com/ryoku-dev/ryotunes/internal/model"
 	"github.com/ryoku-dev/ryotunes/internal/protocol"
 )
 
 const volumeSendInterval = 50 * time.Millisecond
 
+// volumeControl is the mute plaque and the volume scrubber. What the hand
+// does on the scrubber is exact (owner ruling: easy to drag precisely): a
+// drag, a click, arrow keys and the wheel show their value at once. A
+// change that comes from anywhere else (mute, another client, the daemon)
+// is chased: the fill and handle follow the new volume as the Hub's Chase
+// follows, never overshooting, still once it lands.
 type volumeControl struct {
-	icon     kit.IconPlaque
-	iconTip  look.Tip
-	scrubber look.Scrubber
+	icon      kit.IconPlaque
+	iconGlyph widgets.PressGlyph
+	iconTip   look.Tip
+	scrubber  look.Scrubber
+	shown     anim.Chase
+	placed    bool
 
 	target   int
 	preMute  int
@@ -34,32 +45,32 @@ type volumeControl struct {
 func (v *volumeControl) Layout(gtx layout.Context, e *env.Env, width int) layout.Dimensions {
 	v.reconcile(e)
 	volumeTip := "Mute"
+	icon := look.Icon.VolumeUp
 	v.icon.Small = true
 	v.icon.Kind = kit.PlaqueQuiet
-	v.icon.Icon = look.Icon.VolumeUp
-	v.icon.Description = volumeTip
 	switch {
 	case v.target == 0:
 		volumeTip = "Unmute"
-		v.icon.Icon = look.Icon.VolumeOff
-		v.icon.Description = volumeTip
+		icon = look.Icon.VolumeOff
 	case v.target < 34:
-		v.icon.Icon = look.Icon.VolumeMute
+		icon = look.Icon.VolumeMute
 	case v.target < 67:
-		v.icon.Icon = look.Icon.VolumeDown
+		icon = look.Icon.VolumeDown
 	}
+	v.icon.Description = volumeTip
 
+	shown := v.shownValue(gtx)
 	dimensions := layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			return v.iconTip.Layout(gtx, e.Th, e.Overlays, volumeTip, func(gtx layout.Context) layout.Dimensions {
-				return v.icon.Layout(gtx, e.Th.Theme)
+				return v.iconGlyph.Layout(gtx, e.Th, &v.icon, icon)
 			})
 		}),
 		layout.Rigid(layout.Spacer{Width: 4}.Layout),
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			width = max(0, min(width, gtx.Constraints.Max.X))
 			gtx.Constraints.Min.X, gtx.Constraints.Max.X = width, width
-			return v.scrubber.Layout(gtx, e.Th, float32(v.target)/100, look.ScrubberStyle{
+			return v.scrubber.Layout(gtx, e.Th, shown, look.ScrubberStyle{
 				Fill:         e.Th.R.Fg2,
 				AlwaysHandle: true,
 				Bubble: func(fraction float32) string {
@@ -98,6 +109,13 @@ func (v *volumeControl) Layout(gtx layout.Context, e *env.Env, width int) layout
 	}
 	if fraction, committed := v.scrubber.Committed(); committed {
 		v.commit(e, int(math.Round(float64(fraction*100))))
+		// the hand's own change (a click, a key, a settled wheel) stands at
+		// once: the next key steps from it and the wheel never glides back
+		v.shown.Snap(float32(v.target) / 100)
+	}
+	if v.dragging {
+		// the pointer's own value stands; a chase would trail the hand
+		v.shown.Snap(float32(v.target) / 100)
 	}
 	if v.queued {
 		if !gtx.Now.Before(v.sendAt) {
@@ -107,6 +125,19 @@ func (v *volumeControl) Layout(gtx layout.Context, e *env.Env, width int) layout
 		}
 	}
 	return dimensions
+}
+
+// shownValue is the scrubber's value this frame, 0..1: the target itself
+// while the pointer drags or on the first frame, else the chase toward it.
+func (v *volumeControl) shownValue(gtx layout.Context) float32 {
+	target := float32(v.target) / 100
+	if !v.placed || v.dragging {
+		v.placed = true
+		v.shown.Snap(target)
+		return target
+	}
+	v.shown.Set(target)
+	return v.shown.Value(gtx)
 }
 
 func (v *volumeControl) reconcile(e *env.Env) {

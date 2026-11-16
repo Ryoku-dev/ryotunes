@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- Ryotunes follows the Style page in Ryoku Settings now. Design, colours, light or dark, contrast, tint, reduced motion and the Japanese words all come from there and change while Ryotunes is open, and Settings, Appearance shows what the desktop uses with a button that opens Ryoku Settings.
+- Material, Adwaita and Fluent work in Ryotunes too, with their own rounded corners and surfaces like the rest of Ryoku. Covers stay rounded squares and the visualizer bars stay sharp.
+- Ryotunes looks like Ryoku Settings: a numbered sidebar with its Japanese words, a header on every page with where you are, the service and the time, ruled sections, a line of counts under each page title, and Ryoku's motto at the foot.
+- Your playlists open and close as a folder in the sidebar, with New playlist as its first item, and while Settings is open its sections hang under it and take you straight there.
+- Hovering, pressing and moving around all have the same small animations as Ryoku Settings, at your screen's full refresh rate, and nothing moves while you're not doing anything.
+- Home shows your listening for the last two weeks: plays and listening time as charts, plus this week's plays, your top artist and your top song. The daemon needs a restart after updating for the charts to show.
+- Unliking a song, removing something from your library, unsubscribing from an artist, dropping a radio favourite, stopping watching a folder, resetting a setting and changing the equalizer now show a notice with Undo.
+- Settings marks the rows you changed and gives each one a reset, asks before clearing caches, signing out, disconnecting Last.fm or removing a folder, and keeps the rarely used options under More options.
+- The equalizer is drawn like Ryoku's charts, its values roll as they change, a preset glides into place, and a dragged point follows your pointer smoothly while the value stays exact.
+- The player bar shows the service and where you are in the queue under the artist, and search suggestions are grouped with your words underlined.
+- Text is set in Geologica and Martian Mono, and the icons are Material Symbols like the rest of Ryoku.
+- The queue, lyrics and sidebar open as drawers over the page with the page dimmed behind them when there's no room to dock.
 - Now playing, the album, playlist and artist pages, Home's now playing card and the mini player show the cover, heavily blurred, behind them. Its shapes and colours come through while text over it reads the same on any cover, and it fades over when the track changes.
 - Black and white or dark covers no longer turn Ryotunes navy blue: a cover without colour makes the window grey, with grey buttons and bars and the sung lyrics in white, and dark covers no longer pick a bright blue from their shadows.
 - The equalizer's bands spread across the whole row instead of bunching up on the left, and each band's gain, frequency and Q sit centred over its fader. With more bands than fit, the row scrolls and + Band stays in view.
@@ -20,11 +32,11 @@
 - Fast scrolling no longer skips ahead in long pages and lists.
 - Hovering a cover, song or row leaves room around it, so titles don't touch the edge of the highlight anymore.
 - Menus light up the row under the pointer instead of darkening it.
-- Sound presets and the appearance choices wrap onto a second line instead of scrolling sideways, the equalizer's bands show when there's more to scroll, and the settings sections list scrolls when the window is short.
-- The Ryoku mark in the top bar and About is the current logo.
+- Sound presets and the appearance choices wrap onto a second line instead of scrolling sideways, and the equalizer's bands show when there's more to scroll.
+- The Ryoku mark in the sidebar and About is the current logo.
 - Ryotunes now has its own notice: GPL-3.0-or-later, copyright Ryoku-dev and contributors, a trademark term for the Ryoku and Ryotunes names and marks, and every bundled component's license, also reachable from Settings, About.
 - Lyrics are sung word by word now: each word fills with the cover's colour as it's sung and lifts a little, and the line being sung grows into place while the last one settles back. Lyrics that only time each line get their word timing estimated, and it can be turned off in Settings, Lyrics.
-- The whole window takes on the colour of the cover that's playing, the sidebar, panels and player bar included, and retints when the track changes. Turn it off with Tint the window in Settings, Appearance.
+- Tint with the cover in Settings, Appearance gives the whole window the colour of the cover that's playing and retints it when the track changes. It's off by default, so Ryotunes wears the same surfaces as the rest of Ryoku.
 - A new cover slides in behind a sharp diagonal cut when the track changes.
 - Visualizers are bolder and react much more to the music: loud bands are brighter, bars have peak caps that hold and fall, every style kicks on the beat, and the now playing visualizer is taller.
 - Fixed the Word-timed lyrics setting showing off while it was actually on.
@@ -33,12 +45,10 @@
 - The visualizer has four styles in Settings, Appearance, or by clicking it on Home: bars, curve, oscilloscope and vectorscope. The scopes read the real stereo signal through pw-record, only while they're on screen.
 - New parametric equalizer with up to 20 bands: drag the points on the curve, use the wheel for Q, double click to add a band, pick a preset or paste an AutoEQ profile. Open it from the sound menu or Settings, Sound.
 - The sidebar folds down to an icon rail and back with the button next to Back or Ctrl B, and it remembers your choice. On narrower windows the same button opens the full sidebar over the page.
-- The corners of the panes can be set in Settings, Appearance, from square to deep cuts or your own size, and Desktop follows the window corners you set in Ryoku Hub.
 - The mini player is a wide strip now, with the cover along its left edge and no empty space around it.
 - Ryotunes is laid out like a music player now: your playlists sit in the sidebar, the queue and lyrics open beside the music and the player stays along the bottom, with a now playing view for big artwork and lyrics.
 - The Ryoku mark is back, and the provider switcher sits on top with the provider icons again, lit in the provider's colour.
 - Search is one field in the top bar, with recent searches and suggestions while you type.
-- Play, likes, track changes, seeking, panels and provider switches have small animations, and nothing moves while you are not doing anything.
 - The Discord toggle is back in the top bar, artists can be subscribed to again, and Settings has its missing rows back: sound, watched folders, playlist import and export, diagnostics and the engine version.
 - The seek bar is a slim, sharp zigzag that moves while music plays and lies flat when you pause, like Android's wavy progress but cut in Lithic.
 - Page headers and the now playing view have a visualizer that moves with the music at 60 frames a second. It can be turned off in Settings, Appearance.

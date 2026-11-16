@@ -16,6 +16,8 @@ import (
 	"github.com/ryoku-dev/ryotunes/internal/client/ui/act"
 	"github.com/ryoku-dev/ryotunes/internal/client/ui/env"
 	"github.com/ryoku-dev/ryotunes/internal/client/ui/look"
+	"github.com/ryoku-dev/ryotunes/internal/client/ui/pages/pagesheet"
+	"github.com/ryoku-dev/ryotunes/internal/client/ui/sheet"
 	"github.com/ryoku-dev/ryotunes/internal/client/ui/widgets"
 	"github.com/ryoku-dev/ryotunes/internal/model"
 	"github.com/ryoku-dev/ryotunes/internal/protocol"
@@ -51,6 +53,8 @@ type Page struct {
 	savePending bool
 	meta        []kit.Span
 	trackIDs    map[string]struct{}
+	reveal      sheet.Reveal
+	moreLine    pagesheet.More
 }
 
 // New constructs an album detail page for r.ID.
@@ -67,6 +71,12 @@ func (p *Page) Title() string {
 		return p.route.Title
 	}
 	return "Album"
+}
+
+// Masthead leaves the part to the route (the frame reads "Album") and says how far the
+// page is read.
+func (p *Page) Masthead() (part, partGloss string, progress float32) {
+	return "", "", p.scroll.Progress()
 }
 
 // Refresh reloads the album and its saved-library state.
@@ -126,14 +136,16 @@ func (p *Page) Layout(gtx layout.Context, e *env.Env) layout.Dimensions {
 	if len(items) == 0 {
 		viewport := gtx.Constraints.Max.Y
 		return p.scroll.Layout(gtx, e.Th, 2, func(gtx layout.Context, index int) layout.Dimensions {
-			if index == 0 {
-				dims := p.layoutHero(gtx, e)
-				p.heroHeight = dims.Size.Y
-				return dims
-			}
-			// Centred in the room under the hero, scrolling when there is none.
-			gtx.Constraints.Min.Y = max(0, viewport-p.heroHeight)
-			return widgets.EmptyState(e, look.Icon.Album, "No tracks on this album", "This album does not have any playable tracks.")(gtx)
+			return p.reveal.Group(gtx, e.Th, index, func(gtx layout.Context) layout.Dimensions {
+				if index == 0 {
+					dims := p.layoutHero(gtx, e)
+					p.heroHeight = dims.Size.Y
+					return dims
+				}
+				// Centred in the room under the hero, scrolling when there is none.
+				gtx.Constraints.Min.Y = max(0, viewport-p.heroHeight)
+				return widgets.EmptyState(e, look.Icon.Album, "No tracks on this album", "This album has no tracks Ryotunes can play.")(gtx)
+			})
 		})
 	}
 
@@ -149,21 +161,23 @@ func (p *Page) Layout(gtx layout.Context, e *env.Env) layout.Dimensions {
 	}
 	count := len(items) + 3
 	return p.scroll.Layout(gtx, e.Th, count, func(gtx layout.Context, index int) layout.Dimensions {
-		switch {
-		case index == 0:
-			return p.layoutHero(gtx, e)
-		case index == 1:
-			return p.inset(e, 0, 0, func(gtx layout.Context) layout.Dimensions {
-				return p.table.Header(gtx, e, opts)
-			})(gtx)
-		case index < len(items)+2:
-			row := index - 2
-			return p.inset(e, 0, 0, func(gtx layout.Context) layout.Dimensions {
-				return p.table.Row(gtx, e, items, row, opts)
-			})(gtx)
-		default:
-			return p.inset(e, 13, 34, p.layoutFooter(e))(gtx)
-		}
+		return p.reveal.Group(gtx, e.Th, index, func(gtx layout.Context) layout.Dimensions {
+			switch {
+			case index == 0:
+				return p.layoutHero(gtx, e)
+			case index == 1:
+				return p.inset(e, 0, 0, func(gtx layout.Context) layout.Dimensions {
+					return p.table.Header(gtx, e, opts)
+				})(gtx)
+			case index < len(items)+2:
+				row := index - 2
+				return p.inset(e, 0, 0, func(gtx layout.Context) layout.Dimensions {
+					return p.table.Row(gtx, e, items, row, opts)
+				})(gtx)
+			default:
+				return p.inset(e, 13, 34, p.layoutFooter(e))(gtx)
+			}
+		})
 	})
 }
 
@@ -180,8 +194,17 @@ func (p *Page) layoutHero(gtx layout.Context, e *env.Env) layout.Dimensions {
 	if artistID != "" {
 		openArtist = func() { act.OpenArtist(e, artistID, artistName) }
 	}
+	gtx.Constraints.Min.Y = 0
+	return layout.Inset{Top: e.Th.Sp.S2}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+		return p.layoutHeroField(gtx, e, openArtist)
+	})
+}
+
+func (p *Page) layoutHeroField(gtx layout.Context, e *env.Env, openArtist func()) layout.Dimensions {
 	return p.hero.Layout(gtx, e, widgets.HeroContent{
 		Art:        value(p.page.Thumbnail),
+		Place:      sheet.Library,
+		PartGloss:  "盤",
 		Kind:       albumKind(p.page),
 		Title:      p.Title(),
 		Meta:       p.meta,
@@ -218,7 +241,7 @@ func (p *Page) handleActions(gtx layout.Context, e *env.Env) {
 		if !albumSaveSignedIn(e, p.route.ID) {
 			e.Toast("Sign in to save albums to your library", env.ToastInfo)
 		} else {
-			p.setSaved(e, !p.saved)
+			p.setSaved(e, !p.saved, false)
 		}
 	}
 	if p.more.Clicked(gtx) {
@@ -307,7 +330,10 @@ func (p *Page) layoutDownload(gtx layout.Context, e *env.Env, active bool, progr
 	return dims
 }
 
-func (p *Page) setSaved(e *env.Env, saved bool) {
+// setSaved saves the album to or removes it from the library; undoing marks the Undo of a
+// removal, which saves it again without a notice of its own (as the item menu's Undo). The
+// daemon cannot place a saved album, so the Undo says nothing about where it lands.
+func (p *Page) setSaved(e *env.Env, saved, undoing bool) {
 	p.savePending = true
 	act.Call[protocol.Null](e, protocol.MethodSetAlbumSaved, protocol.SetAlbumSavedParams{PlaylistID: p.route.ID, Saved: saved}, func(_ protocol.Null, err error) {
 		p.savePending = false
@@ -317,9 +343,15 @@ func (p *Page) setSaved(e *env.Env, saved bool) {
 		}
 		p.saved = saved
 		if saved {
-			e.Toast("Saved to library", env.ToastSuccess)
+			if !undoing {
+				e.Toast("Saved to library", env.ToastSuccess)
+			}
 		} else {
-			e.Toast("Removed from library", env.ToastSuccess)
+			pagesheet.OfferUndo(e, "Removed from your library.", func() {
+				if !p.savePending && !p.saved {
+					p.setSaved(e, true, true)
+				}
+			})
 		}
 	})
 }
@@ -351,21 +383,22 @@ func (p *Page) loadMore(e *env.Env) {
 
 func (p *Page) layoutFooter(e *env.Env) layout.Widget {
 	return func(gtx layout.Context) layout.Dimensions {
-		if p.loadingMore {
-			return kit.Text(e.Th.Theme, e.Th.T.Body, e.Th.R.Fg2, "Loading more…")(gtx)
-		}
 		if p.moreError != "" {
-			p.moreRetry.Kind, p.moreRetry.Label = kit.PlaqueQuiet, "Try again"
+			p.moreRetry.Kind, p.moreRetry.Icon, p.moreRetry.Label, p.moreRetry.Small = kit.PlaqueQuiet, look.Icon.Refresh, "Retry", true
 			return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
-				layout.Flexed(1, kit.Text(e.Th.Theme, e.Th.T.Body, e.Th.R.Jasper, p.moreError)),
+				layout.Flexed(1, kit.Text(e.Th.Theme, e.Th.T.Detail, e.Th.R.Jasper, "The rest of the album did not load. "+p.moreError)),
+				layout.Rigid(layout.Spacer{Width: e.Th.Sp.S3}.Layout),
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions { return p.moreRetry.Layout(gtx, e.Th.Theme) }),
 			)
 		}
-		if p.page.Continuation != nil && *p.page.Continuation != "" {
+		pending := p.page.Continuation != nil && *p.page.Continuation != ""
+		if pending && !p.loadingMore {
 			p.loadMore(e)
-			return kit.Text(e.Th.Theme, e.Th.T.Body, e.Th.R.Fg2, "Loading more…")(gtx)
 		}
-		return layout.Dimensions{}
+		if !p.loadingMore && !pending {
+			return layout.Dimensions{}
+		}
+		return p.moreLine.Layout(gtx, e.Th, true, "Loading the rest of the album")
 	}
 }
 

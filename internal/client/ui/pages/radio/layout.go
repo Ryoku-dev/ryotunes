@@ -11,6 +11,7 @@ import (
 	"github.com/ryoku-dev/ryotunes/internal/client/state"
 	"github.com/ryoku-dev/ryotunes/internal/client/ui/env"
 	"github.com/ryoku-dev/ryotunes/internal/client/ui/look"
+	"github.com/ryoku-dev/ryotunes/internal/client/ui/sheet"
 	"github.com/ryoku-dev/ryotunes/internal/client/ui/widgets"
 	"github.com/ryoku-dev/ryotunes/internal/model"
 )
@@ -39,6 +40,14 @@ func (p *Page) Layout(gtx layout.Context, e *env.Env) layout.Dimensions {
 	width := int(gtx.Metric.PxToDp(gtx.Constraints.Max.X - 2*gtx.Dp(inset)))
 	children := []layout.Widget{
 		func(gtx layout.Context) layout.Dimensions {
+			p.header.Place = sheet.Radio
+			p.header.Part = ""
+			if p.selected > 0 {
+				p.header.Part = radioFilters[p.selected]
+			}
+			p.strip.Set(0, "Stations", len(p.stations), false)
+			p.strip.Set(1, "Favourites", len(favouriteStations(snapshot.Personal, nil)), false)
+			p.header.Specs = p.strip.Specs(p.loaded)
 			return p.header.Layout(gtx, e, "Radio", "Live stations from around the world.", nil)
 		},
 		p.controls(e),
@@ -71,18 +80,29 @@ func (p *Page) Layout(gtx layout.Context, e *env.Env) layout.Dimensions {
 		if index >= len(children)-2 {
 			p.loadMore(e)
 		}
-		if index == stateIndex {
-			return children[index](gtx)
-		}
-		bottom := unit.Dp(21)
-		if index+1 == stateIndex {
-			bottom = 0
-		}
-		if index == 0 {
-			return layout.Inset{Bottom: bottom}.Layout(gtx, children[index])
-		}
-		return layout.Inset{Right: inset, Bottom: bottom, Left: inset}.Layout(gtx, children[index])
+		return p.reveal.Group(gtx, e.Th, index, func(gtx layout.Context) layout.Dimensions {
+			if index == stateIndex {
+				return children[index](gtx)
+			}
+			bottom := unit.Dp(21)
+			if index+1 == stateIndex {
+				bottom = 0
+			}
+			if index == 0 {
+				return layout.Inset{Top: e.Th.Sp.S2, Bottom: bottom}.Layout(gtx, children[index])
+			}
+			return layout.Inset{Right: inset, Bottom: bottom, Left: inset}.Layout(gtx, children[index])
+		})
 	})
+}
+
+// Masthead names the catalogue view shown on the frame's masthead and says how far the
+// directory is read.
+func (p *Page) Masthead() (part, partGloss string, progress float32) {
+	if p.selected > 0 {
+		part = radioFilters[p.selected]
+	}
+	return part, "", p.scroll.Progress()
 }
 
 func (p *Page) controls(e *env.Env) layout.Widget {
@@ -225,10 +245,12 @@ func stationGroupCount(groups []stationGroup) int {
 func (p *Page) groupWidgets(e *env.Env, personal state.Personal, groups []stationGroup, width int, playing string) []layout.Widget {
 	children := make([]layout.Widget, 0)
 	columns := stationColumns(width)
-	for _, group := range groups {
+	for number, group := range groups {
 		if group.title != "" {
-			title := group.title
-			children = append(children, kit.Text(e.Th.Theme, e.Th.T.Section, e.Th.R.Fg, title))
+			title, mark := group.title, kit.Ordinal(number+1, len(groups))
+			children = append(children, func(gtx layout.Context) layout.Dimensions {
+				return widgets.RuledHead(gtx, e, title, mark, nil)
+			})
 		}
 		rows := (len(group.stations) + columns - 1) / columns
 		for row := range rows {
@@ -300,21 +322,19 @@ func (p *Page) empty(e *env.Env) layout.Widget {
 
 func (p *Page) footer(e *env.Env) layout.Widget {
 	switch {
-	case p.more:
-		return kit.Text(e.Th.Theme, e.Th.T.Proof, e.Th.R.Fg2, "Finding more stations...")
 	case p.moreErr != "":
-		p.moreTry.Kind = kit.PlaqueLine
-		p.moreTry.Label = "Try again"
-		p.moreTry.Icon = look.Icon.Refresh
+		p.moreTry.Kind, p.moreTry.Label, p.moreTry.Icon, p.moreTry.Small = kit.PlaqueQuiet, "Retry", look.Icon.Refresh, true
 		return func(gtx layout.Context) layout.Dimensions {
-			return layout.Flex{Axis: layout.Vertical, Alignment: layout.Start}.Layout(gtx,
-				layout.Rigid(kit.Text(e.Th.Theme, e.Th.T.Proof, e.Th.R.Jasper, p.moreErr)),
-				layout.Rigid(layout.Spacer{Height: unit.Dp(8)}.Layout),
+			return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
+				layout.Flexed(1, kit.Text(e.Th.Theme, e.Th.T.Detail, e.Th.R.Jasper, "More stations did not load. "+p.moreErr)),
+				layout.Rigid(layout.Spacer{Width: e.Th.Sp.S3}.Layout),
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions { return p.moreTry.Layout(gtx, e.Th.Theme) }),
 			)
 		}
-	case p.hasMore:
-		return kit.Text(e.Th.Theme, e.Th.T.Proof, e.Th.R.Fg3, "More stations load as you reach them.")
+	case p.more || p.hasMore:
+		return func(gtx layout.Context) layout.Dimensions {
+			return p.moreLine.Layout(gtx, e.Th, p.more, "Finding more stations")
+		}
 	default:
 		return nil
 	}

@@ -10,6 +10,7 @@ import (
 	"github.com/ryoku-dev/ryoku/docs/lithic/library/go/kit"
 	"github.com/ryoku-dev/ryotunes/internal/client/ui/act"
 	"github.com/ryoku-dev/ryotunes/internal/client/ui/env"
+	"github.com/ryoku-dev/ryotunes/internal/client/ui/look"
 	"github.com/ryoku-dev/ryotunes/internal/model"
 	"github.com/ryoku-dev/ryotunes/internal/protocol"
 	localprovider "github.com/ryoku-dev/ryotunes/internal/provider/local"
@@ -30,22 +31,31 @@ func (p *page) layoutLocal(gtx layout.Context, e *env.Env) layout.Dimensions {
 			button = new(kit.Plaque)
 			p.local.remove[folder] = button
 		}
+		roll := p.local.counts[folder]
+		if roll == nil {
+			roll = new(look.CountRoll)
+			p.local.counts[folder] = roll
+		}
 		rows = append(rows, p.settingRow(e.Th, filepath.Base(folder), folder, func(gtx layout.Context) layout.Dimensions {
-			button.Kind, button.Label, button.Small = kit.PlaqueDangerLine, "Remove", true
+			button.Kind, button.Label, button.Small = kit.PlaqueQuiet, "Remove", true
 			if button.Clicked(gtx) {
-				p.local.busy = true
-				act.Call[model.LocalLibrary](e, protocol.MethodRemoveLocalFolder, protocol.PathParams{Path: folder}, func(local model.LocalLibrary, err error) {
-					p.local.busy = false
-					if err != nil {
-						toastError(e, err, "Could not remove local folder")
-						return
-					}
-					p.local.library = local
+				confirm(e, "Stop watching "+filepath.Base(folder)+"?", "Its tracks leave your local library; the files stay on disk.", "Remove", func() {
+					p.local.busy = true
+					act.Call[model.LocalLibrary](e, protocol.MethodRemoveLocalFolder, protocol.PathParams{Path: folder}, func(local model.LocalLibrary, err error) {
+						p.local.busy = false
+						if err != nil {
+							toastError(e, err, "Could not remove local folder")
+							return
+						}
+						p.local.library = local
+					})
 				})
 			}
 			count := localTrackCount(folder, p.local.library.Songs)
 			return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
-				layout.Rigid(kit.Text(e.Th.Theme, e.Th.T.Mono, e.Th.R.Fg2, pluralCount(count, "track"))),
+				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+					return roll.Layout(gtx, e.Th, e.Th.T.Mono, e.Th.R.Fg2, pluralCount(count, "track"))
+				}),
 				layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions { return button.Layout(gtx, e.Th.Theme) }),
 			)
@@ -53,7 +63,7 @@ func (p *page) layoutLocal(gtx layout.Context, e *env.Env) layout.Dimensions {
 	}
 	rows = append(rows,
 		p.settingRow(e.Th, "Rescan watched folders", "Refresh every watched folder and update the local library.", func(gtx layout.Context) layout.Dimensions {
-			p.local.rescan.Kind, p.local.rescan.Label, p.local.rescan.Busy = kit.PlaqueLine, "Rescan", p.local.busy
+			p.local.rescan.Kind, p.local.rescan.Small, p.local.rescan.Label, p.local.rescan.Busy = kit.PlaqueQuiet, true, "Rescan", p.local.busy
 			if p.local.rescan.Clicked(gtx) && !p.local.busy {
 				p.local.loaded = false
 				p.loadLocal(e, p.generation)
@@ -63,7 +73,7 @@ func (p *page) layoutLocal(gtx layout.Context, e *env.Env) layout.Dimensions {
 		p.settingRow(e.Th, "Add folder", "Folders Ryotunes watches for files on disk. The daemon rescans them on demand.", func(gtx layout.Context) layout.Dimensions {
 			p.local.path.field.Mono = true
 			p.local.path.field.Placeholder = "/home/you/Music"
-			p.local.add.Kind, p.local.add.Label, p.local.add.Busy = kit.PlaqueLine, "Add folder", p.local.busy
+			p.local.add.Kind, p.local.add.Small, p.local.add.Label, p.local.add.Busy = kit.PlaqueQuiet, true, "Add folder", p.local.busy
 			if p.local.add.Clicked(gtx) && !p.local.busy {
 				path := strings.TrimSpace(p.local.path.field.Text())
 				if path == "" {

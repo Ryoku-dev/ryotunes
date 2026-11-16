@@ -16,14 +16,24 @@ import (
 	"github.com/ryoku-dev/ryoku/docs/lithic/library/go/tokens"
 )
 
-// WindowControl is 24 dp because the library's smallest icon plaque is 32 dp.
+// WindowControl is a quiet window control, 24 dp unless Size says otherwise (the
+// library's smallest icon plaque is 32 dp), that answers the pointer as the Hub's IconButton does: the row wash under it
+// (Roles.Hover, turning to Roles.Press while held, 120 in and 240 out on OutCubic), the
+// plaque's press cut and sink, and the glyph at .85 while pressed. A Close control's glyph
+// also turns a quarter while hovered (CloseTurn). Its corners follow the desktop's design.
 type WindowControl struct {
 	kit.Click
 	Icon        *widget.Icon
 	Description string
-	press       anim.Tween
-	hover       anim.Tween
-	focus       anim.Tween
+	// Close turns the glyph a quarter while hovered, as the Hub's close button.
+	Close bool
+	// Size is the control's side; zero is 24 dp. From 32 dp the glyph is 18.
+	Size unit.Dp
+
+	wash  RowWash
+	turn  CloseTurn
+	press anim.Tween
+	focus anim.Tween
 }
 
 // Clicked reports one activation.
@@ -33,11 +43,14 @@ func (control *WindowControl) Clicked(gtx layout.Context) bool {
 
 // Layout draws the compact quiet window control.
 func (control *WindowControl) Layout(gtx layout.Context, th *Theme) layout.Dimensions {
-	const (
-		sizeDp = unit.Dp(24)
-		iconDp = unit.Dp(16)
-		cutDp  = unit.Dp(4)
-	)
+	const cutDp = unit.Dp(4)
+	sizeDp, iconDp := control.Size, unit.Dp(16)
+	if sizeDp <= 0 {
+		sizeDp = 24
+	}
+	if sizeDp >= 32 {
+		iconDp = 18
+	}
 	original := gtx
 	size := gtx.Dp(sizeDp)
 	cut := gtx.Dp(cutDp)
@@ -46,22 +59,24 @@ func (control *WindowControl) Layout(gtx layout.Context, th *Theme) layout.Dimen
 		semantic.DescriptionOp(control.Description).Add(gtx.Ops)
 		semantic.EnabledOp(gtx.Source.Enabled()).Add(gtx.Ops)
 
-		pressed := controlTransition(original, &control.press, control.Pressed() && gtx.Source.Enabled(), th.Motion.Press, th.Motion.Press)
-		hovered := controlTransition(original, &control.hover, control.Hovered() && gtx.Source.Enabled(), th.Motion.HoverIn, th.Motion.HoverOut)
+		enabled := gtx.Source.Enabled()
+		hovered, held := enabled && control.Hovered(), enabled && control.Pressed()
+		control.wash.Update(original, th, hovered, held)
+		pressed := controlTransition(original, &control.press, held, th.Motion.Press, th.Motion.Press)
 		cut = gtx.Dp(cutDp) + int(float32(gtx.Dp(unit.Dp(tokens.SizeControlPressCutGrow)))*pressed+.5)
 		sink := int(float32(gtx.Dp(unit.Dp(tokens.SizeControlPressSink)))*pressed + .5)
 		bounds := image.Rectangle{Max: gtx.Constraints.Constrain(image.Pt(size, size))}
-		plane := max(hovered, pressed)
-		if plane > 0 {
-			fill := palette.Mix(th.R.Stone3, th.R.Fg, tokens.AlphaPressRow*pressed)
-			kit.FillCut(gtx.Ops, bounds, cut, palette.WithAlpha(fill, plane))
+		control.wash.Paint(gtx, th, bounds, cut)
+		angle, scale := float32(0), float32(1)
+		if control.Close {
+			angle, scale = control.turn.Update(original, th, hovered, held)
+		} else {
+			scale = 1 - (1-glyphPressedButton)*control.wash.pressed
 		}
 		if control.Icon != nil {
 			iconSize := min(gtx.Dp(iconDp), min(bounds.Dx(), bounds.Dy()))
 			offset := op.Offset(image.Pt((bounds.Dx()-iconSize)/2, (bounds.Dy()-iconSize)/2+sink)).Push(gtx.Ops)
-			iconGTX := gtx
-			iconGTX.Constraints = layout.Exact(image.Pt(iconSize, iconSize))
-			control.Icon.Layout(iconGTX, th.R.Fg2)
+			DrawGlyph(gtx, control.Icon, palette.Mix(th.R.Fg2, th.R.Fg, control.wash.hovered), iconSize, angle, scale)
 			offset.Pop()
 		}
 		return layout.Dimensions{Size: bounds.Size()}
@@ -71,6 +86,7 @@ func (control *WindowControl) Layout(gtx layout.Context, th *Theme) layout.Dimen
 	return dimensions
 }
 
+// controlTransition moves a control's state tween: chisel, as the library's plaques move.
 func controlTransition(gtx layout.Context, tween *anim.Tween, active bool, in, out time.Duration) float32 {
 	tween.Ease = anim.EaseChisel
 	if active {

@@ -62,8 +62,7 @@ type nowPlayingCard struct {
 	now       kit.IconPlaque
 	nowTip    look.Tip
 
-	compactPlay    kit.IconPlaque
-	compactMorph   look.Morph
+	compactPlay    widgets.PlayButton
 	compactPlayTip look.Tip
 
 	instrument    kit.Click
@@ -91,7 +90,7 @@ func (card *nowPlayingCard) Layout(gtx layout.Context, e *env.Env) layout.Dimens
 		card.snapshot = snapshot
 	}
 
-	card.height.Duration, card.height.Ease = e.Th.Motion.Unfold, anim.EaseChisel
+	card.height.Duration, card.height.Ease = e.Th.Motion.HubUnfold, anim.EaseOutCubic
 	card.reveal.Duration, card.reveal.Ease = e.Th.Motion.Navigate, anim.EaseChisel
 	if !card.ready {
 		card.ready = true
@@ -161,8 +160,12 @@ func (card *nowPlayingCard) layoutSlab(gtx layout.Context, e *env.Env) layout.Di
 	content := record.Stop()
 	bounds := image.Rectangle{Max: dimensions.Size}
 	cut := gtx.Dp(e.Th.Cut.Mid)
-	kit.FillCutCorners(gtx.Ops, bounds, cut, 0, cut, 0, e.Th.R.Stone1)
-	card.backdrop.Paint(gtx, e.Th, e.Art, homeString(card.track.Thumbnail), e.Th.R.Stone1, bounds, [4]int{cut, 0, cut, 0})
+	planes := e.Th.Planes()
+	kit.FillCorners(gtx, e.Th.Theme, bounds, cut, 0, cut, 0, planes.Card)
+	card.backdrop.Paint(gtx, e.Th, e.Art, homeString(card.track.Thumbnail), planes.Card, bounds, [4]int{cut, 0, cut, 0})
+	if planes.CardStroke.A != 0 {
+		kit.StrokeCorners(gtx, e.Th.Theme, bounds, cut, 0, cut, 0, max(1, gtx.Dp(1)), planes.CardStroke)
+	}
 	content.Add(gtx.Ops)
 	return dimensions
 }
@@ -421,11 +424,8 @@ func (card *nowPlayingCard) layoutActions(gtx layout.Context, e *env.Env) layout
 
 	dimensions := layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx, children[:count]...)
 	if card.like.Clicked(gtx) {
-		rating := model.RatingLike
-		if liked {
-			rating = model.RatingIndifferent
-		}
-		act.Rate(e, card.track, rating)
+		// the shared heart: an unlike offers Undo, as every other heart does
+		widgets.ToggleLike(e, card.track, liked)
 	}
 	if card.queue.Clicked(gtx) {
 		e.Nav.TogglePanel(env.PanelQueue)
@@ -457,7 +457,7 @@ func (card *nowPlayingCard) layoutCompact(gtx layout.Context, e *env.Env) layout
 		layout.Rigid(layout.Spacer{Width: 13}.Layout),
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			return card.compactPlayTip.Layout(gtx, e.Th, e.Overlays, playDescription, func(gtx layout.Context) layout.Dimensions {
-				return widgets.PlayPlaque(gtx, e.Th, &card.compactPlay, &card.compactMorph, playIcon, playDescription)
+				return card.compactPlay.Layout(gtx, e.Th, playIcon, playDescription)
 			})
 		}),
 	)
@@ -485,7 +485,7 @@ func (card *nowPlayingCard) layoutInstrument(gtx layout.Context, e *env.Env) lay
 			labelGTX.Constraints.Min = image.Point{}
 			labelGTX.Constraints.Max = image.Pt(max(0, size.X-2*inset), size.Y)
 			labelRecord := op.Record(gtx.Ops)
-			labelDimensions := kit.Text(e.Th.Theme, e.Th.T.Mono, e.Th.R.Fg3, styleName)(labelGTX)
+			labelDimensions := kit.LayoutSpacedCaps(labelGTX, e.Th.Theme, e.Th.T.MonoSm, e.Th.R.Fg3, 1.2, styleName)
 			labelCall := labelRecord.Stop()
 
 			drawingTop := labelTop + labelDimensions.Size.Y + gtx.Dp(5)
@@ -506,8 +506,8 @@ func (card *nowPlayingCard) layoutInstrument(gtx layout.Context, e *env.Env) lay
 			content := record.Stop()
 			bounds := image.Rectangle{Max: size}
 			cut := gtx.Dp(e.Th.Cut.Small)
-			kit.FillCut(gtx.Ops, bounds, cut, e.Th.R.Stone2)
-			kit.StrokeCut(gtx.Ops, bounds, cut, max(1, gtx.Dp(1)), e.Th.R.Vein)
+			kit.Fill(gtx, e.Th.Theme, bounds, cut, e.Th.R.Stone2)
+			kit.Stroke(gtx, e.Th.Theme, bounds, cut, max(1, gtx.Dp(1)), e.Th.R.Vein)
 			content.Add(gtx.Ops)
 			return layout.Dimensions{Size: size}
 		})

@@ -57,6 +57,32 @@ func TestBackdropShowsTheCoverButKeepsTypeReadable(t *testing.T) {
 	}
 }
 
+func TestBackdropStaysVisibleOnTheBlackLadder(t *testing.T) {
+	cover := image.NewRGBA(image.Rect(0, 0, 2, 1))
+	copy(cover.Pix, []uint8{255, 255, 255, 255, 0, 0, 0, 255})
+	roles := palette.Signature(true)
+	if colorToOKLCH(roles.Ground).L > .01 {
+		t.Skip("the dark ladder no longer lays its planes on black")
+	}
+	layer := backdropLayer{source: cover}
+	layer.tone(roles.Ground, true)
+	if layer.lightness != backdropFloorDark {
+		t.Fatalf("band on a black plane centres on %.3f, want the floor %.3f", layer.lightness, backdropFloorDark)
+	}
+	toned := toneBackdrop(cover, layer.lightness, true)
+	pixel := func(index int) color.NRGBA {
+		at := index * 4
+		return color.NRGBA{R: toned.Pix[at], G: toned.Pix[at+1], B: toned.Pix[at+2], A: 255}
+	}
+	white, black := colorToOKLCH(pixel(0)).L, colorToOKLCH(pixel(1)).L
+	if white-black < .15 {
+		t.Fatalf("on a black plane white and black covers end %.3f apart, want the cover clearly visible", white-black)
+	}
+	if ratio := palette.ContrastRatio(roles.Fg, palette.Mix(roles.Ground, pixel(0), backdropOpacity)); ratio < 4.5 {
+		t.Fatalf("type over the lightest cover reads at %.2f:1", ratio)
+	}
+}
+
 func TestBackdropCoverLandingMidFadeNeverJumpsAndSettles(t *testing.T) {
 	theme := NewTheme(palette.Signature(true), libtheme.Comfortable)
 	var operations op.Ops

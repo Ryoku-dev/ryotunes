@@ -22,13 +22,15 @@ import (
 const playArtLinger = 700 * time.Millisecond
 
 // PlayArt is the loaded track's cover as its play and pause control. Hovering
-// lays a plate with the action's glyph over the art; a click toggles playback
-// and the glyph morphs to the next action.
+// lays a plate with the action's glyph over the art at the Hub's hover (120
+// in, 240 out on OutCubic); a click toggles playback, the glyph presses as
+// the Hub's icon buttons do and morphs to the next action.
 type PlayArt struct {
 	View  look.ArtView
 	click kit.Click
 	hover look.Hover
 	morph look.Morph
+	press PressGlyph
 	plate anim.Tween
 	until time.Time
 }
@@ -36,6 +38,7 @@ type PlayArt struct {
 // Layout draws url crossfading over fade inside size with shape.
 func (p *PlayArt) Layout(gtx layout.Context, e *env.Env, url string, size image.Point, shape look.Shape, fade time.Duration) layout.Dimensions {
 	snapshot := e.Store.Snapshot()
+	p.hover.Hub = true
 	loaded := snapshot.Playback.Now != nil
 	if !loaded {
 		return p.View.Layout(gtx, e.Th, e.Art, url, size, shape, fade)
@@ -63,9 +66,9 @@ func (p *PlayArt) Layout(gtx layout.Context, e *env.Env, url string, size image.
 		target = 1
 		gtx.Execute(op.InvalidateCmd{At: p.until})
 	}
-	p.plate.Duration, p.plate.Ease = e.Th.Motion.HoverIn, anim.EaseChisel
+	p.plate.Duration, p.plate.Ease = e.Th.Motion.Quick, anim.EaseOutCubic
 	if target == 0 {
-		p.plate.Duration = e.Th.Motion.HoverOut
+		p.plate.Duration = e.Th.Motion.Move
 	}
 	p.plate.Set(gtx, target)
 	alpha := max(hover, p.plate.Value(gtx))
@@ -80,11 +83,12 @@ func (p *PlayArt) Layout(gtx layout.Context, e *env.Env, url string, size image.
 	at := image.Pt((dimensions.Size.X-side)/2, (dimensions.Size.Y-side)/2)
 	offset := op.Offset(at).Push(gtx.Ops)
 	opacity := paint.PushOpacity(gtx.Ops, min(alpha, 1))
-	kit.FillCut(gtx.Ops, image.Rectangle{Max: image.Pt(side, side)}, gtx.Dp(e.Th.Cut.Small), palette.WithAlpha(e.Th.R.Stone4, .9))
+	kit.Fill(gtx, e.Th.Theme, image.Rectangle{Max: image.Pt(side, side)}, gtx.Dp(e.Th.Cut.Small), palette.WithAlpha(e.Th.R.Stone4, .9))
 	glyph := side / 2
-	inner := op.Offset(image.Pt((side-glyph)/2, (side-glyph)/2)).Push(gtx.Ops)
-	p.morph.Layout(gtx, e.Th, icon, e.Th.R.Fg, unit.Dp(float32(glyph)/gtx.Metric.PxPerDp))
-	inner.Pop()
+	pressed := p.press.Value(gtx, e.Th, p.click.Pressed())
+	DrawPressedGlyph(gtx, image.Pt(side, side), pressed, func(gtx layout.Context) layout.Dimensions {
+		return p.morph.Layout(gtx, e.Th, icon, e.Th.R.Fg, unit.Dp(float32(glyph)/gtx.Metric.PxPerDp))
+	}, glyph)
 	opacity.Pop()
 	offset.Pop()
 	return dimensions

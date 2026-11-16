@@ -28,6 +28,7 @@ func (s *uiShell) layoutOverlays(gtx layout.Context, e *env.Env) {
 		placardContext.Constraints.Max.Y = height
 	}
 	s.placards.Layout(placardContext, e.Th.Theme)
+	s.notices.act(gtx, &s.placards)
 	s.overlays.Layout(gtx, e.Th)
 }
 

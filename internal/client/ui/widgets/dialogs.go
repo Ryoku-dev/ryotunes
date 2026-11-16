@@ -1,9 +1,13 @@
 package widgets
 
 import (
+	"image"
 	"strings"
 
 	"gioui.org/layout"
+	"gioui.org/op"
+	"gioui.org/op/clip"
+	"gioui.org/op/paint"
 	"gioui.org/unit"
 
 	"github.com/ryoku-dev/ryoku/docs/lithic/library/go/kit"
@@ -14,7 +18,17 @@ import (
 	"github.com/ryoku-dev/ryotunes/internal/protocol"
 )
 
+// Dialog widths, in dp: the Hub's dialog is 520; an editor takes 640.
+const (
+	dialogWidth       = 520
+	dialogEditorWidth = 640
+)
+
 // AddToPlaylistDialog adds one or more tracks to an existing or new playlist.
+// The playlists stand as the Hub's ruled list: rows that wash and lean under
+// the pointer and press deeper, a mono ordinal and the playlist's name, a
+// vein rule between; the wait for them is the Hub's (nothing for a second,
+// then the flakes with a word). Create is the dialog's one gold.
 type AddToPlaylistDialog struct {
 	Open   bool
 	Tracks []model.Track
@@ -24,13 +38,21 @@ type AddToPlaylistDialog struct {
 	create     kit.Plaque
 	cancel     kit.Plaque
 	scroll     look.Scroller
-	buttons    map[string]*kit.Plaque
+	rows       map[string]*playlistRow
 	playlists  []model.BrowseItem
 	loading    bool
 	loaded     bool
 	err        string
 	wasOpen    bool
 	createOnly bool
+}
+
+// playlistRow is one playlist's retained row in the dialog.
+type playlistRow struct {
+	click   kit.Click
+	wash    look.RowWash
+	ordinal string
+	at      [2]int
 }
 
 func (d *AddToPlaylistDialog) load(e *env.Env) {
@@ -123,17 +145,74 @@ func (d *AddToPlaylistDialog) createPlaylist(e *env.Env) {
 	})
 }
 
-func (d *AddToPlaylistDialog) playlistButton(id string) *kit.Plaque {
-	if d.buttons == nil {
-		d.buttons = make(map[string]*kit.Plaque)
+func (d *AddToPlaylistDialog) playlistRow(id string) *playlistRow {
+	if d.rows == nil {
+		d.rows = make(map[string]*playlistRow)
 	}
-	button := d.buttons[id]
-	if button == nil {
-		button = new(kit.Plaque)
-		d.buttons[id] = button
+	row := d.rows[id]
+	if row == nil {
+		row = new(playlistRow)
+		d.rows[id] = row
 	}
-	return button
+	return row
 }
+
+// playlistRowLayout draws one playlist row: the wash with its lean and
+// press, the ordinal in mono fg3, the playlist glyph and name, and a vein
+// rule under it.
+func playlistRowLayout(gtx layout.Context, e *env.Env, row *playlistRow, index, count int, title string) layout.Dimensions {
+	th := e.Th
+	digits := ordinalDigits(count)
+	if row.ordinal == "" || row.at != [2]int{index, digits} {
+		row.at = [2]int{index, digits}
+		row.ordinal = padOrdinal(index+1, digits)
+	}
+	row.wash.Update(gtx, th, row.click.Hovered(), row.click.Pressed())
+	height := gtx.Dp(44)
+	size := image.Pt(gtx.Constraints.Max.X, height)
+	rowGTX := gtx
+	rowGTX.Constraints = layout.Exact(size)
+	return row.click.Layout(rowGTX, func(gtx layout.Context) layout.Dimensions {
+		bounds := image.Rectangle{Max: size}
+		hair := max(1, gtx.Dp(1))
+		if index+1 < count {
+			paint.FillShape(gtx.Ops, th.R.Line(), clip.Rect(image.Rect(0, height-hair, size.X, height)).Op())
+		}
+		row.wash.Paint(gtx, th, image.Rect(0, hair, size.X, height-hair), gtx.Dp(th.Cut.Small))
+		lean := op.Offset(image.Pt(row.wash.Lean(gtx)+gtx.Dp(8), 0)).Push(gtx.Ops)
+		x := 0
+		place := func(w layout.Widget) {
+			cell := gtx
+			cell.Constraints = layout.Constraints{Max: image.Pt(max(0, size.X-x-gtx.Dp(16)), height)}
+			record := op.Record(gtx.Ops)
+			dims := w(cell)
+			call := record.Stop()
+			offset := op.Offset(image.Pt(x, (height-dims.Size.Y)/2)).Push(gtx.Ops)
+			call.Add(gtx.Ops)
+			offset.Pop()
+			x += dims.Size.X
+		}
+		place(func(gtx layout.Context) layout.Dimensions {
+			return kit.Label{Style: th.T.Mono, Color: th.R.Fg3, MaxLines: 1}.Layout(gtx, th.Theme, row.ordinal)
+		})
+		x += gtx.Dp(13)
+		place(func(gtx layout.Context) layout.Dimensions {
+			return drawScaledIcon(gtx, look.Icon.Playlist, th.R.Fg2, 18, row.wash.GlyphScale())
+		})
+		x += gtx.Dp(12)
+		place(func(gtx layout.Context) layout.Dimensions {
+			return kit.Label{Style: th.T.Label, Color: th.R.Fg, MaxLines: 1}.Layout(gtx, th.Theme, title)
+		})
+		lean.Pop()
+		if gtx.Focused(&row.click.Clickable) {
+			kit.FocusRing(gtx, th.Theme, bounds, gtx.Dp(th.Cut.Small))
+		}
+		return layout.Dimensions{Size: size}
+	})
+}
+
+// loadingPlaylists is the dialog's own wait, apart from any page's.
+const loadingPlaylists LoadingShape = 100
 
 func (d *AddToPlaylistDialog) body(gtx layout.Context, e *env.Env) layout.Dimensions {
 	if d.create.Clicked(gtx) {
@@ -145,7 +224,7 @@ func (d *AddToPlaylistDialog) body(gtx layout.Context, e *env.Env) layout.Dimens
 	if d.createOnly {
 		d.newTitle.Help = "Create an empty playlist."
 	}
-	d.create.Kind, d.create.Icon, d.create.Label = kit.PlaqueLine, look.Icon.Add, "Create playlist"
+	d.create.Kind, d.create.Icon, d.create.Label = kit.PlaqueGold, look.Icon.Add, "Create playlist"
 	children := []layout.FlexChild{
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions { return d.newTitle.Layout(gtx, e.Th.Theme) }),
 		layout.Rigid(layout.Spacer{Height: unit.Dp(8)}.Layout),
@@ -154,28 +233,43 @@ func (d *AddToPlaylistDialog) body(gtx layout.Context, e *env.Env) layout.Dimens
 	if d.createOnly {
 		return layout.Flex{Axis: layout.Vertical, Alignment: layout.Start}.Layout(gtx, children...)
 	}
-	children = append(children, layout.Rigid(layout.Spacer{Height: unit.Dp(21)}.Layout))
+	children = append(children,
+		layout.Rigid(layout.Spacer{Height: unit.Dp(21)}.Layout),
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			gtx.Constraints.Min.X = gtx.Constraints.Max.X
+			mark := ""
+			if d.loaded && len(d.playlists) > 0 {
+				mark = kit.Pad2(len(d.playlists))
+			}
+			return RuledHead(gtx, e, "Your playlists", mark, nil)
+		}),
+		layout.Rigid(layout.Spacer{Height: unit.Dp(8)}.Layout),
+	)
 	switch {
 	case d.loading:
-		children = append(children, layout.Rigid(kit.Text(e.Th.Theme, e.Th.T.Body, e.Th.R.Fg2, "Loading playlists…")))
+		children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			elapsed, clock := waitFor(gtx, e, loadingPlaylists)
+			height := gtx.Dp(44)
+			if elapsed < waitQuiet {
+				return layout.Dimensions{Size: image.Pt(gtx.Constraints.Max.X, height)}
+			}
+			line := workLine(gtx, e, clock, elapsed, "Loading your playlists")
+			return layout.Dimensions{Size: image.Pt(gtx.Constraints.Max.X, max(height, line.Size.Y))}
+		}))
 	case d.err != "":
-		children = append(children, layout.Rigid(kit.Text(e.Th.Theme, e.Th.T.Body, e.Th.R.Jasper, d.err)))
+		children = append(children, layout.Rigid(kit.Text(e.Th.Theme, e.Th.T.Detail, e.Th.R.Jasper, d.err)))
 	case len(d.playlists) == 0:
-		children = append(children, layout.Rigid(kit.Text(e.Th.Theme, e.Th.T.Body, e.Th.R.Fg2, "No playlists yet.")))
+		children = append(children, layout.Rigid(kit.Text(e.Th.Theme, e.Th.T.Body, e.Th.R.Fg2, "You have no playlists yet. Create one above.")))
 	default:
 		children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			gtx.Constraints.Max.Y = min(gtx.Constraints.Max.Y, gtx.Dp(280))
 			return d.scroll.Layout(gtx, e.Th, len(d.playlists), func(gtx layout.Context, index int) layout.Dimensions {
 				playlist := d.playlists[index]
-				button := d.playlistButton(playlist.ID)
-				if button.Clicked(gtx) {
+				row := d.playlistRow(playlist.ID)
+				if row.click.Clicked(gtx) {
 					d.add(e, playlist.ID)
 				}
-				button.Kind, button.Icon, button.Label = kit.PlaqueQuiet, look.Icon.Playlist, playlist.Title
-				return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
-					layout.Rigid(func(gtx layout.Context) layout.Dimensions { return button.Layout(gtx, e.Th.Theme) }),
-					layout.Rigid(layout.Spacer{Height: unit.Dp(4)}.Layout),
-				)
+				return playlistRowLayout(gtx, e, row, index, len(d.playlists), playlist.Title)
 			})
 		}))
 	}
@@ -187,7 +281,7 @@ func (d *AddToPlaylistDialog) Layout(gtx layout.Context, e *env.Env) layout.Dime
 	if d.Open && !d.wasOpen {
 		d.loaded, d.loading, d.err = false, false, ""
 		d.playlists = nil
-		d.buttons = nil
+		d.rows = nil
 		d.newTitle.SetText("New playlist")
 	}
 	d.wasOpen = d.Open
@@ -199,7 +293,7 @@ func (d *AddToPlaylistDialog) Layout(gtx layout.Context, e *env.Env) layout.Dime
 	}
 	d.cancel.Kind, d.cancel.Label = kit.PlaqueQuiet, "Cancel"
 	d.dialog.Open = d.Open
-	d.dialog.Width = 560
+	d.dialog.Width = dialogWidth
 	title := "Add to playlist"
 	if d.createOnly {
 		title = "New playlist"
@@ -399,7 +493,7 @@ func (d *EditPlaylistDialog) Layout(gtx layout.Context, e *env.Env) layout.Dimen
 	d.cancel.Kind, d.cancel.Label = kit.PlaqueQuiet, "Cancel"
 	d.save.Kind, d.save.Label = kit.PlaqueGold, "Save"
 	d.dialog.Open = d.Open
-	d.dialog.Width = 620
+	d.dialog.Width = dialogEditorWidth
 	dims := d.dialog.Layout(gtx, e.Th.Theme, "Edit playlist",
 		func(gtx layout.Context) layout.Dimensions { return d.body(gtx, e) },
 		func(gtx layout.Context) layout.Dimensions { return d.delete.Layout(gtx, e.Th.Theme) },

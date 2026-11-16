@@ -23,18 +23,20 @@ type flowChip struct {
 	focus anim.Tween
 }
 
-// FlowChoice is a single-select set of filter plaques that wraps to fit.
+// FlowChoice is a single-select set of filter plaques that wraps to fit. The
+// chosen plaque wears the Hub's selection wash (SelectWash) with fg ink, and
+// the wash travels to a new choice over th.Motion.Move on OutCubic.
 type FlowChoice struct {
 	Labels   []string
 	Selected int
 
-	chips                                  []flowChip
-	calls                                  []op.CallOp
-	sizes                                  []image.Point
-	positions                              []image.Point
-	selectionX, selectionY, selectionWidth anim.Tween
-	changed                                int
-	pending                                bool
+	chips     []flowChip
+	calls     []op.CallOp
+	sizes     []image.Point
+	positions []image.Point
+	selection SelectWash
+	changed   int
+	pending   bool
 }
 
 // Changed reports and clears the selected-index change latch.
@@ -84,23 +86,11 @@ func (f *FlowChoice) Layout(gtx layout.Context, th *Theme) layout.Dimensions {
 	}
 	height := y + rowHeight
 
-	target := f.positions[f.Selected]
-	targetWidth := f.sizes[f.Selected].X
-	f.selectionX.Duration, f.selectionY.Duration, f.selectionWidth.Duration = th.Motion.Select, th.Motion.Select, th.Motion.Select
-	f.selectionX.Ease, f.selectionY.Ease, f.selectionWidth.Ease = anim.EaseChisel, anim.EaseChisel, anim.EaseChisel
-	f.selectionX.Set(gtx, float32(target.X))
-	f.selectionY.Set(gtx, float32(target.Y))
-	f.selectionWidth.Set(gtx, float32(targetWidth))
-	selectionX := f.selectionX.Value(gtx)
-	selectionY := f.selectionY.Value(gtx)
-	selectionWidth := f.selectionWidth.Value(gtx)
-	selection := image.Rect(
-		int(selectionX+.5),
-		int(selectionY+.5),
-		int(selectionX+selectionWidth+.5),
-		int(selectionY+.5)+gtx.Dp(unit.Dp(tokens.SizeFilterHeight)),
-	)
-	kit.FillCut(gtx.Ops, selection, gtx.Dp(th.Cut.Small), flowDisabled(gtx, th.R.Sel))
+	target := image.Rectangle{Min: f.positions[f.Selected], Max: f.positions[f.Selected].Add(image.Pt(f.sizes[f.Selected].X, gtx.Dp(unit.Dp(tokens.SizeFilterHeight))))}
+	selection, opacity := f.selection.Step(gtx, th, target, 0)
+	if opacity > 0 {
+		kit.Fill(gtx, th.Theme, selection, gtx.Dp(th.Cut.Small), flowDisabled(gtx, palette.WithAlpha(th.R.Select(), opacity)))
+	}
 
 	for i, call := range f.calls {
 		offset := op.Offset(f.positions[i]).Push(gtx.Ops)
@@ -126,15 +116,10 @@ func (f *FlowChoice) layoutChip(gtx layout.Context, th *Theme, index int, label 
 		hover := flowTransition(gtx, &chip.hover, chip.Hovered() && !selected, th.Motion.HoverIn, th.Motion.HoverOut)
 
 		ink := flowDisabled(gtx, th.R.Fg2)
-		fill := color.NRGBA{}
+		fill := flowDisabled(gtx, WashInk(th.R, hover, press))
 		outline := flowDisabled(gtx, th.R.Vein)
-		stroke := true
 		if selected {
-			ink = flowDisabled(gtx, th.R.OnSel)
-			fill = flowDisabled(gtx, palette.WithAlpha(th.R.OnSel, tokens.AlphaPressRow*press))
-			stroke = false
-		} else if hover > 0 {
-			fill = flowDisabled(gtx, palette.WithAlpha(th.R.Fg2, tokens.AlphaHoverFill*hover))
+			ink = flowDisabled(gtx, th.R.Fg)
 		}
 
 		contentGTX := gtx
@@ -145,10 +130,8 @@ func (f *FlowChoice) layoutChip(gtx layout.Context, th *Theme, index int, label 
 		call := record.Stop()
 		size := gtx.Constraints.Constrain(image.Pt(content.Size.X, gtx.Dp(unit.Dp(tokens.SizeFilterHeight))))
 		bounds := image.Rectangle{Max: size}
-		kit.FillCut(gtx.Ops, bounds, cut, fill)
-		if stroke {
-			kit.StrokeCut(gtx.Ops, bounds, cut, max(1, gtx.Dp(unit.Dp(tokens.SizeHairline))), outline)
-		}
+		kit.Fill(gtx, th.Theme, bounds, cut, fill)
+		kit.Stroke(gtx, th.Theme, bounds, cut, max(1, gtx.Dp(unit.Dp(tokens.SizeHairline))), outline)
 		offset := op.Offset(image.Pt((size.X-content.Size.X)/2, (size.Y-content.Size.Y)/2+sink)).Push(gtx.Ops)
 		call.Add(gtx.Ops)
 		offset.Pop()
@@ -183,15 +166,15 @@ func (f *FlowChoice) ensure(count int) {
 }
 
 func flowTransition(gtx layout.Context, tween *anim.Tween, active bool, in, out time.Duration) float32 {
-	tween.Duration = out
-	if active {
-		tween.Duration = in
-	}
 	tween.Ease = anim.EaseChisel
+	// set before the duration changes, so a reversal starts where the run
+	// in progress stands
 	if active {
 		tween.Set(gtx, 1)
+		tween.Duration = in
 	} else {
 		tween.Set(gtx, 0)
+		tween.Duration = out
 	}
 	return tween.Value(gtx)
 }

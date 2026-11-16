@@ -13,10 +13,11 @@ import (
 	"gioui.org/unit"
 
 	"github.com/ryoku-dev/ryoku/docs/lithic/library/go/kit"
-	"github.com/ryoku-dev/ryotunes/internal/client/state"
 	"github.com/ryoku-dev/ryotunes/internal/client/ui/act"
 	"github.com/ryoku-dev/ryotunes/internal/client/ui/env"
 	"github.com/ryoku-dev/ryotunes/internal/client/ui/look"
+	"github.com/ryoku-dev/ryotunes/internal/client/ui/pages/pagesheet"
+	"github.com/ryoku-dev/ryotunes/internal/client/ui/sheet"
 	"github.com/ryoku-dev/ryotunes/internal/client/ui/widgets"
 	"github.com/ryoku-dev/ryotunes/internal/model"
 	"github.com/ryoku-dev/ryotunes/internal/protocol"
@@ -70,6 +71,8 @@ type Page struct {
 	libraryRev  uint64
 	meta        []kit.Span
 	trackIDs    map[string]struct{}
+	reveal      sheet.Reveal
+	moreLine    pagesheet.More
 }
 
 // New constructs a playlist detail page for r.ID.
@@ -86,6 +89,12 @@ func (p *Page) Title() string {
 		return p.route.Title
 	}
 	return "Playlist"
+}
+
+// Masthead leaves the part to the route (the frame reads "Playlist") and says how far the
+// page is read.
+func (p *Page) Masthead() (part, partGloss string, progress float32) {
+	return "", "", p.scroll.Progress()
 }
 
 // Refresh reloads playlist metadata and tracks.
@@ -146,14 +155,16 @@ func (p *Page) Layout(gtx layout.Context, e *env.Env) layout.Dimensions {
 	if len(items) == 0 {
 		viewport := gtx.Constraints.Max.Y
 		dims := p.scroll.Layout(gtx, e.Th, 2, func(gtx layout.Context, index int) layout.Dimensions {
-			if index == 0 {
-				dims := p.layoutHero(gtx, e, sortInHero)
-				p.heroHeight = dims.Size.Y
-				return dims
-			}
-			// Centred in the room under the hero, scrolling when there is none.
-			gtx.Constraints.Min.Y = max(0, viewport-p.heroHeight)
-			return widgets.EmptyState(e, look.Icon.Playlist, "No tracks in this playlist", "Add a song and it will appear here.")(gtx)
+			return p.reveal.Group(gtx, e.Th, index, func(gtx layout.Context) layout.Dimensions {
+				if index == 0 {
+					dims := p.layoutHero(gtx, e, sortInHero)
+					p.heroHeight = dims.Size.Y
+					return dims
+				}
+				// Centred in the room under the hero, scrolling when there is none.
+				gtx.Constraints.Min.Y = max(0, viewport-p.heroHeight)
+				return widgets.EmptyState(e, look.Icon.Playlist, "No tracks in this playlist", "Add a song and it will appear here.")(gtx)
+			})
 		})
 		p.editDialog.Layout(gtx, e)
 		p.exportDialog.Layout(gtx, e, p)
@@ -171,19 +182,21 @@ func (p *Page) Layout(gtx layout.Context, e *env.Env) layout.Dimensions {
 	}
 	count := len(items) + 3
 	dims := p.scroll.Layout(gtx, e.Th, count, func(gtx layout.Context, index int) layout.Dimensions {
-		switch {
-		case index == 0:
-			return p.layoutHero(gtx, e, sortInHero)
-		case index == 1:
-			return p.inset(e, 0, 0, func(gtx layout.Context) layout.Dimensions {
-				return p.layoutTableHeader(gtx, e, opts, sortInHero)
-			})(gtx)
-		case index < len(items)+2:
-			row := index - 2
-			return p.inset(e, 0, 0, func(gtx layout.Context) layout.Dimensions { return p.table.Row(gtx, e, items, row, opts) })(gtx)
-		default:
-			return p.inset(e, 13, 34, p.layoutFooter(e))(gtx)
-		}
+		return p.reveal.Group(gtx, e.Th, index, func(gtx layout.Context) layout.Dimensions {
+			switch {
+			case index == 0:
+				return p.layoutHero(gtx, e, sortInHero)
+			case index == 1:
+				return p.inset(e, 0, 0, func(gtx layout.Context) layout.Dimensions {
+					return p.layoutTableHeader(gtx, e, opts, sortInHero)
+				})(gtx)
+			case index < len(items)+2:
+				row := index - 2
+				return p.inset(e, 0, 0, func(gtx layout.Context) layout.Dimensions { return p.table.Row(gtx, e, items, row, opts) })(gtx)
+			default:
+				return p.inset(e, 13, 34, p.layoutFooter(e))(gtx)
+			}
+		})
 	})
 	p.editDialog.Layout(gtx, e)
 	p.exportDialog.Layout(gtx, e, p)
@@ -198,8 +211,16 @@ func (p *Page) inset(e *env.Env, top, bottom unit.Dp, body layout.Widget) layout
 }
 
 func (p *Page) layoutHero(gtx layout.Context, e *env.Env, sortInHero bool) layout.Dimensions {
+	gtx.Constraints.Min.Y = 0
+	return layout.Inset{Top: e.Th.Sp.S2}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+		return p.layoutHeroField(gtx, e, sortInHero)
+	})
+}
+
+func (p *Page) layoutHeroField(gtx layout.Context, e *env.Env, sortInHero bool) layout.Dimensions {
 	return p.hero.Layout(gtx, e, widgets.HeroContent{
 		Art:     value(p.page.Thumbnail),
+		Place:   sheet.Playlists,
 		Collage: strings.HasPrefix(value(p.page.Thumbnail), model.CollageThumbnailPrefix),
 		Kind:    playlistKind(p.route.ID),
 		Title:   p.Title(),
@@ -279,32 +300,24 @@ func (p *Page) saved(e *env.Env) bool {
 	return false
 }
 
+// setSaved saves the playlist to or removes it from the library through the item menu's
+// helpers, so a removal's Undo puts it back where it stood, silently, as the menu's does.
 func (p *Page) setSaved(e *env.Env, save bool) {
 	card := model.BrowseItem{Kind: "playlist", ID: p.route.ID, Title: p.Title(), Thumbnail: p.page.Thumbnail, Subtitle: p.page.Subtitle}
-	changed := e.Store.UpdatePersonal(func(personal *state.Personal) bool {
-		for index, item := range personal.Saved {
-			if item.ID != card.ID || !strings.EqualFold(item.Kind, card.Kind) {
-				continue
-			}
-			if save {
-				return false
-			}
-			personal.Saved = append(personal.Saved[:index], personal.Saved[index+1:]...)
-			return true
+	for _, item := range e.Store.Snapshot().Personal.Saved {
+		if item.ID == card.ID && strings.EqualFold(item.Kind, card.Kind) {
+			card = item
+			break
 		}
-		if !save {
-			return false
-		}
-		personal.Saved = append(personal.Saved, card)
-		return true
-	})
-	if !changed {
-		return
 	}
 	if save {
-		e.Toast("Saved to library", env.ToastSuccess)
-	} else {
-		e.Toast("Removed from library", env.ToastSuccess)
+		if widgets.SetPersonalSaved(e, card, true) < 0 && e.Toast != nil {
+			e.Toast("Saved to library", env.ToastSuccess)
+		}
+		return
+	}
+	if at := widgets.SetPersonalSaved(e, card, false); at >= 0 {
+		pagesheet.OfferUndo(e, widgets.LibraryRemoved(card), func() { widgets.RestorePersonalSaved(e, card, at) })
 	}
 }
 
@@ -461,21 +474,22 @@ func (p *Page) loadMore(e *env.Env) {
 
 func (p *Page) layoutFooter(e *env.Env) layout.Widget {
 	return func(gtx layout.Context) layout.Dimensions {
-		if p.loadingMore {
-			return kit.Text(e.Th.Theme, e.Th.T.Body, e.Th.R.Fg2, "Loading more…")(gtx)
-		}
 		if p.moreError != "" {
-			p.moreRetry.Kind, p.moreRetry.Label = kit.PlaqueQuiet, "Try again"
+			p.moreRetry.Kind, p.moreRetry.Icon, p.moreRetry.Label, p.moreRetry.Small = kit.PlaqueQuiet, look.Icon.Refresh, "Retry", true
 			return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
-				layout.Flexed(1, kit.Text(e.Th.Theme, e.Th.T.Body, e.Th.R.Jasper, p.moreError)),
+				layout.Flexed(1, kit.Text(e.Th.Theme, e.Th.T.Detail, e.Th.R.Jasper, "The rest of the playlist did not load. "+p.moreError)),
+				layout.Rigid(layout.Spacer{Width: e.Th.Sp.S3}.Layout),
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions { return p.moreRetry.Layout(gtx, e.Th.Theme) }),
 			)
 		}
-		if p.page.Continuation != nil && *p.page.Continuation != "" {
+		pending := p.page.Continuation != nil && *p.page.Continuation != ""
+		if pending && !p.loadingMore {
 			p.loadMore(e)
-			return kit.Text(e.Th.Theme, e.Th.T.Body, e.Th.R.Fg2, "Loading more…")(gtx)
 		}
-		return layout.Dimensions{}
+		if !p.loadingMore && !pending {
+			return layout.Dimensions{}
+		}
+		return p.moreLine.Layout(gtx, e.Th, true, "Loading the rest of the playlist")
 	}
 }
 

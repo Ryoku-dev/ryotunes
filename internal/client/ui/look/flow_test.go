@@ -53,7 +53,7 @@ func TestFlowChoiceWrapsAndReportsSelectionInReleaseFrame(t *testing.T) {
 	}
 }
 
-func TestFlowChoiceSelectionGlidesOverSelectMotion(t *testing.T) {
+func TestFlowChoiceSelectionWashTravelsOverMove(t *testing.T) {
 	theme := NewTheme(palette.Signature(true), libtheme.Comfortable)
 	metric := unit.Metric{PxPerDp: 1, PxPerSp: 1}
 	choices := FlowChoice{Labels: []string{"First", "Second"}}
@@ -67,7 +67,7 @@ func TestFlowChoiceSelectionGlidesOverSelectMotion(t *testing.T) {
 			Constraints: layout.Constraints{Max: image.Pt(240, 100)},
 		}
 		choices.Layout(gtx, theme)
-		position := choices.selectionX.Value(gtx)
+		position := float32(choices.selection.Rect().Min.X)
 		router.Frame(&operations)
 		return position
 	}
@@ -80,13 +80,19 @@ func TestFlowChoiceSelectionGlidesOverSelectMotion(t *testing.T) {
 	if start != 0 || target <= 0 {
 		t.Fatalf("selection glide started at %.1f toward %.1f, want 0 toward a positive target", start, target)
 	}
-	now = now.Add(theme.Motion.Select / 2)
+	now = now.Add(theme.Motion.Move / 2)
 	middle := frame()
 	if middle <= start || middle >= target {
 		t.Fatalf("selection halfway position = %.1f, want between %.1f and %.1f", middle, start, target)
 	}
-	now = now.Add(theme.Motion.Select)
+	now = now.Add(theme.Motion.Move)
 	if end := frame(); end != target {
 		t.Fatalf("settled selection position = %.1f, want %.1f", end, target)
+	}
+	router.WakeupTime()
+	now = now.Add(time.Millisecond)
+	frame()
+	if wake, ok := router.WakeupTime(); ok {
+		t.Fatalf("a settled selection wash still asks for frames (%v)", wake)
 	}
 }

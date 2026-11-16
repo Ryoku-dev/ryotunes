@@ -4,12 +4,10 @@ import (
 	"image/color"
 
 	"gioui.org/layout"
-	"gioui.org/unit"
 
 	"github.com/ryoku-dev/ryoku/docs/lithic/library/go/anim"
 	"github.com/ryoku-dev/ryoku/docs/lithic/library/go/palette"
 	libtheme "github.com/ryoku-dev/ryoku/docs/lithic/library/go/theme"
-	"github.com/ryoku-dev/ryoku/docs/lithic/library/go/tokens"
 	"github.com/ryoku-dev/ryotunes/internal/client/art"
 	"github.com/ryoku-dev/ryotunes/internal/model"
 )
@@ -23,8 +21,8 @@ type Source struct {
 
 // Accent is the one hue the player borrows: the play plaque face (Fill) and
 // its ink (On), the accent as a glyph or text on stone (Ink), and the mineral
-// wash of stone toward it (Field). The progress wave, the visualizer, the
-// playing row, hearts and hero fields read it.
+// field of that hue (Field). The progress wave, the visualizer, the playing
+// row, hearts and hero fields read it.
 type Accent struct {
 	Fill, On, Ink, Field color.NRGBA
 }
@@ -44,12 +42,20 @@ type schemeCacheEntry struct {
 	used   bool
 }
 
-// Theme is the shared Lithic theme plus Ryotunes source colors and frame class.
+// Theme is the shared Lithic theme the desktop asks for, plus Ryotunes'
+// music colours (the provider source and the accent) and the frame class.
+//
+// The layers, bottom to top: the desktop's roles (Desktop.Roles, its design,
+// colours, mode, contrast and tint), then the cover tint when the listener
+// asks for it, then the accent over gold.
 type Theme struct {
 	*libtheme.Theme
 	Src    Source
 	Accent Accent
 	Class  Class
+	// Desktop is the look the desktop asks for: design, colours, light or
+	// dark, contrast, tint, reduced motion and the gloss.
+	Desktop palette.Desktop
 
 	loadedRoles palette.Roles
 
@@ -63,27 +69,45 @@ type Theme struct {
 	schemeSet            bool
 	schemeAnimating      bool
 
-	cornerTween anim.Tween
-	cornerSet   bool
-
 	schemeCache     [schemeCacheSize]schemeCacheEntry
 	schemeCacheNext int
 }
 
-// NewTheme constructs the official Lithic theme with Ryotunes fonts.
+// NewThemeFor builds the theme the desktop asks for (theme.NewFor), which
+// also sets the process's reduced motion from it.
+func NewThemeFor(desktop palette.Desktop, density libtheme.Density, provider ...model.Provider) *Theme {
+	return newTheme(libtheme.NewFor(desktop), desktop, density, provider)
+}
+
+// NewTheme builds a Lithic theme on caller-chosen roles (theme.New), for
+// tests and galleries that read no desktop: Lithic design, gloss on, motion
+// left as it is.
 func NewTheme(roles palette.Roles, density libtheme.Density, provider ...model.Provider) *Theme {
-	base := libtheme.New(roles, libtheme.WithFontCollection(Fonts()))
+	mode := palette.Dark
+	if !roles.Dark {
+		mode = palette.Light
+	}
+	desktop := palette.Desktop{
+		Mode: mode, Gloss: true, Roles: roles,
+		Palette: palette.Palette{Dark: roles.Dark, Source: roles.Source},
+	}
+	return newTheme(libtheme.New(roles), desktop, density, provider)
+}
+
+func newTheme(base *libtheme.Theme, desktop palette.Desktop, density libtheme.Density, provider []model.Provider) *Theme {
 	base.Density = density
 	var initial model.Provider
 	if len(provider) > 0 {
 		initial = provider[0]
 	}
+	roles := desktop.Roles
 	source := sourceFor(initial, roles)
 	accent := AccentFromDesktop(roles)
 	theme := &Theme{
 		Theme:       base,
 		Src:         source,
 		Accent:      accent,
+		Desktop:     desktop,
 		loadedRoles: roles,
 		srcFrom:     source,
 		srcTo:       source,
@@ -93,14 +117,27 @@ func NewTheme(roles palette.Roles, density libtheme.Density, provider ...model.P
 		accentFrom:  accent,
 		accentTo:    accent,
 		schemeTween: anim.Tween{Duration: base.Motion.Field, Ease: anim.EaseChisel},
-		cornerTween: anim.Tween{Duration: base.Motion.Select, Ease: anim.EaseChisel},
 		providerSet: initial != "",
 	}
 	theme.applyScheme(roles, accent)
 	return theme
 }
 
-// LoadedRoles returns the untouched roles loaded from the current palette.
+// SetDesktop swaps in a new reading of the desktop: a theme built by
+// theme.NewFor on the same shaper (so no face loads again), the density kept,
+// and the roles snapped as SetRoles does. It sets reduced motion from the
+// desktop. Call it on the window's goroutine.
+func (theme *Theme) SetDesktop(desktop palette.Desktop) {
+	density := theme.Density
+	base := libtheme.NewFor(desktop, libtheme.WithShaper(theme.Shaper))
+	base.Density = density
+	theme.Theme = base
+	theme.Desktop = desktop
+	theme.SetRoles(desktop.Roles)
+}
+
+// LoadedRoles returns the untouched desktop roles, before the cover tint and
+// the accent.
 func (theme *Theme) LoadedRoles() palette.Roles {
 	return theme.loadedRoles
 }
@@ -214,26 +251,10 @@ func (theme *Theme) SetAccent(gtx layout.Context, accent Accent) {
 	theme.SetScheme(gtx, theme.loadedRoles, accent)
 }
 
-// SetCorner snaps the first pane cut and transitions later preference changes.
-func (theme *Theme) SetCorner(gtx layout.Context, target unit.Dp) {
-	if !theme.cornerSet {
-		theme.cornerSet = true
-		theme.cornerTween = anim.Tween{Duration: theme.Motion.Select, Ease: anim.EaseChisel}
-		theme.cornerTween.Set(gtx, float32(target))
-		theme.Cut.Large = target
-		return
-	}
-	theme.cornerTween.Set(gtx, float32(target))
-	theme.Cut.Large = unit.Dp(theme.cornerTween.Value(gtx))
-}
-
 // Animate advances active theme transitions.
 func (theme *Theme) Animate(gtx layout.Context) {
 	theme.animateSource(gtx)
 	theme.animateScheme(gtx)
-	if theme.cornerSet {
-		theme.Cut.Large = unit.Dp(theme.cornerTween.Value(gtx))
-	}
 }
 
 func (theme *Theme) animateSource(gtx layout.Context) {
@@ -264,6 +285,8 @@ func (theme *Theme) animateScheme(gtx layout.Context) {
 	}
 }
 
+// applyScheme lays the accent over gold: the play plaque, gold ink and every
+// kit gold control point at the music.
 func (theme *Theme) applyScheme(roles palette.Roles, accent Accent) {
 	theme.R = roles
 	theme.Accent = accent
@@ -272,31 +295,41 @@ func (theme *Theme) applyScheme(roles palette.Roles, accent Accent) {
 	theme.R.GoldInk = accent.Ink
 }
 
+// mixRoles blends every colour role from from toward to. It starts from to,
+// so every field the library adds (and the unexported mineral lightness
+// MineralField reads) lands as the target's.
 func mixRoles(from, to palette.Roles, progress float32) palette.Roles {
-	return palette.Roles{
-		Ground:  palette.Mix(from.Ground, to.Ground, progress),
-		Stone1:  palette.Mix(from.Stone1, to.Stone1, progress),
-		Stone2:  palette.Mix(from.Stone2, to.Stone2, progress),
-		Stone3:  palette.Mix(from.Stone3, to.Stone3, progress),
-		Stone4:  palette.Mix(from.Stone4, to.Stone4, progress),
-		Vein:    palette.Mix(from.Vein, to.Vein, progress),
-		Fg:      palette.Mix(from.Fg, to.Fg, progress),
-		Fg2:     palette.Mix(from.Fg2, to.Fg2, progress),
-		Fg3:     palette.Mix(from.Fg3, to.Fg3, progress),
-		Sel:     palette.Mix(from.Sel, to.Sel, progress),
-		OnSel:   palette.Mix(from.OnSel, to.OnSel, progress),
-		OnSel2:  palette.Mix(from.OnSel2, to.OnSel2, progress),
-		Gold:    palette.Mix(from.Gold, to.Gold, progress),
-		OnGold:  palette.Mix(from.OnGold, to.OnGold, progress),
-		GoldInk: palette.Mix(from.GoldInk, to.GoldInk, progress),
-		Jade:    palette.Mix(from.Jade, to.Jade, progress),
-		Lapis:   palette.Mix(from.Lapis, to.Lapis, progress),
-		Amber:   palette.Mix(from.Amber, to.Amber, progress),
-		Jasper:  palette.Mix(from.Jasper, to.Jasper, progress),
-		Scrim:   palette.Mix(from.Scrim, to.Scrim, progress),
-		Dark:    to.Dark,
-		Source:  to.Source,
+	mixed := to
+	for _, pair := range [...]struct{ out, a, b *color.NRGBA }{
+		{&mixed.Ground, &from.Ground, &to.Ground},
+		{&mixed.Stone1, &from.Stone1, &to.Stone1},
+		{&mixed.Stone2, &from.Stone2, &to.Stone2},
+		{&mixed.Stone3, &from.Stone3, &to.Stone3},
+		{&mixed.Stone4, &from.Stone4, &to.Stone4},
+		{&mixed.Slab, &from.Slab, &to.Slab},
+		{&mixed.Field, &from.Field, &to.Field},
+		{&mixed.Vein, &from.Vein, &to.Vein},
+		{&mixed.Edge, &from.Edge, &to.Edge},
+		{&mixed.Fg, &from.Fg, &to.Fg},
+		{&mixed.Fg2, &from.Fg2, &to.Fg2},
+		{&mixed.Fg3, &from.Fg3, &to.Fg3},
+		{&mixed.Sel, &from.Sel, &to.Sel},
+		{&mixed.OnSel, &from.OnSel, &to.OnSel},
+		{&mixed.OnSel2, &from.OnSel2, &to.OnSel2},
+		{&mixed.Gold, &from.Gold, &to.Gold},
+		{&mixed.OnGold, &from.OnGold, &to.OnGold},
+		{&mixed.GoldInk, &from.GoldInk, &to.GoldInk},
+		{&mixed.Jade, &from.Jade, &to.Jade},
+		{&mixed.Lapis, &from.Lapis, &to.Lapis},
+		{&mixed.Amber, &from.Amber, &to.Amber},
+		{&mixed.Jasper, &from.Jasper, &to.Jasper},
+		{&mixed.Scrim, &from.Scrim, &to.Scrim},
+		{&mixed.Container, &from.Container, &to.Container},
+		{&mixed.OnContainer, &from.OnContainer, &to.OnContainer},
+	} {
+		*pair.out = palette.Mix(*pair.a, *pair.b, progress)
 	}
+	return mixed
 }
 
 func sourceFor(provider model.Provider, roles palette.Roles) Source {
@@ -305,6 +338,6 @@ func sourceFor(provider model.Provider, roles palette.Roles) Source {
 		Provider: provider,
 		Fill:     fill,
 		Ink:      BrandInk(provider, roles),
-		Field:    palette.Mix(roles.Stone2, fill, tokens.AlphaMineral),
+		Field:    accentField(fill, roles),
 	}
 }

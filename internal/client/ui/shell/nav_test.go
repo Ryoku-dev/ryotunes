@@ -123,17 +123,22 @@ func TestMiniSidebarShortcutDoesNotChangePersistentFold(t *testing.T) {
 	}
 }
 
+// The page pane stands where the sidebar ends, as the Hub's pane stands at the sidebar's
+// width; the docked panel keeps the gap.
 func TestFoldFrameGeometryNeverOverlaps(t *testing.T) {
 	size := image.Pt(1280, 800)
 	const margin, gap, panel = 8, 8, 340
 	for _, progress := range []float32{0, .5, 1} {
-		sidebar := 240 + int(float32(72-240)*progress+.5)
+		sidebar := 272 + int(float32(72-272)*progress+.5)
 		rects := resolveFrameRects(size, 56, 696, margin, gap, sidebar, panel)
 		if !rects.Sidebar.Intersect(rects.Content).Empty() || !rects.Content.Intersect(rects.Panel).Empty() {
 			t.Fatalf("progress %.1f overlaps: sidebar=%v content=%v panel=%v", progress, rects.Sidebar, rects.Content, rects.Panel)
 		}
-		if rects.Content.Min.X-rects.Sidebar.Max.X != gap || rects.Panel.Min.X-rects.Content.Max.X != gap {
-			t.Fatalf("progress %.1f gaps = (%d, %d), want %d", progress, rects.Content.Min.X-rects.Sidebar.Max.X, rects.Panel.Min.X-rects.Content.Max.X, gap)
+		if rects.Content.Min.X != rects.Sidebar.Max.X || rects.Panel.Min.X-rects.Content.Max.X != gap {
+			t.Fatalf("progress %.1f gaps = (%d, %d), want (0, %d)", progress, rects.Content.Min.X-rects.Sidebar.Max.X, rects.Panel.Min.X-rects.Content.Max.X, gap)
+		}
+		if rects.Sidebar.Min != (image.Point{}) || rects.Sidebar.Dx() != sidebar {
+			t.Fatalf("progress %.1f sidebar = %v, want the window's edge %d wide", progress, rects.Sidebar, sidebar)
 		}
 		if rects.Content.Dx() < int(look.ContentMinWithPanel) {
 			t.Fatalf("progress %.1f content width = %d, want at least %d", progress, rects.Content.Dx(), int(look.ContentMinWithPanel))
