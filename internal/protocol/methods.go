@@ -111,6 +111,8 @@ const (
 	MethodLastfmStatus = "lastfm_status"
 	// MethodListEqualizerPresets returns the built-in and saved equalizer presets.
 	MethodListEqualizerPresets = "list_equalizer_presets"
+	// MethodListeningDays returns the per-day local listening series.
+	MethodListeningDays = "listening_days"
 	// MethodListeningStats returns period listening aggregates.
 	MethodListeningStats = "listening_stats"
 	// MethodLogClientError records one client diagnostic.
@@ -337,6 +339,7 @@ var Methods = []Method{
 	def[Null, Null](MethodLastfmDisconnect, "Clear Last.fm authorization."),
 	def[Null, model.LastfmStatus](MethodLastfmStatus, "Return Last.fm state."),
 	def[Null, []model.EQPreset](MethodListEqualizerPresets, "Return the built-in and saved equalizer presets."),
+	def[ListeningDaysParams, model.ListeningDays](MethodListeningDays, "Return per-day listening history, oldest day first."),
 	def[ListeningStatsParams, model.ListeningStats](MethodListeningStats, "Return period listening aggregates."),
 	def[LogClientErrorParams, Null](MethodLogClientError, "Record one client diagnostic."),
 	def[LTUserParams, Null](MethodLTApproveJoin, "Approve a pending room join."),

@@ -348,6 +348,12 @@ type ListeningStatsParams struct {
 	Period model.ListeningPeriod `json:"period"`
 }
 
+// ListeningDaysParams asks for the last Days calendar days (1 to 30; outside that range it
+// is clamped).
+type ListeningDaysParams struct {
+	Days int `json:"days"`
+}
+
 // LTServerURLParams updates the Listen Together relay URL.
 type LTServerURLParams struct {
 	URL string `json:"url"`

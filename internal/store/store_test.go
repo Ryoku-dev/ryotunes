@@ -206,6 +206,50 @@ func TestListeningStatsPeriodsAndPlayCounts(t *testing.T) {
 	}
 }
 
+func TestListeningDaysBucketsLocalCalendarDays(t *testing.T) {
+	store := testStore(t)
+	zone := time.FixedZone("UTC+9", 9*60*60)
+	now := time.Date(2026, 11, 16, 1, 30, 0, 0, zone)
+	store.now = func() time.Time { return now }
+	three, four := "3:00", "4:00"
+	a := model.Track{VideoID: "a", Title: "Alpha", Artists: "A", Duration: &three}
+	b := model.Track{VideoID: "b", Title: "Beta", Artists: "B", Duration: &four}
+	insertPlay(t, store, a, now.Add(-time.Hour))                                           // today, 00:30 local
+	insertPlay(t, store, b, now.Add(-2*time.Hour))                                         // yesterday, 23:30 local
+	insertPlay(t, store, a, now.Add(-2*time.Hour-time.Minute))                             // yesterday
+	insertPlay(t, store, b, time.Date(2026, 11, 14, 12, 0, 0, 0, zone))                    // two days ago
+	insertPlay(t, store, a, time.Date(2026, 11, 13, 23, 59, 0, 0, zone))                   // before the window
+	insertPlay(t, store, model.Track{VideoID: "c", Title: "Gamma"}, now.Add(-time.Minute)) // no duration
+
+	got, err := store.ListeningDays(3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []model.DailyListening{
+		{Date: "2026-11-14", Plays: 1, KnownDurationSeconds: 240},
+		{Date: "2026-11-15", Plays: 2, KnownDurationSeconds: 420},
+		{Date: "2026-11-16", Plays: 2, KnownDurationSeconds: 180},
+	}
+	if !reflect.DeepEqual(got.Days, want) {
+		t.Fatalf("days = %#v, want %#v", got.Days, want)
+	}
+
+	long, err := store.ListeningDays(400)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(long.Days) != MaxListeningDays || long.Days[len(long.Days)-1].Date != "2026-11-16" || long.Days[0].Date != "2026-10-18" {
+		t.Fatalf("clamped series = %d days from %s to %s", len(long.Days), long.Days[0].Date, long.Days[len(long.Days)-1].Date)
+	}
+	today, err := store.ListeningDays(0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(today.Days) != 1 || today.Days[0].Plays != 2 {
+		t.Fatalf("today only = %#v", today.Days)
+	}
+}
+
 func testDirs(t *testing.T) Dirs {
 	t.Helper()
 	root := t.TempDir()

@@ -29,6 +29,7 @@ func init() {
 	register(protocol.MethodSyncPlaylistIndex, typed(syncPlaylistIndex))
 	register(protocol.MethodPlayCounts, typed(playCounts))
 	register(protocol.MethodListeningStats, typed(listeningStats))
+	register(protocol.MethodListeningDays, typed(listeningDays))
 	register(protocol.MethodCreatePlaylist, typed(createPlaylist))
 	register(protocol.MethodEditPlaylistDetails, typed(editPlaylistDetails))
 	register(protocol.MethodDeletePlaylist, typed(deletePlaylist))
@@ -180,6 +181,9 @@ func playCounts(_ context.Context, a *App, _ protocol.Null) (model.PlayCounts, e
 }
 func listeningStats(_ context.Context, a *App, p protocol.ListeningStatsParams) (model.ListeningStats, error) {
 	return a.Store.ListeningStats(p.Period)
+}
+func listeningDays(_ context.Context, a *App, p protocol.ListeningDaysParams) (model.ListeningDays, error) {
+	return a.Store.ListeningDays(p.Days)
 }
 func createPlaylist(ctx context.Context, a *App, p protocol.CreatePlaylistParams) (protocol.PlaylistIDResult, error) {
 	title := strings.TrimSpace(p.Title)

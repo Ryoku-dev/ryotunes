@@ -124,6 +124,40 @@ func (s *Store) ListeningStats(period model.ListeningPeriod) (model.ListeningSta
 	return stats, nil
 }
 
+// MaxListeningDays is the longest per-day series ListeningDays returns: plays are kept for
+// the retention window only.
+const MaxListeningDays = int(playRetention / (24 * time.Hour))
+
+// ListeningDays returns the plays and known listening time of each of the last days calendar
+// days in the store clock's location, oldest first and ending today; days is clamped to
+// 1..MaxListeningDays. Days without plays are present with zeros.
+func (s *Store) ListeningDays(days int) (model.ListeningDays, error) {
+	days = max(1, min(days, MaxListeningDays))
+	now := s.now()
+	location := now.Location()
+	first := time.Date(now.Year(), now.Month(), now.Day()-(days-1), 0, 0, 0, 0, location)
+	plays, err := s.playRows(first, now)
+	if err != nil {
+		return model.ListeningDays{}, err
+	}
+	out := model.ListeningDays{Days: make([]model.DailyListening, days)}
+	index := make(map[string]int, days)
+	for day := range days {
+		date := time.Date(first.Year(), first.Month(), first.Day()+day, 0, 0, 0, 0, location).Format(time.DateOnly)
+		out.Days[day].Date = date
+		index[date] = day
+	}
+	for _, play := range plays {
+		day, ok := index[time.Unix(play.playedAt, 0).In(location).Format(time.DateOnly)]
+		if !ok {
+			continue
+		}
+		out.Days[day].Plays++
+		out.Days[day].KnownDurationSeconds += parseDuration(play.track.Duration)
+	}
+	return out, nil
+}
+
 // TopPlays returns tracks ranked by count and then latest play.
 func (s *Store) TopPlays(since time.Time, limit int) ([]TrackPlay, error) {
 	plays, err := s.playRows(since, s.now())

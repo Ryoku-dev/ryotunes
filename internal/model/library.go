@@ -60,6 +60,20 @@ type ListeningStats struct {
 	TopTracks            []TrackPlayCount  `json:"topTracks"`
 }
 
+// DailyListening is one calendar day of local listening history.
+type DailyListening struct {
+	// Date is the day in the daemon's local time, as 2006-01-02.
+	Date                 string `json:"date"`
+	Plays                int    `json:"plays"`
+	KnownDurationSeconds int64  `json:"knownDurationSeconds"`
+}
+
+// ListeningDays is a per-day listening series, oldest day first, ending today, every day
+// present (a day without plays is zero).
+type ListeningDays struct {
+	Days []DailyListening `json:"days"`
+}
+
 // RadioStation is a normalized Radio Browser station.
 type RadioStation struct {
 	StationUUID string `json:"stationUuid"`

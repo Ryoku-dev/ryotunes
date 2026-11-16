@@ -41,7 +41,7 @@ replacement.
 - `create_playlist`, `edit_playlist_details`, `delete_playlist`, `set_playlist_cover`, `set_playlist_sort`: playlist metadata writes.
 - `add_to_playlist`, `add_to_local_playlist`, `remove_from_playlist`, `set_album_saved`, `rate`: playlist/library membership and ratings.
 - `export_playlist_file`, `import_playlist_file`: portable JSON playlist transfer.
-- `play_counts`, `listening_stats`: local listening history aggregates.
+- `play_counts`, `listening_stats`, `listening_days`: local listening history aggregates; `listening_days` is one row per calendar day (daemon local time), oldest first, ending today, at most the 30 kept days.
 
 ## Settings, personal data, and account
 
