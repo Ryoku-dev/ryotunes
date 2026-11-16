@@ -48,17 +48,43 @@ type SettingsOutline interface {
 	GoTo(index int)
 }
 
-// treeOutlineRoom is the least of the tree the outline must leave above the foot: the
-// places, the Playlists folder and its first leaf.
-const treeOutlineRoom = 5*treeLine + treeLeaf
+// The tree's reserve under the Settings outline: the places and the Playlists folder,
+// and, while the folder is open, its New playlist line and the first four collections
+// (Liked songs and three playlists), so opening
+// Settings never takes the playlists away.
+const (
+	treeReserveLines  = 5
+	treeReserveCovers = 4
+	// treeOutlineLeast is the fewest sections the outline shows; a sidebar too short for
+	// them leaves the outline off and the Settings page keeps its own section chips
+	treeOutlineLeast = 3
+)
 
-// OutlineFits reports whether a sidebar height pixels tall holds an outline of sections
-// under Settings and still the tree's places, the Playlists folder and its first leaf.
-// Below it the outline stays off and the Settings page keeps its own section chips.
-func OutlineFits(gtx layout.Context, height, sections int) bool {
-	need := gtx.Dp(treeBodyTop) + gtx.Dp(treeOutlineRoom) + gtx.Dp(4) + gtx.Dp(treeLine) +
-		sections*gtx.Dp(treeOutlineRow) + gtx.Dp(4) + gtx.Dp(treeFootGap)
-	return height >= need
+// outlineRoom is how tall the outline may stand in a sidebar height pixels tall: what the
+// foot can take while the tree keeps its reserve.
+func (t *tree) outlineRoom(gtx layout.Context, height int) int {
+	reserve := treeReserveLines * gtx.Dp(treeLine)
+	if t.open || !t.openSet {
+		reserve += gtx.Dp(treeLeaf) + treeReserveCovers*gtx.Dp(treeCoverLeaf)
+	}
+	room := height - gtx.Dp(treeBodyTop) - gtx.Dp(4) - reserve - gtx.Dp(treeLine) - gtx.Dp(treeFootGap)
+	return max(0, room)
+}
+
+// OutlineFits reports whether a sidebar height pixels tall holds the Settings outline
+// (at least three sections, scrolling within the room for more) under Settings while the
+// tree keeps its places and the first playlists. Below it the outline stays off and the
+// Settings page keeps its own section chips.
+func (sidebar *Sidebar) OutlineFits(gtx layout.Context, height int) bool {
+	return sidebar.tree.outlineRoom(gtx, height) >= treeOutlineLeast*gtx.Dp(treeOutlineRow)+gtx.Dp(4)
+}
+
+// OutlineOpen reports whether the reader keeps the Settings outline unfolded under
+// Settings (the chevron beside 05 SETTINGS): on until folded, then as left for the
+// session. While it is folded the Settings page shows its own section chips.
+func (sidebar *Sidebar) OutlineOpen() bool {
+	t := &sidebar.tree
+	return !t.outlineFoldSet || t.outlineOpen
 }
 
 // treePlace is one numbered place of the tree: Home, Library, Radio, Downloads and, at the
@@ -92,11 +118,20 @@ type tree struct {
 
 	bodyWash, footWash look.SelectWash
 
-	outline       SettingsOutline
-	outlineNames  []string
-	outlineLines  []outlineLine
-	outlineUnfold anim.Tween
-	outlineSet    bool
+	outline        SettingsOutline
+	outlineNames   []string
+	outlineLines   []outlineLine
+	outlineUnfold  anim.Tween
+	outlineSet     bool
+	outlineScroll  look.Scroller
+	outlineCurrent int
+	outlineEntered time.Time
+	// outlineOpen is the reader's fold choice, outlineFoldSet once they made one
+	outlineOpen, outlineFoldSet bool
+	chevron                     kit.Click
+	// where the last layout put the body and the foot, in the sidebar's pixels
+	bodyRect image.Rectangle
+	footY    int
 }
 
 func (t *tree) initialize() {
@@ -191,7 +226,19 @@ func (sidebar *Sidebar) layoutTree(gtx layout.Context, e *env.Env, rail float32,
 
 	sidebar.layoutHead(gtx, e, size.X, m)
 
-	// the foot: Settings and, while it is open in the tree, its outline
+	// the chevron beside 05 SETTINGS folds the outline; pressed away from Settings it
+	// opens Settings with its outline unfolded
+	if t.chevron.Clicked(gtx) {
+		open := !selection.footer || !sidebar.OutlineOpen()
+		t.outlineOpen, t.outlineFoldSet = open, true
+		if !selection.footer {
+			sidebar.navigated = true
+			sidebarNavigate(e, env.Route{Kind: env.RouteSettings, Title: sheet.Settings.Name})
+		}
+		gtx.Execute(op.InvalidateCmd{})
+	}
+
+	// the foot: Settings and, while it is unfolded, the open page's outline
 	current := -1
 	if t.outline != nil {
 		var names []string
@@ -201,13 +248,17 @@ func (sidebar *Sidebar) layoutTree(gtx layout.Context, e *env.Env, rail float32,
 			t.outlineNames = names
 		}
 	}
-	shown := t.outline != nil && selection.footer && len(t.outlineNames) >= 2 && m.rail == 0
-	outlineHeight := t.outlineHeight(gtx, e, shown, len(t.outlineNames), m)
+	available := t.outline != nil && selection.footer && len(t.outlineNames) >= 2 && m.rail == 0
+	shown := available && sidebar.OutlineOpen()
+	room := t.outlineRoom(gtx, size.Y)
+	outlineMax := min(len(t.outlineNames)*m.outlineRow+gtx.Dp(4), room)
+	outlineHeight := t.outlineHeight(gtx, e, shown, outlineMax)
 	footHeight := m.line + outlineHeight
 	footY := max(gtx.Dp(treeBodyTop), size.Y-gtx.Dp(treeFootGap)-footHeight)
 	inset := gtx.Dp(treeInset)
 
 	body := image.Rect(inset, gtx.Dp(treeBodyTop), size.X-inset, footY-gtx.Dp(4))
+	t.bodyRect, t.footY = body, footY
 	overflowing := sidebar.layoutBody(gtx, e, body, m, collections, selection, snapshot)
 	if overflowing {
 		hline(gtx, gtx.Dp(12), size.X-gtx.Dp(12), footY-1, e.Th.R.Line())
@@ -216,7 +267,7 @@ func (sidebar *Sidebar) layoutTree(gtx layout.Context, e *env.Env, rail float32,
 	foot := op.Offset(image.Pt(inset, footY)).Push(gtx.Ops)
 	footGtx := gtx
 	footGtx.Constraints = layout.Exact(image.Pt(m.width, footHeight))
-	sidebar.layoutFoot(footGtx, e, m, selection, outlineHeight, t.outlineNames, current)
+	sidebar.layoutFoot(footGtx, e, m, selection, available, shown, outlineHeight, outlineMax, t.outlineNames, current)
 	foot.Pop()
 	return layout.Dimensions{Size: size}
 }
@@ -377,14 +428,21 @@ func (sidebar *Sidebar) layoutBody(gtx layout.Context, e *env.Env, body image.Re
 }
 
 // leafEntry is how far leaf (0 is the New playlist line) has slid in since its folder
-// opened: its x offset and opacity. Leaves past the 24th share its delay, so a long folder
-// is never kept waiting.
+// opened: its x offset and opacity.
 func (t *tree) leafEntry(gtx layout.Context, e *env.Env, leaf int) (int, float32) {
-	if t.entered.IsZero() || anim.Reduced() {
+	return treeEntry(gtx, e, t.entered, leaf)
+}
+
+// treeEntry is how far the line at index of a folder opened at entered has slid in: its
+// x offset and opacity, each line 18 ms after the one above (th.Motion.Stagger) over
+// th.Motion.Move on OutCubic. Lines past the 24th share its delay, so a long folder is
+// never kept waiting.
+func treeEntry(gtx layout.Context, e *env.Env, entered time.Time, index int) (int, float32) {
+	if entered.IsZero() || anim.Reduced() {
 		return 0, 1
 	}
-	delay := time.Duration(min(leaf, 24)) * e.Th.Motion.Stagger
-	elapsed := gtx.Now.Sub(t.entered) - delay
+	delay := time.Duration(min(index, 24)) * e.Th.Motion.Stagger
+	elapsed := gtx.Now.Sub(entered) - delay
 	move := e.Th.Motion.Move
 	if move <= 0 || elapsed >= move {
 		return 0, 1
@@ -689,8 +747,9 @@ func (sidebar *Sidebar) layoutCollectionLeaf(gtx layout.Context, e *env.Env, m t
 	body(gtx)
 }
 
-// outlineHeight moves the outline's unfold toward shown and returns its height now.
-func (t *tree) outlineHeight(gtx layout.Context, e *env.Env, shown bool, count int, m treeMetrics) int {
+// outlineHeight moves the outline's unfold toward shown over the Hub's unfold (260
+// OutCubic) and returns its height now, most pixels when unfolded.
+func (t *tree) outlineHeight(gtx layout.Context, e *env.Env, shown bool, most int) int {
 	t.outlineUnfold.Duration, t.outlineUnfold.Ease = e.Th.Motion.HubUnfold, anim.EaseOutCubic
 	target := float32(0)
 	if shown {
@@ -700,13 +759,18 @@ func (t *tree) outlineHeight(gtx layout.Context, e *env.Env, shown bool, count i
 		t.outlineSet = true
 		t.outlineUnfold.Set(gtx, target)
 	}
+	if shown && t.outlineUnfold.Value(gtx) == 0 && !anim.Reduced() {
+		// the sections slide in as the outline unfolds, 18 ms apart
+		t.outlineEntered = gtx.Now
+	}
 	t.outlineUnfold.Set(gtx, target)
-	unfold := t.outlineUnfold.Value(gtx)
-	return int(float32(count*m.outlineRow+gtx.Dp(4))*unfold + .5)
+	return int(float32(most)*t.outlineUnfold.Value(gtx) + .5)
 }
 
-// layoutFoot draws Settings and, under it, the open page's outline.
-func (sidebar *Sidebar) layoutFoot(gtx layout.Context, e *env.Env, m treeMetrics, selection treeSelection, outlineHeight int, names []string, current int) {
+// layoutFoot draws Settings as a folder and, under it, the open page's outline: its
+// chevron folds the outline, its line opens Settings. The outline stands at most
+// outlineMax tall and scrolls within it, so the tree above keeps its playlists.
+func (sidebar *Sidebar) layoutFoot(gtx layout.Context, e *env.Env, m treeMetrics, selection treeSelection, available, shown bool, outlineHeight, outlineMax int, names []string, current int) {
 	t := &sidebar.tree
 	th := e.Th
 	if t.settings.row.click.Clicked(gtx) {
@@ -722,10 +786,22 @@ func (sidebar *Sidebar) layoutFoot(gtx layout.Context, e *env.Env, m treeMetrics
 	lineGtx := gtx
 	lineGtx.Constraints = layout.Exact(image.Pt(m.width, m.line))
 	area := clip.Rect(image.Rectangle{Max: lineGtx.Constraints.Max}).Push(gtx.Ops)
+	trailing := ""
+	if available {
+		trailing = treeCount(len(names))
+	}
 	sidebar.layoutNumbered(lineGtx, e, &t.settings.row, m, treeNumbered{
 		number: sheet.Settings.Number, name: sheet.Settings.Name, gloss: sheet.Settings.GlossIf(e.Gloss()),
-		icon: t.settings.icon, selected: selection.footer,
+		icon: t.settings.icon, selected: selection.footer, folder: true, open: shown, trailing: trailing,
 	})
+	if m.rail == 0 {
+		// the chevron's own target, over the line's: it folds instead of opening
+		chevronGtx := lineGtx
+		chevronGtx.Constraints = layout.Exact(image.Pt(gtx.Dp(treeInset)+gtx.Dp(8)+gtx.Dp(treeChevron)+gtx.Dp(4), m.line))
+		t.chevron.Layout(chevronGtx, func(gtx layout.Context) layout.Dimensions {
+			return layout.Dimensions{Size: gtx.Constraints.Max}
+		})
+	}
 	area.Pop()
 	if outlineHeight <= 0 || len(names) < 2 {
 		return
@@ -733,37 +809,60 @@ func (sidebar *Sidebar) layoutFoot(gtx layout.Context, e *env.Env, m treeMetrics
 	for len(t.outlineLines) < len(names) {
 		t.outlineLines = append(t.outlineLines, outlineLine{})
 	}
+	row := m.outlineRow
+	// the section being read stays in view as the page scrolls
+	if current != t.outlineCurrent && current >= 0 {
+		t.outlineCurrent = current
+		first, _ := t.outlineScroll.Offset()
+		visible := max(1, (outlineMax-gtx.Dp(4))/row)
+		if current < first || current >= first+visible {
+			t.outlineScroll.GlideTo(max(0, current-visible/2), th.Motion.Move)
+		}
+	}
 	offset := op.Offset(image.Pt(0, m.line)).Push(gtx.Ops)
 	box := clip.Rect(image.Rect(0, 0, m.width, outlineHeight)).Push(gtx.Ops)
-	row := m.outlineRow
 	threadX := gtx.Dp(treeThread)
-	vline(gtx, threadX, 0, len(names)*row-row/2, th.R.Guide())
-	for index, name := range names {
+	entering := false
+	listGtx := gtx
+	listGtx.Constraints = layout.Exact(image.Pt(m.width, max(row, outlineMax-gtx.Dp(4))))
+	t.outlineScroll.Layout(listGtx, th, len(names), func(gtx layout.Context, index int) layout.Dimensions {
+		size := image.Pt(m.width, row)
+		gtx.Constraints = layout.Exact(size)
 		section := &t.outlineLines[index]
 		if section.row.click.Clicked(gtx) && t.outline != nil {
 			t.outline.GoTo(index)
 			gtx.Execute(op.InvalidateCmd{})
 		}
+		// the thread the sections hang on, down to the last one's node
+		bottom := row
+		if index == len(names)-1 {
+			bottom = row / 2
+		}
+		vline(gtx, threadX, 0, bottom, th.R.Guide())
+		slide, alpha := treeEntry(gtx, e, t.outlineEntered, index)
+		if alpha < 1 {
+			entering = true
+		}
 		here := index == current
-		at := op.Offset(image.Pt(0, index*row)).Push(gtx.Ops)
-		rowGtx := gtx
-		rowGtx.Constraints = layout.Exact(image.Pt(m.width, row))
-		section.row.click.Layout(rowGtx, func(gtx layout.Context) layout.Dimensions {
+		name := names[index]
+		section.row.click.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 			section.row.update(gtx, th, here)
+			fade := paint.PushOpacity(gtx.Ops, alpha)
+			shift := op.Offset(image.Pt(slide, 0)).Push(gtx.Ops)
 			section.row.wash.Paint(gtx, th, image.Rect(gtx.Dp(46), 0, m.width-gtx.Dp(4), row), gtx.Dp(treeRowCut))
 			// the node grows as its section is read, OutBack 2
 			section.node.Duration, section.node.Ease = th.Motion.Move, look.EaseOutBackNode
-			size := float32(gtx.Dp(treeNodeRest))
+			nodeSize := float32(gtx.Dp(treeNodeRest))
 			if here {
-				size = float32(gtx.Dp(treeNodeHere))
+				nodeSize = float32(gtx.Dp(treeNodeHere))
 			}
 			if !section.set {
 				section.set = true
-				section.node.Set(gtx, size)
+				section.node.Set(gtx, nodeSize)
 			}
-			section.node.Set(gtx, size)
+			section.node.Set(gtx, nodeSize)
 			ring := palette.Mix(th.R.Guide(), th.R.Fg2, section.row.hover)
-			node(gtx, section.node.Value(gtx), threadX, row/2, palette.Mix(ring, th.R.Sel, section.row.sel), here, th.Planes().Side)
+			node(gtx, section.node.Value(gtx), threadX-slide, row/2, palette.Mix(ring, th.R.Sel, section.row.sel), here, th.Planes().Side)
 			style := th.T.Caption
 			if here {
 				style = bold(style)
@@ -772,9 +871,14 @@ func (sidebar *Sidebar) layoutFoot(gtx layout.Context, e *env.Env, m treeMetrics
 			x := gtx.Dp(treeOutlineText) + section.row.lean(gtx)
 			words := line(gtx, th, style, ink, name, m.width-x-gtx.Dp(treeTail))
 			words.at(gtx, x, row/2)
-			return layout.Dimensions{Size: gtx.Constraints.Max}
+			shift.Pop()
+			fade.Pop()
+			return layout.Dimensions{Size: size}
 		})
-		at.Pop()
+		return layout.Dimensions{Size: size}
+	})
+	if entering {
+		gtx.Execute(op.InvalidateCmd{})
 	}
 	box.Pop()
 	offset.Pop()

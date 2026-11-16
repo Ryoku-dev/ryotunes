@@ -184,9 +184,10 @@ type settingsOutlinePage interface {
 	chrome.SettingsOutline
 }
 
-// settingsOutline tells the open Settings page whether the tree shows its sections (the
-// tree unfolded and height pixels tall enough to hold them) and returns the outline the
-// tree hangs, nil when none shows.
+// settingsOutline hands the tree the open Settings page's outline while the tree is
+// unfolded and height pixels tall enough to hold it beside its playlists, nil otherwise,
+// and tells the page whether the outline shows: folded by the reader or with no room,
+// the page shows its own section chips instead.
 func (s *uiShell) settingsOutline(gtx layout.Context, e *env.Env, unfolded bool, height int) chrome.SettingsOutline {
 	route := e.Nav.Current()
 	if route.Kind != env.RouteSettings || e.Nav.NowPlaying() {
@@ -196,10 +197,9 @@ func (s *uiShell) settingsOutline(gtx layout.Context, e *env.Env, unfolded bool,
 	if !ok {
 		return nil
 	}
-	names, _ := page.Outline()
-	shown := unfolded && chrome.OutlineFits(gtx, height, len(names))
-	page.SetOutline(shown)
-	if !shown {
+	available := unfolded && s.sidebar.OutlineFits(gtx, height)
+	page.SetOutline(available && s.sidebar.OutlineOpen())
+	if !available {
 		return nil
 	}
 	return page

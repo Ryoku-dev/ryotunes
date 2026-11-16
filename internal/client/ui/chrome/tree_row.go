@@ -25,7 +25,8 @@ type kitStyle = libtheme.TextStyle
 // The Hub's tree, in dp (components/nav/NavRow.qml, NavFolder.qml, NavOutline.qml,
 // HubSidebar.qml): a numbered line 34 tall, a leaf 30 (a collection leaf keeps its 32 dp
 // cover and stands 44), a step in of 22 a level, the guide 16 in from the rows' edge, the
-// branch tick 8 long, the row's own cut 6, and the outline's rows 26 on a thread 36 in.
+// branch tick 8 long, the row's own cut 6, and the outline's rows 24 (the Hub's 26, made
+// compact for a music player's sidebar) on a thread 36 in.
 const (
 	treeLine        unit.Dp = 34
 	treeLeaf        unit.Dp = 30
@@ -38,7 +39,7 @@ const (
 	treeTail        unit.Dp = 10
 	treeChevron     unit.Dp = 16
 	treeCover       unit.Dp = 32
-	treeOutlineRow  unit.Dp = 26
+	treeOutlineRow  unit.Dp = 24
 	treeThread      unit.Dp = 36
 	treeOutlineText unit.Dp = 55
 	treeNodeRest    unit.Dp = 5

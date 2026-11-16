@@ -33,6 +33,8 @@ type treeHarness struct {
 	now        time.Time
 	size       image.Point
 	rail       float32
+	// scale is the pixels a dp; zero is 1
+	scale float32
 }
 
 func newTreeHarness(t *testing.T) *treeHarness {
@@ -55,12 +57,20 @@ func (h *treeHarness) frame(d time.Duration) bool {
 	h.operations.Reset()
 	gtx := layout.Context{
 		Ops: &h.operations, Now: h.now, Source: h.router.Source(),
-		Metric: unit.Metric{PxPerDp: 1, PxPerSp: 1}, Constraints: layout.Exact(h.size),
+		Metric: h.metric(), Constraints: layout.Exact(h.size),
 	}
 	h.sidebar.Layout(gtx, h.e, look.Expanded, h.rail)
 	h.router.Frame(&h.operations)
 	_, wake := h.router.WakeupTime()
 	return wake
+}
+
+func (h *treeHarness) metric() unit.Metric {
+	scale := h.scale
+	if scale <= 0 {
+		scale = 1
+	}
+	return unit.Metric{PxPerDp: scale, PxPerSp: scale}
 }
 
 // settle runs frames until none is asked for, failing past limit.
@@ -194,6 +204,10 @@ func (o *fakeOutline) Outline() (names []string, current int) {
 
 func (o *fakeOutline) GoTo(index int) { o.went = index }
 
+// twelveSections are the Settings page's sections, as many as it has.
+var twelveSections = []string{"Account", "Playback", "Sound", "Lyrics", "Downloads", "Local music",
+	"Playlists", "Appearance", "Integrations", "Data and storage", "Diagnostics", "About"}
+
 func TestSettingsOutlineUnfoldsUnderSettingsAndGoesToASection(t *testing.T) {
 	h := newTreeHarness(t)
 	h.nav.current = env.Route{Kind: env.RouteSettings}
@@ -201,12 +215,10 @@ func TestSettingsOutlineUnfoldsUnderSettingsAndGoesToASection(t *testing.T) {
 	h.sidebar.SetOutline(outline)
 	h.frame(0)
 	h.settle(2 * time.Second)
-	height := h.sidebar.tree.outlineHeight(layout.Context{Now: h.now}, h.e, true, 3, treeMeasure(layout.Context{Metric: unit.Metric{PxPerDp: 1, PxPerSp: 1}}, 264, 0))
-	if want := 3*int(treeOutlineRow) + 4; height != want {
-		t.Fatalf("the outline stands %d tall, want %d", height, want)
+	footY := h.sidebar.tree.footY
+	if want := h.size.Y - int(treeFootGap) - int(treeLine) - (3*int(treeOutlineRow) + 4); footY != want {
+		t.Fatalf("the foot stands at %d, want %d: Settings with its three sections", footY, want)
 	}
-	// the foot: Settings 34 then the outline, 8 off the sidebar's foot
-	footY := h.size.Y - int(treeFootGap) - int(treeLine) - height
 	soundY := float32(footY + int(treeLine) + 2*int(treeOutlineRow) + int(treeOutlineRow)/2)
 	h.click(f32.Pt(120, soundY))
 	h.frame(time.Millisecond)
@@ -222,6 +234,105 @@ func TestSettingsOutlineUnfoldsUnderSettingsAndGoesToASection(t *testing.T) {
 	}
 	h.settle(2 * time.Second)
 }
+
+// settingsLineY is the middle of the 05 SETTINGS line as the last layout placed it, in px.
+func (h *treeHarness) settingsLineY() float32 {
+	return float32(h.sidebar.tree.footY) + float32(layout.Context{Metric: h.metric()}.Dp(treeLine))/2
+}
+
+func TestSettingsChevronFoldsAndUnfoldsTheOutline(t *testing.T) {
+	h := newTreeHarness(t)
+	h.nav.current = env.Route{Kind: env.RouteHome}
+	h.frame(0)
+	h.settle(time.Second)
+	// opening Settings unfolds its outline, sections sliding in
+	h.nav.current = env.Route{Kind: env.RouteSettings}
+	outline := &fakeOutline{names: twelveSections, went: -1}
+	h.sidebar.SetOutline(outline)
+	h.frame(time.Millisecond)
+	if !h.frame(16*time.Millisecond) || h.sidebar.tree.outlineEntered.IsZero() {
+		t.Fatal("opening Settings did not unfold its outline with motion")
+	}
+	h.settle(2 * time.Second)
+	folded := h.size.Y - int(treeFootGap) - int(treeLine)
+	if h.sidebar.tree.footY >= folded || !h.sidebar.OutlineOpen() {
+		t.Fatal("the outline did not stand open under Settings")
+	}
+	// the chevron folds it; the route stays
+	chevronX := float32(treeInset + 8 + treeChevron/2)
+	h.click(f32.Pt(chevronX, h.settingsLineY()))
+	h.frame(time.Millisecond)
+	if h.sidebar.OutlineOpen() {
+		t.Fatal("pressing the chevron did not fold the outline")
+	}
+	if !h.frame(16 * time.Millisecond) {
+		t.Fatal("the outline folded without motion")
+	}
+	h.settle(2 * time.Second)
+	if h.sidebar.tree.footY != folded || h.nav.current.Kind != env.RouteSettings {
+		t.Fatalf("folded, the foot stands at %d on %q; want %d on Settings", h.sidebar.tree.footY, h.nav.current.Kind, folded)
+	}
+	// and unfolds it again, the choice kept
+	h.click(f32.Pt(chevronX, h.settingsLineY()))
+	h.frame(time.Millisecond)
+	if !h.sidebar.OutlineOpen() || !h.frame(16*time.Millisecond) {
+		t.Fatal("pressing the chevron again did not unfold the outline with motion")
+	}
+	h.settle(2 * time.Second)
+	if h.sidebar.tree.footY >= folded {
+		t.Fatal("the outline did not unfold again")
+	}
+	// pressing the line itself opens Settings and never folds
+	h.nav.current = env.Route{Kind: env.RouteHome}
+	h.sidebar.SetOutline(nil)
+	h.settle(2 * time.Second)
+	h.click(f32.Pt(140, h.settingsLineY()))
+	h.frame(time.Millisecond)
+	if h.nav.current.Kind != env.RouteSettings || !h.sidebar.OutlineOpen() {
+		t.Fatalf("pressing 05 SETTINGS opened %q with the outline open %v", h.nav.current.Kind, h.sidebar.OutlineOpen())
+	}
+}
+
+// The owner's window, 1280x800 at zoom 110 with the player bar: Settings open with its
+// twelve sections still leaves Liked songs and the first three playlists in view; the
+// outline scrolls within the room left.
+func TestSettingsOutlineLeavesThePlaylistsInView(t *testing.T) {
+	h := newTreeHarness(t)
+	h.scale = 1.1
+	h.size = image.Pt(299, 685)
+	snapshot := h.e.Store.Snapshot()
+	sidebar := &h.sidebar
+	sidebar.loaded, sidebar.loadedProvider = true, snapshot.Provider
+	sidebar.loadedSignedIn = providerSignedIn(snapshot, snapshot.Provider)
+	for n := 1; n <= 12; n++ {
+		sidebar.playlists = append(sidebar.playlists, model.BrowseItem{Kind: "playlist", ID: "PL" + kitPad(n), Title: "Mix " + kitPad(n)})
+	}
+	h.nav.current = env.Route{Kind: env.RouteSettings}
+	sidebar.SetOutline(&fakeOutline{names: twelveSections, went: -1})
+	h.frame(0)
+	h.settle(2 * time.Second)
+	tree := &sidebar.tree
+	if !tree.open {
+		t.Fatal("the Playlists folder should stand open")
+	}
+	gtx := layout.Context{Metric: h.metric()}
+	outline := h.size.Y - gtx.Dp(treeFootGap) - gtx.Dp(treeLine) - tree.footY
+	if outline < 3*gtx.Dp(treeOutlineRow) {
+		t.Fatalf("the outline stands %d px, want at least three sections", outline)
+	}
+	if full := len(twelveSections)*gtx.Dp(treeOutlineRow) + gtx.Dp(4); outline >= full {
+		t.Fatalf("the outline stands its full %d px; it should scroll within the room left", full)
+	}
+	// leaf 0 is New playlist, 1 Liked songs, 2.. the playlists
+	if len(tree.leafTops) < 5 {
+		t.Fatalf("the folder holds %d leaves", len(tree.leafTops))
+	}
+	if bottom := tree.leafTops[4] + gtx.Dp(treeCoverLeaf); bottom > tree.bodyRect.Dy() {
+		t.Fatalf("the third playlist ends at %d px, under the tree's %d", bottom, tree.bodyRect.Dy())
+	}
+}
+
+func kitPad(n int) string { return string(rune('0'+n/10)) + string(rune('0'+n%10)) }
 
 func TestSearchHitsGroupByKindWithCrumbs(t *testing.T) {
 	subtitle := "Kite Assembly"
@@ -264,12 +375,19 @@ func TestSearchUnderlineFoldsAccents(t *testing.T) {
 
 func TestSettingsOutlineFallsBackToChipsWhenTheSidebarIsShort(t *testing.T) {
 	gtx := layout.Context{Metric: unit.Metric{PxPerDp: 1, PxPerSp: 1}}
+	var sidebar Sidebar
+	sidebar.tree.initialize()
 	// the owner's window (800 tall at 110 %) leaves the tree about 623 dp
-	if !OutlineFits(gtx, 623, 12) {
-		t.Fatal("twelve sections did not fit the owner's window")
+	if !sidebar.OutlineFits(gtx, 623) {
+		t.Fatal("the outline did not fit the owner's window")
 	}
-	// the 560 dp minimum window leaves the tree about 456 dp
-	if OutlineFits(gtx, 456, 12) {
-		t.Fatal("twelve sections starved the tree in the smallest window")
+	// the 560 dp minimum window leaves the tree about 456 dp: the playlists keep it
+	if sidebar.OutlineFits(gtx, 456) {
+		t.Fatal("the outline starved the playlists in the smallest window")
+	}
+	// with the Playlists folder shut the same window has room for it
+	sidebar.tree.open = false
+	if !sidebar.OutlineFits(gtx, 456) {
+		t.Fatal("the outline found no room beside a shut Playlists folder")
 	}
 }
