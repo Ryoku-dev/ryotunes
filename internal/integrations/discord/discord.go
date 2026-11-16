@@ -24,13 +24,18 @@ import (
 	"github.com/ryoku-dev/ryotunes/internal/model"
 )
 
+// Discord's status_display_type: 0 shows the activity name, 1 the state, 2 the details.
+// The member list and profile line read the song title (details) first.
+const statusDisplayDetails = 2
+
 const (
 	applicationID       = "1525891596804161727"
 	defaultPresenceName = "Ryotunes"
-	brandImage          = "https://raw.githubusercontent.com/ryoku-dev/ryotunes/main/src-tauri/icons/icon.png"
-	brandBadgeText      = "Ryotunes"
-	maxFieldRunes       = 128
-	maxAssetURLBytes    = 256
+	// pinned to the commit that added it, so the badge never breaks when branches move
+	brandImage       = "https://raw.githubusercontent.com/Ryoku-dev/ryotunes/cf7e43ebec8eaa4421b2742eb5cf01cbb1613c37/assets/discord/ryoku-mark.png"
+	brandBadgeText   = "Ryotunes"
+	maxFieldRunes    = 128
+	maxAssetURLBytes = 256
 )
 
 const (
@@ -88,7 +93,7 @@ type playbackUpdate struct {
 type activity struct {
 	Name              string             `json:"name"`
 	Type              int                `json:"type"`
-	StatusDisplayType string             `json:"status_display_type"`
+	StatusDisplayType int                `json:"status_display_type"`
 	Details           string             `json:"details"`
 	State             string             `json:"state,omitempty"`
 	Timestamps        activityTimestamps `json:"timestamps"`
@@ -521,7 +526,7 @@ func buildActivity(now time.Time, name string, update playbackUpdate) activity {
 	result := activity{
 		Name:              field(name),
 		Type:              2,
-		StatusDisplayType: "state",
+		StatusDisplayType: statusDisplayDetails,
 		Details:           field(track.Title),
 		Timestamps:        timestamps,
 		Assets:            assets,

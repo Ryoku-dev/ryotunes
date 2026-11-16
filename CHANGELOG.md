@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Discord shows the song you are playing first, in your member list entry and profile, instead of "Ryotunes", and the small badge on the cover is the current Ryoku mark rather than the old music note.
 - Ryotunes follows the Style page in Ryoku Settings now. Design, colours, light or dark, contrast, tint, reduced motion and the Japanese words all come from there and change while Ryotunes is open, and Settings, Appearance shows what the desktop uses with a button that opens Ryoku Settings.
 - Material, Adwaita and Fluent work in Ryotunes too, with their own rounded corners and surfaces like the rest of Ryoku. Covers stay rounded squares and the visualizer bars stay sharp.
 - Ryotunes looks like Ryoku Settings: a numbered sidebar with its Japanese words, a header on every page with where you are, the service and the time, ruled sections, a line of counts under each page title, and Ryoku's motto at the foot.

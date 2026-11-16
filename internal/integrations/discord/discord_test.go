@@ -26,7 +26,7 @@ func TestBuildActivity(t *testing.T) {
 		duration: 300,
 		at:       now,
 	})
-	if got.Name != "Ryotunes" || got.Type != 2 || got.StatusDisplayType != "state" {
+	if got.Name != "Ryotunes" || got.Type != 2 || got.StatusDisplayType != statusDisplayDetails {
 		t.Fatalf("identity fields = %#v", got)
 	}
 	if got.Details != "Song" || got.State != "Artist" {
