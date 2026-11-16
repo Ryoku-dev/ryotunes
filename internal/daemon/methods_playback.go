@@ -183,16 +183,42 @@ func getWaveform(ctx context.Context, a *App, p protocol.IDParams) (model.Wavefo
 	waveform, err := a.SoundCloud.Waveform(ctx, p.ID)
 	return waveform, providerError(model.ProviderSoundCloud, err)
 }
+
+// rate rates the song with its service (the YouTube Music account, Spotify,
+// SoundCloud, the device for local files) or, when that service has no likes
+// or YouTube Music is signed out, in the device's Liked songs. A confirmed
+// rating is carried onto the queue and now playing and announced to every
+// client, so each heart showing the song follows it.
 func rate(ctx context.Context, a *App, p protocol.RateParams) (protocol.Null, error) {
 	pr := providerForID(a, p.VideoID)
+	key, account := string(pr.ID()), ""
 	useProvider := pr.ID() == model.ProviderSpotify || pr.ID() == model.ProviderSoundCloud || pr.ID() == model.ProviderLocal
 	if pr.ID() == model.ProviderYouTube {
-		account, err := a.YouTube.Account(ctx)
-		useProvider = err == nil && account.SignedIn
+		current, err := pr.Account(ctx)
+		useProvider = err == nil && current.SignedIn
+		if err == nil {
+			account = youtubeAccount(current)
+			if a.ratings.setYouTubeAccount(account) {
+				a.ratingsChanged()
+			}
+		}
+	}
+	if pr.ID() == model.ProviderLocal || !useProvider {
+		key, account = likesDevice, likesDevice
 	}
 	if r, ok := pr.(provider.Rater); ok && useProvider {
-		return protocol.Null{}, providerError(pr.ID(), r.Rate(ctx, p.VideoID, p.Rating))
+		if err := r.Rate(ctx, p.VideoID, p.Rating); err != nil {
+			return protocol.Null{}, providerError(pr.ID(), err)
+		}
+	} else if err := rateOnDevice(ctx, a, p); err != nil {
+		return protocol.Null{}, err
 	}
+	a.rated(key, account, p.VideoID, p.Rating)
+	return protocol.Null{}, nil
+}
+
+// rateOnDevice likes a song in the device's Liked songs playlist, or takes it out.
+func rateOnDevice(ctx context.Context, a *App, p protocol.RateParams) error {
 	if p.Rating == model.RatingLike {
 		track := model.Track{VideoID: p.VideoID}
 		for _, candidate := range a.Queue.Snapshot().Items {
@@ -202,9 +228,9 @@ func rate(ctx context.Context, a *App, p protocol.RateParams) (protocol.Null, er
 			}
 		}
 		_, err := a.Local.AddTrackToPlaylist(ctx, model.LocalLikedPlaylistID, track)
-		return protocol.Null{}, err
+		return err
 	}
-	return protocol.Null{}, a.Local.RemoveFromPlaylist(ctx, model.LocalLikedPlaylistID, p.VideoID, "")
+	return a.Local.RemoveFromPlaylist(ctx, model.LocalLikedPlaylistID, p.VideoID, "")
 }
 
 func providerForID(a *App, id string) provider.Provider {

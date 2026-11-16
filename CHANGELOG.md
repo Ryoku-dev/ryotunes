@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Hearts show your YouTube Music likes everywhere. Songs you already liked show a filled heart in the queue, the player, now playing, search, albums and Home, not only in Liked music, and liking a song keeps its heart filled instead of emptying it again a moment later. A like or unlike made anywhere in Ryotunes shows on every heart for that song at once. Likes made on another device show up within half an hour.
 - Lyrics belong to the song you're playing. A video whose title holds the artist ("PIXY - LEGACY") on someone else's channel, or carries tags like Official Video, Lyrics or ft., now finds the right song, and lyrics for a different song of about the same length are no longer shown. Slowed, sped up, nightcore, reverb, 8D and daycore uploads get the original song's lyrics stretched to their speed, or shown without timing when the speed can't be worked out. Lyrics saved by earlier versions are looked up again once.
 - Discord shows the song you are playing first, in your member list entry and profile, instead of "Ryotunes", and the small badge on the cover is the current Ryoku mark rather than the old music note.
 - Ryotunes follows the Style page in Ryoku Settings now. Design, colours, light or dark, contrast, tint, reduced motion and the Japanese words all come from there and change while Ryotunes is open, and Settings, Appearance shows what the desktop uses with a button that opens Ryoku Settings.

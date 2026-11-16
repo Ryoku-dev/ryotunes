@@ -268,6 +268,9 @@ func addToLocalPlaylist(ctx context.Context, a *App, p protocol.AddToLocalPlayli
 	if err == nil && added {
 		a.Bus.Emit(protocol.EventLibraryChanged, protocol.LibraryChangedEvent{ID: p.PlaylistID})
 	}
+	if err == nil && p.PlaylistID == model.LocalLikedPlaylistID {
+		a.rated(likesDevice, likesDevice, p.Item.VideoID, model.RatingLike)
+	}
 	return added, err
 }
 func removeFromPlaylist(ctx context.Context, a *App, p protocol.RemoveFromPlaylistParams) (protocol.Null, error) {
@@ -286,6 +289,9 @@ func removeFromPlaylist(ctx context.Context, a *App, p protocol.RemoveFromPlayli
 	err := editor.RemoveFromPlaylist(ctx, p.PlaylistID, p.VideoID, setID)
 	if err == nil && strings.HasPrefix(p.PlaylistID, model.LocalPlaylistPrefix) {
 		a.Bus.Emit(protocol.EventLibraryChanged, protocol.LibraryChangedEvent{ID: p.PlaylistID})
+	}
+	if err == nil && p.PlaylistID == model.LocalLikedPlaylistID {
+		a.rated(likesDevice, likesDevice, p.VideoID, model.RatingIndifferent)
 	}
 	return protocol.Null{}, providerError(pr.ID(), err)
 }

@@ -59,12 +59,19 @@ type Transport interface {
 	Events() <-chan player.Event
 }
 
+// Ratings knows the rating of a track whose provider sent none, such as the
+// signed-in account's likes; nil when it isn't known yet.
+type Ratings interface {
+	Rating(videoID string) *model.Rating
+}
+
 // Options supplies queue dependencies.
 type Options struct {
 	Player   Transport
 	Registry *provider.Registry
 	Persist  Persist
 	Hooks    Hooks
+	Ratings  Ratings
 	Bus      bus.Sink
 	Log      *slog.Logger
 	Rand     *rand.Rand

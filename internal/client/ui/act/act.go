@@ -295,7 +295,7 @@ func TrackFromCard(card model.BrowseItem) model.Track {
 	return model.Track{
 		VideoID: card.ID, Title: card.Title, Artists: artistText, ArtistRuns: card.ArtistRuns,
 		Duration: duration, Thumbnail: card.Thumbnail, PlayCount: card.PlayCount,
-		IsVideo: card.IsVideo, IsUpload: card.IsUpload, Explicit: card.Explicit,
+		IsVideo: card.IsVideo, IsUpload: card.IsUpload, Explicit: card.Explicit, Rating: card.Rating,
 	}
 }
 

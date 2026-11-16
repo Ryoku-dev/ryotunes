@@ -66,6 +66,8 @@ type BrowseItem struct {
 	IsVideo    bool     `json:"isVideo"`
 	IsUpload   bool     `json:"isUpload"`
 	Explicit   bool     `json:"explicit"`
+	// Rating is a song card's rating when the daemon knows it.
+	Rating *Rating `json:"rating,omitempty"`
 }
 
 // Shelf is one titled row of browse cards.

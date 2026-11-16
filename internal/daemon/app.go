@@ -53,7 +53,10 @@ func New(ctx context.Context, bootstrapLog *slog.Logger) (_ *App, err error) {
 	slog.SetDefault(log)
 
 	appCtx, cancel := context.WithCancel(ctx)
-	a := &App{Log: log, Diag: diagnostics, Dirs: dirs, Bus: &bus.Fanout{}, ctx: appCtx, cancel: cancel}
+	a := &App{
+		Log: log, Diag: diagnostics, Dirs: dirs, Bus: &bus.Fanout{}, ctx: appCtx, cancel: cancel,
+		ratings: newRatingBook(), likesWake: make(chan struct{}, 1),
+	}
 	defer func() {
 		if err != nil {
 			cancel()
@@ -116,7 +119,7 @@ func New(ctx context.Context, bootstrapLog *slog.Logger) (_ *App, err error) {
 
 	a.Queue, err = queue.New(queue.Options{
 		Player: a.Player, Registry: a.Providers, Persist: queuePersist{kv: kv},
-		Hooks: queueHooks{app: a}, Bus: a.Bus, Log: log,
+		Hooks: queueHooks{app: a}, Ratings: a.ratings, Bus: a.Bus, Log: log,
 	})
 	if err != nil {
 		return nil, err
@@ -166,6 +169,12 @@ func New(ctx context.Context, bootstrapLog *slog.Logger) (_ *App, err error) {
 		case protocol.EventPlaybackState, protocol.EventNowPlaying, protocol.EventQueueChanged,
 			protocol.EventQueueIndex, protocol.EventStopAfterCurrent, protocol.EventVolume:
 			a.syncIntegrations(true)
+		case protocol.EventAuthChanged:
+			a.wakeLikes()
+		case protocol.EventSpotifyAuth:
+			a.ratings.forget(string(model.ProviderSpotify))
+		case protocol.EventSoundCloudAuth:
+			a.ratings.forget(string(model.ProviderSoundCloud))
 		}
 	}))
 	a.syncIntegrations(false)
@@ -181,6 +190,7 @@ func New(ctx context.Context, bootstrapLog *slog.Logger) (_ *App, err error) {
 	go func() {
 		defer a.background.Done()
 		a.restoreBrowserSessions(appCtx)
+		a.followLikes(appCtx)
 	}()
 	if folders, foldersErr := a.Store.LocalFolders(); foldersErr != nil {
 		log.Warn("reading local music folders", "error", foldersErr)

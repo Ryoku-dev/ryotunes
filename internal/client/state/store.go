@@ -134,6 +134,11 @@ type Store struct {
 	lastNowID            string
 	pendingPersonal      []json.RawMessage
 	lastOpenedAuthURL    map[model.Provider]string
+	// ratings are the latest ratings confirmed for tracks, by video id: this
+	// window's own rates once the daemon accepted them, the daemon's rating
+	// events (a rate from any client) and the playing track's rating. A page's
+	// rows keep the rating they were fetched with; this is newer.
+	ratings map[string]model.Rating
 }
 
 // New returns a store seeded from a daemon subscription snapshot.
@@ -141,6 +146,7 @@ func New(snapshot protocol.Snapshot) *Store {
 	store := &Store{
 		subscribers:       make(map[uint64]func()),
 		lastOpenedAuthURL: make(map[model.Provider]string),
+		ratings:           make(map[string]model.Rating),
 	}
 	store.state.Personal = EmptyPersonal()
 	store.state.Client = DefaultClientPreferences()
@@ -264,6 +270,72 @@ func (s *Store) CurrentTrack() *model.Track {
 	}
 	track := s.snapshot.Queue.Items[index]
 	return &track
+}
+
+// Rating returns the latest confirmed rating of the track with id, if any.
+func (s *Store) Rating(id string) (model.Rating, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	rating, ok := s.ratings[id]
+	return rating, ok
+}
+
+// NoteRating records a rating the daemon has just confirmed for id, so every
+// heart showing the track, the player's included, fills or empties at once,
+// before (and whether or not) the daemon's rating event arrives.
+func (s *Store) NoteRating(id string, rating model.Rating) {
+	if id == "" {
+		return
+	}
+	s.mu.Lock()
+	s.applyRatingLocked(id, rating)
+	s.publishLocked()
+	callbacks := s.callbacksLocked()
+	s.mu.Unlock()
+	notify(callbacks)
+}
+
+// applyRatingLocked records rating for id and carries it onto the playing track
+// and the queue rows of that track.
+func (s *Store) applyRatingLocked(id string, rating model.Rating) {
+	s.ratings[id] = rating
+	if now := s.state.Playback.Now; now != nil && now.VideoID == id {
+		now = clonePlaybackTrack(now)
+		now.Rating = &rating
+		s.state.Playback.Now = now
+		s.state.Rating = rating
+	}
+	var items []model.Track
+	for i, item := range s.state.Queue.Items {
+		if item.VideoID != id {
+			continue
+		}
+		if items == nil {
+			items = cloneTracks(s.state.Queue.Items)
+		}
+		value := rating
+		items[i].Rating = &value
+	}
+	if items != nil {
+		s.state.Queue.Items = items
+	}
+}
+
+// playingRatingLocked is the playing track's rating: the one the daemon sent with
+// it (recorded as the latest), else the latest confirmed one, else not liked.
+func (s *Store) playingRatingLocked() model.Rating {
+	now := s.state.Playback.Now
+	if now == nil {
+		return model.RatingIndifferent
+	}
+	if now.Rating != nil {
+		s.ratings[now.VideoID] = *now.Rating
+		return *now.Rating
+	}
+	if rating, ok := s.ratings[now.VideoID]; ok {
+		return rating
+	}
+	return model.RatingIndifferent
 }
 
 // QueueGroups returns the QueuePanel's three stable row groups.
@@ -457,11 +529,7 @@ func (s *Store) applySnapshotLocked(snapshot protocol.Snapshot, now time.Time) {
 		s.state.PersonalRevision++
 	}
 	s.state.LT = snapshot.LT
-	if s.state.Playback.Now != nil && s.state.Playback.Now.Rating != nil {
-		s.state.Rating = *s.state.Playback.Now.Rating
-	} else {
-		s.state.Rating = model.RatingIndifferent
-	}
+	s.state.Rating = s.playingRatingLocked()
 	s.state = cloneState(s.state)
 	s.positionSampledAt = now
 	s.positionSamplePaused = s.state.Playback.Paused
@@ -523,10 +591,7 @@ func (s *Store) applyLocked(name string, data json.RawMessage, now time.Time) er
 		}
 		s.state.PendingVideoID = ""
 		s.state.LastError = ""
-		s.state.Rating = model.RatingIndifferent
-		if event != nil && event.Rating != nil {
-			s.state.Rating = *event.Rating
-		}
+		s.state.Rating = s.playingRatingLocked()
 		s.realNowPlaying = true
 		s.state.Personal = clonePersonal(s.state.Personal)
 		if RecordNowPlaying(&s.state.Personal, event, &s.lastNowID, now.UnixMilli()) {
@@ -556,8 +621,8 @@ func (s *Store) applyLocked(name string, data json.RawMessage, now time.Time) er
 		if err := decode(data, &event); err != nil {
 			return err
 		}
-		if s.state.Playback.Now != nil && s.state.Playback.Now.VideoID == event.VideoID {
-			s.state.Rating = event.Rating
+		if event.VideoID != "" {
+			s.applyRatingLocked(event.VideoID, event.Rating)
 		}
 	case protocol.EventStopAfterCurrent:
 		if err := decode(data, &s.state.Playback.StopAfterCurrent); err != nil {
@@ -586,8 +651,15 @@ func (s *Store) applyLocked(name string, data json.RawMessage, now time.Time) er
 		s.state.ShowRequested = true
 	case protocol.EventAuthChanged:
 		oldSignedIn := s.state.Auth.SignedIn
-		if err := decode(data, &s.state.Auth); err != nil {
+		oldChannel := accountChannel(s.state.Auth)
+		var account model.Account
+		if err := decode(data, &account); err != nil {
 			return err
+		}
+		s.state.Auth = account
+		if oldSignedIn != account.SignedIn || oldChannel != accountChannel(account) {
+			// the likes recorded so far were another account's
+			s.ratings = make(map[string]model.Rating)
 		}
 		s.state.Personal = clonePersonal(s.state.Personal)
 		if oldSignedIn && !s.state.Auth.SignedIn && ForgetYouTubeRecents(&s.state.Personal) > 0 {
@@ -970,6 +1042,13 @@ func clonePersonal(personal Personal) Personal {
 	return clone
 }
 
+func accountChannel(account model.Account) string {
+	if account.ChannelID == nil {
+		return ""
+	}
+	return *account.ChannelID
+}
+
 func cloneAccount(account model.Account) model.Account {
 	account.Name = clonePtr(account.Name)
 	account.Handle = clonePtr(account.Handle)
@@ -1046,6 +1125,7 @@ func cloneBrowseItem(item model.BrowseItem) model.BrowseItem {
 	item.Duration = clonePtr(item.Duration)
 	item.ArtistRuns = cloneArtists(item.ArtistRuns)
 	item.PlayCount = clonePtr(item.PlayCount)
+	item.Rating = clonePtr(item.Rating)
 	return item
 }
 

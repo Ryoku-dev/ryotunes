@@ -141,8 +141,8 @@ func undoableCall(e *env.Env, method string, params any, message string, undo fu
 // ToggleLike likes track, or, when liked, takes it out of the liked songs
 // and, once the daemon has done it, offers Undo ("Removed from liked
 // songs."), which likes it again. Every heart and Like/Unlike row uses it.
-// Each confirmed rating is kept for the window, so every row showing the
-// track fills or empties its heart at once.
+// Each confirmed rating goes into the store's record, so every row and the
+// player showing the track fill or empty their heart at once.
 func ToggleLike(e *env.Env, track model.Track, liked bool) {
 	if !liked {
 		rate(e, track, model.RatingLike, nil)
@@ -163,7 +163,9 @@ func rate(e *env.Env, track model.Track, rating model.Rating, done func()) {
 			}
 			return
 		}
-		noteRating(track.VideoID, rating)
+		if e.Store != nil {
+			e.Store.NoteRating(track.VideoID, rating)
+		}
 		if done != nil {
 			done()
 		}

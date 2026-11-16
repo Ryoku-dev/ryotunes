@@ -25,6 +25,7 @@ type Queue struct {
 	registry *provider.Registry
 	persist  Persist
 	hooks    Hooks
+	ratings  Ratings
 	bus      bus.Sink
 	log      *slog.Logger
 	rng      *rand.Rand
@@ -77,7 +78,7 @@ func New(o Options) (*Queue, error) {
 	}
 	queueCtx, cancel := context.WithCancel(context.Background())
 	q := &Queue{
-		player: o.Player, persist: o.Persist, hooks: o.Hooks, bus: o.Bus,
+		player: o.Player, persist: o.Persist, hooks: o.Hooks, ratings: o.Ratings, bus: o.Bus,
 		log: o.Log, rng: o.Rand, now: o.Now, volume: 100,
 		state: state{repeat: model.RepeatOff}, ctx: queueCtx, cancel: cancel,
 		closed: make(chan struct{}),

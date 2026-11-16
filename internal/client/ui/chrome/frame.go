@@ -24,9 +24,10 @@ type Frame struct {
 // or an unlike whose notice offers Undo. The shell's Ctrl L goes through it, so the key and
 // every heart behave alike.
 func ToggleLikePlaying(e *env.Env) {
-	now := e.Store.Snapshot().Playback.Now
+	snapshot := e.Store.Snapshot()
+	now := snapshot.Playback.Now
 	if now == nil {
 		return
 	}
-	widgets.ToggleLike(e, trackFromPlayback(now, e.Store.CurrentTrack()), now.Rating != nil && *now.Rating == model.RatingLike)
+	widgets.ToggleLike(e, trackFromPlayback(now, e.Store.CurrentTrack()), snapshot.Rating == model.RatingLike)
 }

@@ -153,6 +153,31 @@ package serves the decrypted Ogg Vorbis over `127.0.0.1` with `Range`
 support so mpv seeks like any file. Local returns a `file://` URL. The
 player never knows which provider it is playing.
 
+### Likes
+
+YouTube Music only says whether a song is liked in Liked music's own rows;
+its queue, radio, search and home answers carry no `likeStatus`. The daemon
+keeps what it knows of liked songs in memory (`daemon/ratings.go`, nothing on
+disk), one set per place a like lives: the signed-in YouTube Music account
+(keyed by channel, email or handle), Spotify, SoundCloud and the device's
+Liked songs playlist, which holds local files' likes and every song's while
+YouTube Music is signed out. The account's Liked music is read in the
+background after the start-up session re-read, again on a sign in or account
+change and every 30 minutes (up to 5000 songs; a failed read retries after a
+minute, doubling); the device's once at start. Spotify's and SoundCloud's are
+never listed, only the ratings made since they signed in.
+
+Every song the daemon hands out without a provider rating is stamped like or
+indifferent from its set: queue rows, now playing and `queue-index` (through
+`queue.Ratings`) and every method result holding songs or song cards
+(`Dispatch`). A song whose set isn't known yet keeps no rating. `rate` records
+the confirmed rating in its set, writes it onto the queue rows of that song
+and emits `rating {videoId, rating}` to every client; a finished read
+re-announces the queue and the playing song's rating when anything changed.
+The client keeps the latest confirmed rating per song (its own once the
+daemon accepts it, every `rating` event, the playing song's) in `state.Store`,
+ahead of the rating a page's row was fetched with.
+
 ### Sessions
 
 Each provider's session survives the daemon being off for any length of time;

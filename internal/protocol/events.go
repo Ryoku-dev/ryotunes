@@ -23,7 +23,7 @@ const (
 	EventQueueChanged = "queue-changed"
 	// EventQueueIndex patches queue pointer state.
 	EventQueueIndex = "queue-index"
-	// EventRating updates a current track rating.
+	// EventRating reports a song's newly confirmed rating, for any song.
 	EventRating = "rating"
 	// EventStopAfterCurrent updates the one-shot stop flag.
 	EventStopAfterCurrent = "stop-after-current"

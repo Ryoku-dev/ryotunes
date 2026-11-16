@@ -6,7 +6,6 @@ import (
 	"math"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"gioui.org/f32"
@@ -161,44 +160,18 @@ func trackRateable(track model.Track) bool {
 	return provider != "" && provider != model.ProviderLocal && provider != model.ProviderRadio
 }
 
-// ratings are the ratings this window has set and the daemon has confirmed,
-// by video id. A page's rows keep the rating they were fetched with, so
-// without these a heart pressed in a row, a menu or the player bar would not
-// fill (or empty) until the page was fetched again.
-var ratings struct {
-	sync.Mutex
-	byID map[string]model.Rating
-}
-
-// noteRating records a rating the daemon has confirmed for id.
-func noteRating(id string, rating model.Rating) {
-	if id == "" {
-		return
-	}
-	ratings.Lock()
-	if ratings.byID == nil {
-		ratings.byID = make(map[string]model.Rating)
-	}
-	ratings.byID[id] = rating
-	ratings.Unlock()
-}
-
-// trackRating is track's rating as it stands now: the playing track's from
-// the live playback state (the daemon's rating events keep it current),
-// else the last rating this window set for it, else the one it was fetched
-// with.
+// trackRating is track's rating as it stands now: the latest confirmed one (this
+// window's own rates and the daemon's rating events, the store's record), else
+// the playing track's from the live playback state, else the one it was
+// fetched with.
 func trackRating(e *env.Env, track model.Track) model.Rating {
 	if track.VideoID != "" && e != nil && e.Store != nil {
-		snapshot := e.Store.Snapshot()
-		if now := snapshot.Playback.Now; now != nil && now.VideoID == track.VideoID {
-			return snapshot.Rating
+		if rating, ok := e.Store.Rating(track.VideoID); ok {
+			return rating
 		}
-	}
-	ratings.Lock()
-	rating, ok := ratings.byID[track.VideoID]
-	ratings.Unlock()
-	if ok {
-		return rating
+		if now := e.Store.Snapshot().Playback.Now; now != nil && now.VideoID == track.VideoID && now.Rating != nil {
+			return *now.Rating
+		}
 	}
 	if track.Rating != nil {
 		return *track.Rating

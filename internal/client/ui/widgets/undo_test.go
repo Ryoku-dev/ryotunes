@@ -233,7 +233,7 @@ func TestLikingARowFillsItsHeartAtRestOnceTheDaemonConfirms(t *testing.T) {
 	t.Cleanup(client.Close)
 	theme := hubTheme()
 	e := &env.Env{
-		Th: theme, Conn: client,
+		Th: theme, Conn: client, Store: state.NewEmpty(),
 		Go: func(fn func(context.Context)) { go fn(context.Background()) },
 	}
 	indifferent := model.RatingIndifferent
@@ -303,5 +303,79 @@ func TestLikingARowFillsItsHeartAtRestOnceTheDaemonConfirms(t *testing.T) {
 	rows()
 	if rating := awaitRate(t, requests, rows); rating != model.RatingIndifferent {
 		t.Fatalf("the heart at rest sent %q, want %q (unlike)", rating, model.RatingIndifferent)
+	}
+}
+
+// TestRatingEventsFromElsewhereFillAndEmptyRows: a like or unlike made
+// elsewhere (another client, Ctrl L, the player bar) reaches rows fetched
+// before it, both ways, and a row filled that way unlikes from its heart at rest.
+func TestRatingEventsFromElsewhereFillAndEmptyRows(t *testing.T) {
+	socket, requests := recordingDaemon(t)
+	client := conn.NewPath(socket)
+	t.Cleanup(client.Close)
+	theme := hubTheme()
+	store := state.NewEmpty()
+	e := &env.Env{
+		Th: theme, Conn: client, Store: store,
+		Go: func(fn func(context.Context)) { go fn(context.Background()) },
+	}
+	liked := model.RatingLike
+	items := []model.Track{
+		{VideoID: "elsewhere01", Title: "Night drive", Artists: "Someone"},
+		{VideoID: "elsewhere02", Title: "Other song", Artists: "Someone", Rating: &liked},
+	}
+	var table TrackTable
+	frame := newHubFrame(900, 400)
+	rows := func() {
+		frame.run(func(gtx layout.Context) layout.Dimensions {
+			act.PendingClipboard(gtx)
+			height := gtx.Dp(theme.RowHeight())
+			for index := range items {
+				offset := op.Offset(image.Pt(0, index*height)).Push(gtx.Ops)
+				table.Row(gtx, e, items, index, TrackTableOpts{})
+				offset.Pop()
+			}
+			return layout.Dimensions{}
+		})
+	}
+	event := func(id string, rating model.Rating) {
+		raw, err := json.Marshal(protocol.RatingEvent{VideoID: id, Rating: rating})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := store.Apply(protocol.EventRating, raw); err != nil {
+			t.Fatal(err)
+		}
+		frame.advance(time.Second)
+		rows()
+		rows()
+	}
+	rows()
+	if trackLiked(e, items[0]) || !trackLiked(e, items[1]) {
+		t.Fatal("rows should read as they were fetched before any event")
+	}
+
+	event(items[0].VideoID, model.RatingLike)
+	event(items[1].VideoID, model.RatingIndifferent)
+	if !trackLiked(e, items[0]) {
+		t.Fatal("a like from elsewhere left the row unliked")
+	}
+	if trackLiked(e, items[1]) {
+		t.Fatal("an unlike from elsewhere left the row liked")
+	}
+
+	var scratch op.Ops
+	gtx := frame.context()
+	gtx.Ops = &scratch
+	gtx.Constraints = layout.Constraints{Max: image.Pt(800, 100)}
+	titleWidth := kit.Label{Style: theme.T.Row, MaxLines: 1}.Layout(gtx, theme.Theme, items[0].Title).Size.X
+	rest := f32.Pt(float32(gtx.Dp(48)+titleWidth+gtx.Dp(8)+gtx.Dp(8)), float32(gtx.Dp(theme.RowHeight())/2))
+	frame.router.Queue(
+		pointer.Event{Kind: pointer.Press, Source: pointer.Mouse, PointerID: 1, Buttons: pointer.ButtonPrimary, Position: rest},
+		pointer.Event{Kind: pointer.Release, Source: pointer.Mouse, PointerID: 1, Position: rest},
+	)
+	rows()
+	if rating := awaitRate(t, requests, rows); rating != model.RatingIndifferent {
+		t.Fatalf("the heart filled by the event sent %q, want %q (unlike)", rating, model.RatingIndifferent)
 	}
 }

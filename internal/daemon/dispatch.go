@@ -74,6 +74,11 @@ type App struct {
 	mu       sync.Mutex
 	provider string // the selected catalogue provider
 
+	// ratings is what the daemon knows of liked songs; likesWake asks
+	// followLikes to look at the YouTube Music account again.
+	ratings   *ratingBook
+	likesWake chan struct{}
+
 	equalizerMu             sync.Mutex
 	equalizerPlayer         equalizerPlayer
 	equalizerStore          provider.KV
@@ -113,6 +118,9 @@ func (a *App) Dispatch(ctx context.Context, method string, params json.RawMessag
 			a.Log.Warn("daemon request failed", "method", method, "error", err)
 		}
 		return nil, rpcError
+	}
+	if a.ratings != nil {
+		result = a.ratings.stampRatings(result)
 	}
 	return result, nil
 }

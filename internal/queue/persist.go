@@ -160,10 +160,24 @@ func (q *Queue) persistPosition(force bool) {
 }
 
 func (q *Queue) snapshotLocked() model.QueueSnapshot {
+	items := cloneTracks(q.state.items)
+	for i := range items {
+		items[i] = q.ratedLocked(items[i])
+	}
 	return model.QueueSnapshot{
-		Items: cloneTracks(q.state.items), CurrentIndex: q.state.current, PlayedFrom: q.state.playedFrom,
+		Items: items, CurrentIndex: q.state.current, PlayedFrom: q.state.playedFrom,
 		Shuffle: q.state.shuffleOrig != nil, Repeat: q.state.repeat, SourceName: cloneString(q.state.sourceName),
 	}
+}
+
+// ratedLocked fills in the rating of a track whose provider sent none (YouTube's
+// queue and radio answers never say whether a song is liked) from what the daemon
+// knows of the account's likes. It stays nil while that isn't known.
+func (q *Queue) ratedLocked(track model.Track) model.Track {
+	if track.Rating == nil && q.ratings != nil {
+		track.Rating = q.ratings.Rating(track.VideoID)
+	}
+	return track
 }
 
 func (q *Queue) indexLocked() model.QueueIndex {
@@ -172,7 +186,7 @@ func (q *Queue) indexLocked() model.QueueIndex {
 		Repeat: q.state.repeat, SourceName: cloneString(q.state.sourceName),
 	}
 	if q.state.current >= 0 && q.state.current < len(q.state.items) {
-		current := q.state.items[q.state.current]
+		current := q.ratedLocked(q.state.items[q.state.current])
 		index.Current = &current
 	}
 	return index
@@ -182,7 +196,7 @@ func (q *Queue) nowPlayingLocked() *model.PlaybackTrack {
 	if q.state.current < 0 || q.state.current >= len(q.state.items) {
 		return nil
 	}
-	track := q.state.items[q.state.current]
+	track := q.ratedLocked(q.state.items[q.state.current])
 	return &model.PlaybackTrack{
 		VideoID: track.VideoID, Title: track.Title, Artists: track.Artists, ArtistID: track.ArtistID,
 		ArtistRuns: append([]model.Artist(nil), track.ArtistRuns...), Thumbnail: track.Thumbnail,
@@ -220,6 +234,41 @@ func (q *Queue) emitChanged() {
 	snapshot := q.snapshotLocked()
 	q.mu.Unlock()
 	q.bus.Emit(protocol.EventQueueChanged, snapshot)
+}
+
+// SetRating records a rating the account just confirmed on every queued row of
+// that track, so the queue and now playing carry it from then on. It emits
+// nothing; the daemon announces the rating itself.
+func (q *Queue) SetRating(videoID string, rating model.Rating) {
+	if videoID == "" {
+		return
+	}
+	q.mu.Lock()
+	changed := setRating(q.state.items, videoID, rating)
+	changed = setRating(q.state.shuffleOrig, videoID, rating) || changed
+	q.mu.Unlock()
+	if changed {
+		q.persistState()
+	}
+}
+
+func setRating(items []model.Track, videoID string, rating model.Rating) bool {
+	changed := false
+	for i := range items {
+		if items[i].VideoID != videoID || (items[i].Rating != nil && *items[i].Rating == rating) {
+			continue
+		}
+		value := rating
+		items[i].Rating = &value
+		changed = true
+	}
+	return changed
+}
+
+// RatingsChanged re-announces the queue after what Ratings knows has changed,
+// so rows without a provider rating show the account's likes.
+func (q *Queue) RatingsChanged() {
+	q.emitChanged()
 }
 
 func playbackState(paused bool) protocol.PlaybackState {

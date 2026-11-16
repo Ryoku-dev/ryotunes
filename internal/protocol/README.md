@@ -39,7 +39,7 @@ replacement.
 - `get_local_library`, `add_local_folder`, `remove_local_folder`: local scan roots and catalogue.
 - `get_playlist`, `get_playlist_more`, `playlist_index`, `sync_playlist_index`: playlist reads and membership index.
 - `create_playlist`, `edit_playlist_details`, `delete_playlist`, `set_playlist_cover`, `set_playlist_sort`: playlist metadata writes.
-- `add_to_playlist`, `add_to_local_playlist`, `remove_from_playlist`, `set_album_saved`, `rate`: playlist/library membership and ratings.
+- `add_to_playlist`, `add_to_local_playlist`, `remove_from_playlist`, `set_album_saved`, `rate`: playlist/library membership and ratings. A confirmed `rate`, or adding to or removing from the device's Liked songs, emits `rating` `{"videoId","rating"}` for that song to every client. Songs and song cards in every result, the queue and now playing carry `rating` when the daemon knows the account's likes and the service sent none; it is null or absent while they aren't known.
 - `export_playlist_file`, `import_playlist_file`: portable JSON playlist transfer.
 - `play_counts`, `listening_stats`, `listening_days`: local listening history aggregates; `listening_days` is one row per calendar day (daemon local time), oldest first, ending today, at most the 30 kept days.
 
