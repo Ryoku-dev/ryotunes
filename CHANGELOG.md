@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Fixed Library ▸ Songs and playlists jumping back to the top each time the next batch of tracks loaded, which made the end of a long list unreachable. The list now keeps its place while more tracks are added below.
 - Lyrics can now be romanized from Settings ▸ Appearance, including pinyin readings for Chinese and transliterations for Japanese and Korean.
 - TIDAL sign-in now opens its approval page in the browser while keeping the code visible (`client/lib/playback.js`, `client/tests/tst_playback.qml`).
 - Playlist and album Play actions now start in sequence, while clicking a track preserves the current shuffle mode. Active shuffle and repeat controls follow the live Ryoku accent.
