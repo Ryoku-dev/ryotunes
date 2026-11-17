@@ -74,14 +74,15 @@ Item {
         root.dragTo = -1;
     }
 
-    ListView {
+    StableList {
         id: list
         anchors.fill: parent
         clip: true
         reuseItems: true
         cacheBuffer: Math.max(0, Math.round(height * 1.5))
         boundsBehavior: Flickable.StopAtBounds
-        model: root.items
+        rows: root.items
+        rowKey: (row) => row.video_id
         header: (root.showHeader || root.header) ? listHead : null
         footer: root.footer
         // A drag in progress must not also flick the list.
