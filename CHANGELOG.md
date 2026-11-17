@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## v2.0.0 - 2026-11-16
+
+- Ryotunes now uses the Lithic look in one native main window.
+- Tidal and local music now sit beside YouTube Music, Spotify, SoundCloud and internet radio in the same app.
+- Material role-set palette files replace the 1.x skin system.
+- The mini player keeps playback controls available in a separate compact window.
+- The existing library, device playlists, settings and provider sign-ins carry over from 1.x.
+- Update in Settings, About follows Ryotunes 2 releases, including the prereleases Ryotunes 2 ships as while 1.x stays the stable release, and never offers a version older than the one you run.
 - Settings folds in the sidebar like Playlists: a chevron opens and closes its sections, and your playlists stay in view while Settings is open.
 - Hearts show your YouTube Music likes everywhere. Songs you already liked show a filled heart in the queue, the player, now playing, search, albums and Home, not only in Liked music, and liking a song keeps its heart filled instead of emptying it again a moment later. A like or unlike made anywhere in Ryotunes shows on every heart for that song at once. Likes made on another device show up within half an hour.
 - Lyrics belong to the song you're playing. A video whose title holds the artist ("PIXY - LEGACY") on someone else's channel, or carries tags like Official Video, Lyrics or ft., now finds the right song, and lyrics for a different song of about the same length are no longer shown. Slowed, sped up, nightcore, reverb, 8D and daycore uploads get the original song's lyrics stretched to their speed, or shown without timing when the speed can't be worked out. Lyrics saved by earlier versions are looked up again once.
@@ -63,14 +71,6 @@
 - Fixed trackpad scrolling trailing behind your fingers, the sound popover getting cut off at the bottom of the window, the volume being hard to drag, a narrow window hiding the page behind the queue, and Ryotunes not opening again while something else was listening to its events.
 - Fixed remote playback stalling or skipping during back-to-back loads, restored live playback events, made daemon shutdown deterministic, and applied proxy changes across every network-backed source and download.
 - Fixed an empty "Untitled track" that could replace your queue and come back after every restart. Local music covers show up again too.
-
-## v2.0.0 - 2026-11-08
-
-- Ryotunes now uses the Lithic look in one native main window.
-- Tidal and local music now sit beside YouTube Music, Spotify, SoundCloud and internet radio in the same app.
-- Material role-set palette files replace the 1.x skin system.
-- The mini player keeps playback controls available in a separate compact window.
-- The existing library, device playlists, settings and provider sign-ins carry over from 1.x.
 
 ## v1.2.3 - 2026-10-19
 

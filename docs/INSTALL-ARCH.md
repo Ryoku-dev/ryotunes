@@ -4,15 +4,15 @@ Ryotunes releases provide a verified x86_64 pacman package. Building from source
 
 ## Ryoku
 
-Ryotunes is included with Ryoku. Restore it after removal with:
+Ryoku Hyperion installs Ryotunes 2 for you. Install or update it from Ryostore › Ryoku apps, or run:
 
 ```sh
-ryoku-host pkg add ryotunes
+ryoku update
 ```
 
 ## Release package
 
-Download these files from the [latest release](https://github.com/ryoku-dev/ryotunes/releases/latest):
+Download these files from the [v2.0.0 prerelease](https://github.com/Ryoku-dev/ryotunes/releases/tag/v2.0.0). GitHub's latest release is still the 1.x line.
 
 ```text
 ryotunes-X.Y.Z-1-x86_64.pkg.tar.zst

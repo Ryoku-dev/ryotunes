@@ -6,7 +6,14 @@ on:
       - main
     paths:
       - VERSION
+  # A manual run builds and publishes the dispatched branch. Side branches (Hyperion's
+  # Ryotunes 2 line) publish prereleases only, so they never become the stable latest.
   workflow_dispatch:
+    inputs:
+      prerelease:
+        description: Publish as a prerelease (required from branches other than main)
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -15,15 +22,26 @@ concurrency:
   group: release
   cancel-in-progress: false
 
+env:
+  PRERELEASE: ${{ inputs.prerelease && 'true' || 'false' }}
+
 jobs:
   package:
     runs-on: ubuntu-24.04
     container: archlinux:latest
     steps:
+      - name: Refuse a stable release from a side branch
+        if: github.event_name == 'workflow_dispatch' && github.ref != 'refs/heads/main'
+        run: |
+          if [[ $PRERELEASE != true ]]; then
+            echo "::error::Stable releases come from main. Dispatch $GITHUB_REF_NAME with prerelease enabled."
+            exit 1
+          fi
       - name: Install checkout prerequisites
         run: pacman -Syu --noconfirm --needed git glibc
       - uses: actions/checkout@v4
         with:
+          ref: ${{ github.sha }}
           fetch-depth: 0
       - name: Build source archive and notes
         run: |
@@ -45,6 +63,8 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
       - uses: actions/download-artifact@v4
         with:
           name: ryotunes-release
@@ -55,17 +75,28 @@ jobs:
         run: |
           version=$(tr -d '[:space:]' < VERSION)
           tag="v$version"
+          # Ryoku's apprelease lane and the in-app updater both read exactly these names:
+          # the epochless package and its sha256sum sidecar.
           assets=(
             "dist/ryotunes-$version-1-x86_64.pkg.tar.zst"
             "dist/ryotunes-$version-1-x86_64.pkg.tar.zst.sha256"
             "dist/ryotunes-$version.tar.gz"
             "dist/ryotunes-$version.tar.gz.sha256"
           )
+          flags=()
+          if [[ $PRERELEASE == true ]]; then
+            flags+=(--prerelease)
+          fi
           if gh release view "$tag" >/dev/null 2>&1; then
+            if [[ $GITHUB_REF != refs/heads/main ]] &&
+              [[ $(gh release view "$tag" --json isPrerelease --jq .isPrerelease) != true ]]; then
+              echo "::error::$tag is a stable release. Only main may replace its assets."
+              exit 1
+            fi
             gh release upload "$tag" "${assets[@]}" --clobber
-            gh release edit "$tag" --notes-file dist/RELEASE_NOTES.md
+            gh release edit "$tag" "${flags[@]}" --notes-file dist/RELEASE_NOTES.md
           else
-            gh release create "$tag" "${assets[@]}" \
+            gh release create "$tag" "${assets[@]}" "${flags[@]}" \
               --target "$GITHUB_SHA" \
               --title "Ryotunes $version" \
               --notes-file dist/RELEASE_NOTES.md

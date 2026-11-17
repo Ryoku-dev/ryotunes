@@ -15,10 +15,11 @@ depends=$(
   done < "$root/release/void/depends"
 )
 
-tag=$(curl -fsSL "https://api.github.com/repos/$repo/releases/latest" |
-  sed -n 's/.*"tag_name": *"\(v[0-9][0-9.]*\)".*/\1/p' | head -n1)
-[[ -n $tag ]] || { echo 'Could not find the latest release.' >&2; exit 1; }
-version=${tag#v}
+# The release matching this checkout: GitHub's /latest is the stable 1.x line, while this
+# tree may be a 2.x prerelease that /latest never names.
+version=$(tr -d '[:space:]' < "$root/VERSION")
+[[ $version =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo 'VERSION must hold X.Y.Z.' >&2; exit 1; }
+tag="v$version"
 package="ryotunes-$version-1-x86_64.pkg.tar.zst"
 
 work=$(mktemp -d)

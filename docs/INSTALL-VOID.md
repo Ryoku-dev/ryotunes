@@ -12,7 +12,7 @@ Run the installer from a clone or release source archive:
 
 The script:
 
-1. reads the latest Ryotunes release tag;
+1. takes the release named in the checkout's `VERSION` (2.0 is a prerelease, which GitHub's latest release never names);
 2. downloads the package and its SHA-256 sidecar;
 3. verifies the checksum;
 4. removes the systemd files;

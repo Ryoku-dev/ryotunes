@@ -29,11 +29,17 @@ import (
 
 const (
 	repositoryURL = "https://github.com/ryoku-dev/ryotunes"
-	latestURL     = "https://api.github.com/repos/ryoku-dev/ryotunes/releases/latest"
 	maxPackage    = int64(1 << 30)
-	maxMetadata   = int64(1 << 20)
+	maxMetadata   = int64(4 << 20)
 	maxChecksum   = int64(4096)
+	// firstPrereleaseLine is the oldest major line whose installs also follow prereleases:
+	// Ryotunes 2 reaches its testers as GitHub prereleases while 1.x stays on stable releases.
+	firstPrereleaseLine = 2
 )
+
+// releasesURL lists releases newest first, prereleases included, unlike /releases/latest.
+// One page reaches every release a current install can move to. A variable for tests.
+var releasesURL = "https://api.github.com/repos/ryoku-dev/ryotunes/releases?per_page=50"
 
 var installing atomic.Bool
 
@@ -73,9 +79,9 @@ type semver struct {
 	patch uint64
 }
 
-// Check queries the latest GitHub release and reports whether this installation can update.
+// Check queries the GitHub releases and reports whether this installation can update.
 func Check(ctx context.Context) (model.UpdateInfo, error) {
-	rel, err := fetchRelease(ctx)
+	rel, err := fetchRelease(ctx, version.Version)
 	if err != nil {
 		return model.UpdateInfo{}, err
 	}
@@ -96,17 +102,17 @@ func Check(ctx context.Context) (model.UpdateInfo, error) {
 	return info, nil
 }
 
-// Install downloads, verifies, and installs the selected latest release package.
+// Install downloads, verifies, and installs the selected newest release package.
 func Install(ctx context.Context, requested string) (model.UpdateResult, error) {
 	if _, ok := parseVersion(requested); !ok {
-		return model.UpdateResult{}, errors.New("Select a valid v1 release.")
+		return model.UpdateResult{}, errors.New("Select a valid release.")
 	}
 	if !installing.CompareAndSwap(false, true) {
 		return model.UpdateResult{}, errors.New("An update is already in progress.")
 	}
 	defer installing.Store(false)
 
-	rel, err := fetchRelease(ctx)
+	rel, err := fetchRelease(ctx, version.Version)
 	if err != nil {
 		return model.UpdateResult{}, err
 	}
@@ -178,10 +184,11 @@ func Install(ctx context.Context, requested string) (model.UpdateResult, error) 
 	return model.UpdateResult{Version: requested, RestartRequired: true}, nil
 }
 
-func fetchRelease(ctx context.Context) (*release, error) {
+// fetchRelease returns the newest release the running version may move to, or nil.
+func fetchRelease(ctx context.Context, current string) (*release, error) {
 	requestCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
-	request, err := http.NewRequestWithContext(requestCtx, http.MethodGet, latestURL, nil)
+	request, err := http.NewRequestWithContext(requestCtx, http.MethodGet, releasesURL, nil)
 	if err != nil {
 		return nil, fmt.Errorf("Could not contact GitHub: %v", err)
 	}
@@ -201,11 +208,41 @@ func fetchRelease(ctx context.Context) (*release, error) {
 	if err != nil {
 		return nil, err
 	}
-	var rel release
-	if err := json.Unmarshal(body, &rel); err != nil {
+	var releases []release
+	if err := json.Unmarshal(body, &releases); err != nil {
 		return nil, fmt.Errorf("Invalid GitHub release metadata: %v", err)
 	}
-	return &rel, nil
+	return selectRelease(releases, current), nil
+}
+
+// selectRelease picks the highest published release on the running version's major line.
+// Drafts never count; prereleases count only from the 2.x line on. Releases of another
+// major line are ignored, so a 2.x install is never offered 1.x and never jumps to 3.x.
+// A running version that does not parse (a development build) follows stable releases.
+func selectRelease(releases []release, current string) *release {
+	running, known := parseVersion(current)
+	var best *release
+	var bestVersion semver
+	for i := range releases {
+		candidate := &releases[i]
+		if candidate.Draft || !strings.HasPrefix(candidate.TagName, "v") {
+			continue
+		}
+		next, ok := parseVersion(strings.TrimPrefix(candidate.TagName, "v"))
+		if !ok {
+			continue
+		}
+		if known && next.major != running.major {
+			continue
+		}
+		if candidate.Prerelease && (!known || running.major < firstPrereleaseLine) {
+			continue
+		}
+		if best == nil || compareVersion(next, bestVersion) > 0 {
+			best, bestVersion = candidate, next
+		}
+	}
+	return best
 }
 
 func releaseInfo(rel *release, current string, mgr manager, reason *string) model.UpdateInfo {
@@ -214,7 +251,7 @@ func releaseInfo(rel *release, current string, mgr manager, reason *string) mode
 		ReleaseURL:        repositoryURL + "/releases",
 		UnsupportedReason: reason,
 	}
-	if rel == nil || rel.Draft || rel.Prerelease || !strings.HasPrefix(rel.TagName, "v") {
+	if rel == nil || rel.Draft || !strings.HasPrefix(rel.TagName, "v") {
 		return info
 	}
 	latest := strings.TrimPrefix(rel.TagName, "v")
@@ -271,20 +308,30 @@ func packageName(version string, mgr manager) string {
 	return "ryotunes-" + version + "-1-x86_64.pkg.tar.zst"
 }
 
+// parseVersion accepts a canonical X.Y.Z release version: decimal parts without leading
+// zeros, major 1 or later. Anything else (paths, suffixes, a leading v) is rejected.
 func parseVersion(raw string) (semver, bool) {
 	parts := strings.Split(raw, ".")
-	if len(parts) != 3 || parts[0] != "1" {
+	if len(parts) != 3 {
 		return semver{}, false
 	}
-	if len(parts[1]) > 1 && parts[1][0] == '0' || len(parts[2]) != 1 {
+	var values [3]uint64
+	for i, part := range parts {
+		// ParseUint rejects signs and anything but decimal digits; the length check rejects
+		// leading zeros so one version has exactly one spelling.
+		if len(part) > 1 && part[0] == '0' {
+			return semver{}, false
+		}
+		value, err := strconv.ParseUint(part, 10, 64)
+		if err != nil {
+			return semver{}, false
+		}
+		values[i] = value
+	}
+	if values[0] == 0 {
 		return semver{}, false
 	}
-	minor, errMinor := strconv.ParseUint(parts[1], 10, 64)
-	patch, errPatch := strconv.ParseUint(parts[2], 10, 64)
-	if errMinor != nil || errPatch != nil {
-		return semver{}, false
-	}
-	return semver{major: 1, minor: minor, patch: patch}, true
+	return semver{major: values[0], minor: values[1], patch: values[2]}, true
 }
 
 func compareVersion(left, right semver) int {

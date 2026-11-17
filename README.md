@@ -32,17 +32,19 @@ Ryotunes does not play music videos.
 
 ## Install
 
+Ryotunes 2.0 is a prerelease, [v2.0.0](https://github.com/Ryoku-dev/ryotunes/releases/tag/v2.0.0). GitHub's latest release is still the 1.x line.
+
 ### Ryoku
 
-Ryotunes comes with Ryoku. If it was removed, install it again with:
+Ryoku Hyperion installs Ryotunes 2 for you. Install or update it from Ryostore › Ryoku apps, or run:
 
 ```sh
-ryoku-host pkg add ryotunes
+ryoku update
 ```
 
 ### Arch Linux and CachyOS
 
-Download the pacman package and matching checksum from the [latest release](https://github.com/ryoku-dev/ryotunes/releases/latest), then verify and install them:
+Download the pacman package and matching checksum from the [v2.0.0 prerelease](https://github.com/Ryoku-dev/ryotunes/releases/tag/v2.0.0), then verify and install them:
 
 ```sh
 sha256sum -c ryotunes-2.0.0-1-x86_64.pkg.tar.zst.sha256
