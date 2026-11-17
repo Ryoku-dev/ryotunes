@@ -911,7 +911,7 @@ impl Dispatch for Methods {
                     };
                     let lyrics = client.lyrics(tid).await.map_err(spotify_err)?;
                     let lyrics = lyrics.as_ref().map(spotify_bridge::lyrics_to_lyrics);
-                    return ok(ryotunes_core::romanize::for_client(st, lyrics));
+                    return ok(ryotunes_core::romanize::for_client(st, lyrics).await);
                 }
                 if radio::is_radio_id(&video_id) {
                     return null();
@@ -927,7 +927,7 @@ impl Dispatch for Methods {
                     },
                 )
                 .await;
-                ok(ryotunes_core::romanize::for_client(st, lyrics))
+                ok(ryotunes_core::romanize::for_client(st, lyrics).await)
             }
             "open_external" => {
                 ryotunes_core::lastfm::open_browser(&arg::<String>(&params, "url")?)

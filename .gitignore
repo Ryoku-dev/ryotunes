@@ -33,6 +33,7 @@ rustypipe_reports/
 /packaging/arch/pkg/
 /packaging/arch/src/
 /packaging/arch/*.log
+/packaging/arch/ipadic-mecab-*.tar.xz
 
 # Local environment / credentials
 .env
