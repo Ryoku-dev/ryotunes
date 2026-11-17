@@ -40,7 +40,9 @@ Item {
     }
     readonly property bool inLibrary: !!(page.album && page.album.inLibrary)
 
-    onParamsChanged: page.load()
+    // Deferred: the handler can run before the id bindings above see the new params, and would
+    // then reload the page being left. callLater also folds repeat calls into one.
+    onParamsChanged: Qt.callLater(page.load)
     Component.onCompleted: page.load()
 
     function asItem() {

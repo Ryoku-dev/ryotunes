@@ -36,4 +36,13 @@ TestCase {
         compare(Ids.sourceGlyph(""), "");
         compare(Ids.sourceGlyph(undefined), "");
     }
+
+    // A fresh YouTube playlist opens as a browse target; device and Spotify ids pass untouched.
+    function test_playlist_browse_id() {
+        compare(Ids.playlistBrowseId("PLyS6kpEBH9YCDwMH_Fe8huQGSA9g1w3vb"), "VLPLyS6kpEBH9YCDwMH_Fe8huQGSA9g1w3vb");
+        compare(Ids.playlistBrowseId("VLPLabc"), "VLPLabc");
+        compare(Ids.playlistBrowseId("RYOTUNES_LOCAL_PLAYLIST:1a2b"), "RYOTUNES_LOCAL_PLAYLIST:1a2b");
+        compare(Ids.playlistBrowseId("spotify:playlist:37i9dQZF1DXcBWIGoYBM5M"), "spotify:playlist:37i9dQZF1DXcBWIGoYBM5M");
+        compare(Ids.playlistBrowseId(""), "");
+    }
 }

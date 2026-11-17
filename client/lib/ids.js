@@ -26,6 +26,18 @@ function isSmartPlaylistId(id) {
     return id === ON_REPEAT || id === RECENTLY_PLAYED || id === REDISCOVER;
 }
 
+// create_playlist answers with YouTube's bare playlist id (PL…), but a playlist page is a browse
+// target and needs the VL prefix, as ui/src/lib/player.svelte.ts adds it. Device and Spotify ids
+// are already what get_playlist takes and must never gain VL.
+var LOCAL_PLAYLIST = "RYOTUNES_LOCAL_PLAYLIST:";
+function playlistBrowseId(id) {
+    if (typeof id !== "string" || !id)
+        return "";
+    if (id.indexOf(LOCAL_PLAYLIST) === 0 || id.indexOf("VL") === 0 || providerOf(id) !== "youtube")
+        return id;
+    return "VL" + id;
+}
+
 // The daemon's ids are namespaced across catalogues; keep Home history and
 // recommendations on the selected provider without mistaking SoundCloud for YouTube.
 function providerOf(id) {
