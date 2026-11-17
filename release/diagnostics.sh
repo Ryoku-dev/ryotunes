@@ -33,10 +33,10 @@ line 'GPU classes:' "$(lspci 2>/dev/null | grep -Ei 'VGA|3D controller' | sed -E
 
 printf '\nRuntime packages:\n'
 if command -v xbps-query >/dev/null 2>&1; then
-  packages=(mpv yt-dlp ffmpeg6 wayland libxkbcommon libX11 libXcursor libXfixes mesa-dri vulkan-loader)
+  packages=(mpv yt-dlp ffmpeg6 wayland libxkbcommon libxkbcommon-x11 libX11 libXcursor libXfixes mesa-dri vulkan-loader)
   present() { xbps-query "$1" >/dev/null 2>&1; }
 else
-  packages=(mpv yt-dlp ffmpeg wayland libxkbcommon libx11 libxcursor libxfixes mesa vulkan-icd-loader)
+  packages=(mpv yt-dlp ffmpeg wayland libxkbcommon libxkbcommon-x11 libx11 libxcursor libxfixes mesa vulkan-icd-loader)
   present() { pacman -Q "$1" >/dev/null 2>&1; }
 fi
 for package in "${packages[@]}"; do

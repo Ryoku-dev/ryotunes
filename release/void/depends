@@ -8,6 +8,7 @@ libX11
 libXcursor
 libXfixes
 libxkbcommon
+libxkbcommon-x11
 mesa-dri
 mpv
 polkit

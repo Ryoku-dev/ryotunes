@@ -30,6 +30,7 @@ depends=(
   'desktop-file-utils'
   'wayland'
   'libxkbcommon'
+  'libxkbcommon-x11'
   'libx11'
   'libxcursor'
   'libxfixes'
