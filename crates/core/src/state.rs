@@ -211,7 +211,45 @@ pub enum RepeatMode {
 /// playing, or an "Add to queue" block (whose pages keep their order and carry the block's label).
 enum Fill {
     Playing,
-    Queued(Option<String>),
+    Queued { from: Option<String>, block_id: u64, next: bool },
+}
+
+static NEXT_QUEUE_BLOCK_ID: AtomicU64 = AtomicU64::new(1);
+
+#[derive(Default)]
+struct NetworkRetryBudget {
+    used: u8,
+}
+
+impl NetworkRetryBudget {
+    fn take(&mut self) -> bool {
+        if self.used >= 3 {
+            return false;
+        }
+        self.used += 1;
+        true
+    }
+
+    fn reset(&mut self) {
+        self.used = 0;
+    }
+}
+
+fn spotify_retry_is_current(
+    current_generation: u64,
+    scheduled_generation: u64,
+    current_video_id: Option<&str>,
+    video_id: &str,
+) -> bool {
+    current_generation == scheduled_generation && current_video_id == Some(video_id)
+}
+
+fn should_clear_retry_guard(
+    position: f64,
+    spotify_retry_pending_generation: Option<u64>,
+    current_generation: u64,
+) -> bool {
+    position >= 3.0 && spotify_retry_pending_generation != Some(current_generation)
 }
 
 /// Canonical persisted account selection. `data_sync_id` drives request delegation; every display
@@ -402,6 +440,8 @@ struct QueueState {
     /// Last videoId we re-resolved after a playback failure — guards the one-shot retry in
     /// `on_track_failed` against a retry loop when the retried stream dies too.
     retried: Option<String>,
+    /// Keeps position samples from clearing the one-shot guard during Spotify's delayed retry.
+    spotify_retry_pending_generation: Option<u64>,
 }
 
 impl QueueState {
@@ -1030,16 +1070,22 @@ impl AppState {
         // 30 min and re-resolve after. Resolving fetches the track (transcodings + counts) then
         // picks an HLS transcoding; a cache hit above already returned without any of this.
         if let Some(id) = crate::spotify::sc_track_id(video_id) {
-            let track = self
-                .soundcloud
-                .track(id)
-                .await
-                .map_err(|e| ResolveError::AllClientsFailed(format!("{video_id}: {e}")))?;
-            let url = self
-                .soundcloud
-                .stream_url(&track)
-                .await
-                .map_err(|e| ResolveError::AllClientsFailed(format!("{video_id}: {e}")))?;
+            let track = self.soundcloud.track(id).await.map_err(|e| match &e {
+                ryotunes_soundcloud::Error::Http(http)
+                    if crate::orchestrator::transient_reqwest_error(http) =>
+                {
+                    ResolveError::TransientNetwork(video_id.to_owned())
+                }
+                _ => ResolveError::AllClientsFailed(format!("{video_id}: {e}")),
+            })?;
+            let url = self.soundcloud.stream_url(&track).await.map_err(|e| match &e {
+                ryotunes_soundcloud::Error::Http(http)
+                    if crate::orchestrator::transient_reqwest_error(http) =>
+                {
+                    ResolveError::TransientNetwork(video_id.to_owned())
+                }
+                _ => ResolveError::AllClientsFailed(format!("{video_id}: {e}")),
+            })?;
             self.remember_sc_meta(video_id, &track);
             const SC_CACHE_SECS: i64 = 30 * 60;
             self.db.put_stream(
@@ -1084,6 +1130,11 @@ impl AppState {
             let stream = self.tidal.stream(id, want).await.map_err(|e| match e {
                 ryotunes_tidal::Error::SignedOut => {
                     ResolveError::SignInRequired("Sign in to TIDAL to play this".to_owned())
+                }
+                ryotunes_tidal::Error::Http(ref http)
+                    if crate::orchestrator::transient_reqwest_error(http) =>
+                {
+                    ResolveError::TransientNetwork(video_id.to_owned())
                 }
                 e => ResolveError::AllClientsFailed(format!("{video_id}: {e}")),
             })?;
@@ -1590,10 +1641,12 @@ impl AppState {
             let mut items = page.items;
             // The rest of an added playlist belongs to the same block: same markers, same heading,
             // and its order left alone (shuffle is about the playlist that's playing).
-            if let Fill::Queued(from) = &fill {
+            if let Fill::Queued { from, block_id, next } = &fill {
                 for item in &mut items {
-                    item.queued_end = true;
+                    item.queued = *next;
+                    item.queued_end = !next;
                     item.queued_from = from.clone();
+                    item.queue_block_id = Some(*block_id);
                 }
             }
             {
@@ -1683,6 +1736,8 @@ impl AppState {
                 return;
             }
             q.seek_to(index);
+            q.retried = None; // an explicit user retry gets a fresh one-shot stream retry
+            q.spotify_retry_pending_generation = None;
             q.lookahead_loaded = None;
         }
         if self.start_current(gen).await {
@@ -1824,15 +1879,20 @@ impl AppState {
             (vid, q.current_client.clone(), retried)
         };
         if let (Some(vid), Some(c)) = (video_id, client) {
+            // librespot has its own Unavailable event and delayed retry path. Let that watcher
+            // handle Spotify so mpv's FIFO error cannot race it and advance the queue early.
+            if c == "spotify" {
+                return true;
+            }
             // Whatever served it, the URL is dead — evict so the retry can't replay it from cache.
             self.db.evict_stream(&vid);
-            if c == MAIN_CLIENT {
-                tracing::warn!(video_id = %vid, "WEB_REMIX stream failed on GET — marking + evicting");
+            if c == MAIN_CLIENT && already_retried {
+                tracing::warn!(video_id = %vid, "WEB_REMIX stream failed after one retry — marking failed");
                 self.orchestrator.mark_web_remix_failed(&vid).await;
             }
-            // Retry once for WEB_REMIX-served and cache-served URLs. A failure from a fallback
-            // client, or a second failure of the same id, advances as before.
-            if (c == MAIN_CLIENT || c == "cache") && !already_retried {
+            // Retry the same item once for URL failures, regardless of which client served it. A
+            // fallback URL can fail for the same network reason as WEB_REMIX or a cached URL.
+            if !already_retried {
                 {
                     let mut q = self.queue.lock().await;
                     q.retried = Some(vid.clone());
@@ -1856,6 +1916,7 @@ impl AppState {
         // Resolve the current track, auto-skipping any that no client can play (dead / region-locked
         // videos — stream selection "no client could resolve") instead of stalling the queue on them.
         // Bounded: each failure advances current by one, so the loop terminates at the queue tail.
+        let mut network_retries = NetworkRetryBudget::default();
         let (mut item, data) = loop {
             if self.generation.load(Ordering::SeqCst) != gen {
                 return false; // user moved on
@@ -1876,6 +1937,7 @@ impl AppState {
                 // other failure is transient in principle (network, region, a cipher self-heal),
                 // so those keep their place.
                 Err(ResolveError::LocalMissing(_)) => {
+                    network_retries.reset();
                     let exhausted = {
                         let mut q = self.queue.lock().await;
                         let cur = q.current;
@@ -1911,6 +1973,23 @@ impl AppState {
                         self.emit_error(&item.video_id, message);
                         return false;
                     }
+                    if e.is_transient_network() {
+                        if network_retries.take() {
+                            let retry = network_retries.used - 1;
+                            let delay = std::time::Duration::from_millis(400 << retry);
+                            tracing::warn!(
+                                video_id = item.video_id,
+                                retry = network_retries.used,
+                                ?delay,
+                                "network interrupted playback resolution; retrying current track"
+                            );
+                            tokio::time::sleep(delay).await;
+                            continue;
+                        }
+                        tracing::warn!(video_id = item.video_id, "network interrupted playback resolution; keeping this queue item selected");
+                        self.emit_error(&item.video_id, "Network interrupted playback. The selected track can be retried when the connection is back.");
+                        return false;
+                    }
                     let mut q = self.queue.lock().await;
                     // Deliberately ignores repeat-all: wrapping the unplayable-skip would spin
                     // forever on a queue where nothing resolves. Skips stop at the tail.
@@ -1922,6 +2001,7 @@ impl AppState {
                     q.current += 1;
                     q.lookahead_loaded = None;
                     drop(q);
+                    network_retries.reset();
                     self.emit_skip(&item.title);
                     self.emit_queue().await;
                 }
@@ -2060,6 +2140,10 @@ impl AppState {
                 Err(e) => {
                     tracing::warn!(video_id = %next_video, error = %e, "lookahead resolve failed — dropping from queue");
                     if self.generation.load(Ordering::SeqCst) != gen {
+                        return;
+                    }
+                    if e.is_transient_network() {
+                        tracing::info!(video_id = %next_video, "keeping lookahead item after a transient network failure");
                         return;
                     }
                     // The queue can shift under a resolve — only remove the slot if it still
@@ -2554,6 +2638,13 @@ impl AppState {
         self.record_position(pos);
         let crossed = {
             let mut q = self.queue.lock().await;
+            if should_clear_retry_guard(
+                pos,
+                q.spotify_retry_pending_generation,
+                self.generation.load(Ordering::SeqCst),
+            ) {
+                q.retried = None;
+            }
             if q.history_pinged {
                 None
             } else {
@@ -2692,15 +2783,76 @@ impl AppState {
         video_id: &'a str,
     ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
         Box::pin(async move {
-            let has_next = {
-                let q = self.queue.lock().await;
+            let scheduled_generation = self.generation.load(Ordering::SeqCst);
+            let (has_next, retry) = {
+                let mut q = self.queue.lock().await;
                 if q.items.get(q.current).map(|i| i.video_id != video_id).unwrap_or(true) {
                     return; // superseded — a newer track is current
                 }
+                let retry = q.retried.as_deref() != Some(video_id);
+                if retry {
+                    q.retried = Some(video_id.to_owned());
+                    q.spotify_retry_pending_generation = Some(scheduled_generation);
+                } else {
+                    q.spotify_retry_pending_generation = None;
+                }
                 // Strictly-forward only: never wrap here, or a repeat-all queue whose only playable
                 // path is this unavailable track would retry it forever.
-                q.current + 1 < q.items.len()
+                (q.current + 1 < q.items.len(), retry)
             };
+            if retry {
+                self.emit_notice("Spotify stream interrupted; retrying this track…");
+                let me = self.clone();
+                let video_id = video_id.to_owned();
+                tokio::spawn(async move {
+                    // Let librespot reconnect before replacing the FIFO. If it still reports
+                    // Unavailable, the one-shot guard below lets the normal skip path run.
+                    tokio::time::sleep(std::time::Duration::from_millis(2500)).await;
+                    let gen = {
+                        let mut q = me.queue.lock().await;
+                        if !spotify_retry_is_current(
+                            me.generation.load(Ordering::SeqCst),
+                            scheduled_generation,
+                            q.items.get(q.current).map(|i| i.video_id.as_str()),
+                            &video_id,
+                        ) {
+                            if q.items.get(q.current).map(|i| i.video_id.as_str())
+                                == Some(video_id.as_str())
+                                && q.retried.as_deref() == Some(&video_id)
+                            {
+                                q.spotify_retry_pending_generation = None;
+                            }
+                            return;
+                        }
+                        let Ok(gen) = me.generation.compare_exchange(
+                            scheduled_generation,
+                            scheduled_generation + 1,
+                            Ordering::SeqCst,
+                            Ordering::SeqCst,
+                        ) else {
+                            q.spotify_retry_pending_generation = None;
+                            return;
+                        };
+                        q.spotify_retry_pending_generation = Some(gen + 1);
+                        q.lookahead_loaded = None;
+                        gen + 1
+                    };
+                    let started = me.start_current(gen).await;
+                    {
+                        let mut q = me.queue.lock().await;
+                        if me.generation.load(Ordering::SeqCst) == gen
+                            && q.items.get(q.current).map(|i| i.video_id.as_str())
+                                == Some(video_id.as_str())
+                        {
+                            q.spotify_retry_pending_generation = None;
+                        }
+                    }
+                    if started {
+                        me.prime_lookahead(gen).await;
+                    }
+                });
+                return;
+            }
             self.emit_error(video_id, "This track isn't available on Spotify.");
             if has_next {
                 // `on_track_ended` loads the next track, whose `player.load` replaces mpv's
@@ -3375,8 +3527,8 @@ impl AppState {
         self.enqueue(items, true, from, None).await;
     }
 
-    /// "Add to queue": the tracks go at the back of the manual block, ahead of the playing context
-    /// and anything the app generated (see [`enqueue_at`]). `continuation` is the next-page token —
+    /// "Add to queue": the tracks go at the end of the queued context, before generated autoplay
+    /// tracks (see [`enqueue_at`]). `continuation` is the next-page token —
     /// the rest of a long playlist is walked in the background instead of adding only page one.
     pub async fn add_to_queue(
         self: &std::sync::Arc<Self>,
@@ -3420,13 +3572,17 @@ impl AppState {
                     .collect()
             }
         };
-        self.insert_queued(items, next, from.clone()).await;
+        let block_id = self.insert_queued(items, next, from.clone()).await;
         if let Some(token) = continuation {
             // After `insert_queued`: an add to an empty queue starts playback, which bumps the
             // generation the walk has to match.
             let gen = self.generation.load(Ordering::SeqCst);
             let me = self.clone();
-            tokio::spawn(async move { me.fill_playlist(gen, token, Fill::Queued(from)).await });
+            if let Some(block_id) = block_id {
+                tokio::spawn(async move {
+                    me.fill_playlist(gen, token, Fill::Queued { from, block_id, next }).await
+                });
+            }
         }
     }
 
@@ -3439,24 +3595,24 @@ impl AppState {
     /// Splice a block of manually-queued tracks into the queue, then emit/persist/re-prime and (as
     /// host) broadcast. Shared by "Play next", "Add to queue" and approved guest suggestions.
     ///
-    /// Both land in the same place — the "Next in queue" block right behind the playing track,
-    /// ahead of the context and of anything the app generated. `next` ("Play next") marks them
-    /// `queued` and puts them at the front of that block; "Add to queue" marks them `queued_end`
-    /// and puts them at its back, so a play-next always plays before an add-to-queue. `from` names
-    /// the album/playlist they came from, for the block's heading.
+    /// "Play next" goes right behind the playing track. "Add to queue" goes after the queued
+    /// context and any earlier manual adds, before generated autoplay tracks. `from` names the
+    /// album/playlist they came from, for the block's heading.
     async fn insert_queued(
         self: &std::sync::Arc<Self>,
         mut items: Vec<SongItem>,
         next: bool,
         from: Option<String>,
-    ) {
+    ) -> Option<u64> {
         if items.is_empty() {
-            return;
+            return None;
         }
+        let block_id = Some(NEXT_QUEUE_BLOCK_ID.fetch_add(1, Ordering::Relaxed));
         for item in &mut items {
             item.queued = next;
             item.queued_end = !next;
             item.queued_from = from.clone();
+            item.queue_block_id = block_id;
         }
         let dedupe = self.db.get_setting("prevent_duplicates").as_deref() == Some("true");
         let was_empty = {
@@ -3526,7 +3682,7 @@ impl AppState {
         if was_empty {
             self.play_index(0).await; // emits + persists + primes on its way
             self.lt_broadcast_queue().await;
-            return;
+            return block_id;
         }
         self.emit_queue().await;
         self.persist_queue().await;
@@ -3534,6 +3690,7 @@ impl AppState {
         // (no lookahead existed because nothing was next). No-op when still primed correctly.
         self.prime_lookahead(self.generation.load(Ordering::SeqCst)).await;
         self.lt_broadcast_queue().await;
+        block_id
     }
 
     /// Remove an upcoming track from the queue (host's ✕ on guest adds; also plain local queue
@@ -3723,6 +3880,7 @@ fn track_to_song(t: &Track) -> SongItem {
         queued: false,
         queued_end: false,
         queued_from: None,
+        queue_block_id: None,
         autoplay: false,
         is_video: false,
         is_upload: false,
@@ -3731,13 +3889,18 @@ fn track_to_song(t: &Track) -> SongItem {
     }
 }
 
-/// Where an "Add to queue" lands: at the back of the manual block, so it plays after everything
-/// already queued by hand and before the playing context, its radio, and autoplay's filler. The
-/// tail of a playlist is not where "add to queue" belongs — a radio has no end at all, so a track
-/// queued behind one is never heard, and a 50-track playlist buries it just as effectively.
+/// Where "Add to queue" lands: after the current queued context and earlier manual adds, before
+/// generated autoplay filler. This lets an album or playlist finish before the new collection.
 fn enqueue_at(q: &QueueState) -> usize {
     let mut at = (q.current + 1).min(q.items.len());
-    while q.items.get(at).map(|i| i.queued || i.queued_end).unwrap_or(false) {
+    // A radio is effectively endless; a manual add must interrupt it to be reachable.
+    if q.radio {
+        while q.items.get(at).map(|i| i.queued || i.queued_end).unwrap_or(false) {
+            at += 1;
+        }
+        return at;
+    }
+    while q.items.get(at).is_some_and(|i| !i.autoplay) {
         at += 1;
     }
     at
@@ -3955,8 +4118,8 @@ fn shuffle_upcoming(items: &mut [SongItem], current: usize) {
 /// track is already loaded into mpv, so moving it would desync what mpv plays next from what the
 /// queue says is next. It was drawn from the same random tail anyway. A page walked in for
 /// "Add to queue" passes `playing: false` — those tracks join the manual block their first page is
-/// in (not the tail of the queue) and keep their own order, since shuffle is about the playlist
-/// that's playing, not about what the user lined up behind it.
+/// in and keep their own order, since shuffle is about the playlist that's playing, not about what
+/// the user lined up behind it.
 fn append_page(q: &mut QueueState, page: Vec<SongItem>, playing: bool) {
     if let Some(orig) = q.shuffle_orig.as_mut() {
         orig.extend(page.iter().cloned());
@@ -3968,9 +4131,27 @@ fn append_page(q: &mut QueueState, page: Vec<SongItem>, playing: bool) {
             shuffle_upcoming(&mut q.items, pivot);
         }
     } else {
-        let at = enqueue_at(q);
+        let at = page
+            .first()
+            .and_then(|item| item.queue_block_id)
+            .and_then(|block_id| queued_block_end(q, block_id))
+            .unwrap_or_else(|| enqueue_at(q));
         q.items.splice(at..at, page);
     }
+}
+
+/// Insert a walked collection page after that collection's queued block, which may sit at the
+/// tail after the active album/playlist. Fall back to the normal add position if it was consumed.
+fn queued_block_end(q: &QueueState, block_id: u64) -> Option<usize> {
+    q.items
+        .iter()
+        .enumerate()
+        .skip(q.current + 1)
+        .filter(|(_, item)| {
+            (item.queued || item.queued_end) && item.queue_block_id == Some(block_id)
+        })
+        .map(|(index, _)| index + 1)
+        .last()
 }
 
 /// A mix (`RD…`, reached as the `VLRD…` browseId) is a generated, effectively endless feed rather
@@ -4344,9 +4525,10 @@ mod tests {
     use super::{
         append_page, backfill_metadata, drop_duplicates, enqueue_at, format_duration,
         guest_insert_index, is_mix, loudness_gain, merge_radio, next_index, parse_duration_ms,
-        persist_fingerprint, queue_fingerprint, radio_seed_for, read_personal, shuffle_new_queue,
-        shuffle_upcoming, splice_radio_into, spotify_mpv_options, unshuffled, upcoming_queued,
-        validate_personal_blob, QueueState, RepeatMode, PERSONAL_JSON_KEY,
+        persist_fingerprint, queue_fingerprint, radio_seed_for, read_personal,
+        should_clear_retry_guard, shuffle_new_queue, shuffle_upcoming, splice_radio_into,
+        spotify_mpv_options, spotify_retry_is_current, unshuffled, upcoming_queued,
+        validate_personal_blob, NetworkRetryBudget, QueueState, RepeatMode, PERSONAL_JSON_KEY,
     };
     use crate::db::Db;
 
@@ -4480,6 +4662,7 @@ mod tests {
             queued: by.is_some(),
             queued_end: false,
             queued_from: None,
+            queue_block_id: None,
             queued_by: by.map(Into::into),
             autoplay: false,
             is_video: false,
@@ -4715,13 +4898,16 @@ mod tests {
         assert!(q.shuffle_orig.is_none());
     }
 
-    // The rest of an added playlist joins the block its first page went into — not the tail of the
-    // queue, which is a different place entirely now that "Add to queue" inserts up front. Order
-    // kept even under shuffle: the user queued that album, shuffle belongs to what's playing.
+    // The rest of an added playlist joins the block its first page went into. Order is kept even
+    // under shuffle: the user queued that album, shuffle belongs to what's playing.
     #[test]
     fn appended_page_joins_the_add_to_queue_block_it_belongs_to() {
-        let added = |id: &str| innertube::SongItem { queued_end: true, ..song(id, None) };
-        let items = vec![song("a", None), added("x1"), song("b", None)];
+        let added = |id: &str| innertube::SongItem {
+            queued_end: true,
+            queued_from: Some("X".into()),
+            ..song(id, None)
+        };
+        let items = vec![song("a", None), song("b", None), added("x1")];
         let mut q = QueueState {
             shuffle_orig: Some(items.clone()),
             items,
@@ -4730,9 +4916,51 @@ mod tests {
         };
         append_page(&mut q, vec![added("x2"), added("x3")], false);
         let ids: Vec<_> = q.items.iter().map(|i| i.video_id.as_str()).collect();
-        assert_eq!(ids, ["a", "x1", "x2", "x3", "b"]);
+        assert_eq!(ids, ["a", "b", "x1", "x2", "x3"]);
         // Still on the snapshot, so un-shuffle keeps them.
         assert_eq!(q.shuffle_orig.as_ref().unwrap().len(), 5);
+    }
+
+    #[test]
+    fn appended_page_stays_with_the_exact_add_to_queue_insertion() {
+        let added = |id: &str, block_id| innertube::SongItem {
+            queued_end: true,
+            queued_from: Some("Same playlist".into()),
+            queue_block_id: Some(block_id),
+            ..song(id, None)
+        };
+        let items = vec![song("playing", None), added("first-1", 1), added("second-1", 2)];
+        let mut q = QueueState { items, current: 0, ..QueueState::default() };
+        append_page(&mut q, vec![added("first-2", 1)], false);
+        let ids: Vec<_> = q.items.iter().map(|item| item.video_id.as_str()).collect();
+        assert_eq!(ids, ["playing", "first-1", "first-2", "second-1"]);
+    }
+
+    #[test]
+    fn network_retry_budget_resets_for_the_next_queue_item() {
+        let mut budget = NetworkRetryBudget::default();
+        for _ in 0..3 {
+            assert!(budget.take());
+        }
+        assert!(!budget.take());
+        // `start_current` resets immediately after moving its queue pointer.
+        budget.reset();
+        assert!(budget.take());
+    }
+
+    #[test]
+    fn spotify_retry_requires_the_original_generation() {
+        assert!(spotify_retry_is_current(8, 8, Some("spotify:track:a"), "spotify:track:a"));
+        assert!(!spotify_retry_is_current(9, 8, Some("spotify:track:a"), "spotify:track:a"));
+        assert!(!spotify_retry_is_current(8, 8, Some("spotify:track:b"), "spotify:track:a"));
+    }
+
+    #[test]
+    fn position_does_not_clear_retry_guard_during_spotify_retry() {
+        assert!(!should_clear_retry_guard(4.0, Some(8), 8));
+        assert!(should_clear_retry_guard(4.0, None, 8));
+        assert!(should_clear_retry_guard(4.0, Some(7), 8));
+        assert!(!should_clear_retry_guard(2.9, None, 8));
     }
 
     // The played run ("Previously played") is `played_from..current`, and only moving the pointer
@@ -4781,30 +5009,29 @@ mod tests {
         assert_eq!(items.len(), 2);
     }
 
-    // "Add to queue" lands at the back of the manual block, ahead of the context — the bug in #26
-    // was it landing at the very end, where a radio or a long playlist buries it forever.
+    // "Add to queue" follows the current context; radio is the exception because it has no end.
     #[test]
-    fn add_to_queue_goes_behind_the_manual_block_but_ahead_of_the_context() {
+    fn add_to_queue_follows_the_context_but_interrupts_radio() {
         let queued = |id: &str| innertube::SongItem { queued: true, ..song(id, None) };
         let added = |id: &str| innertube::SongItem { queued_end: true, ..song(id, None) };
 
-        // Plain playlist queue → straight behind the playing track.
+        // Plain playlist queue → after the rest of the album/playlist.
         let q = QueueState {
             items: vec![song("a", None), song("b", None), song("c", None)],
             current: 0,
             ..QueueState::default()
         };
-        assert_eq!(enqueue_at(&q), 1);
+        assert_eq!(enqueue_at(&q), 3);
 
-        // Behind a waiting "Play next" block and behind earlier adds, never inside either.
+        // After the context and any earlier manual items.
         let q = QueueState {
             items: vec![song("a", None), queued("mine"), added("x1"), song("b", None)],
             current: 0,
             ..QueueState::default()
         };
-        assert_eq!(enqueue_at(&q), 3);
+        assert_eq!(enqueue_at(&q), 4);
 
-        // A radio is no different: the add is heard next instead of after an endless feed.
+        // A radio has no natural end, so the add is placed right after existing manual items.
         let q = QueueState {
             items: vec![song("r1", None), song("r2", None), song("r3", None)],
             current: 0,

@@ -57,6 +57,7 @@ pub fn track_to_song(track: &Track) -> SongItem {
         queued: false,
         queued_end: false,
         queued_from: None,
+        queue_block_id: None,
         autoplay: false,
         is_video: false,
         is_upload: false,

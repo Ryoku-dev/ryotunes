@@ -69,6 +69,11 @@ pub struct SongItem {
     /// single-song adds. Pure queue metadata, never parsed.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub queued_from: Option<String>,
+    /// Internal identity for one queued collection insertion, so fetched continuation pages stay
+    /// with that insertion even when the same source is queued more than once. Never persisted or
+    /// sent to the UI; continuation walkers only live for the current process.
+    #[serde(skip)]
+    pub queue_block_id: Option<u64>,
     /// Appended by autoplay radio continuation (vs. chosen by the user). Drives the queue's
     /// "Autoplay" divider + player-bar badge. Pure queue metadata, never parsed.
     #[serde(default)]
@@ -482,6 +487,7 @@ pub(crate) fn parse_list_item(node: &Value) -> Option<SongItem> {
         queued: false,
         queued_end: false,
         queued_from: None,
+        queue_block_id: None,
         autoplay: false,
         is_video: is_video_row(node),
         is_upload: is_upload_row(node),
@@ -610,6 +616,7 @@ fn parse_panel_video(node: &Value) -> Option<SongItem> {
         queued: false,
         queued_end: false,
         queued_from: None,
+        queue_block_id: None,
         autoplay: false,
         is_video: is_video_row(node),
         is_upload: is_upload_row(node),
