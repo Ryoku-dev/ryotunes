@@ -62,6 +62,12 @@ Rectangle {
     }
     Component.onCompleted: if (Daemon.connected) root.loadPlaylists();
     Connections {
+        target: Playback
+        // The rail lists the selected catalogue's playlists, so it has to swap them with the rest
+        // of the page on a provider switch — nothing else re-reads it for that.
+        function onProviderChanged(): void { root.loadPlaylists(); }
+    }
+    Connections {
         target: Daemon
         function onSnapshot(snap): void { root.loadPlaylists(); }
         // A device-playlist mutation (a track added or removed, the cover set or reset) can change a

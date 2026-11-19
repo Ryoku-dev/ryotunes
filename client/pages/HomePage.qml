@@ -47,6 +47,10 @@ Item {
     // user into the wrong service entirely and leaves the selected provider exactly as dead.
     readonly property bool tidalGate: Playback.provider === "tidal"
         && !(Playback.tidal && Playback.tidal.signedIn)
+    // Same for a music server: signed out its home is empty, and the Google sign-in offered by the
+    // generic empty state would sign the user into the wrong service.
+    readonly property bool navidromeGate: Playback.provider === "navidrome"
+        && !(Playback.navidrome && Playback.navidrome.signedIn)
     readonly property var forgottenList: page.forgottenSongs()
 
     // Familiar artists: the most-played artists (topArtistIds) resolved to round cards. Loaded once.
@@ -61,6 +65,11 @@ Item {
     Connections {
         target: Playback
         function onProviderChanged(): void { page.load(page.selected); }
+        // Connecting the server from Settings lifts its empty state: load its shelves now.
+        function onNavidromeChanged(): void {
+            if (Playback.provider === "navidrome" && !page.navidromeGate)
+                page.load(page.selected);
+        }
     }
 
     Connections {
@@ -683,12 +692,17 @@ Item {
                     Layout.topMargin: Style.sp(16)
                     visible: !page.loading && page.errorMsg === "" && blocks.count === 0 && !page.forgotten
                     spacing: Style.sp(3)
-                    Icon { Layout.alignment: Qt.AlignHCenter; name: "music"; size: Style.fs.hero; color: Tokens.inkFaint }
+                    Icon { Layout.alignment: Qt.AlignHCenter; name: "music"; size: Style.fs.hero; color: Tokens.inkFaint; visible: !page.navidromeGate }
+                    NavidromeGate {
+                        Layout.alignment: Qt.AlignHCenter
+                        visible: page.navidromeGate
+                    }
                     Text {
                         Layout.alignment: Qt.AlignHCenter
                         Layout.maximumWidth: Style.sp(90)
                         horizontalAlignment: Text.AlignHCenter
                         wrapMode: Text.WordWrap
+                        visible: !page.navidromeGate
                         text: page.tidalGate
                             ? "Sign in to TIDAL and home fills up with your playlists, albums and tracks."
                             : (Playback.auth && Playback.auth.signedIn)
@@ -700,6 +714,7 @@ Item {
                     }
                     Chip {
                         Layout.alignment: Qt.AlignHCenter
+                        visible: !page.navidromeGate
                         text: page.tidalGate ? "Sign in to TIDAL"
                             : (Playback.auth && Playback.auth.signedIn) ? "Try again" : "Sign in with Google"
                         active: page.tidalGate || !(Playback.auth && Playback.auth.signedIn)

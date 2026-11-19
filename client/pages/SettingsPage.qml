@@ -39,6 +39,11 @@ Item {
     property string discordNameInput: "Ryotunes"
     property bool forkOpen: false
     property string forkName: ""
+    // The music-server form. The address and username stay while the page is mounted (never
+    // persisted); the password only ever lives in its own TextInput.
+    property string ndServer: ""
+    property string ndUser: ""
+    property bool ndBusy: false
 
     // Software updates (About). Never polled — a check runs only on the button. The daemon dispatches
     // requests concurrently and imposes no RPC timeout, so the long install call simply resolves when
@@ -72,7 +77,15 @@ Item {
 
     Component.onCompleted: {
         page.load();
-        var requested = Router.current && Router.current.params ? Router.current.params.section : "";
+        page.applyParams();
+    }
+
+    // A deep link to one section (the Navidrome gate's "Open account settings", a menu shortcut)
+    // has to work while Settings is already mounted, not only on the first arrival.
+    readonly property var params: Router.current ? Router.current.params : ({})
+    onParamsChanged: page.applyParams()
+    function applyParams() {
+        var requested = (page.params && page.params.section) ? page.params.section : "";
         if (page.sections.some((s) => s.k === requested)) page.selectSection(requested);
     }
 
@@ -174,6 +187,17 @@ Item {
         var value = page.proxyInput.trim();
         page.setSetting("proxy", value)
             .then(() => { page.proxyInput = value; Playback.toast("Proxy saved — restart to apply", "success"); });
+    }
+    // Connect the music server. The daemon checks the address and the credential before it keeps
+    // anything, and the navidrome-auth event carries the reason when it refuses; the password field
+    // empties either way, so a bad try does not leave it sitting on screen.
+    function connectNavidrome(server, user, password) {
+        if (page.ndBusy)
+            return;
+        page.ndBusy = true;
+        Playback.navidromeSignIn(String(server || "").trim(), String(user || "").trim(), password)
+            .catch(() => {})
+            .then(() => { ndPassField.text = ""; page.ndBusy = false; });
     }
     function clearCaches() {
         page.clearing = true;
@@ -1236,6 +1260,153 @@ Item {
                                 var out = !!(Playback.tidal && Playback.tidal.signedIn);
                                 var call = out ? Playback.tidalSignOut() : Playback.tidalSignIn();
                                 call.catch((e) => Playback.toast((e && e.message) ? e.message : String(e), "error"));
+                            }
+                        }
+                    }
+
+                    // ── Navidrome ─────────────────────────────────────────────────────────
+                    SectionHeading { Layout.fillWidth: true; Layout.topMargin: Style.sp(3); title: "Navidrome"; mark: "書庫" }
+
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: Style.sp(3)
+                        Icon {
+                            name: "navidrome"
+                            size: Style.fs.hero
+                            color: Playback.provider === "navidrome" ? Style.providerColors.navidrome : Tokens.inkMuted
+                        }
+                        ColumnLayout {
+                            Layout.fillWidth: true
+                            spacing: 1
+                            Text {
+                                readonly property var nd: Playback.navidrome || ({})
+                                text: (nd.signedIn && nd.name) ? nd.name : (nd.signedIn ? "Signed in" : "Not signed in")
+                                color: Tokens.ink; font.family: Style.fontUi; font.pixelSize: Style.fs.lg; font.weight: Font.DemiBold
+                                elide: Text.ElideRight; Layout.fillWidth: true
+                            }
+                            Text {
+                                readonly property var nd: Playback.navidrome || ({})
+                                text: nd.signedIn ? ("Connected to " + (nd.server || "your server") + " \u00b7 its collection joins Home")
+                                    : nd.error ? nd.error
+                                    : "A Navidrome or other Subsonic server, on your own machine or network."
+                                color: (nd.error && !nd.signedIn) ? Style.accent : Tokens.inkMuted
+                                font.family: Style.fontUi; font.pixelSize: Style.fs.sm
+                                wrapMode: Text.WordWrap; Layout.fillWidth: true
+                            }
+                        }
+                        Pill {
+                            readonly property var nd: Playback.navidrome || ({})
+                            visible: !!nd.signedIn
+                            label: "Sign out"
+                            icon: "close"
+                            onClicked: Playback.navidromeSignOut()
+                                .catch((e) => Playback.toast((e && e.message) ? e.message : String(e), "error"))
+                        }
+                    }
+
+                    // The address, the username and the password, once: the daemon checks the server
+                    // before it keeps anything and stores only a derived token, so the password lives
+                    // in this field and nowhere else (it is cleared either way after a try).
+                    ColumnLayout {
+                        Layout.fillWidth: true
+                        readonly property var nd: Playback.navidrome || ({})
+                        visible: !nd.signedIn
+                        spacing: Style.sp(2)
+                        RowLayout {
+                            Layout.fillWidth: true
+                            spacing: Style.sp(2)
+                            Rectangle {
+                                Layout.fillWidth: true
+                                Layout.maximumWidth: Style.sp(120)
+                                implicitHeight: Style.sp(9)
+                                radius: Style.radius
+                                color: Tokens.paperLift
+                                border.width: 1
+                                border.color: ndServerField.activeFocus ? Tokens.lineStrong : Tokens.line
+                                TextInput {
+                                    id: ndServerField
+                                    anchors.fill: parent
+                                    anchors.leftMargin: Style.sp(2)
+                                    anchors.rightMargin: Style.sp(2)
+                                    verticalAlignment: TextInput.AlignVCenter
+                                    clip: true
+                                    color: Tokens.ink
+                                    font.family: Style.fontUi
+                                    font.pixelSize: Style.fs.md
+                                    text: page.ndServer
+                                    onTextChanged: page.ndServer = text
+                                    onAccepted: ndUserField.forceActiveFocus()
+                                    Text {
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        visible: ndServerField.text.length === 0
+                                        text: "http://host:4533"
+                                        color: Tokens.inkFaint
+                                        font: ndServerField.font
+                                    }
+                                }
+                            }
+                            Rectangle {
+                                Layout.preferredWidth: Style.sp(54)
+                                implicitHeight: Style.sp(9)
+                                radius: Style.radius
+                                color: Tokens.paperLift
+                                border.width: 1
+                                border.color: ndUserField.activeFocus ? Tokens.lineStrong : Tokens.line
+                                TextInput {
+                                    id: ndUserField
+                                    anchors.fill: parent
+                                    anchors.leftMargin: Style.sp(2)
+                                    anchors.rightMargin: Style.sp(2)
+                                    verticalAlignment: TextInput.AlignVCenter
+                                    clip: true
+                                    color: Tokens.ink
+                                    font.family: Style.fontUi
+                                    font.pixelSize: Style.fs.md
+                                    text: page.ndUser
+                                    onTextChanged: page.ndUser = text
+                                    onAccepted: ndPassField.forceActiveFocus()
+                                    Text {
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        visible: ndUserField.text.length === 0
+                                        text: "username"
+                                        color: Tokens.inkFaint
+                                        font: ndUserField.font
+                                    }
+                                }
+                            }
+                            Rectangle {
+                                Layout.preferredWidth: Style.sp(54)
+                                implicitHeight: Style.sp(9)
+                                radius: Style.radius
+                                color: Tokens.paperLift
+                                border.width: 1
+                                border.color: ndPassField.activeFocus ? Tokens.lineStrong : Tokens.line
+                                TextInput {
+                                    id: ndPassField
+                                    anchors.fill: parent
+                                    anchors.leftMargin: Style.sp(2)
+                                    anchors.rightMargin: Style.sp(2)
+                                    verticalAlignment: TextInput.AlignVCenter
+                                    clip: true
+                                    echoMode: TextInput.Password
+                                    color: Tokens.ink
+                                    font.family: Style.fontUi
+                                    font.pixelSize: Style.fs.md
+                                    onAccepted: page.connectNavidrome(ndServerField.text, ndUserField.text, ndPassField.text)
+                                    Text {
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        visible: ndPassField.text.length === 0
+                                        text: "password"
+                                        color: Tokens.inkFaint
+                                        font: ndPassField.font
+                                    }
+                                }
+                            }
+                            Pill {
+                                label: page.ndBusy ? "Connecting\u2026" : "Connect"
+                                icon: "navidrome"
+                                primary: true
+                                onClicked: page.connectNavidrome(ndServerField.text, ndUserField.text, ndPassField.text)
                             }
                         }
                     }

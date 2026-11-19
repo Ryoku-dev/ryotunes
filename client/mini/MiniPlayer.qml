@@ -154,11 +154,11 @@ Item {
                 RowLayout {
                     Layout.fillWidth: true
                     spacing: 4
-                    // The provider tell for the playing track: spotify glyph for spotify: ids, the
-                    // YouTube Music glyph otherwise.
+                    // The provider tell for the playing track, from the shared id map so every
+                    // catalogue gets its own glyph instead of a Spotify-or-YouTube guess.
                     Icon {
                         visible: !!root.now
-                        name: (root.now && root.now.videoId && String(root.now.videoId).startsWith("spotify:")) ? "spotify" : "youtube-music"
+                        name: Ids.sourceGlyph(root.now ? root.now.videoId : "") || "youtube-music"
                         size: 14
                         color: Qt.rgba(1, 1, 1, 0.70)
                     }
@@ -344,11 +344,10 @@ Item {
                         RowLayout {
                             Layout.fillWidth: true
                             spacing: 5
-                            // The provider tell for the playing track: spotify glyph for spotify:
-                            // ids, the YouTube Music glyph otherwise.
+                            // The provider tell for the playing track (see Ids.sourceGlyph).
                             Icon {
                                 visible: !!root.now
-                                name: (root.now && root.now.videoId && String(root.now.videoId).startsWith("spotify:")) ? "spotify" : "youtube-music"
+                                name: Ids.sourceGlyph(root.now ? root.now.videoId : "") || "youtube-music"
                                 size: 14
                                 color: Tokens.inkMuted
                             }

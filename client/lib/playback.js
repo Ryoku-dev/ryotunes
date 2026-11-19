@@ -201,6 +201,27 @@ function applyEvent(s, name, data) {
         }
         return null;
     }
+    case "navidrome-auth": {
+        // A music server's session: signing in is one round trip, so the only states are signed_in,
+        // signed_out and error. A refused credential must NOT clear `signedIn`/`server` here — the
+        // daemon keeps a working session when a re-sign-in fails, and this is only the mirror.
+        var nd = (data && data.state) ? data.state : "";
+        if (nd === "signed_in") {
+            s.navidrome = { signedIn: true, server: (data && data.server) ? data.server : "",
+                name: (data && data.name) ? data.name : null, error: "" };
+            return { toast: "Signed in to Navidrome" + ((data && data.name) ? (" as " + data.name) : ""), kind: "success" };
+        }
+        if (nd === "signed_out") {
+            s.navidrome = { signedIn: false, server: "", name: null, error: "" };
+            return null;
+        }
+        if (nd === "error") {
+            var nwhy = (data && data.message) ? data.message : "Navidrome sign-in failed";
+            s.navidrome = Object.assign({}, s.navidrome, { error: nwhy });
+            return { toast: nwhy, kind: "error" };
+        }
+        return null;
+    }
     case "playback-error":
         s.lastError = (data && data.message !== undefined) ? data.message : String(data);
         s.pendingVideoId = null;

@@ -215,6 +215,18 @@ TestCase {
         verify(!!p.recent["VLLM"] && !!p.recent["v1"]);
     }
 
+    // Signing out of a music server forgets only its nd: recents — the mirror image again.
+    function test_forget_navidrome_recents() {
+        var p = P.empty();
+        P.noteRecent(p, { kind: "album", id: "nd:album:8f3a", title: "Album" }, 1);
+        P.noteRecent(p, { kind: "playlist", id: "nd:playlist:mix", title: "Mix" }, 2);
+        P.noteRecent(p, { kind: "playlist", id: "spotify:playlist:abc", title: "Mix" }, 3);
+        P.noteRecent(p, song("v1"), 4);
+        compare(P.forgetNavidromeRecents(p), 2);
+        verify(!p.recent["nd:album:8f3a"] && !p.recent["nd:playlist:mix"]);
+        verify(!!p.recent["spotify:playlist:abc"] && !!p.recent["v1"]);
+    }
+
     // deepEqual recognises a save's echo despite serde reordering keys at any depth (so the client
     // drops it), and reports a genuine change as different (so another client's edit still applies)
     // — what keeps a stale full-blob echo from reverting a mutation made while the save was in flight.

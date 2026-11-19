@@ -41,6 +41,11 @@ Item {
     readonly property bool open: panel.visible
     readonly property bool noYouTubeTrack: !!root.song
         && (Ids.isLocalId(root.song.video_id) || Ids.isRadioId(root.song.video_id))
+    // Share copies a music.youtube.com link, so it is only right for a YouTube id: a Spotify, TIDAL
+    // or music-server id would paste a dead one.
+    readonly property bool shareable: !!root.song && Ids.providerOf(root.song.video_id) === "youtube"
+    // A Navidrome row: its heart is the server's star, and it has no radio endpoint to start.
+    readonly property bool serverTrack: !!root.song && Ids.providerOf(root.song.video_id) === "navidrome"
     // The track this menu is about is the one playing. "Play next" and "Add to queue" are a no-op
     // on it, so they are left out rather than offered and ignored.
     readonly property bool isNowPlaying: !!root.song && !!Playback.now
@@ -107,10 +112,12 @@ Item {
             out.push({ icon: "arrow-up", label: "Play next", danger: false, act: () => root.enqueue(true) });
             out.push({ icon: "queue", label: "Add to queue", danger: false, act: () => root.enqueue(false) });
         }
-        if (!root.noYouTubeTrack)
+        if (!root.noYouTubeTrack && !root.serverTrack)
             out.push({ icon: "radio", label: "Start radio", danger: false, act: () => root.startRadio() });
         if (!root.noYouTubeTrack)
-            out.push({ icon: "heart", label: root.rated === "like" ? "Remove from Liked Songs" : "Save to Liked Songs",
+            out.push({ icon: "heart", label: root.serverTrack
+                    ? (root.rated === "like" ? "Remove from starred" : "Star on your server")
+                    : (root.rated === "like" ? "Remove from Liked Songs" : "Save to Liked Songs"),
                 danger: false, act: () => root.toggleLike() });
         if (s.artist_id)
             out.push({ icon: "artists", label: "Go to artist", danger: false,
@@ -121,7 +128,7 @@ Item {
         if (root.canAdd && !root.noYouTubeTrack)
             out.push({ icon: "add", label: "Add to playlist", danger: false,
                 act: () => picker.openWith([s]) });
-        if (!root.noYouTubeTrack)
+        if (root.shareable)
             out.push({ icon: "link", label: "Share", danger: false, act: () => root.share() });
         if (root.canRemove)
             out.push({ icon: "close", label: root.removeLabel, danger: true, act: () => root.removeRequested() });
