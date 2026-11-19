@@ -29,6 +29,12 @@ Item {
     // Spotify is selected but not signed in: show the sign-in empty state instead of loading a
     // library from the daemon.
     readonly property bool spotifyGate: Playback.provider === "spotify" && !(Playback.spotify && Playback.spotify.signedIn)
+    // A music server with no session has nothing to load either.
+    readonly property bool navidromeGate: Playback.provider === "navidrome" && !(Playback.navidrome && Playback.navidrome.signedIn)
+    readonly property bool gated: page.spotifyGate || page.navidromeGate
+    // Its collection is albums, artists and playlists only: Songs, Local and Insights read the device
+    // and YouTube, which a server has neither of.
+    readonly property bool serverOnly: Playback.provider === "navidrome"
     // The sidebar deep-links a tab (Router.push("library", { tab })). Honour it on every navigation,
     // not just the first mount, so clicking a Library sub-item while already on the page switches
     // tabs. A plain library nav (no tab) leaves the current tab alone. Tab clicks are local state
@@ -48,6 +54,10 @@ Item {
         { k: "local", l: "Local" },
         { k: "insights", l: "Insights" }
     ]
+    // What the segmented control offers. A music server lists collections only.
+    readonly property var shownTabs: page.serverOnly
+        ? page.tabs.filter((t) => t.k === "albums" || t.k === "artists" || t.k === "playlists")
+        : page.tabs
     readonly property bool gridTab: page.tab === "albums" || page.tab === "artists" || page.tab === "playlists"
     readonly property var gridModel: {
         if (page.tab === "playlists") return page.playlists;
@@ -72,10 +82,13 @@ Item {
         page.load();
     }
 
-    // A provider switch swaps the whole library: reload (or fall to the sign-in card).
+    // A provider switch swaps the whole library: reload (or fall to the sign-in card), and re-pick
+    // the tab in case the new provider has no device tabs. Connecting the server lifts its gate the
+    // same way.
     Connections {
         target: Playback
-        function onProviderChanged(): void { page.load(); }
+        function onProviderChanged(): void { page.load(); page.selectTab(page.tab); }
+        function onNavidromeChanged(): void { if (!page.gated) page.load(); }
     }
 
     // A device-playlist mutation can change a playlist's auto cover: silently re-read the playlist
@@ -90,6 +103,10 @@ Item {
     }
 
     function selectTab(k) {
+        // A music server has no device library: its three YouTube tabs do not exist for it, so a
+        // deep link to one lands on Albums instead of an empty YouTube surface.
+        if (page.serverOnly && k !== "albums" && k !== "artists" && k !== "playlists")
+            k = "albums";
         page.tab = k;
         if (page.opened.indexOf(k) < 0)
             page.opened = page.opened.concat([k]);
@@ -98,7 +115,7 @@ Item {
 
     function load() {
         // Gated: no daemon call, the sign-in card carries the page.
-        if (page.spotifyGate) {
+        if (page.gated) {
             page.playlists = [];
             page.albums = [];
             page.artists = [];
@@ -124,7 +141,7 @@ Item {
     }
 
     function refreshPlaylists() {
-        if (page.spotifyGate)
+        if (page.gated)
             return;
         Daemon.call("get_library")
             .then((r) => { page.playlists = r || []; })
@@ -170,7 +187,7 @@ Item {
 
     ColumnLayout {
         anchors.fill: parent
-        visible: !page.spotifyGate
+        visible: !page.gated
         spacing: Style.sp(4)
 
         // title row: display title + active-tab count, then the collection toolbar
@@ -210,7 +227,7 @@ Item {
                 id: tabRow
                 spacing: Style.sp(2)
                 Repeater {
-                    model: page.tabs
+                    model: page.shownTabs
                     delegate: Chip {
                         required property var modelData
                         text: modelData.l
@@ -239,30 +256,34 @@ Item {
 
             Loader {
                 anchors.fill: parent
-                active: page.isOpened("songs") && !page.spotifyGate
+                active: page.isOpened("songs") && !page.gated
                 visible: page.tab === "songs"
                 sourceComponent: LibrarySongs {}
             }
             Loader {
                 anchors.fill: parent
-                active: page.isOpened("local") && !page.spotifyGate
+                active: page.isOpened("local") && !page.gated
                 visible: page.tab === "local"
                 sourceComponent: LocalMusic {}
             }
             Loader {
                 anchors.fill: parent
-                active: page.isOpened("insights") && !page.spotifyGate
+                active: page.isOpened("insights") && !page.gated
                 visible: page.tab === "insights"
                 sourceComponent: ListeningInsights {}
             }
         }
     }
 
-    // The Spotify sign-in empty state: shown when Spotify is selected but not signed in, in place of
-    // the library. The button starts the OAuth flow; nothing here touches the daemon.
+    // The sign-in empty state for a provider with no session, in place of the library. Neither
+    // button loads anything; the Navidrome one walks to the account form.
     SpotifyGate {
         anchors.centerIn: parent
         visible: page.spotifyGate
+    }
+    NavidromeGate {
+        anchors.centerIn: parent
+        visible: page.navidromeGate
     }
 
     // new-playlist dialog

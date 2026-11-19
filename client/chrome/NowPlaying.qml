@@ -5,6 +5,7 @@ import Ryoku.Ui.Singletons
 import Ryoku.Ui as RU
 import "../"
 import "../components"
+import "../lib/ids.js" as Ids
 
 // The Now Playing stage (spec section 3): the playing surface at full size, artwork-first. It
 // replaces the content area and the right panel when open. The cover fills the left column over a
@@ -50,6 +51,16 @@ Item {
     // A SoundCloud track shows its plays / likes / genre in the meta line and its waveform under
     // the title, the Orange look at full size.
     readonly property bool scNow: !!Playback.now && String(Playback.now.videoId).startsWith("sc:")
+    // The eyebrow's catalogue name, from the playing id (falling back to the selected provider
+    // while nothing plays) so a TIDAL or Navidrome track stops reading "YouTube Music".
+    readonly property string providerName: {
+        var p = (Playback.now && Playback.now.videoId) ? Ids.providerOf(Playback.now.videoId) : Playback.provider;
+        if (p === "spotify") return "SPOTIFY";
+        if (p === "soundcloud") return "SOUNDCLOUD";
+        if (p === "tidal") return "TIDAL";
+        if (p === "navidrome") return "NAVIDROME";
+        return "YOUTUBE MUSIC";
+    }
 
     // The spectrum ribbon claims the analyser only while the stage is on screen.
     onVisibleChanged: Spectrum.claim("stage", root.visible)
@@ -91,7 +102,7 @@ Item {
             spacing: Style.sp(4)
             Text {
                 Layout.fillWidth: true
-                text: (root.scNow ? "SOUNDCLOUD" : (Playback.provider === "spotify" ? "SPOTIFY" : "YOUTUBE MUSIC")) + "  \u00b7  NOW PLAYING"
+                text: root.providerName + "  \u00b7  NOW PLAYING"
                 color: Tokens.inkFaint
                 font.family: Style.fontMono
                 font.pixelSize: Style.fs.micro

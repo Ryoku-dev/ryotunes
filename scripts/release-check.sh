@@ -91,7 +91,16 @@ else
   if command -v cargo >/dev/null 2>&1; then
     say check 'Rust format and tests'
     cargo fmt --all -- --check
-    cargo test --workspace
+    # `generate_context!` reads `ui/build` at compile time, so the Tauri host cannot build
+    # before the frontend does. When the frontend step above was skipped (no pnpm or no
+    # node_modules) that directory does not exist: test everything else and say so, instead
+    # of failing on an artefact nobody in this run built.
+    if [[ -d ui/build ]]; then
+      cargo test --workspace
+    else
+      say skip 'ui/build absent; testing without the Tauri host (run pnpm build to include it)'
+      cargo test --workspace --exclude ryotunes
+    fi
   else
     say skip 'cargo unavailable; Rust compiler checks not run'
   fi

@@ -684,6 +684,8 @@ fn discord_thumb(url: &str) -> Option<String> {
 /// Music. A numeric SoundCloud id, a local path, a radio stream, or any unrecognised id gets no
 /// button rather than a fabricated one. Pure, so provider routing is testable without a socket.
 fn listen_link(video_id: &str) -> Option<(&'static str, String)> {
+    // A Navidrome row is omitted: its page lives on the user's own server, and the presence thread
+    // never learns that address — a fabricated URL is worse than no button.
     if let Some(id) = crate::spotify::spotify_track_id(video_id) {
         return Some(("Listen on Spotify", format!("https://open.spotify.com/track/{id}")));
     }
@@ -706,6 +708,8 @@ fn provider_label(video_id: &str) -> &'static str {
         "Radio"
     } else if crate::spotify::is_sc_id(video_id) {
         "SoundCloud"
+    } else if crate::spotify::is_nd_id(video_id) {
+        "Navidrome"
     } else if crate::spotify::is_spotify_id(video_id) {
         "Spotify"
     } else {
@@ -985,6 +989,10 @@ mod tests {
         // Private / unlinkable: a local path and a radio stream carry no button.
         assert_eq!(listen_link(&format!("{}Music/x.flac", crate::local::SONG_PREFIX)), None);
         assert_eq!(listen_link(&format!("{}uuid-123", crate::radio::RADIO_ID_PREFIX)), None);
+        // Navidrome: the page is on the user's own server, which the presence thread cannot name.
+        let nd = format!("{}abc123", crate::spotify::ND_TRACK_PREFIX);
+        assert_eq!(listen_link(&nd), None, "a navidrome id never becomes a youtube url");
+        assert_eq!(provider_label(&nd), "Navidrome");
         // An unrecognised bare id (not a valid 11-char YouTube id) is omitted, not made into a URL.
         assert_eq!(listen_link("short"), None, "malformed ids get no fabricated youtube url");
     }

@@ -127,8 +127,37 @@ TestCase {
         verify(gone && gone.toast.indexOf("expired") >= 0);
     }
 
-    function test_soundcloud_auth_events_mirror_the_browser_flow() {
+    // A music server signs in through one call, so its event has only three states — and a refused
+    // re-sign-in must leave a working session showing (the daemon keeps it), which is why the mirror
+    // only records the reason. Nothing here can carry a password: the daemon never sends one back.
+    function test_navidrome_auth_events_mirror_the_session() {
         var s = freshState();
+        s.navidrome = { signedIn: false, server: "", name: null, error: "" };
+        var fx = PB.applyEvent(s, "navidrome-auth",
+            { state: "signed_in", server: "http://music.lan:4533", name: "aleft" });
+        compare(s.navidrome.signedIn, true);
+        compare(s.navidrome.server, "http://music.lan:4533");
+        compare(s.navidrome.name, "aleft");
+        compare(s.navidrome.error, "");
+        compare(fx.kind, "success");
+        // A typo'd re-sign-in: the reason is kept, the live session is not thrown away.
+        var bad = PB.applyEvent(s, "navidrome-auth", { state: "error", message: "username or password is wrong" });
+        compare(bad.kind, "error");
+        compare(s.navidrome.signedIn, true);
+        compare(s.navidrome.error, "username or password is wrong");
+        verify(!("password" in s.navidrome));
+        // Signing out clears the address with the session.
+        compare(PB.applyEvent(s, "navidrome-auth", { state: "signed_out" }), null);
+        compare(s.navidrome.signedIn, false);
+        compare(s.navidrome.server, "");
+        compare(s.navidrome.name, null);
+        compare(s.navidrome.error, "");
+        // An unknown state is ignored rather than guessed at.
+        compare(PB.applyEvent(s, "navidrome-auth", { state: "waiting" }), null);
+        compare(s.navidrome.signedIn, false);
+    }
+
+    function test_soundcloud_auth_events_mirror_the_browser_flow() {        var s = freshState();
         s.soundcloud = { signedIn: false, name: null, error: "" };
         // Opening the browser is progress, not an error: an info toast plus a guidance line.
         var wait = PB.applyEvent(s, "soundcloud-auth", { state: "waiting" });

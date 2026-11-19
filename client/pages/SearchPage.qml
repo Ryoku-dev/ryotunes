@@ -34,6 +34,10 @@ Item {
     // Spotify is selected but not signed in: show the sign-in empty state instead of searching the
     // daemon (search is gated on a signed-in Spotify account).
     readonly property bool spotifyGate: Playback.provider === "spotify" && !(Playback.spotify && Playback.spotify.signedIn)
+    // The same for a music server: no session, no catalogue to search.
+    readonly property bool navidromeGate: Playback.provider === "navidrome" && !(Playback.navidrome && Playback.navidrome.signedIn)
+    // Neither can search, so the page is the gate rather than an empty result list.
+    readonly property bool gated: page.spotifyGate || page.navidromeGate
 
     // A ?q= arrival (the Ctrl+K palette's "All results", or a card's search intent) runs the search.
     readonly property var params: Router.current ? Router.current.params : ({})
@@ -51,13 +55,19 @@ Item {
     Connections {
         target: Playback
         function onProviderChanged(): void {
-            if (page.spotifyGate || page.searched === "")
+            if (page.gated || page.searched === "")
                 return;
             page.res = null;
             page.songs = [];
             page.expandedCat = "";
             page.query = page.searched;
             page.runSearch();
+        }
+        // Connecting the server from Settings lifts the gate: run whatever is in the box, if
+        // anything, instead of making the user retype it.
+        function onNavidromeChanged(): void {
+            if (!page.gated && page.query.trim() !== "")
+                page.runSearch();
         }
     }
 
@@ -98,7 +108,7 @@ Item {
     function runSearch() {
         var q = page.query.trim().replace(/\s+/g, " ");
         // Gated: no daemon call, the sign-in card carries the page.
-        if (!q || page.spotifyGate)
+        if (!q || page.gated)
             return;
         page.latest = q;
         page.searched = q;
@@ -207,7 +217,7 @@ Item {
         id: root
         anchors.fill: parent
         spacing: Style.sp(4)
-        visible: page.expandedCat === "" && !page.spotifyGate
+        visible: page.expandedCat === "" && !page.gated
 
         ColumnLayout {
             Layout.fillWidth: true
@@ -512,7 +522,7 @@ Item {
     // --- expanded category view ----------------------------------------------------------------
     Item {
         anchors.fill: parent
-        visible: page.expandedCat !== "" && !page.spotifyGate
+        visible: page.expandedCat !== "" && !page.gated
 
         RowLayout {
             id: backBar
@@ -570,10 +580,15 @@ Item {
         }
     }
 
-    // The Spotify sign-in empty state: shown when Spotify is selected but not signed in, in place of
-    // the search surface. The button starts the OAuth flow; nothing here touches the daemon.
+    // The sign-in empty state for a provider with no session: shown when Spotify is selected but
+    // not signed in, or when Navidrome is and has no server connected, in place of the search
+    // surface. Neither button searches the daemon.
     SpotifyGate {
         anchors.centerIn: parent
         visible: page.spotifyGate
+    }
+    NavidromeGate {
+        anchors.centerIn: parent
+        visible: page.navidromeGate
     }
 }

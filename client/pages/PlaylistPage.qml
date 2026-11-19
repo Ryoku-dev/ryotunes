@@ -295,7 +295,7 @@ Item {
                 out.push({ icon: "music", label: "Change cover", danger: false, act: () => page.pickCover() });
             out.push({ icon: "close", label: "Delete playlist", danger: true, act: () => page.confirmingDelete = true });
         }
-        if (!page.isSmart && !page.isLocal)
+        if (!page.isSmart && Ids.providerOf(page.playlistId) === "youtube")
             out.push({ icon: "link", label: "Share", danger: false, act: () => page.share() });
         return out;
     }

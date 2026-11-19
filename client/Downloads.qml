@@ -108,6 +108,8 @@ Singleton {
             return "spotify";
         if (/^sc:track:[0-9]+$/.test(id))
             return "soundcloud";
+        if (id.indexOf("nd:") === 0)
+            return "navidrome";
         if (/^[0-9A-Za-z_-]{11}$/.test(id))
             return "youtube";
         return "unknown";
@@ -126,6 +128,7 @@ Singleton {
         case "radio": return "Live radio can\u2019t be downloaded.";
         case "spotify": return "Saves a matching YouTube audio track.";
         case "soundcloud": return "Save this SoundCloud track.";
+        case "navidrome": return "Navidrome downloads are not supported yet.";
         case "youtube": return "Save this track.";
         default: return "This track can\u2019t be downloaded.";
         }
@@ -197,6 +200,13 @@ Singleton {
     function enqueueCollectionFromPage(page, label) {
         if (!page || root.addingAlbum)
             return;
+        // A music server's tracks have no downloader in v1: refuse the collection once, with the
+        // same reason the per-track button gives, instead of queueing jobs that each fail.
+        var first = (page.items && page.items.length) ? page.items[0].video_id : "";
+        if (root.kindOf({ videoId: first }) === "navidrome") {
+            Playback.toast(root.reason({ videoId: first }), "info");
+            return;
+        }
         root.addingAlbum = true;
         var tokens = Object.create(null);
         var tracks = (page.items || []).slice();

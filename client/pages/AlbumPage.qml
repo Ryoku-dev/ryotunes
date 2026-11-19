@@ -352,7 +352,7 @@ Item {
             out.push({ icon: "add", label: "Save to playlist", danger: false,
                 act: () => albumPicker.openWith(page.album ? page.album.items : []) });
         out.push({ icon: "dashboard", label: "Add to shortcuts", danger: false, act: () => page.addAlbumShortcut() });
-        if (!page.isLocal)
+        if (Ids.providerOf(page.albumId) === "youtube")
             out.push({ icon: "link", label: "Share", danger: false, act: () => page.share() });
         return out;
     }

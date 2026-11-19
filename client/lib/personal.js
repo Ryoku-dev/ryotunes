@@ -250,6 +250,19 @@ function forgetSpotifyRecents(p) {
     return n;
 }
 
+// The same for a music server: an nd: id is an opaque row on *that* server, so nothing stays
+// openable once the session is gone. Returns how many entries were dropped.
+function forgetNavidromeRecents(p) {
+    var n = 0;
+    for (var id in p.recent) {
+        if (id.indexOf("nd:") === 0) {
+            delete p.recent[id];
+            n++;
+        }
+    }
+    return n;
+}
+
 // The lead artist out of a joined credit string — a usable search seed, unlike the whole list.
 function firstArtist(artists) {
     return artists.split(/[,&•]|\sfeat\.?\s|\sft\.?\s/i)[0].trim();

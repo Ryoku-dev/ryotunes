@@ -22,12 +22,14 @@ Singleton {
     // Recording state kept out of the persisted blob. `lastNowId` is the last track we recorded a
     // play for, so a repeated now-playing for the same track (a metadata refresh) or a reconnect —
     // which replays state through the snapshot, never a now-playing event — is not a fresh play.
-    // `wasSignedIn`/`wasSpotifyIn` remember each session's state so only a real sign-out transition
-    // sweeps its recents. `pendingSaves` holds the blobs of set_personal writes still awaiting their
-    // personal-changed echo, so the daemon's echo of our own save can be dropped instead of applied.
+    // `wasSignedIn`/`wasSpotifyIn`/`wasNavidromeIn` remember each session's state so only a real
+    // sign-out transition sweeps its recents. `pendingSaves` holds the blobs of set_personal writes
+    // still awaiting their personal-changed echo, so the daemon's echo of our own save can be
+    // dropped instead of applied.
     property string lastNowId: ""
     property bool wasSignedIn: false
     property bool wasSpotifyIn: false
+    property bool wasNavidromeIn: false
     property var pendingSaves: []
     property bool hydrated: false
     property bool dirty: false
@@ -75,6 +77,7 @@ Singleton {
     Component.onCompleted: {
         root.wasSignedIn = !!(Playback.auth && Playback.auth.signedIn);
         root.wasSpotifyIn = !!(Playback.spotify && Playback.spotify.signedIn);
+        root.wasNavidromeIn = !!(Playback.navidrome && Playback.navidrome.signedIn);
         if (Daemon.connected) root.reload();
     }
 
@@ -176,6 +179,12 @@ Singleton {
             if (root.wasSpotifyIn && !nowIn)
                 root.mutate(function (b) { return P.forgetSpotifyRecents(b) > 0; });
             root.wasSpotifyIn = nowIn;
+        }
+        function onNavidromeChanged(): void {
+            var nowIn = !!(Playback.navidrome && Playback.navidrome.signedIn);
+            if (root.wasNavidromeIn && !nowIn)
+                root.mutate(function (b) { return P.forgetNavidromeRecents(b) > 0; });
+            root.wasNavidromeIn = nowIn;
         }
     }
 

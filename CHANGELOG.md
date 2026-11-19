@@ -4,6 +4,7 @@
 
 - Fixed Library ▸ Songs and playlists jumping back to the top each time the next batch of tracks loaded, which made the end of a long list unreachable. The list now keeps its place while more tracks are added below.
 - Lyrics can now be romanized from Settings ▸ Appearance, including pinyin readings for Chinese and transliterations for Japanese and Korean.
+- Navidrome and other Subsonic/OpenSubsonic servers are now a fifth catalogue: add the address, a username and a password under Settings ▸ Account and browse, search, play, star, scrobble, edit playlists and read lyrics straight from your own server. Ryotunes keeps a derived token, never the password, and talks to one server at a time. Downloads, server radio and transcoding are not supported yet.
 - TIDAL sign-in now opens its approval page in the browser while keeping the code visible (`client/lib/playback.js`, `client/tests/tst_playback.qml`).
 - Playlist and album Play actions now start in sequence, while clicking a track preserves the current shuffle mode. Active shuffle and repeat controls follow the live Ryoku accent.
 - Icon buttons now show their labels on hover and expose the same labels to assistive technology.
