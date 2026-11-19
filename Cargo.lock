@@ -4807,6 +4807,7 @@ dependencies = [
  "rusqlite",
  "rustls 0.23.43",
  "ruzstd",
+ "ryotunes-navidrome",
  "ryotunes-soundcloud",
  "ryotunes-spotify",
  "ryotunes-tidal",
@@ -4822,6 +4823,21 @@ dependencies = [
  "tracing",
  "url",
  "urlencoding",
+]
+
+[[package]]
+name = "ryotunes-navidrome"
+version = "1.2.3"
+dependencies = [
+ "md-5",
+ "parking_lot",
+ "rand 0.8.7",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.20",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]
@@ -4909,6 +4925,7 @@ dependencies = [
  "player",
  "rusqlite",
  "ryotunes-core",
+ "ryotunes-navidrome",
  "ryotunes-protocol",
  "ryotunes-soundcloud",
  "ryotunes-tidal",
