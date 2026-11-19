@@ -11,7 +11,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use parking_lot::Mutex;
 use ryotunes_core::db::now_secs;
 use ryotunes_core::host::EventSink;
-use ryotunes_core::spotify::{sc_track_id, spotify_track_id};
+use ryotunes_core::spotify::{is_nd_id, sc_track_id, spotify_track_id};
 use ryotunes_core::state::AppState;
 use ryotunes_core::{local, radio};
 use ryotunes_soundcloud::SoundCloud;
@@ -157,6 +157,11 @@ fn classify(video_id: &str) -> Result<Source, String> {
     }
     if spotify_track_id(video_id).is_some() {
         return Ok(Source::Spotify);
+    }
+    // A music server's tracks are ordinary files on that server, fetched with a stream URL this
+    // client has no downloader for. Said plainly rather than falling through to "can't".
+    if is_nd_id(video_id) {
+        return Err("Navidrome downloads are not supported yet.".into());
     }
     if is_youtube_id(video_id) {
         return Ok(Source::YouTube);
@@ -1770,6 +1775,22 @@ mod tests {
             collection: None,
             collection_kind: None,
         }
+    }
+
+    /// A music-server row has a real id but no downloader: it is refused with a reason the client
+    /// can show, not mistaken for an opaque YouTube id.
+    #[test]
+    fn navidrome_tracks_are_refused_with_their_own_reason() {
+        assert_eq!(
+            classify("nd:track:8f3a").err().as_deref(),
+            Some("Navidrome downloads are not supported yet.")
+        );
+        // The prefix alone is not a track, and a bare server id is still not a YouTube one.
+        assert_eq!(
+            classify("nd:album:8f3a").err().as_deref(),
+            Some("Navidrome downloads are not supported yet.")
+        );
+        assert_eq!(classify("8f3a").err().as_deref(), Some("This track can't be downloaded."));
     }
 
     #[test]
