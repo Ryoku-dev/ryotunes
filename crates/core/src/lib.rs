@@ -11,6 +11,8 @@ pub mod listentogether;
 pub mod local;
 pub mod lyrics;
 pub mod media;
+pub mod navidrome_bridge;
+pub mod navidrome_scrobble;
 pub mod orchestrator;
 pub mod potoken;
 pub mod radio;
