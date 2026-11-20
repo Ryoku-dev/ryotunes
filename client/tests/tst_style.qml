@@ -10,6 +10,7 @@ TestCase {
 
     function test_thumb_rewrites_sizes() {
         compare(Style.thumb("https://x/a=w120-h120-l90", 544), "https://x/a=w544-h544-l90");
+        compare(Style.thumb("https://x/a=w120-h120-l90", 708), "https://x/a=w800-h800-l90");
         compare(Style.thumb("https://x/a=s200", 64), "https://x/a=s64");
         compare(Style.thumb("/music/cover.jpg", 64), "file:///music/cover.jpg");
         compare(Style.thumb("", 64), undefined);

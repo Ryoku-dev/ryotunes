@@ -122,6 +122,8 @@ Rectangle {
             }
 
             Artwork {
+                Layout.preferredWidth: Style.sp(12)
+                Layout.preferredHeight: Style.sp(12)
                 url: root.now && root.now.thumbnail ? root.now.thumbnail : ""
                 px: Style.sp(12)
             }

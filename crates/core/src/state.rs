@@ -1963,6 +1963,7 @@ impl AppState {
             &mut item,
             data.duration.as_deref(),
             data.artists.as_deref(),
+            data.thumbnail.as_deref(),
             data.is_video,
         );
         {
@@ -1982,6 +1983,7 @@ impl AppState {
                         qi,
                         data.duration.as_deref(),
                         data.artists.as_deref(),
+                        data.thumbnail.as_deref(),
                         data.is_video,
                     );
                 }
@@ -2127,7 +2129,13 @@ impl AppState {
         // Same backfill as start_current: a gapless advance emits this item straight from the
         // queue, so the repair has to land before it becomes the current track.
         if let Some(qi) = q.items.get_mut(next_idx) {
-            backfill_metadata(qi, data.duration.as_deref(), data.artists.as_deref(), data.is_video);
+            backfill_metadata(
+                qi,
+                data.duration.as_deref(),
+                data.artists.as_deref(),
+                data.thumbnail.as_deref(),
+                data.is_video,
+            );
         }
         tracing::debug!(index = next_idx, "gapless lookahead primed");
     }
@@ -4029,11 +4037,17 @@ fn backfill_metadata(
     item: &mut SongItem,
     length_seconds: Option<&str>,
     author: Option<&str>,
+    thumbnail: Option<&str>,
     is_video: Option<bool>,
 ) {
     if item.duration.is_none() {
         if let Some(secs) = length_seconds.and_then(|s| s.trim().parse::<i64>().ok()) {
             item.duration = Some(format_duration(secs * 1000));
+        }
+    }
+    if item.thumbnail.as_ref().map_or(true, |t| t.trim().is_empty()) {
+        if let Some(thumb) = thumbnail.map(str::trim).filter(|s| !s.is_empty()) {
+            item.thumbnail = Some(thumb.to_owned());
         }
     }
     // YouTube's own media-type verdict outranks whatever the row was parsed with: a card played
@@ -4507,7 +4521,7 @@ mod tests {
 
         // No artist (an album track) → YouTube's own author.
         let mut it = with("", vec![]);
-        backfill_metadata(&mut it, None, Some("Delara"), None);
+        backfill_metadata(&mut it, None, Some("Delara"), None, None);
         assert_eq!(it.artists, "Delara");
 
         // A display subtitle that was parsed as the artist → replaced, and the links that pointed
@@ -4518,21 +4532,21 @@ mod tests {
             "Song • Dua Lipa",
         ] {
             let mut it = with(bogus, vec![bogus]);
-            backfill_metadata(&mut it, None, Some("Dua Lipa"), None);
+            backfill_metadata(&mut it, None, Some("Dua Lipa"), None, None);
             assert_eq!(it.artists, "Dua Lipa", "{bogus} should have been replaced");
             assert!(it.artist_runs.is_empty(), "{bogus}: stale links must not survive the swap");
         }
 
         // A real artist line is never second-guessed, links included. Collabs use "&" and ",".
         let mut it = with("Nicki Minaj, Ice Spice & Aqua", vec!["Nicki Minaj", " & ", "Aqua"]);
-        backfill_metadata(&mut it, None, Some("Nicki Minaj"), None);
+        backfill_metadata(&mut it, None, Some("Nicki Minaj"), None, None);
         assert_eq!(it.artists, "Nicki Minaj, Ice Spice & Aqua");
         assert_eq!(it.artist_runs.len(), 3);
 
         // Nothing to repair with (rustypipe served the stream, or /player had no author) → as-is.
         for author in [None, Some(""), Some("   ")] {
             let mut it = with("", vec![]);
-            backfill_metadata(&mut it, None, author, None);
+            backfill_metadata(&mut it, None, author, None, None);
             assert_eq!(it.artists, "");
         }
     }
@@ -4540,16 +4554,31 @@ mod tests {
     #[test]
     fn player_response_fills_only_a_missing_duration() {
         let mut it = song("v", None);
-        backfill_metadata(&mut it, Some("191"), None, None);
+        backfill_metadata(&mut it, Some("191"), None, None, None);
         assert_eq!(it.duration.as_deref(), Some("3:11"));
         // A duration the row already carried wins: it's the length of the cut YouTube listed.
         let mut it = innertube::SongItem { duration: Some("3:02".into()), ..song("v", None) };
-        backfill_metadata(&mut it, Some("191"), None, None);
+        backfill_metadata(&mut it, Some("191"), None, None, None);
         assert_eq!(it.duration.as_deref(), Some("3:02"));
         // Junk from the player response can't blank an existing one.
         let mut it = song("v", None);
-        backfill_metadata(&mut it, Some("not-a-number"), None, None);
+        backfill_metadata(&mut it, Some("not-a-number"), None, None, None);
         assert_eq!(it.duration, None);
+    }
+
+    #[test]
+    fn player_response_fills_only_a_missing_thumbnail() {
+        let mut it = song("v", None);
+        backfill_metadata(&mut it, None, None, Some("https://img.test/art.jpg"), None);
+        assert_eq!(it.thumbnail.as_deref(), Some("https://img.test/art.jpg"));
+        // A thumbnail the row already carried wins.
+        let mut it = innertube::SongItem { thumbnail: Some("https://existing.test/art.jpg".into()), ..song("v", None) };
+        backfill_metadata(&mut it, None, None, Some("https://img.test/art.jpg"), None);
+        assert_eq!(it.thumbnail.as_deref(), Some("https://existing.test/art.jpg"));
+        // Empty string / whitespace can't blank an existing one or create a bogus thumbnail.
+        let mut it = song("v", None);
+        backfill_metadata(&mut it, None, None, Some("   "), None);
+        assert_eq!(it.thumbnail, None);
     }
 
     /// The audio-only fetch filter reads this flag, and the rows that reach it are only as
@@ -4558,14 +4587,14 @@ mod tests {
     #[test]
     fn player_response_settles_whether_the_track_is_a_video() {
         let mut it = song("v", None);
-        backfill_metadata(&mut it, None, None, Some(true));
+        backfill_metadata(&mut it, None, None, None, Some(true));
         assert!(it.is_video);
         // A stale `true` is cleared when YouTube identifies the resolved item as generated audio.
-        backfill_metadata(&mut it, None, None, Some(false));
+        backfill_metadata(&mut it, None, None, None, Some(false));
         assert!(!it.is_video);
         // Nothing said (rustypipe, or a cached URL) → whatever the row already claimed stands.
         it.is_video = true;
-        backfill_metadata(&mut it, None, None, None);
+        backfill_metadata(&mut it, None, None, None, None);
         assert!(it.is_video);
     }
 

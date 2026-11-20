@@ -661,7 +661,10 @@ pub fn parse_album(root: &Value) -> AlbumPage {
         header.and_then(|h| h.get("straplineThumbnail")).and_then(last_thumbnail);
 
     // Target the header's own thumbnail subtree so we get the cover, not the artist avatar.
-    let thumbnail = header.and_then(|h| h.get("thumbnail")).and_then(last_thumbnail);
+    let thumbnail = header
+        .and_then(|h| h.get("thumbnail"))
+        .and_then(last_thumbnail)
+        .or_else(|| header.and_then(last_thumbnail));
     let description = header_description(root, header);
 
     // Album track rows carry no per-track thumbnail (every track shares the cover shown once in

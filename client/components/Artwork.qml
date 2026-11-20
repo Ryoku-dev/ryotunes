@@ -27,6 +27,8 @@ Item {
     property string placeholderIcon: "music"
     property int glyphSize: Math.round(px * 0.42)
 
+    implicitWidth: px
+    implicitHeight: px
     width: px
     height: px
 
