@@ -660,8 +660,13 @@ pub fn parse_album(root: &Value) -> AlbumPage {
     let artist_thumbnail =
         header.and_then(|h| h.get("straplineThumbnail")).and_then(last_thumbnail);
 
-    // Target the header's own thumbnail subtree so we get the cover, not the artist avatar.
-    let thumbnail = header.and_then(|h| h.get("thumbnail")).and_then(last_thumbnail);
+    // Target the header's own thumbnail subtree so we get the cover, not the artist avatar
+    // (which lives under "straplineThumbnail").
+    let thumbnail = header.and_then(|h| {
+        ["thumbnail", "thumbnailRenderer", "foregroundThumbnail"]
+            .into_iter()
+            .find_map(|k| h.get(k).and_then(last_thumbnail))
+    });
     let description = header_description(root, header);
 
     // Album track rows carry no per-track thumbnail (every track shares the cover shown once in
@@ -1688,6 +1693,36 @@ mod tests {
         // Every track on an album page is on *this* album; Last.fm takes the album too.
         assert_eq!(a.items[0].album.as_deref(), Some("Sjelen"));
         assert_eq!(a.items[1].album.as_deref(), Some("Sjelen"));
+    }
+
+    #[test]
+    fn album_header_with_avatar_but_no_cover_does_not_use_avatar_as_cover() {
+        let root = json!({
+            "header": { "musicResponsiveHeaderRenderer": {
+                "title": { "runs": [{ "text": "Album Without Cover" }] },
+                "straplineTextOne": { "runs": [
+                    { "text": "Artist Name", "navigationEndpoint": { "browseEndpoint": { "browseId": "UCartist" } } }
+                ] },
+                "straplineThumbnail": { "musicThumbnailRenderer": { "thumbnail": { "thumbnails": [
+                    { "url": "artist_avatar.jpg" }
+                ] } } }
+            } },
+            "contents": { "musicShelfRenderer": { "contents": [
+                { "musicResponsiveListItemRenderer": {
+                    "playlistItemData": { "videoId": "trk1" },
+                    "flexColumns": [
+                        { "musicResponsiveListItemFlexColumnRenderer": { "text": { "runs": [{ "text": "Track 1" }] } } },
+                        { "musicResponsiveListItemFlexColumnRenderer": { "text": {} } }
+                    ]
+                } }
+            ] } }
+        });
+
+        let a = parse_album(&root);
+        assert_eq!(a.artist_thumbnail.as_deref(), Some("artist_avatar.jpg"));
+        assert_eq!(a.thumbnail, None);
+        assert_eq!(a.items.len(), 1);
+        assert_eq!(a.items[0].thumbnail, None);
     }
 
     /// The header's save-to-library toggle: `isToggled` is the state, and its like target carries
