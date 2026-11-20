@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Fixed track artwork failing to render in the player bar and now-playing views: thumbnail requests are now quantized to standard CDN dimensions to avoid image provider errors, missing track thumbnails are backfilled from playback metadata, and layout sizing for player artwork is preserved.
 - Fixed Library ▸ Songs and playlists jumping back to the top each time the next batch of tracks loaded, which made the end of a long list unreachable. The list now keeps its place while more tracks are added below.
 - Lyrics can now be romanized from Settings ▸ Appearance, including pinyin readings for Chinese and transliterations for Japanese and Korean.
 - TIDAL sign-in now opens its approval page in the browser while keeping the code visible (`client/lib/playback.js`, `client/tests/tst_playback.qml`).
