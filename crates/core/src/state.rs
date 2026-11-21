@@ -3,7 +3,7 @@
 use std::collections::hash_map::DefaultHasher;
 use std::collections::HashSet;
 use std::hash::{Hash, Hasher};
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 
 use std::future::Future;
 use std::pin::Pin;
@@ -24,6 +24,18 @@ use crate::host::{EventSink, LoginFlow, Paths};
 use crate::listentogether::{LtSession, SyncCommand};
 use crate::media::MediaHandle;
 use crate::orchestrator::{Orchestrator, PlaybackData, PlaybackPing, ResolveError};
+
+/// Stop the skip loop after this many consecutive resolve failures. YouTube
+/// IP bans make every track fail; advancing row by row would burn the whole
+/// queue and keep hammering the endpoint that flagged us.
+const RESOLVE_FAILURE_CAP: u32 = 5;
+/// Backoff after the Nth consecutive failure: 1s, 2s, 4s, 8s, capped at 8s.
+/// Enough to stop the 1.4s tight loop without making a single transient
+/// failure feel like a hang.
+fn resolve_backoff(failures: u32) -> std::time::Duration {
+    // First failure waits 1s; callers pass a count starting at 1.
+    std::time::Duration::from_secs(1u64 << failures.saturating_sub(1).min(3))
+}
 
 /// Synthetic browseId for the On Repeat playlist. Not a YouTube id: `get_playlist` intercepts it
 /// and builds the page from local play counts, so it must never collide with a real browseId
@@ -150,6 +162,11 @@ pub struct AppState {
     /// `last_queue_fingerprint`, for the persistence side: an advance rewrites 40 bytes rather
     /// than the whole blob.
     last_persisted_fingerprint: AtomicU64,
+    /// Consecutive resolve failures across `start_current`'s skip loop and
+    /// `prime_lookahead`'s drop path. Any successful resolve resets it. When
+    /// the count reaches [`RESOLVE_FAILURE_CAP`] the queue stops instead of
+    /// burning every remaining track against a YouTube IP ban.
+    resolve_failures: AtomicU32,
     /// One-shot sleep-timer style stop: when set, the current track is allowed to finish but no
     /// queued/autoplay successor is started. Kept atomic because the mpv event pump reads it.
     stop_after_current: AtomicBool,
@@ -507,6 +524,7 @@ impl AppState {
             last_media_push: AtomicU64::new(0),
             last_queue_fingerprint: AtomicU64::new(0),
             last_persisted_fingerprint: AtomicU64::new(0),
+            resolve_failures: AtomicU32::new(0),
             stop_after_current: AtomicBool::new(false),
             low_resource_mode: AtomicBool::new(low_resource_mode),
             audio_fx: parking_lot::RwLock::new(AudioFx::default()),
@@ -1870,7 +1888,10 @@ impl AppState {
                 return false;
             }
             match resolved {
-                Ok(d) => break (item, d),
+                Ok(d) => {
+                    self.resolve_failures.store(0, Ordering::Relaxed);
+                    break (item, d);
+                }
                 // A deleted local file is gone for good, so it leaves the queue outright rather
                 // than being skipped over — a row that can only ever fail again is noise. Every
                 // other failure is transient in principle (network, region, a cipher self-heal),
@@ -1911,7 +1932,7 @@ impl AppState {
                         self.emit_error(&item.video_id, message);
                         return false;
                     }
-                    let mut q = self.queue.lock().await;
+                    let q = self.queue.lock().await;
                     // Deliberately ignores repeat-all: wrapping the unplayable-skip would spin
                     // forever on a queue where nothing resolves. Skips stop at the tail.
                     if q.current + 1 >= q.items.len() {
@@ -1919,6 +1940,23 @@ impl AppState {
                         self.emit_error(&item.video_id, &e.to_string()); // nothing left to skip to
                         return false;
                     }
+                    // A YouTube IP ban makes every row fail. Back off and cap
+                    // the streak instead of advancing through the whole queue
+                    // at ~1.4s per request, which fed the ban and wiped the
+                    // user's queue.
+                    let failures = self.resolve_failures.fetch_add(1, Ordering::Relaxed) + 1;
+                    if failures >= RESOLVE_FAILURE_CAP {
+                        drop(q);
+                        tracing::warn!(failures, "resolve failures capped — stopping the queue");
+                        self.emit_error(&item.video_id, "stream resolution keeps failing; playback stopped to avoid burning the queue (possible YouTube rate limit)");
+                        return false;
+                    }
+                    drop(q);
+                    tokio::time::sleep(resolve_backoff(failures)).await;
+                    if self.generation.load(Ordering::SeqCst) != gen {
+                        return false; // user moved on during the backoff
+                    }
+                    let mut q = self.queue.lock().await;
                     q.current += 1;
                     q.lookahead_loaded = None;
                     drop(q);
@@ -2054,11 +2092,27 @@ impl AppState {
             };
             match self.resolve(&next_video, next_upload).await {
                 Ok(d) => {
+                    self.resolve_failures.store(0, Ordering::Relaxed);
                     self.enqueue_lookahead(gen, next_idx, &next_video, d).await;
                     return;
                 }
                 Err(e) => {
                     tracing::warn!(video_id = %next_video, error = %e, "lookahead resolve failed — dropping from queue");
+                    if self.generation.load(Ordering::SeqCst) != gen {
+                        return;
+                    }
+                    // The same IP-ban streak that caps the skip loop must cap
+                    // lookahead: every failed resolve removed one row and
+                    // re-primed the next, wiping the queue at ~1.4s per track.
+                    let failures = self.resolve_failures.fetch_add(1, Ordering::Relaxed) + 1;
+                    if failures >= RESOLVE_FAILURE_CAP {
+                        tracing::warn!(
+                            failures,
+                            "lookahead resolve failures capped — keeping the queue intact"
+                        );
+                        return;
+                    }
+                    tokio::time::sleep(resolve_backoff(failures)).await;
                     if self.generation.load(Ordering::SeqCst) != gen {
                         return;
                     }
@@ -4344,11 +4398,24 @@ mod tests {
     use super::{
         append_page, backfill_metadata, drop_duplicates, enqueue_at, format_duration,
         guest_insert_index, is_mix, loudness_gain, merge_radio, next_index, parse_duration_ms,
-        persist_fingerprint, queue_fingerprint, radio_seed_for, read_personal, shuffle_new_queue,
-        shuffle_upcoming, splice_radio_into, spotify_mpv_options, unshuffled, upcoming_queued,
-        validate_personal_blob, QueueState, RepeatMode, PERSONAL_JSON_KEY,
+        persist_fingerprint, queue_fingerprint, radio_seed_for, read_personal, resolve_backoff,
+        shuffle_new_queue, shuffle_upcoming, splice_radio_into, spotify_mpv_options, unshuffled,
+        upcoming_queued, validate_personal_blob, QueueState, RepeatMode, PERSONAL_JSON_KEY,
+        RESOLVE_FAILURE_CAP,
     };
     use crate::db::Db;
+
+    #[test]
+    fn resolve_backoff_grows_then_caps() {
+        use std::time::Duration;
+        assert_eq!(resolve_backoff(1), Duration::from_secs(1));
+        assert_eq!(resolve_backoff(2), Duration::from_secs(2));
+        assert_eq!(resolve_backoff(3), Duration::from_secs(4));
+        assert_eq!(resolve_backoff(4), Duration::from_secs(8));
+        // A long ban cannot grow the sleep into minutes — the cap stops the
+        // queue at RESOLVE_FAILURE_CAP anyway.
+        assert_eq!(resolve_backoff(RESOLVE_FAILURE_CAP + 10), Duration::from_secs(8));
+    }
 
     #[test]
     fn personal_round_trips_and_rejects_bad_blobs() {
