@@ -76,6 +76,7 @@ impl Db {
                 artist        TEXT NOT NULL,
                 album         TEXT NOT NULL,
                 album_key     TEXT NOT NULL,
+                disc_no       INTEGER NOT NULL DEFAULT 0,
                 track_no      INTEGER NOT NULL,
                 duration_secs INTEGER NOT NULL,
                 cover         TEXT,
@@ -126,6 +127,11 @@ impl Db {
         }
         let _ = conn.execute("ALTER TABLE stream_url_cache ADD COLUMN ping_url TEXT", []);
         let _ = conn.execute("ALTER TABLE stream_url_cache ADD COLUMN ping_client TEXT", []);
+        // Multi-disc albums restart track numbers on every disc, so the disc has to sort first.
+        // Rows from before this column read as disc 0 until the next scan (SCAN_VERSION=6)
+        // reparses them.
+        let _ = conn
+            .execute("ALTER TABLE local_tracks ADD COLUMN disc_no INTEGER NOT NULL DEFAULT 0", []);
         // Local files are no longer recorded as plays (see `AppState::on_position`), but 0.3.1
         // recorded them for a while, so clear out anything already sitting in On Repeat's table.
         let _ = conn.execute("DELETE FROM plays WHERE video_id LIKE 'LOCAL:%'", []);
@@ -785,6 +791,7 @@ impl Db {
                     t.artist,
                     t.album,
                     t.album_key,
+                    t.disc_no,
                     t.track_no,
                     t.duration_secs,
                     t.cover,
@@ -823,8 +830,8 @@ impl Db {
     pub fn local_tracks(&self, album_key: Option<&str>) -> Vec<LocalTrack> {
         let conn = self.0.lock().unwrap();
         let sql =
-            "SELECT path, title, artist, album, album_key, track_no, duration_secs, cover, mtime
-                   FROM local_tracks {WHERE} ORDER BY album, track_no, title";
+            "SELECT path, title, artist, album, album_key, disc_no, track_no, duration_secs, cover, mtime
+                   FROM local_tracks {WHERE} ORDER BY album, disc_no, track_no, title";
         let sql =
             sql.replace("{WHERE}", if album_key.is_some() { "WHERE album_key = ?1" } else { "" });
         let mut out = Vec::new();
@@ -835,10 +842,11 @@ impl Db {
                 artist: r.get(2)?,
                 album: r.get(3)?,
                 album_key: r.get(4)?,
-                track_no: r.get(5)?,
-                duration_secs: r.get(6)?,
-                cover: r.get(7)?,
-                mtime: r.get(8)?,
+                disc_no: r.get(5)?,
+                track_no: r.get(6)?,
+                duration_secs: r.get(7)?,
+                cover: r.get(8)?,
+                mtime: r.get(9)?,
             })
         };
         if let Ok(mut stmt) = conn.prepare(&sql) {
@@ -855,10 +863,11 @@ impl Db {
 }
 
 const LOCAL_TRACK_UPSERT: &str =
-    "INSERT INTO local_tracks(path, title, artist, album, album_key, track_no, duration_secs, cover, mtime)
-     VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+    "INSERT INTO local_tracks(path, title, artist, album, album_key, disc_no, track_no, duration_secs, cover, mtime)
+     VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
      ON CONFLICT(path) DO UPDATE SET title = excluded.title, artist = excluded.artist,
-        album = excluded.album, album_key = excluded.album_key, track_no = excluded.track_no,
+        album = excluded.album, album_key = excluded.album_key, disc_no = excluded.disc_no,
+        track_no = excluded.track_no,
         duration_secs = excluded.duration_secs, cover = excluded.cover, mtime = excluded.mtime";
 
 /// One file in the local library. Tag data as read at scan time; `mtime` is the change detector.
@@ -880,6 +889,8 @@ pub struct LocalTrack {
     pub album: String,
     /// Stable, human-readable album id fragment (`artist--album`, sanitized). See `local.rs`.
     pub album_key: String,
+    /// Disc number from the tags, 0 when the file doesn't say. Sorts before `track_no`.
+    pub disc_no: i64,
     pub track_no: i64,
     pub duration_secs: i64,
     /// Absolute path to the cover image (extracted or found next to the files).
@@ -893,6 +904,30 @@ mod tests {
 
     fn db() -> Db {
         Db::open(std::path::Path::new(":memory:")).unwrap()
+    }
+
+    #[test]
+    fn multi_disc_albums_list_disc_by_disc() {
+        let d = db();
+        let t = |path: &str, disc_no, track_no| LocalTrack {
+            path: path.into(),
+            title: path.into(),
+            artist: "Various Artists".into(),
+            album: "Two Discs".into(),
+            album_key: "various-artists--two-discs".into(),
+            disc_no,
+            track_no,
+            duration_secs: 10,
+            cover: None,
+            mtime: 1,
+        };
+        d.put_local_tracks(&[t("2-01", 2, 1), t("1-02", 1, 2), t("2-02", 2, 2), t("1-01", 1, 1)]);
+        let order: Vec<String> = d
+            .local_tracks(Some("various-artists--two-discs"))
+            .into_iter()
+            .map(|t| t.path)
+            .collect();
+        assert_eq!(order, ["1-01", "1-02", "2-01", "2-02"]);
     }
 
     #[test]

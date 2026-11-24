@@ -26,10 +26,10 @@ pub const ALBUM_PREFIX: &str = "LOCALALBUM:";
 pub const ARTIST_PREFIX: &str = "LOCALARTIST:";
 /// Where the folder list lives (JSON array of absolute paths).
 const FOLDERS_SETTING: &str = "local_folders";
-/// Bumped whenever `read_track` starts producing different titles, artists or album keys. The scan
+/// Bumped whenever `read_track` starts producing different titles, artists, album keys or order. The scan
 /// normally trusts stored rows whose file hasn't changed; after a bump it re-reads everything once,
 /// so a library isn't left half-parsed by the old rules and half by the new ones.
-const SCAN_VERSION: &str = "5";
+const SCAN_VERSION: &str = "6";
 const SCAN_VERSION_SETTING: &str = "local_scan_version";
 
 /// Extensions we pick up. Playback itself is mpv, which decodes far more than this — the list is
@@ -266,6 +266,7 @@ fn read_track(file: &Path, path: &str, mtime: i64, covers_dir: &Path) -> LocalTr
         artist,
         album,
         album_key,
+        disc_no: tag.and_then(|t| t.disk()).unwrap_or(0) as i64,
         track_no: tag.and_then(|t| t.track()).unwrap_or(0) as i64,
         duration_secs,
         cover,
@@ -658,6 +659,7 @@ mod tests {
             artist: artist.into(),
             album: album.into(),
             album_key: key.into(),
+            disc_no: 0,
             track_no: 1,
             duration_secs: 10,
             cover: None,
