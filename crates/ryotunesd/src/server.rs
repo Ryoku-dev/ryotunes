@@ -167,7 +167,13 @@ async fn handle(
                     // The one chokepoint every RPC error passes: record it (minus codes that
                     // describe an expected state rather than a failure) so the Diagnostics page
                     // sees what actually broke, with the method name attached.
-                    if !matches!(e.code.as_str(), "spotify_signed_out" | "client_side") {
+                    if !matches!(
+                        e.code.as_str(),
+                        "spotify_signed_out"
+                            | "tidal_signed_out"
+                            | "navidrome_signed_out"
+                            | "client_side"
+                    ) {
                         crate::diagnostics::record(
                             "error",
                             "daemon",

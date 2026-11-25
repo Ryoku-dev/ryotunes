@@ -6,6 +6,7 @@ import Quickshell
 import Ryoku.Ui.Singletons
 import "../"
 import "../components"
+import "../lib/ids.js" as Ids
 
 // The artist page, ported from ui/src/routes/artist/[id]/+page.svelte. get_artist(id) once; the page
 // is one TrackList whose header is a PageHero (round artist art, name, counts, Play/Shuffle/Radio/
@@ -41,6 +42,9 @@ Item {
     // SoundCloud user page (the Orange look): get_artist for an sc:user id returns kind:"soundcloud"
     // with the user's own tracks, albums, playlists and likes rather than the YouTube sections.
     readonly property bool isSC: !!(page.artist && page.artist.kind === "soundcloud")
+    // Radio and channel Subscribe are YouTube endpoints: another catalogue's artist id has no
+    // radio seed and no channel to subscribe to, so both would only answer with an error.
+    readonly property bool isYouTube: Ids.providerOf(page.artistId) === "youtube"
     readonly property var scTracks: (page.artist && page.artist.tracks) || []
     readonly property var scAlbums: (page.artist && page.artist.albums) || []
     readonly property var scPlaylists: (page.artist && page.artist.playlists) || []
@@ -586,11 +590,13 @@ Item {
                     Btn {
                         text: "Radio"
                         icon: "radio"
+                        visible: page.isYouTube
                         onClicked: page.radio()
                     }
                     Btn {
                         text: !page.signedIn ? "Save to library" : (page.subscribed ? "Subscribed" : "Subscribe")
                         icon: page.subscribed ? "check-circle" : "add"
+                        visible: page.isYouTube
                         enabled: !page.subBusy
                         onClicked: page.toggleSub()
                     }
@@ -707,10 +713,12 @@ Item {
 
     Menu {
         id: artistMenu
+        // Share copies a music.youtube.com/channel link, so it only exists for a YouTube artist.
         customItems: [
-            { icon: "dashboard", label: "Add to shortcuts", danger: false, act: () => page.addArtistShortcut() },
-            { icon: "link", label: "Share", danger: false, act: () => page.share() }
-        ]
+            { icon: "dashboard", label: "Add to shortcuts", danger: false, act: () => page.addArtistShortcut() }
+        ].concat(Ids.providerOf(page.artistId) === "youtube"
+            ? [{ icon: "link", label: "Share", danger: false, act: () => page.share() }]
+            : [])
     }
 
     // Personal-store action (Task 4b): pin this artist to the Home shortcuts grid. Wired by PersonalStore.

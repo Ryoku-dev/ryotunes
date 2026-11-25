@@ -30,9 +30,10 @@ Singleton {
     // The Sound dialog's effects, mirrored from the daemon (the `audio-fx` event and the subscribe
     // snapshot). `bass` is dB, reverb/width are 0..1, speed is the tempo multiplier.
     property var audioFx: ({ speed: 1, semitones: 0, reverb: 0, bass: 0, width: 0 })
-    // The active music provider ("youtube" | "spotify" | "soundcloud" | "tidal"), mirrored from the daemon
-    // (the subscribe snapshot's `provider` and a `provider-changed` event). The title bar's switch
-    // reads it; each catalogue's own sign-in state gates its shelves, not the selector.
+    // The active music provider ("youtube" | "spotify" | "soundcloud" | "tidal" | "navidrome"),
+    // mirrored from the daemon (the subscribe snapshot's `provider` and a `provider-changed` event).
+    // The title bar's switch reads it; each catalogue's own sign-in state gates its shelves, not the
+    // selector.
     property string provider: "youtube"
     // The Spotify account, mirrored from the daemon (the subscribe snapshot's `spotify` object and
     // the `spotify-auth` events). `signedIn` gates the Spotify catalogue; `premium` is null until the
@@ -49,6 +50,12 @@ Singleton {
     // while the daemon ships a pair and only turns false if a host clears one.
     property var tidal: ({ signedIn: false, name: null, quality: null, hasCredentials: false,
         code: "", url: "", error: "" })
+
+    // The Navidrome music server, mirrored the same way (the snapshot's `navidrome` object and the
+    // `navidrome-auth` events). One server at a time, and no guest catalogue: a signed-out selection
+    // shows a connect prompt. `server` is the address and `name` the username; `error` is the last
+    // refusal.
+    property var navidrome: ({ signedIn: false, server: "", name: null, error: "" })
 
     // --- SoundCloud waveform cache -----------------------------------------------------------
     // The playing track's 240 amplitude samples (get_waveform), for the Orange seek bar; null for a
@@ -118,6 +125,9 @@ Singleton {
         if (snap.soundcloud)
             root.soundcloud = { signedIn: !!snap.soundcloud.signedIn,
                 name: snap.soundcloud.name, error: "" };
+        if (snap.navidrome)
+            root.navidrome = { signedIn: !!snap.navidrome.signedIn,
+                server: snap.navidrome.server || "", name: snap.navidrome.name, error: "" };
     }
 
     // --- SoundCloud waveform -----------------------------------------------------------------
@@ -157,11 +167,14 @@ Singleton {
     function setAudioFx(fx) {
         return Daemon.call("set_audio_fx", { speed: fx.speed, semitones: fx.semitones, reverb: fx.reverb, bass: fx.bass, width: fx.width });
     }
-    // Optimistic: the switch flips the local mirror at once and asks the daemon. The daemon method
-    // lands later, so a failure is swallowed rather than surfaced.
+    // The daemon serves each request in its own task, so a `get_home`/`get_library_albums` sent
+    // right after `set_provider` can be handled first and answer with the *previous* catalogue.
+    // Flipping the mirror only once the daemon has switched keeps every page's reload consistent;
+    // the daemon's own provider-changed event lands on the same value, so this stays idempotent.
     function setProvider(p) {
-        root.provider = p;
-        return Daemon.call("set_provider", { provider: p }).catch(() => {});
+        return Daemon.call("set_provider", { provider: p })
+            .then(() => { root.provider = p; })
+            .catch(() => {});
     }
     // Start the Spotify OAuth flow; the daemon spawns the task and drives the rest through
     // spotify-auth events (the url step opens the browser). Idempotent while a flow is running.
@@ -173,6 +186,12 @@ Singleton {
 
     function soundcloudSignIn() { return Daemon.call("soundcloud_sign_in"); }
     function soundcloudSignOut() { return Daemon.call("soundcloud_sign_out"); }
+    // A music server signs in with an address, a username and a password; the daemon keeps only a
+    // derived token, so the password never comes back here (and never into `root.navidrome`).
+    function navidromeSignIn(server, username, password) {
+        return Daemon.call("navidrome_sign_in", { server: server, username: username, password: password });
+    }
+    function navidromeSignOut() { return Daemon.call("navidrome_sign_out"); }
     function toggleShuffle() { return Daemon.call("toggle_shuffle"); }
     // off -> all -> one -> off, matching player.svelte.ts cycleRepeat.
     function cycleRepeat() {

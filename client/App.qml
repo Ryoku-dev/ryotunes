@@ -510,6 +510,52 @@ Item {
 
             Hairline { Layout.fillWidth: true }
 
+            // ── SoundCloud ───────────────────────────────────────────────────────────────
+            // Sign-in happens in the browser (the daemon watches its cookie store), so this row
+            // only starts or ends it; the Account section shows walked-through progress.
+            Rectangle {
+                id: scAction
+                Layout.fillWidth: true
+                implicitHeight: Style.sp(9)
+                radius: Style.radius
+                color: scHover.hovered ? Tokens.tint5 : "transparent"
+                readonly property var sc: Playback.soundcloud || ({})
+                readonly property bool signedIn: !!sc.signedIn
+                RowLayout {
+                    anchors.fill: parent
+                    anchors.leftMargin: Style.sp(2)
+                    anchors.rightMargin: Style.sp(2)
+                    spacing: Style.sp(2)
+                    Icon {
+                        name: "soundcloud"
+                        size: Style.fs.md
+                        color: scAction.signedIn ? Style.providerColors.soundcloud : Tokens.ink
+                    }
+                    Text {
+                        Layout.fillWidth: true
+                        text: scAction.signedIn
+                            ? ("SoundCloud \u00b7 " + ((scAction.sc.name) ? scAction.sc.name : "signed in"))
+                            : "Sign in to SoundCloud"
+                        color: Tokens.ink
+                        font.family: Style.fontUi
+                        font.pixelSize: Style.fs.md
+                        elide: Text.ElideRight
+                    }
+                }
+                HoverHandler { id: scHover }
+                MouseArea {
+                    anchors.fill: parent
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: {
+                        accountMenu.visible = false;
+                        if (scAction.signedIn) Playback.soundcloudSignOut().catch(() => {});
+                        else Playback.soundcloudSignIn().catch(() => {});
+                    }
+                }
+            }
+
+            Hairline { Layout.fillWidth: true }
+
             // ── TIDAL ────────────────────────────────────────────────────────────────────
             // Signed out this is one line, the action alone. The account line appears once there
             // is an account to name, or while a device code is live and has to stay readable.
@@ -594,9 +640,86 @@ Item {
                     }
                 }
             }
+            // ── Navidrome ────────────────────────────────────────────────────────────────
+            // Signed out this is one line: the form needs three fields, so the action walks to
+            // Settings → Account rather than trying to fit a password box in a popover.
+            Hairline { Layout.fillWidth: true }
+
+            RowLayout {
+                readonly property var nd: Playback.navidrome || ({})
+                visible: !!nd.signedIn
+                Layout.fillWidth: true
+                Layout.margins: Style.sp(1)
+                spacing: Style.sp(2)
+                Icon {
+                    name: "navidrome"
+                    size: Style.fs.lg
+                    color: (Playback.navidrome && Playback.navidrome.signedIn)
+                        ? Style.providerColors.navidrome : Tokens.inkMuted
+                }
+                ColumnLayout {
+                    Layout.fillWidth: true
+                    spacing: 0
+                    Text {
+                        text: (Playback.navidrome && Playback.navidrome.name)
+                            ? Playback.navidrome.name : "Signed in"
+                        color: Tokens.ink
+                        font.family: Style.fontUi
+                        font.pixelSize: Style.fs.md
+                        font.weight: Font.Medium
+                        elide: Text.ElideRight
+                        Layout.fillWidth: true
+                    }
+                    Text {
+                        text: (Playback.navidrome && Playback.navidrome.server)
+                            ? Playback.navidrome.server : "Navidrome"
+                        color: Tokens.inkMuted
+                        font.family: Style.fontUi
+                        font.pixelSize: Style.fs.sm
+                        elide: Text.ElideRight
+                        Layout.fillWidth: true
+                    }
+                }
+            }
+
+            Rectangle {
+                id: ndAction
+                Layout.fillWidth: true
+                implicitHeight: Style.sp(9)
+                radius: Style.radius
+                color: ndHover.hovered ? Tokens.tint5 : "transparent"
+                readonly property bool signedIn: !!(Playback.navidrome && Playback.navidrome.signedIn)
+                RowLayout {
+                    anchors.fill: parent
+                    anchors.leftMargin: Style.sp(2)
+                    anchors.rightMargin: Style.sp(2)
+                    spacing: Style.sp(2)
+                    Icon {
+                        name: ndAction.signedIn ? "close" : "navidrome"
+                        size: Style.fs.md
+                        color: ndAction.signedIn ? Style.alert : Tokens.ink
+                    }
+                    Text {
+                        Layout.fillWidth: true
+                        text: ndAction.signedIn ? "Sign out" : "Connect a music server"
+                        color: ndAction.signedIn ? Style.alert : Tokens.ink
+                        font.family: Style.fontUi
+                        font.pixelSize: Style.fs.md
+                    }
+                }
+                HoverHandler { id: ndHover }
+                MouseArea {
+                    anchors.fill: parent
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: {
+                        accountMenu.visible = false;
+                        if (ndAction.signedIn) Playback.navidromeSignOut().catch(() => {});
+                        else Router.push("settings", { section: "account" });
+                    }
+                }
+            }
         }
     }
-
     // Listen Together session sheet: a foreground overlay toggled from the title bar. It anchors the
     // whole frame and is visible only while open.
     ListenTogether { id: listenTogether }

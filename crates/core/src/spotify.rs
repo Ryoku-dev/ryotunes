@@ -22,6 +22,7 @@ pub enum Provider {
     Spotify,
     Soundcloud,
     Tidal,
+    Navidrome,
 }
 
 impl Provider {
@@ -31,6 +32,7 @@ impl Provider {
             Provider::Spotify => "spotify",
             Provider::Soundcloud => "soundcloud",
             Provider::Tidal => "tidal",
+            Provider::Navidrome => "navidrome",
         }
     }
     pub fn parse(s: &str) -> Option<Self> {
@@ -39,6 +41,7 @@ impl Provider {
             "spotify" => Some(Provider::Spotify),
             "soundcloud" => Some(Provider::Soundcloud),
             "tidal" => Some(Provider::Tidal),
+            "navidrome" => Some(Provider::Navidrome),
             _ => None,
         }
     }
@@ -121,6 +124,33 @@ pub fn tidal_playlist_id(id: &str) -> Option<&str> {
     id.strip_prefix(TIDAL_PLAYLIST_PREFIX).filter(|s| !s.is_empty())
 }
 
+pub const ND_TRACK_PREFIX: &str = "nd:track:";
+pub const ND_ALBUM_PREFIX: &str = "nd:album:";
+pub const ND_ARTIST_PREFIX: &str = "nd:artist:";
+pub const ND_PLAYLIST_PREFIX: &str = "nd:playlist:";
+
+/// True for any id the daemon minted for a Navidrome item (`nd:<kind>:<server id>`). The server
+/// ids are opaque (a scan number, a UUID, an MD5), so unlike TIDAL's they are never parsed.
+pub fn is_nd_id(id: &str) -> bool {
+    id.starts_with("nd:")
+}
+
+pub fn nd_track_id(id: &str) -> Option<&str> {
+    id.strip_prefix(ND_TRACK_PREFIX).filter(|s| !s.is_empty())
+}
+
+pub fn nd_album_id(id: &str) -> Option<&str> {
+    id.strip_prefix(ND_ALBUM_PREFIX).filter(|s| !s.is_empty())
+}
+
+pub fn nd_artist_id(id: &str) -> Option<&str> {
+    id.strip_prefix(ND_ARTIST_PREFIX).filter(|s| !s.is_empty())
+}
+
+pub fn nd_playlist_id(id: &str) -> Option<&str> {
+    id.strip_prefix(ND_PLAYLIST_PREFIX).filter(|s| !s.is_empty())
+}
+
 const RECOVERY_COOLDOWN: std::time::Duration = std::time::Duration::from_secs(30);
 
 /// Owns the Spotify sign-in, the current client and the catalogue selector. Construct once with the
@@ -176,6 +206,12 @@ impl SpotifyState {
     /// caller still has to check that a session exists before it asks for anything.
     pub fn browsing_tidal(&self) -> bool {
         self.selected() == Provider::Tidal
+    }
+
+    /// Whether browsing should go to Navidrome. Same deal as TIDAL: one server at a time, and the
+    /// caller checks `AppState::navidrome.signed_in()` before it asks for a page.
+    pub fn browsing_navidrome(&self) -> bool {
+        self.selected() == Provider::Navidrome
     }
 
     /// Whether a credential file exists to restore from (no network).
@@ -335,5 +371,39 @@ mod tests {
         assert!(!refused(SignInProblem::Network));
         assert!(!refused(SignInProblem::Refused));
         assert!(!retry_cannot_fix(&anyhow::anyhow!("Connection to server closed")));
+    }
+
+    #[test]
+    fn every_provider_round_trips_through_its_setting_name() {
+        for provider in [
+            Provider::Youtube,
+            Provider::Spotify,
+            Provider::Soundcloud,
+            Provider::Tidal,
+            Provider::Navidrome,
+        ] {
+            assert_eq!(Provider::parse(provider.as_str()), Some(provider));
+        }
+        assert_eq!(Provider::Navidrome.as_str(), "navidrome");
+        assert_eq!(Provider::parse("navidromeish"), None);
+    }
+
+    #[test]
+    fn navidrome_ids_strip_to_the_servers_own_opaque_id() {
+        assert_eq!(nd_track_id("nd:track:8f3a2b"), Some("8f3a2b"));
+        assert_eq!(nd_album_id("nd:album:al-1"), Some("al-1"));
+        assert_eq!(nd_artist_id("nd:artist:ar-1"), Some("ar-1"));
+        assert_eq!(nd_playlist_id("nd:playlist:9b1c7d2e"), Some("9b1c7d2e"));
+
+        // Nothing else parses: a bare id, another provider's id, an empty tail.
+        assert_eq!(nd_track_id("8f3a2b"), None);
+        assert_eq!(nd_track_id("tidal:track:1"), None);
+        assert_eq!(nd_track_id("nd:track:"), None);
+        assert_eq!(nd_album_id("nd:track:8f3a2b"), None);
+
+        assert!(is_nd_id("nd:anything:at:all"));
+        assert!(is_nd_id("nd:"));
+        assert!(!is_nd_id("navidromeish"));
+        assert!(!is_nd_id("spotify:track:x"));
     }
 }

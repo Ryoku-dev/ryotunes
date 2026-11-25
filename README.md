@@ -32,10 +32,10 @@
 ### The primary client: Quickshell / QML
 
 **The QML client is the primary Ryotunes application.** It includes the YouTube,
-Spotify and SoundCloud provider selector, downloads, and Settings → About
-software-update controls. The Tauri/WebKitGTK interface is the legacy client,
-not its replacement. Package version numbers alone do not identify the client:
-the release package currently contains both.
+Spotify, SoundCloud, TIDAL and Navidrome provider selector, downloads, and
+Settings → About software-update controls. The Tauri/WebKitGTK interface is the
+legacy client, not its replacement. Package version numbers alone do not
+identify the client: the release package currently contains both.
 
 To update an existing installation, download the Arch package and matching
 checksum from [the latest release](https://github.com/ryoku-dev/ryotunes/releases/latest).
@@ -211,7 +211,7 @@ flowchart LR
     N --> P["native player crate"]
     P --> MPV["libmpv · audio only"]
 
-    N --> I["YouTube · Spotify · SoundCloud · downloads"]
+    N --> I["YouTube · Spotify · SoundCloud · TIDAL · Navidrome · downloads"]
     N <-->|"Unix socket RPC + events"| W["Quickshell / QML"]
 
     W --> U["Home · Search · Library"]

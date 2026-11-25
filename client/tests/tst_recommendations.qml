@@ -114,6 +114,18 @@ TestCase {
         compare(R.build([sec("S", items)], {}, "youtube", now).items.length, 12);
     }
 
+    // A music server's rows are provider-qualified like any other catalogue's: they rank only in a
+    // Navidrome feed, and a YouTube feed drops them the way it drops a Spotify uri.
+    function test_navidrome_rows_are_provider_scoped() {
+        var mixed = [sec("S", [
+            song("nd:track:8f3a", "nd:artist:1"),
+            song("nd:track:9c1b", "nd:artist:2"),
+            song("vid1", "UCa")
+        ])];
+        compare(ids(R.build(mixed, {}, "navidrome", now).items), "nd:track:8f3a,nd:track:9c1b");
+        compare(ids(R.build(mixed, {}, "youtube", now).items), "vid1");
+    }
+
     // Listening history can change ranking only within its own provider.
     function test_personalization_is_provider_scoped() {
         var yt = [sec("S", [song("a", "UCa"), song("b", "UCb")])];

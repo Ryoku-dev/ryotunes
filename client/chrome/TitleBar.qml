@@ -100,7 +100,8 @@ Rectangle {
                         { key: "youtube", icon: "youtube-music" },
                         { key: "spotify", icon: "spotify" },
                         { key: "soundcloud", icon: "soundcloud" },
-                        { key: "tidal", icon: "tidal" }
+                        { key: "tidal", icon: "tidal" },
+                        { key: "navidrome", icon: "navidrome" }
                     ]
                     delegate: Rectangle {
                         id: prov

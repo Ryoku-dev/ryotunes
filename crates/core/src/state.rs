@@ -58,6 +58,10 @@ pub const TIDAL_AUTH_KEY: &str = "tidal_auth";
 /// overrides it field by field, so someone with their own registered application can replace one
 /// half and keep the other.
 pub const TIDAL_CREDENTIALS_KEY: &str = "tidal_credentials";
+/// The Navidrome session blob: server address, user, salt and the derived token. Outside
+/// `UI_SETTINGS` like the other two — and note what is absent: the password itself is never
+/// stored, only the hash the server would recompute.
+pub const NAVIDROME_AUTH_KEY: &str = "navidrome_auth";
 
 /// Settings the UI is allowed to read *and write*. Session/auth material (`session_cookie`,
 /// `selected_identity_json`, `data_sync_id`, `account_json`, `account_selection_pending`,
@@ -172,6 +176,12 @@ pub struct AppState {
     /// so there is no live handle to hold; unlike SoundCloud it has no guest catalogue, so every
     /// call needs a session.
     pub tidal: Arc<ryotunes_tidal::Tidal>,
+    /// The Navidrome provider: one self-hosted server at a time. Like TIDAL it streams over plain
+    /// HTTPS and has no guest catalogue, so every call needs the session.
+    pub navidrome: Arc<ryotunes_navidrome::Navidrome>,
+    /// The server listen in flight: the running track, when it started, and whether it has been
+    /// submitted. Locked for a few instructions per position tick, never across an await.
+    navidrome_scrobble: parking_lot::Mutex<crate::navidrome_scrobble::Scrobbler>,
     /// Play/like/genre for SoundCloud tracks seen by `resolve`, keyed by `sc:track:` id, so the
     /// now-playing snapshot can render the meta line without another round-trip. Bounded in
     /// `remember_sc_meta`.
@@ -479,6 +489,16 @@ impl AppState {
             Ok(json) => tidal_db.set_setting(TIDAL_AUTH_KEY, &json),
             Err(e) => tracing::error!(error = %e, "tidal: cannot serialize rotated auth"),
         });
+        // A Subsonic token never rotates: its salt is fixed at sign-in, so there is no rotate hook
+        // to register — only the restore. A blob that no longer parses is ignored rather than
+        // fatal: the worst case is a sign-in prompt, not an unusable app.
+        let navidrome = Arc::new(ryotunes_navidrome::Navidrome::new());
+        if let Some(raw) = db.get_setting(NAVIDROME_AUTH_KEY) {
+            match serde_json::from_str::<ryotunes_navidrome::NavidromeAuth>(&raw) {
+                Ok(auth) => navidrome.set_auth(Some(auth)),
+                Err(e) => tracing::warn!(error = %e, "navidrome: stored session did not parse"),
+            }
+        }
         AppState {
             it,
             clients,
@@ -495,6 +515,8 @@ impl AppState {
             spotify,
             soundcloud,
             tidal,
+            navidrome,
+            navidrome_scrobble: parking_lot::Mutex::new(Default::default()),
             sc_meta: parking_lot::Mutex::new(std::collections::HashMap::new()),
             last_visitor_try: AtomicU64::new(0),
             queue: Mutex::new(QueueState::default()),
@@ -1116,6 +1138,36 @@ impl AppState {
                 stream_client: "tidal".to_owned(),
             });
         }
+        // A Navidrome track is a plain file over HTTP with the session's auth query in the URL, so
+        // it resolves to a URL mpv opens directly — nothing to sign, nothing to write out, and
+        // nothing to cache: the URL carries the current token and is resolved once per play.
+        if let Some(id) = crate::spotify::nd_track_id(video_id) {
+            if !self.navidrome.signed_in() {
+                return Err(ResolveError::SignInRequired(
+                    "Sign in to Navidrome to play this".to_owned(),
+                ));
+            }
+            let url = self
+                .navidrome
+                .stream_url(id)
+                .map_err(|e| ResolveError::AllClientsFailed(format!("{video_id}: {e}")))?;
+            return Ok(PlaybackData {
+                video_id: video_id.to_owned(),
+                stream_url: url,
+                itag: 0,
+                mpv_options: Vec::new(),
+                headers: Default::default(),
+                expires_in_seconds: 0,
+                loudness_db: None,
+                playback_ping: None,
+                title: None,
+                artists: None,
+                duration: None,
+                thumbnail: None,
+                is_video: Some(false),
+                stream_client: "navidrome".to_owned(),
+            });
+        }
         let data = match self
             .orchestrator
             .resolve(video_id, is_upload, self.quality(), &self.disabled_clients())
@@ -1198,7 +1250,9 @@ impl AppState {
     /// skip the /player + PoToken + HEAD waterfall and go straight to mpv. Failures are silent.
     pub async fn prefetch_stream(self: &std::sync::Arc<Self>, video_id: String, is_upload: bool) {
         // A Spotify id would open a real librespot stream into the shared FIFO — never on spec.
-        if crate::spotify::is_spotify_id(&video_id) {
+        // A Navidrome id would do the same against the server (a full read that lands in nobody's
+        // cache), so it is skipped too.
+        if crate::spotify::is_spotify_id(&video_id) || crate::spotify::is_nd_id(&video_id) {
             return;
         }
         let _ = self.resolve(&video_id, is_upload).await;
@@ -1433,6 +1487,11 @@ impl AppState {
             || id == ON_REPEAT_ID
         {
             return Err("This has no radio behind it.".into());
+        }
+        // Navidrome has no radio endpoint at all, so say that rather than minting
+        // `RDAMVMnd:album:…` for a server id YouTube has never heard of.
+        if crate::spotify::is_nd_id(id) {
+            return Err("Navidrome has no radio endpoint.".into());
         }
         let client = self.clients.get(innertube::METADATA_CLIENT).ok_or("no metadata client")?;
         // Resolve the seed to (videoId?, radio playlist id). Album and artist need a page fetch:
@@ -2143,6 +2202,21 @@ impl AppState {
     /// window that asks for the current track can't be told a different shape than one that
     /// listened for it.
     fn now_playing_json(&self, item: &SongItem, stream_client: &str) -> serde_json::Value {
+        // A Navidrome row's heart is the server's star: the device's Liked Songs must not override
+        // it (that would show a heart the server does not have, or hide one it does).
+        let local_like_applies = !crate::spotify::is_nd_id(&item.video_id)
+            && (item.rating.is_none()
+                || !self.it.is_logged_in()
+                || crate::spotify::is_sc_id(&item.video_id));
+        let rating = if local_like_applies {
+            if self.liked_locally(&item.video_id) {
+                Some(innertube::Rating::Like)
+            } else {
+                item.rating
+            }
+        } else {
+            item.rating
+        };
         let mut now = serde_json::json!({
             "videoId": item.video_id,
             "title": item.title,
@@ -2153,11 +2227,7 @@ impl AppState {
             "thumbnail": item.thumbnail,
             "duration": item.duration,
             "streamClient": stream_client,
-            "rating": if item.rating.is_none() || !self.it.is_logged_in() || crate::spotify::is_sc_id(&item.video_id) {
-                if self.liked_locally(&item.video_id) { Some(innertube::Rating::Like) } else { item.rating }
-            } else {
-                item.rating
-            },
+            "rating": rating,
         });
         // SoundCloud tracks carry a "plays · likes · genre" meta line the player bar and Now
         // Playing card render; splice in whatever `resolve` remembered for this id.
@@ -2223,6 +2293,11 @@ impl AppState {
         if !self.it.is_logged_in()
             || crate::local::is_local_song(video_id)
             || crate::radio::is_radio_id(video_id)
+            // A provider id is not a YouTube video id: `/next` would answer about a different
+            // track (or nothing), and the answer would overwrite the row's real rating. TIDAL and
+            // Navidrome carry their own like state; SoundCloud has none.
+            || crate::spotify::is_tidal_id(video_id)
+            || crate::spotify::is_nd_id(video_id)
         {
             return;
         }
@@ -2298,6 +2373,14 @@ impl AppState {
                 .map_err(|e| format!("device playlist: {e}"))?;
         }
         let rating = if like { innertube::Rating::Like } else { innertube::Rating::Indifferent };
+        self.echo_rating(video_id, rating).await;
+        self.emit("library-changed", serde_json::json!({ "id": LIKED_SONGS_ID }));
+        Ok(())
+    }
+
+    /// Reflect a rating some other authority (a Navidrome star, say) already accepted on every
+    /// queue row and in the UI. No network and no storage: the write belongs to the caller.
+    pub async fn echo_rating(&self, video_id: &str, rating: innertube::Rating) {
         {
             let mut q = self.queue.lock().await;
             for item in q.items.iter_mut().filter(|i| i.video_id == video_id) {
@@ -2305,8 +2388,6 @@ impl AppState {
             }
         }
         self.emit("rating", serde_json::json!({ "videoId": video_id, "rating": rating }));
-        self.emit("library-changed", serde_json::json!({ "id": LIKED_SONGS_ID }));
-        Ok(())
     }
 
     fn emit_now_playing(&self, item: &SongItem, stream_client: &str) {
@@ -2335,6 +2416,18 @@ impl AppState {
         }
         if !crate::radio::is_radio_id(&item.video_id) {
             self.lastfm.set_track(item);
+        }
+        // A music server gets its own "now playing" (it never touches the play count); the listen
+        // itself follows from the position tick once the threshold is passed.
+        if let Some(id) = self.navidrome_scrobble.lock().start(&item.video_id, now_secs()) {
+            let navidrome = self.navidrome.clone();
+            let at = now_secs();
+            tokio::spawn(async move {
+                match navidrome.scrobble(&id, false, at * 1000).await {
+                    Ok(()) => tracing::debug!("navidrome now playing sent"),
+                    Err(e) => tracing::debug!(error = %e, "navidrome now playing failed"),
+                }
+            });
         }
         // New track ⇒ let the next position tick through immediately instead of waiting out the
         // ~1s throttle, so a restored seek position (and the play-state self-heal) lands at once.
@@ -2552,9 +2645,9 @@ impl AppState {
     /// gated on the `enable_history` setting + being logged in. Best-effort (errors logged).
     pub async fn on_position(&self, pos: f64) {
         self.record_position(pos);
-        let crossed = {
+        let (pinged, duration) = {
             let mut q = self.queue.lock().await;
-            if q.history_pinged {
+            let pinged = if q.history_pinged {
                 None
             } else {
                 // Threshold: halfway, capped at 30s (default 30s until mpv reports duration).
@@ -2565,9 +2658,24 @@ impl AppState {
                 } else {
                     None
                 }
-            }
+            };
+            (pinged, q.duration)
         };
-        let Some((ping, cpn, played)) = crossed else { return };
+
+        // The server's listen, on Last.fm's threshold and latched by the scrobbler itself: one play
+        // counts once, and a signed-out session just drops it. Unlike the ping below, this keeps
+        // running after the local play was counted.
+        if let Some((id, at)) = self.navidrome_scrobble.lock().tick(pos, duration) {
+            let navidrome = self.navidrome.clone();
+            tokio::spawn(async move {
+                match navidrome.scrobble(&id, true, at).await {
+                    Ok(()) => tracing::debug!("navidrome listen submitted"),
+                    Err(e) => tracing::debug!(error = %e, "navidrome listen failed"),
+                }
+            });
+        }
+
+        let Some((ping, cpn, played)) = pinged else { return };
 
         // Local play count, on the same threshold. Deliberately not gated on `enable_history` or
         // sign-in: that setting is about registering plays with YouTube, while this never leaves
@@ -2583,6 +2691,7 @@ impl AppState {
                 && !crate::radio::is_radio_id(&i.video_id)
                 && !crate::spotify::is_spotify_id(&i.video_id)
                 && !crate::spotify::is_sc_id(&i.video_id)
+                && !crate::spotify::is_nd_id(&i.video_id)
         }) {
             if let Ok(json) = serde_json::to_string(&item) {
                 self.db.record_play(&item.video_id, &json, now_secs(), ON_REPEAT_WINDOW_SECS);
@@ -2759,11 +2868,13 @@ impl AppState {
                 (AutoplaySource::Soundcloud { id }, existing)
             } else {
                 // Nothing to continue from when the queue ends on a local file, a live-radio
-                // stream, or a Spotify track: none is a YouTube videoId a radio can seed from.
+                // stream, or a Spotify/Navidrome track: none is a YouTube videoId a radio can seed
+                // from.
                 if q.radio_seed.is_none()
                     && (crate::local::is_local_song(&last.video_id)
                         || crate::radio::is_radio_id(&last.video_id)
-                        || crate::spotify::is_spotify_id(&last.video_id))
+                        || crate::spotify::is_spotify_id(&last.video_id)
+                        || crate::spotify::is_nd_id(&last.video_id))
                 {
                     return 0;
                 }
@@ -3786,7 +3897,10 @@ fn guest_insert_index(items: &[SongItem], current: usize) -> usize {
 /// song / artist top-songs) → no pinned seed; autoplay seeds `RDAMVM<last video>` at extension
 /// time instead.
 fn radio_seed_for(source_id: Option<String>) -> Option<String> {
-    source_id.map(|id| {
+    // A provider id (`nd:`, `tidal:`, `sc:`, `spotify:`, `LOCAL…`, `RYOTUNES_RADIO…`) is not a
+    // YouTube playlist. Wrapping one would ask `/next` for a seed YouTube has never heard of; no
+    // seed at all is the honest answer, and autoplay then stops at the tail.
+    source_id.filter(|id| !id.contains(':')).map(|id| {
         let id = id.strip_prefix("VL").unwrap_or(&id);
         // A mix id already *is* a radio playlist; wrapping it in another `RDAMPL` asks for a
         // playlist YouTube has never heard of. This is the seed that continues a mix past the page
@@ -5011,6 +5125,11 @@ mod tests {
         assert_eq!(radio_seed_for(Some("OLAK5uy_x".into())).as_deref(), Some("RDAMPLOLAK5uy_x"));
         // No source (single song / artist top-songs) → no pinned seed.
         assert_eq!(radio_seed_for(None), None);
+        // A provider page is not a YouTube playlist: a navidrome or TIDAL album would otherwise
+        // become `RDAMPLnd:album:…`, a seed YouTube has never heard of.
+        assert_eq!(radio_seed_for(Some("nd:album:al-1".into())), None);
+        assert_eq!(radio_seed_for(Some("tidal:album:12".into())), None);
+        assert_eq!(radio_seed_for(Some("LOCALALBUM:Queen".into())), None);
     }
 
     #[test]

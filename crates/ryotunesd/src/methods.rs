@@ -10,10 +10,12 @@ use std::sync::Arc;
 
 use innertube::{BrowseItem, PlaylistPage, PlaylistSort, Rating, SongItem, YouTubeClient};
 use ryotunes_core::db::LocalPlaylist;
+use ryotunes_core::navidrome_bridge;
 use ryotunes_core::soundcloud_bridge;
 use ryotunes_core::spotify::{
-    is_sc_id, is_tidal_id, sc_playlist_id, sc_system_id, sc_track_id, sc_user_id, spotify_track_id,
-    tidal_album_id, tidal_artist_id, tidal_playlist_id, Provider,
+    is_nd_id, is_sc_id, is_tidal_id, nd_album_id, nd_artist_id, nd_playlist_id, nd_track_id,
+    sc_playlist_id, sc_system_id, sc_track_id, sc_user_id, spotify_track_id, tidal_album_id,
+    tidal_artist_id, tidal_playlist_id, Provider,
 };
 use ryotunes_core::spotify_bridge;
 use ryotunes_core::state::{
@@ -166,6 +168,46 @@ fn soundcloud_err(e: impl ToString) -> ErrorBody {
     ErrorBody { code: "soundcloud".into(), message: e.to_string() }
 }
 
+/// A Navidrome crate error as the daemon's error body.
+///
+/// Transport failures and refused credentials share `navidrome_auth`: to the user both mean "not
+/// signed in — fix the server or the password", which is the form either way. Only a local
+/// precondition (a malformed address, a missing field) gets its own code.
+fn navidrome_err(e: ryotunes_navidrome::Error) -> ErrorBody {
+    use ryotunes_navidrome::Error as Nd;
+    let code = match &e {
+        Nd::SignedOut => "navidrome_signed_out",
+        Nd::AuthFailed | Nd::AuthUnsupported | Nd::Http(_) => "navidrome_auth",
+        Nd::Unsupported(_) => "navidrome_unsupported",
+        _ => "navidrome",
+    };
+    ErrorBody { code: code.into(), message: e.to_string() }
+}
+
+/// The error a by-prefix Navidrome command returns when no server is signed in.
+fn navidrome_signed_out() -> ErrorBody {
+    ErrorBody { code: "navidrome_signed_out".into(), message: "Sign in to Navidrome".into() }
+}
+
+/// Whether a failed sign-in means the saved session is dead. Only the auth family is: a malformed
+/// address is a typo in the form, and the session that was working keeps working.
+fn navidrome_ends_session(code: &str) -> bool {
+    matches!(code, "navidrome_auth" | "navidrome_signed_out")
+}
+
+/// The `{signedIn, server, name}` block for `navidrome_status` and the subscribe snapshot. Read
+/// from the restored auth only: asking the server would make every window open a request.
+fn navidrome_status_json(st: &Arc<AppState>) -> Value {
+    match st.navidrome.auth() {
+        Some(auth) => json!({
+            "signedIn": true,
+            "server": auth.base_url,
+            "name": auth.username,
+        }),
+        None => json!({ "signedIn": false, "server": null, "name": null }),
+    }
+}
+
 #[async_trait::async_trait]
 impl Dispatch for Methods {
     async fn call(
@@ -201,6 +243,7 @@ impl Dispatch for Methods {
                     "spotify": spotify,
                     "soundcloud": soundcloud_status_json(st),
                     "tidal": tidal_status_json(st),
+                    "navidrome": navidrome_status_json(st),
                     "downloads": self.downloads.snapshot(),
                 }))
             }
@@ -224,6 +267,8 @@ impl Dispatch for Methods {
                 let query = arg::<String>(&params, "query")?;
                 if st.spotify.browsing_tidal() {
                     tidal_search_page(st, &query).await
+                } else if st.spotify.browsing_navidrome() {
+                    navidrome_search_page(st, &query).await
                 } else if st.spotify.browsing_soundcloud() {
                     soundcloud_search_page(st, &query).await
                 } else if st.spotify.browsing_spotify().await {
@@ -235,6 +280,7 @@ impl Dispatch for Methods {
             "search_page_more" => {
                 if st.spotify.browsing_tidal()
                     || st.spotify.browsing_soundcloud()
+                    || st.spotify.browsing_navidrome()
                     || st.spotify.browsing_spotify().await
                 {
                     ok(json!({ "items": [], "continuation": null }))
@@ -246,6 +292,8 @@ impl Dispatch for Methods {
                 let query = arg::<String>(&params, "query")?;
                 if st.spotify.browsing_tidal() {
                     tidal_search_all(st, &query).await
+                } else if st.spotify.browsing_navidrome() {
+                    navidrome_search_all(st, &query).await
                 } else if st.spotify.browsing_soundcloud() {
                     soundcloud_search_all(st, &query).await
                 } else if st.spotify.browsing_spotify().await {
@@ -262,6 +310,8 @@ impl Dispatch for Methods {
                 let category = arg::<String>(&params, "category")?;
                 if st.spotify.browsing_tidal() {
                     tidal_search_cards(st, &query, &category).await
+                } else if st.spotify.browsing_navidrome() {
+                    navidrome_search_cards(st, &query, &category).await
                 } else if st.spotify.browsing_soundcloud() {
                     soundcloud_search_cards(st, &query, &category).await
                 } else if st.spotify.browsing_spotify().await {
@@ -430,6 +480,57 @@ impl Dispatch for Methods {
             "spotify_status" => ok(spotify_status_json(st).await),
             "soundcloud_status" => ok(soundcloud_status_json(st)),
             "tidal_status" => ok(tidal_status_json(st)),
+            "navidrome_status" => ok(navidrome_status_json(st)),
+            "navidrome_sign_in" => {
+                let server = arg::<String>(&params, "server")?;
+                let username = arg::<String>(&params, "username")?;
+                // Read once and drop: the password is never stored, logged or echoed back.
+                let password = arg::<String>(&params, "password")?;
+                match st.navidrome.sign_in(&server, &username, &password).await {
+                    Ok(auth) => {
+                        match serde_json::to_string(&auth) {
+                            Ok(blob) => {
+                                st.db.set_setting(ryotunes_core::state::NAVIDROME_AUTH_KEY, &blob)
+                            }
+                            Err(e) => {
+                                tracing::error!(error = %e, "navidrome: cannot serialize auth")
+                            }
+                        }
+                        let status = navidrome_status_json(st);
+                        st.emit(
+                            "navidrome-auth",
+                            json!({
+                                "state": "signed_in",
+                                "server": auth.base_url,
+                                "name": auth.username,
+                            }),
+                        );
+                        ok(status)
+                    }
+                    Err(e) => {
+                        let body = navidrome_err(e);
+                        // A refused credential or an unreachable server means the saved session
+                        // cannot work: drop it so the next launch opens on the form. A malformed
+                        // address is a typo in the form, not a dead session — the saved one stays
+                        // (the crate never installed the failed attempt either).
+                        if navidrome_ends_session(&body.code) {
+                            st.navidrome.sign_out();
+                            st.db.delete_setting(ryotunes_core::state::NAVIDROME_AUTH_KEY);
+                        }
+                        st.emit(
+                            "navidrome-auth",
+                            json!({ "state": "error", "message": body.message }),
+                        );
+                        Err(body)
+                    }
+                }
+            }
+            "navidrome_sign_out" => {
+                st.navidrome.sign_out();
+                st.db.delete_setting(ryotunes_core::state::NAVIDROME_AUTH_KEY);
+                st.emit("navidrome-auth", json!({ "state": "signed_out" }));
+                ok(json!({ "signedIn": false }))
+            }
             "tidal_sign_out" => {
                 st.tidal.sign_out();
                 st.db.delete_setting(ryotunes_core::state::TIDAL_AUTH_KEY);
@@ -516,6 +617,11 @@ impl Dispatch for Methods {
                     // collection whatever the caller asked for.
                     return tidal_home(st).await;
                 }
+                if st.spotify.browsing_navidrome() {
+                    // Same for a music server: one collection, no chips, and a signed-out
+                    // selection gets an empty page the client renders its connect prompt in.
+                    return navidrome_home(st).await;
+                }
                 match params.as_deref() {
                     Some(p) => ok(st.home(Some(p)).await.map_err(err)?),
                     None => home_merged(st).await,
@@ -527,7 +633,9 @@ impl Dispatch for Methods {
                 ok(st.home_more(&arg::<String>(&params, "token")?).await.map_err(err)?)
             }
             "get_library" => {
-                if st.spotify.browsing_tidal() || st.spotify.browsing_soundcloud() {
+                if st.spotify.browsing_navidrome() {
+                    navidrome_library(st).await
+                } else if st.spotify.browsing_tidal() || st.spotify.browsing_soundcloud() {
                     ok(Vec::<BrowseItem>::new())
                 } else if st.spotify.browsing_spotify().await {
                     spotify_library(st).await
@@ -536,7 +644,9 @@ impl Dispatch for Methods {
                 }
             }
             "get_library_albums" => {
-                if st.spotify.browsing_tidal() || st.spotify.browsing_soundcloud() {
+                if st.spotify.browsing_navidrome() {
+                    navidrome_library_albums(st).await
+                } else if st.spotify.browsing_tidal() || st.spotify.browsing_soundcloud() {
                     ok(Vec::<BrowseItem>::new())
                 } else if st.spotify.browsing_spotify().await {
                     spotify_library_albums(st).await
@@ -545,7 +655,9 @@ impl Dispatch for Methods {
                 }
             }
             "get_library_artists" => {
-                if st.spotify.browsing_tidal() || st.spotify.browsing_soundcloud() {
+                if st.spotify.browsing_navidrome() {
+                    navidrome_library_artists(st).await
+                } else if st.spotify.browsing_tidal() || st.spotify.browsing_soundcloud() {
                     ok(Vec::<BrowseItem>::new())
                 } else if st.spotify.browsing_spotify().await {
                     spotify_library_artists(st).await
@@ -573,6 +685,8 @@ impl Dispatch for Methods {
                     soundcloud_album(st, pid).await
                 } else if let Some(aid) = tidal_album_id(&id) {
                     tidal_album(st, aid).await
+                } else if let Some(aid) = nd_album_id(&id) {
+                    navidrome_album(st, aid).await
                 } else {
                     ok(st.album(&id).await.map_err(err)?)
                 }
@@ -585,6 +699,8 @@ impl Dispatch for Methods {
                     tidal_artist(st, aid).await
                 } else if let Some(uid) = sc_user_id(&id) {
                     soundcloud_artist(st, uid).await
+                } else if let Some(aid) = nd_artist_id(&id) {
+                    navidrome_artist(st, aid).await
                 } else {
                     ok(st.artist(&id).await.map_err(err)?)
                 }
@@ -674,12 +790,25 @@ impl Dispatch for Methods {
                         .map_err(spotify_err)?;
                     return null();
                 }
+                // A Navidrome heart is the server's star. Signed out it falls through to the
+                // device's Liked Songs, so the button still does something rather than erroring.
+                if let Some(sid) = nd_track_id(&video_id) {
+                    if st.navidrome.signed_in() {
+                        st.navidrome
+                            .star(ryotunes_navidrome::StarKind::Song, sid, rating == Rating::Like)
+                            .await
+                            .map_err(navidrome_err)?;
+                        st.echo_rating(&video_id, rating).await;
+                        return null();
+                    }
+                }
                 // No YouTube rating to set (a guest, a SoundCloud or local track): the heart
                 // lands in the device's Liked Songs instead, which the library lists.
                 let no_youtube = radio::is_radio_id(&video_id)
                     || local::is_local_song(&video_id)
                     || is_sc_id(&video_id)
                     || is_tidal_id(&video_id)
+                    || is_nd_id(&video_id)
                     || !st.it.is_logged_in();
                 if no_youtube {
                     st.rate_locally(&video_id, matches!(rating, Rating::Like))
@@ -698,6 +827,13 @@ impl Dispatch for Methods {
                 if let Some(aid) = playlist_id.strip_prefix("spotify:album:") {
                     let client = st.spotify.client().await.ok_or_else(spotify_signed_out)?;
                     client.set_album_saved(aid, saved).await.map_err(spotify_err)?;
+                    return null();
+                }
+                if let Some(aid) = nd_album_id(&playlist_id) {
+                    st.navidrome
+                        .star(ryotunes_navidrome::StarKind::Album, aid, saved)
+                        .await
+                        .map_err(navidrome_err)?;
                     return null();
                 }
                 let client = require_login(st).map_err(err)?;
@@ -720,6 +856,15 @@ impl Dispatch for Methods {
                 }
                 if radio::is_radio_id(&video_id) {
                     return Err(err("Live radio stations cannot be added to song playlists."));
+                }
+                if let Some(pid) = nd_playlist_id(&playlist_id) {
+                    let sid = nd_track_id(&video_id)
+                        .ok_or_else(|| err("This playlist is on your Navidrome server."))?;
+                    st.navidrome
+                        .update_playlist(pid, None, &[sid.to_owned()], &[])
+                        .await
+                        .map_err(navidrome_err)?;
+                    return ok(true);
                 }
                 let client = editable_playlist(st, &playlist_id).map_err(err)?;
                 let added =
@@ -762,6 +907,15 @@ impl Dispatch for Methods {
                     return null();
                 }
                 let set_video_id = arg::<String>(&params, "setVideoId")?;
+                if let Some(pid) = nd_playlist_id(&playlist_id) {
+                    let sid = nd_track_id(&video_id)
+                        .ok_or_else(|| err("This playlist is on your Navidrome server."))?;
+                    st.navidrome
+                        .remove_playlist_entry(pid, sid, nd_position(&set_video_id))
+                        .await
+                        .map_err(navidrome_err)?;
+                    return null();
+                }
                 if is_local_playlist_id(&playlist_id) {
                     st.db
                         .remove_local_playlist_track(&playlist_id, &video_id)
@@ -789,6 +943,11 @@ impl Dispatch for Methods {
                     let id = client.create_playlist(&title).await.map_err(spotify_err)?;
                     return ok(format!("spotify:playlist:{id}"));
                 }
+                if st.spotify.browsing_navidrome() {
+                    let playlist =
+                        st.navidrome.create_playlist(&title).await.map_err(navidrome_err)?;
+                    return ok(format!("nd:playlist:{}", playlist.id));
+                }
                 if st.it.is_logged_in() {
                     let client = require_login(st).map_err(err)?;
                     return ok(st.it.create_playlist(client, &title).await.map_err(err)?);
@@ -809,6 +968,8 @@ impl Dispatch for Methods {
                 let playlist_id = arg::<String>(&params, "playlistId")?;
                 if let Some(pid) = playlist_id.strip_prefix("spotify:playlist:") {
                     spotify_edit_playlist(st, &params, pid).await
+                } else if nd_playlist_id(&playlist_id).is_some() {
+                    navidrome_edit_playlist(st, &params).await
                 } else {
                     edit_playlist_details(st, &params).await
                 }
@@ -817,6 +978,9 @@ impl Dispatch for Methods {
             "set_playlist_sort" => {
                 let playlist_id = arg::<String>(&params, "playlistId")?;
                 let sort = arg::<PlaylistSort>(&params, "sort")?;
+                if let Some(pid) = nd_playlist_id(&playlist_id) {
+                    return navidrome_set_playlist_sort(st, pid, sort).await;
+                }
                 let client = editable_playlist(st, &playlist_id).map_err(err)?;
                 st.it.playlist_set_sort(client, &playlist_id, sort).await.map_err(err)?;
                 null()
@@ -837,6 +1001,10 @@ impl Dispatch for Methods {
                         .map_err(|e| err(format!("device playlist: {e}")))?;
                     st.db.delete_setting(&cover_key(&playlist_id));
                     st.db.delete_setting(&synced_key(&playlist_id));
+                    return null();
+                }
+                if let Some(pid) = nd_playlist_id(&playlist_id) {
+                    st.navidrome.delete_playlist(pid).await.map_err(navidrome_err)?;
                     return null();
                 }
                 let client = editable_playlist(st, &playlist_id).map_err(err)?;
@@ -915,6 +1083,25 @@ impl Dispatch for Methods {
                 }
                 if radio::is_radio_id(&video_id) {
                     return null();
+                }
+                // The server's own lyrics first: a self-hosted library often ships them beside the
+                // files, which beats any matching service. A miss, or a server without the
+                // OpenSubsonic lyrics extension, falls through to the usual chain.
+                if let Some(sid) = nd_track_id(&video_id) {
+                    if st.navidrome.signed_in() {
+                        match st.navidrome.lyrics(sid).await {
+                            Ok(Some(lyrics)) => {
+                                return ok(ryotunes_core::romanize::for_client(
+                                    st,
+                                    Some(navidrome_bridge::lyrics_to_lyrics(&lyrics, "Navidrome")),
+                                ));
+                            }
+                            Ok(None) => {}
+                            Err(e) => {
+                                tracing::debug!(error = %e, "navidrome: no server lyrics")
+                            }
+                        }
+                    }
                 }
                 let lyrics = ryotunes_core::lyrics::get_lyrics(
                     st,
@@ -1577,6 +1764,11 @@ async fn get_playlist(st: &Arc<AppState>, params: &Value) -> Result<Value, Error
     if let Some(uuid) = tidal_playlist_id(&id) {
         return tidal_playlist(st, uuid).await;
     }
+    if let Some(nid) = nd_playlist_id(&id) {
+        // `sort` is deliberately ignored: a server playlist's order *is* the order, because
+        // `set_playlist_sort` rewrites it there (Subsonic has no per-request sort).
+        return navidrome_playlist(st, nid).await;
+    }
     if let Some(pid) = sc_playlist_id(&id) {
         return soundcloud_playlist(st, pid).await;
     }
@@ -1770,6 +1962,11 @@ async fn set_playlist_cover(st: &Arc<AppState>, params: &Value) -> Result<Value,
     const PNG_MAGIC: &[u8; 8] = b"\x89PNG\r\n\x1a\n";
 
     let playlist_id = arg::<String>(params, "playlistId")?;
+    // A server playlist's artwork is the server's: the local override path writes a file and
+    // pushes it to YouTube, neither of which has any meaning for Navidrome.
+    if nd_playlist_id(&playlist_id).is_some() {
+        return Err(err("Navidrome playlists use the server's own artwork."));
+    }
     let pick = arg::<bool>(params, "pick")?;
     let key = cover_key(&playlist_id);
     let stored = st.db.get_setting(&key);
@@ -2383,6 +2580,60 @@ mod tests {
             "four distinct covers form the 2x2 collage; duplicates and extras are ignored"
         );
     }
+
+    /// A sign-in that cannot reach the server is an auth-family failure: the client shows the
+    /// form again. Nothing is installed, so the caller persists nothing, and the password and the
+    /// auth query stay out of the message (port 1 on loopback is closed — no network needed).
+    #[tokio::test]
+    async fn an_unreachable_navidrome_server_signs_in_to_nothing() {
+        let navidrome = ryotunes_navidrome::Navidrome::new();
+        let err = navidrome
+            .sign_in("http://127.0.0.1:1", "admin", "hunter2")
+            .await
+            .expect_err("nothing listens on port 1");
+        let body = navidrome_err(err);
+        assert_eq!(body.code, "navidrome_auth");
+        assert!(body.message.contains("request failed"), "{}", body.message);
+        assert!(!body.message.contains("hunter2"), "the password leaked: {}", body.message);
+        assert!(!body.message.contains("admin"), "the auth query leaked: {}", body.message);
+        assert!(!navidrome.signed_in(), "a failed sign-in leaves no session to persist");
+    }
+
+    /// Only a dead session is cleared on a failed sign-in; a typo in the form must not throw away
+    /// a server that still works.
+    #[test]
+    fn a_failed_navidrome_sign_in_only_clears_a_dead_session() {
+        assert!(navidrome_ends_session("navidrome_auth"));
+        assert!(navidrome_ends_session("navidrome_signed_out"));
+        assert!(!navidrome_ends_session("navidrome_unsupported"));
+        assert!(!navidrome_ends_session("navidrome"));
+    }
+
+    #[test]
+    fn navidrome_playlist_positions_parse_only_their_own_ids() {
+        assert_eq!(nd_position("nd:idx:0"), Some(0));
+        assert_eq!(nd_position("nd:idx:12"), Some(12));
+        // A YouTube setVideoId and a song id are not positions: the removal then looks the song up.
+        assert_eq!(nd_position("someYouTubeSetId"), None);
+        assert_eq!(nd_position("nd:track:8f3a"), None);
+        assert_eq!(nd_position("nd:idx:"), None);
+        assert_eq!(nd_position("nd:idx:-1"), None);
+    }
+
+    #[test]
+    fn navidrome_errors_map_to_the_codes_the_client_acts_on() {
+        use ryotunes_navidrome::Error as Nd;
+        assert_eq!(navidrome_err(Nd::SignedOut).code, "navidrome_signed_out");
+        assert_eq!(navidrome_err(Nd::AuthFailed).code, "navidrome_auth");
+        assert_eq!(navidrome_err(Nd::AuthUnsupported).code, "navidrome_auth");
+        assert_eq!(
+            navidrome_err(Nd::Unsupported("no server address")).code,
+            "navidrome_unsupported"
+        );
+        assert_eq!(navidrome_err(Nd::NotFound).code, "navidrome");
+        // The rejected credential text asks for a new password without quoting one.
+        assert!(!navidrome_err(Nd::AuthFailed).message.contains("hunter2"));
+    }
 }
 
 // --- TIDAL -------------------------------------------------------------------------------------
@@ -2473,4 +2724,166 @@ async fn tidal_home(st: &Arc<AppState>) -> Result<Value, ErrorBody> {
     let albums: Vec<_> = albums.items.into_iter().map(|f| f.item).collect();
     let sections = tidal_bridge::library_sections(&tracks, &albums, &playlists.items);
     ok(json!({ "chips": [], "sections": sections, "continuation": null }))
+}
+
+// --- Navidrome ---------------------------------------------------------------------------------
+
+/// The URL builder for the current session. Every catalogue call needs one, and none of them can
+/// do anything without a session — so this doubles as the signed-out gate.
+fn navidrome_covers(st: &Arc<AppState>) -> Result<ryotunes_navidrome::Covers, ErrorBody> {
+    st.navidrome.covers().ok_or_else(navidrome_signed_out)
+}
+
+/// The row position a playlist row carries in its `setVideoId` (`nd:idx:<n>`). `None` when the id
+/// is not one of ours; the removal then falls back to the first entry holding that song.
+fn nd_position(set_video_id: &str) -> Option<u32> {
+    set_video_id.strip_prefix("nd:idx:")?.parse().ok()
+}
+
+async fn navidrome_search_all(st: &Arc<AppState>, query: &str) -> Result<Value, ErrorBody> {
+    let covers = navidrome_covers(st)?;
+    let results = st.navidrome.search(query, 40).await.map_err(navidrome_err)?;
+    ok(navidrome_bridge::search_all(&results, &covers))
+}
+
+async fn navidrome_search_page(st: &Arc<AppState>, query: &str) -> Result<Value, ErrorBody> {
+    let covers = navidrome_covers(st)?;
+    let results = st.navidrome.search(query, 40).await.map_err(navidrome_err)?;
+    ok(json!({ "items": navidrome_bridge::search_songs(&results, &covers), "continuation": null }))
+}
+
+async fn navidrome_search_cards(
+    st: &Arc<AppState>,
+    query: &str,
+    category: &str,
+) -> Result<Value, ErrorBody> {
+    let covers = navidrome_covers(st)?;
+    let results = st.navidrome.search(query, 40).await.map_err(navidrome_err)?;
+    ok(json!({
+        "items": navidrome_bridge::search_cards(&results, category, &covers),
+        "continuation": null,
+    }))
+}
+
+/// A music server's home is its own collection: recent, new, starred, playlists and a random
+/// handful. Signed out it is empty rather than an error, so the client can show its connect form.
+async fn navidrome_home(st: &Arc<AppState>) -> Result<Value, ErrorBody> {
+    if !st.navidrome.signed_in() {
+        return ok(json!({ "chips": [], "sections": [], "continuation": null }));
+    }
+    let covers = navidrome_covers(st)?;
+    let recent = st
+        .navidrome
+        .albums(ryotunes_navidrome::AlbumList::Recent, 0, 20)
+        .await
+        .map_err(navidrome_err)?;
+    let newest = st
+        .navidrome
+        .albums(ryotunes_navidrome::AlbumList::Newest, 0, 20)
+        .await
+        .map_err(navidrome_err)?;
+    let starred = st.navidrome.starred().await.map_err(navidrome_err)?;
+    let playlists = st.navidrome.playlists().await.map_err(navidrome_err)?;
+    let random = st.navidrome.random_songs(20).await.map_err(navidrome_err)?;
+    let sections =
+        navidrome_bridge::home_sections(&recent, &newest, &starred, &playlists, &random, &covers);
+    ok(json!({ "chips": [], "sections": sections, "continuation": null }))
+}
+
+async fn navidrome_library(st: &Arc<AppState>) -> Result<Value, ErrorBody> {
+    if !st.navidrome.signed_in() {
+        return ok(Vec::<BrowseItem>::new());
+    }
+    let covers = navidrome_covers(st)?;
+    let playlists = st.navidrome.playlists().await.map_err(navidrome_err)?;
+    ok(navidrome_bridge::library_playlists(&playlists, &covers))
+}
+
+/// The Albums tab: one alphabetical page. The RPC carries no offset, so this asks for a large
+/// first page rather than pretending to page a shelf the client did not ask to page.
+async fn navidrome_library_albums(st: &Arc<AppState>) -> Result<Value, ErrorBody> {
+    if !st.navidrome.signed_in() {
+        return ok(Vec::<BrowseItem>::new());
+    }
+    let covers = navidrome_covers(st)?;
+    let albums = st
+        .navidrome
+        .albums(ryotunes_navidrome::AlbumList::AlphabeticalByName, 0, 200)
+        .await
+        .map_err(navidrome_err)?;
+    ok(albums
+        .iter()
+        .map(|album| navidrome_bridge::album_to_card(album, &covers))
+        .collect::<Vec<_>>())
+}
+
+async fn navidrome_library_artists(st: &Arc<AppState>) -> Result<Value, ErrorBody> {
+    if !st.navidrome.signed_in() {
+        return ok(Vec::<BrowseItem>::new());
+    }
+    let covers = navidrome_covers(st)?;
+    let artists = st.navidrome.artists().await.map_err(navidrome_err)?;
+    ok(artists
+        .iter()
+        .map(|artist| navidrome_bridge::artist_to_card(artist, &covers))
+        .collect::<Vec<_>>())
+}
+
+async fn navidrome_album(st: &Arc<AppState>, id: &str) -> Result<Value, ErrorBody> {
+    let covers = navidrome_covers(st)?;
+    let album = st.navidrome.album(id).await.map_err(navidrome_err)?;
+    ok(navidrome_bridge::album_page(&album, &covers))
+}
+
+async fn navidrome_artist(st: &Arc<AppState>, id: &str) -> Result<Value, ErrorBody> {
+    let covers = navidrome_covers(st)?;
+    let artist = st.navidrome.artist(id).await.map_err(navidrome_err)?;
+    ok(navidrome_bridge::artist_page(&artist, &covers))
+}
+
+async fn navidrome_playlist(st: &Arc<AppState>, id: &str) -> Result<Value, ErrorBody> {
+    let covers = navidrome_covers(st)?;
+    let playlist = st.navidrome.playlist(id).await.map_err(navidrome_err)?;
+    ok(navidrome_bridge::playlist_page(&playlist, &covers))
+}
+
+/// Rename a server playlist. The server stores a name, a comment and a public flag; this client
+/// only ever shows the name, so the other two are refused rather than silently dropped.
+async fn navidrome_edit_playlist(st: &Arc<AppState>, params: &Value) -> Result<Value, ErrorBody> {
+    let playlist_id = arg::<String>(params, "playlistId")?;
+    let id =
+        nd_playlist_id(&playlist_id).ok_or_else(|| err("That is not a Navidrome playlist."))?;
+    let name = arg::<Option<String>>(params, "name")?;
+    if arg::<Option<String>>(params, "description")?.is_some()
+        || arg::<Option<bool>>(params, "public")?.is_some()
+    {
+        return Err(err("Navidrome playlists only store a name here."));
+    }
+    st.navidrome.update_playlist(id, name.as_deref(), &[], &[]).await.map_err(navidrome_err)?;
+    null()
+}
+
+/// Sort a server playlist by rewriting its order there. Subsonic has no per-request sort, so the
+/// list is read, reordered and written back in one `createPlaylist` call.
+async fn navidrome_set_playlist_sort(
+    st: &Arc<AppState>,
+    id: &str,
+    sort: PlaylistSort,
+) -> Result<Value, ErrorBody> {
+    let playlist = st.navidrome.playlist(id).await.map_err(navidrome_err)?;
+    let mut songs = playlist.entry;
+    match sort {
+        PlaylistSort::Default => {}
+        PlaylistSort::Newest => songs.sort_by(|a, b| b.created.cmp(&a.created)),
+        PlaylistSort::Oldest => songs.sort_by(|a, b| a.created.cmp(&b.created)),
+        PlaylistSort::Title => songs.sort_by_key(|song| song.title.to_lowercase()),
+        PlaylistSort::Artist => songs.sort_by_key(|song| song.artist_line().to_lowercase()),
+        PlaylistSort::Album => {
+            songs.sort_by_key(|song| song.album.clone().unwrap_or_default().to_lowercase())
+        }
+        PlaylistSort::Top => songs.sort_by(|a, b| b.play_count.cmp(&a.play_count)),
+    }
+    let ids: Vec<String> = songs.into_iter().map(|song| song.id).collect();
+    st.navidrome.replace_playlist(id, &ids).await.map_err(navidrome_err)?;
+    null()
 }

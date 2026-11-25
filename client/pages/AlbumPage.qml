@@ -343,7 +343,9 @@ Item {
         if (!page.isLocal && page.album && page.album.items && page.album.items.length)
             out.push({ icon: "download", label: Downloads.addingAlbum ? "Adding album…" : "Download album",
                 danger: false, act: () => Downloads.enqueueAlbum(page.album) });
-        if (!page.isLocal && page.album && page.album.playlistId)
+        // A radio keys off a YouTube playlist id; a server or streaming album has its own id and no
+        // endpoint behind it, so the entry would only ever answer with an error.
+        if (Ids.providerOf(page.albumId) === "youtube" && page.album && page.album.playlistId)
             out.push({ icon: "radio", label: "Start radio", danger: false, act: () => page.radio() });
         if (page.album && page.album.artistId)
             out.push({ icon: "artists", label: "Go to artist", danger: false,
@@ -352,7 +354,7 @@ Item {
             out.push({ icon: "add", label: "Save to playlist", danger: false,
                 act: () => albumPicker.openWith(page.album ? page.album.items : []) });
         out.push({ icon: "dashboard", label: "Add to shortcuts", danger: false, act: () => page.addAlbumShortcut() });
-        if (!page.isLocal)
+        if (Ids.providerOf(page.albumId) === "youtube")
             out.push({ icon: "link", label: "Share", danger: false, act: () => page.share() });
         return out;
     }

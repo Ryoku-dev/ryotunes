@@ -31,6 +31,7 @@ The workspace separates the playback core from whoever renders it. Phase 1 of th
 |---|---|---|
 | `crates/innertube`, `crates/player`, `crates/listen-protocol`, `crates/sync-server` | unchanged | existing |
 | `crates/core` | `AppState`, orchestrator, db, lyrics, local, discord, lastfm, media (MPRIS), radio, listentogether, cipher, potoken, session (login), settings. No Tauri. Talks to the outside through three traits (4.2) | moved from `src-tauri/src` |
+| `crates/navidrome` | the Subsonic/OpenSubsonic client: token auth, browse/search/detail mapping, stream and cover URLs, lyrics, star and playlist write-back. Pure, no state; `crates/core/src/navidrome_bridge.rs` holds it and the auth blob | new |
 | `crates/protocol` | request/response/event types, `serde` only, shared by daemon, CLI, tests | new |
 | `crates/ryotunesd` | binary: socket server, single-instance lock, systemd-friendly lifecycle, GTK thread hosting the hidden WebKitGTK views, tray | new; absorbs `tray.rs`, `webview.rs`, the login part of `session.rs` |
 | `crates/ryotunes-cli` | `ryotunes-cli <method> [json]` and `ryotunes-cli events`; the shell's and scripts' entry point | new |

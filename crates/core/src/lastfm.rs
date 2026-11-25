@@ -209,7 +209,8 @@ fn scrobbleable(t: &Track) -> bool {
 
 /// Last.fm's scrobble rule: half the track or 4 minutes, whichever comes first; tracks under 30s
 /// never scrobble. Unknown duration (mpv hasn't reported yet) leaves only the 4-minute rule.
-fn crosses_threshold(pos: f64, duration: f64) -> bool {
+/// Shared with [`crate::navidrome_scrobble`] so the two scrobblers cannot disagree.
+pub(crate) fn crosses_threshold(pos: f64, duration: f64) -> bool {
     if duration > 0.0 && duration < 30.0 {
         return false;
     }

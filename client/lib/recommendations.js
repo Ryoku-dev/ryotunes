@@ -315,6 +315,10 @@ function providerLabel(provider) {
         return "Spotify";
     if (provider === "soundcloud")
         return "SoundCloud";
+    if (provider === "tidal")
+        return "TIDAL";
+    if (provider === "navidrome")
+        return "Navidrome";
     return "your feed";
 }
 
