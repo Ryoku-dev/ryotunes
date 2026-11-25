@@ -287,7 +287,8 @@ Item {
         if (!page.isLocal && page.pl && page.pl.items && page.pl.items.length)
             out.push({ icon: "download", label: Downloads.addingAlbum ? "Adding playlist\u2026" : "Download playlist",
                 danger: false, act: () => Downloads.enqueueCollectionFromPage(page.pl, "playlist") });
-        if (!page.isSmart && !page.isLocal)
+        // Radio seeds a YouTube mix from a YouTube list id; a server or streaming playlist has none.
+        if (!page.isSmart && Ids.providerOf(page.playlistId) === "youtube")
             out.push({ icon: "radio", label: "Start radio", danger: false, act: () => page.radio() });
         if (page.owned) {
             out.push({ icon: "edit", label: "Edit details", danger: false, act: () => page.editing = true });

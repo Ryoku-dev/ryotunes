@@ -41,10 +41,11 @@ Item {
     readonly property bool open: panel.visible
     readonly property bool noYouTubeTrack: !!root.song
         && (Ids.isLocalId(root.song.video_id) || Ids.isRadioId(root.song.video_id))
-    // Share copies a music.youtube.com link, so it is only right for a YouTube id: a Spotify, TIDAL
-    // or music-server id would paste a dead one.
+    // Share copies a music.youtube.com link and radio seeds a YouTube mix, so both are only right
+    // for a YouTube id: a Spotify, TIDAL or music-server id would paste a dead link or build a
+    // `RDAMVM` seed YouTube has never heard of.
     readonly property bool shareable: !!root.song && Ids.providerOf(root.song.video_id) === "youtube"
-    // A Navidrome row: its heart is the server's star, and it has no radio endpoint to start.
+    // A Navidrome row: its heart is the server's star.
     readonly property bool serverTrack: !!root.song && Ids.providerOf(root.song.video_id) === "navidrome"
     // The track this menu is about is the one playing. "Play next" and "Add to queue" are a no-op
     // on it, so they are left out rather than offered and ignored.
@@ -112,7 +113,7 @@ Item {
             out.push({ icon: "arrow-up", label: "Play next", danger: false, act: () => root.enqueue(true) });
             out.push({ icon: "queue", label: "Add to queue", danger: false, act: () => root.enqueue(false) });
         }
-        if (!root.noYouTubeTrack && !root.serverTrack)
+        if (root.shareable)
             out.push({ icon: "radio", label: "Start radio", danger: false, act: () => root.startRadio() });
         if (!root.noYouTubeTrack)
             out.push({ icon: "heart", label: root.serverTrack
